@@ -1,101 +1,118 @@
-# Medical Document Pipeline
+# MediMind Clinical Pipeline — End-to-End Flow
 
-Two modules:
-
-- [`medical_extractor.py`](../medical_extractor.py) — extraction, timeline building, cross-checking
-- [`retrieval.py`](../retrieval.py) — retrieval-augmented Q&A over an already-built timeline (Phase 1)
-
-## 1. Extraction (`medical_extractor.py`)
-
-Turns a PDF or image (prescription, lab report, discharge summary) into structured JSON using a Groq-hosted vision-capable model (`MODEL` defaults to `"meta-llama/llama-4-scout-17b-16e-instruct"`, overridable via `GROQ_MODEL`; fallback `"llama-3.1-8b-instant"`). Groq's API is OpenAI-compatible, so calls go through the standard OpenAI SDK pointed at `https://api.groq.com/openai/v1`.
-
-- `pdf_has_text_layer()` / `extract_text_from_pdf()` — digital PDFs go straight to text extraction, skipping vision.
-- `pdf_pages_to_images()` — scanned PDFs are rasterized per page and sent through vision OCR instead.
-- `extract_from_image()` / `extract_from_text()` — call the model with `EXTRACTION_JSON_SCHEMA` (OpenAI Structured Outputs, `strict: True`) so every field is always present: `document_type`, `date`, `provider_or_doctor`, `patient_name`, `medications[]` (with inferred `ingredients`), `lab_results[]`, `allergies_noted[]`, `clinical_notes`, `overall_confidence`.
-- `process_document()` — top-level router: detects file type, picks the right path, raises friendly errors for common mistakes (path still inside a `.zip`, missing file, folder passed where a file was expected, unsupported extension).
-- `process_patient_folder()` — walks a folder (including subfolders like "Year 1", "Year 2") and processes every supported file in it.
-
-## 2. Grouping and Timeline (`medical_extractor.py`)
-
-- `group_documents_by_patient()` — splits a batch of extracted documents by `patient_name` so unrelated patients' documents never get merged into one timeline. Drops demo/placeholder documents (`_is_demo_document()`) by default and warns if more than one real patient is found in a single batch.
-- `build_patient_timeline()` — merges one patient's documents into:
-  ```
-  {
-    "visits": [...],                 # one entry per document, sorted by date
-    "medications_timeline": [...],   # every medication, flattened, with date + source_file
-    "lab_results_timeline": [...],   # every lab result, flattened, with date + source_file
-    "known_allergies": [...]         # deduped, sorted
-  }
-  ```
-
-## 3. Cross-checking (`medical_extractor.py`)
-
-- `cross_check_prescriptions()` — sends the medication timeline + allergies to the model and gets back a safety report: `potential_drug_interactions`, `duplicate_prescriptions` (matched by active ingredient, not brand name), `conflicting_dosage_instructions`, `allergy_conflicts`, plus an `overall_recommendation` that always defers to a doctor/pharmacist. Never diagnoses or tells the patient to start/stop a medication.
-
-## 4. Retrieval-Augmented Q&A (`retrieval.py`, Phase 1)
-
-Sits on top of the **already-extracted** structured timeline — it does not re-read raw documents.
+Anonymous workspaces, no login. One browser → one isolated patient view.
 
 ```
-timeline → chunks → embeddings (text-embedding-3-small) → per-patient Chroma collection (./chroma_db)
-question → embedding → top_k similarity search → cited context → chat model → structured JSON answer
+                Frontend (React + TS + Vite)
+                        │
+                        ▼
+               Anonymous Session (POST /anonymous/session → JWT anon_* stored in localStorage)
+                        │
+                        ▼
+                   Dashboard / Overview
+                        │
+            ┌───────────┴────────────┐
+            ▼                        ▼
+      Upload Documents         Ask Question / Chat
+            │                        │
+            ▼                        ▼
+      FastAPI /api/v1/          Conversation service
+      documents (multipart)           │
+            │                         ├── rewrite follow-up → self-contained query
+            ▼                         │
+      Clinical Pipeline          RAG Retrieval (Chroma)
+      ┌─────────────┐                   │
+      │ OCR / text  │                   ▼
+      │ Extraction  │ ← Groq Llama 4 Scout vision + strict JSON schema
+      │ Filter      │   (document_filter: no extra LLM call)
+      │ Timeline    │   (group + sort with dateutil, merge meds/labs/allergies)
+      │ Safety      │   (LLM cross-check + deterministic duplicate)
+      │ Lab Trends  │   (deterministic direction + crossing)
+      └──────┬──────┘
+             │
+      ┌──────┴──────┬───────────────┐
+      ▼             ▼               ▼
+  Supabase      Cloudinary      Chroma per user
+  documents     mediscan/<uid>/  collection = sanitized user_id
+  snapshots     original files    vectors + plaintext chunks
+      └──────┬───────┘
+             ▼
+      Patient Record {timeline, cross_check, lab_trends}
+             │
+      ┌──────┼───────────────┬────────────┐
+      ▼      ▼               ▼            ▼
+   History Medicine        Labs       Safety
+   (chrono) (traceable) (trends)  (warnings)
 ```
 
-### Chunking
+### 1. Extraction — medical_extractor.py
 
-`build_chunks_from_timeline()` produces one chunk per:
+- Detects digital PDF vs scanned PDF vs image.
+- Digital → `pdfplumber` text extraction; scanned → `PyMuPDF` rasterize → `PIL.Image` → base64 → Groq vision.
+- Strict `json_schema` output ensures fields always present: `document_type`, dates, provider, patient, meds with INN ingredients + normalized `dosage_value/unit` + `frequency_per_day`, lab results with flags, allergies, notes, confidences.
+- `process_document()` returns single doc or `{multi_page, pages}` shape — callers must flatten.
+- Friendly errors for zip-inside-path, missing file, folder passed, unsupported extension.
 
-| chunk_type       | source                                   |
-|-------------------|-------------------------------------------|
-| `medication`       | each entry in `medications_timeline`       |
-| `lab_result`        | each entry in `lab_results_timeline`        |
-| `clinical_note`     | each visit with non-null `clinical_notes`   |
-| `allergy`           | one chunk listing all `known_allergies`      |
+### 2. Grouping & Timeline
 
-Each chunk has a natural-language `text` (what gets embedded) and `metadata` (`patient_key`, `date`, `source_file`, `chunk_type`).
+- `group_documents_by_patient()` — flattens, drops DEMO/SAMPLE/DUMMY docs, groups by lowercased `patient_name`, `unknown_patient` bucket for missing names, warns if multiple real patients.
+- `build_patient_timeline()` — merges one patient's docs, **sorting via `dateutil.parser` fuzzy** (fixed lexicographic bug), outputs `visits`, `medications_timeline` (each with `date+source_file`), `lab_results_timeline`, `known_allergies`.
 
-### Storage
+In MediMind API path, scoping uses anonymous `user_id` (`anon_*`) from JWT — no manual patient_name grouping needed beyond extraction.
 
-- One Chroma collection per patient, name = sanitized `patient_key` (`_sanitize_collection_name()`), persisted to `./chroma_db` via `chromadb.PersistentClient`.
-- Chunk IDs are deterministic (`sha256(patient_key|source_file|chunk_type|index)`), so `index_patient_timeline()` can be called repeatedly on the same documents — it `upsert()`s instead of duplicating.
+### 3. Cross-checking
 
-### Answering
+- LLM prompt asks for interactions (severity low/moderate/high), duplicates by ingredient not brand, conflicting dosages, allergy conflicts, plus overall recommendation that always says consult clinician and notes not a validated DB.
+- Deterministic duplicate detector matches exact `ingredients + dosage_value + dosage_unit` across distinct `(date, source_file)` — language-independent.
+- Merged, deduped by source sets.
 
-`answer_question(patient_key, question, chat_history=None, top_k=8)`:
+### 4. Lab Trends — lab_trends.py
 
-1. Embeds the question.
-2. Queries the patient's collection for the `top_k` most similar chunks.
-3. Builds a prompt with retrieved chunks (tagged with date/source_file), optional `chat_history`, and the question.
-4. Calls the chat model under a system prompt that:
-   - answers **only** from retrieved context, saying "I don't have enough information" otherwise
-   - never gives a diagnosis
-   - forces `recommend_professional_consult: true` for anything touching risk, interactions, or dosage changes
-   - requires structured JSON output: `{"answer", "confidence", "sources": [{"date", "source_file"}], "recommend_professional_consult"}`
+Deterministic, no LLM:
 
-Returns a graceful "no information" answer (no API calls) if the patient was never indexed or their collection is empty. Raises `ValueError` for a missing `patient_key`/`question`, `RuntimeError` if the embedding or Groq chat call fails.
+- Parse dates fuzzy, parse values numeric, parse ranges robust (`70-99 mg/dL`, `Reference: 0.74-1.35 mg/dL` handled, avoids `70-99` → `70,-99` bug).
+- Group by lowercase test name, keep first casing for display.
+- Require 2+ usable dated numeric points; else `insufficient_data` with reason.
+- Computes direction `increasing/decreasing/stable/fluctuating (net ...)`, flag sequence phrase, crossing point (first normal→abnormal), approaching threshold (within 15% of boundary width).
+- Template explanation: rise/fall + trail `value (date) → ...` + crossing/approaching wording. No LLM hallucination.
+- Confidence discounted for dropped entries or disagreeing units/ranges.
 
-## 5. Wiring (`medical_extractor.py` `__main__`)
+### 5. Retrieval — retrieval.py
 
-```
-python medical_extractor.py <file1> <file2> ...      # or a folder path
-python medical_extractor.py <path> --chat             # same, then drops into an interactive Q&A loop
-```
+- `build_chunks_from_timeline()` → one chunk per medication / lab result / clinical note / single allergy list. Text is natural language embedding input; metadata strings (Chroma can't store None).
+- Chunk IDs deterministic `sha256(patient_key|source_file|chunk_type|index)` → upsert safe.
+- `embed_texts()` — OpenAI `text-embedding-3-small` if `OPENAI_API_KEY`, else local ONNX MiniLM. Batch size 100.
+- `_sanitize_collection_name()` → 3-63 chars, alphanumeric start/end, stable mapping.
+- `index_patient_timeline()` — chunks → embeddings → `collection.upsert()` into `CHROMA_DIR` (env overridable, e.g. Railway volume `/data/chroma_db`).
+- `answer_question()` — embed query (or rewritten query from conversation), `collection.query(n_results=min(top_k,count))`, build tagged context `[date | source_file | type]\ntext`, plus optional chat_history, system prompt forces grounded answers, no diagnosis, forces professional consult for risk, strict JSON output. Returns no-info answer if no collection.
 
-For each patient found: build timeline → cross-check → `index_patient_timeline()` → write `patient_report_<name>.json`. If `--chat` was passed, prompts for a patient (if more than one was processed) and loops on `input()` → `answer_question()` → prints the JSON result, keeping running `chat_history`.
+### 6. Conversation — conversation.py
 
-## Dependencies
+- `ConversationSession` holds turns with ISO timestamps, summary cache.
+- `get_history(max_turns=6)` — if total >20, summarizes older than last 6 via cheap LLM keeping safety details.
+- `rewrite_query_with_context()` — resolves pronouns, preserves risk framing (safe/danger/allergy/interact), outputs only rewritten query, falls back to raw on failure.
+- `ask(session, question)` — get history, rewrite, call `answer_question(question=original, chat_history=history, retrieval_query=rewritten)`, record turns, return result + `rewritten_query`.
 
-```
-pip install openai pdfplumber pymupdf pillow chromadb --break-system-packages
-```
+### 7. API — api.py
 
-```
-export GROQ_API_KEY="gsk_..."       # Groq key — extraction + chat (free tier at console.groq.com)
-# export OPENAI_API_KEY="sk-..."    # optional — embeddings only (Groq has no embeddings API);
-                                    # without it, embeddings run locally via Chroma's ONNX MiniLM
-```
+- Lifespan startup → `db.ensure_indexes()` (no-op for Supabase but kept).
+- CORS `*` by default, overridable via `CORS_ORIGINS`.
+- `POST /anonymous/session` public → issues JWT server-side.
+- `POST /documents` — validates extensions, extracts all first (no Cloudinary write until all pass to avoid orphans), filters demo + non-medical, archives to Cloudinary once per file, merges with Supabase existing docs, builds timeline, cross-check, trends, re-indexes, saves snapshot.
+- `GET /timeline, /cross-check, /lab-trends` — 404 if no snapshot.
+- `POST /qa` and `POST /sessions/{id}/messages` — 400 empty, 502 LLM/embedding failure.
 
-## Status / Next steps
+### 8. CLI wiring (medical_extractor __main__)
 
-- Phase 1 (this doc) covers Q&A grounded in structured, already-extracted fields only.
-- Not yet implemented: retrieval over raw document text/images, multi-patient comparison queries, auth/access control around `./chroma_db`, evaluation harness for answer quality.
+For local dev: `python medical_extractor.py <files|folder> --chat` → group → timeline → cross-check → trends → index → write local JSON reports. `--chat` drops into interactive loop with session `cli`.
+
+### Dependencies
+
+`openai pdfplumber pymupdf pillow chromadb python-dotenv python-dateutil fastapi uvicorn[standard] python-multipart supabase cloudinary pyjwt`
+
+### Status
+
+- Retrieval only over structured fields, not raw pages/images.
+- No deletion reconciliation if timeline ordering shifts causing stale chunk IDs.
+- Sessions in-memory per process.
+- Next: evaluation harness, raw text retrieval, multi-patient diff.

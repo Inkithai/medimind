@@ -1,222 +1,148 @@
-import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { ApiError, api } from "../api/client";
+import { useState } from "react";
+import { api } from "../api/client";
 import { Alert } from "../components/Alert";
 import { Card, CardBody, CardHeader } from "../components/Card";
 import { Spinner } from "../components/Spinner";
 import { SettingsIcon } from "../components/icons";
 import { useAuth } from "../context/AuthContext";
 
-interface FormState {
-  apiBase: string;
-  token: string;
-  userId: string;
-}
-
 export function SettingsPage() {
-  const { credentials, isConfigured, saveCredentials, clearCredentials } = useAuth();
-  const navigate = useNavigate();
-
-  const [form, setForm] = useState<FormState>({
-    apiBase: credentials.apiBase,
-    token: credentials.token,
-    userId: credentials.userId,
-  });
+  const { credentials, isConfigured, isInitializing, initError, createNewWorkspace, clearCredentials } = useAuth();
   const [testing, setTesting] = useState(false);
-  const [testResult, setTestResult] = useState<
-    | { ok: true; message: string }
-    | { ok: false; message: string }
-    | null
-  >(null);
-
-  useEffect(() => {
-    setForm({
-      apiBase: credentials.apiBase,
-      token: credentials.token,
-      userId: credentials.userId,
-    });
-  }, [credentials]);
-
-  const update = (field: keyof FormState, value: string) =>
-    setForm((f) => ({ ...f, [field]: value }));
-
-  const canTest = form.token.trim().length > 0 && form.userId.trim().length > 0;
+  const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
 
   async function handleTest() {
     setTesting(true);
     setTestResult(null);
-    const creds = {
-      apiBase: form.apiBase.trim(),
-      token: form.token.trim(),
-      userId: form.userId.trim(),
-    };
     try {
-      // 1) Unauthenticated health check proves the API is reachable.
-      const health = await api.health(creds);
-      // 2) Authenticated call proves the JWT + X-User-Id are accepted.
-      // /timeline returns 404 for a user with no documents, which is still
-      // a successful auth result (the request was authorized; there's
-      // simply nothing stored yet). Treat 404 as auth-success.
+      const health = await api.healthUnauthenticated(credentials.apiBase);
+      // Try timeline as auth test
       try {
-        await api.getTimeline(creds);
-      } catch (err) {
-        if (err instanceof ApiError && err.status === 404) {
-          // expected for a brand-new user
+        await api.getTimeline(credentials);
+        setTestResult({ ok: true, message: `API ${health.status} • Auth OK for ${credentials.userId}` });
+      } catch (err: any) {
+        if (err?.status === 404) {
+          setTestResult({ ok: true, message: `API ${health.status} • Auth OK for ${credentials.userId} (no docs yet)` });
         } else {
           throw err;
         }
       }
-      setTestResult({
-        ok: true,
-        message: `Connected successfully. API health: "${health.status}". Credentials accepted for user ${creds.userId}.`,
-      });
-    } catch (err) {
-      const message =
-        err instanceof ApiError
-          ? `[${err.status || "network"}] ${err.message}`
-          : err instanceof Error
-          ? err.message
-          : "Connection failed.";
-      setTestResult({ ok: false, message });
+    } catch (err: any) {
+      setTestResult({ ok: false, message: err?.message || "Connection failed" });
     } finally {
       setTesting(false);
     }
   }
 
-  function handleSave() {
-    saveCredentials({
-      apiBase: form.apiBase,
-      token: form.token,
-      userId: form.userId,
-    });
-    navigate("/dashboard");
-  }
-
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-slate-900">API connection</h1>
-        <p className="mt-1 text-sm text-slate-500">
-          Connect this console to your Nalam backend. The backend verifies a JWT
-          bearer token locally (HS256) and requires the <code className="rounded bg-slate-100 px-1">X-User-Id</code> header
-          to match the user-id claim inside that token. These credentials are
-          stored only in this browser's local storage.
+        <h1 className="text-2xl font-bold text-slate-900">Workspace • MediMind</h1>
+        <p className="mt-1 max-w-3xl text-sm text-slate-500">
+          MediMind uses an <strong>anonymous workspace</strong> per browser. No email, no password. Backend issues a signed
+          JWT via <code className="rounded bg-slate-100 px-1">POST /api/v1/anonymous/session</code> using{" "}
+          <code className="rounded bg-slate-100 px-1">JWT_SECRET</code> from <code className="rounded bg-slate-100 px-1">.env</code>. The
+          workspace ID (<code className="rounded bg-slate-100 px-1">anon_*</code>) is stored in{" "}
+          <code className="rounded bg-slate-100 px-1">localStorage.medimind.session.v1</code> only in this browser.
+          Clearing it resets your isolated patient record.
         </p>
       </div>
 
       <Card>
         <CardHeader
-          title="Backend credentials"
-          description="All API calls are scoped to this authenticated user."
+          title="Anonymous session"
+          description="Auto-provisioned on first visit. No manual credentials needed."
           icon={<SettingsIcon className="h-5 w-5" />}
         />
-        <CardBody className="space-y-5">
-          <div>
-            <label className="block text-sm font-medium text-slate-700">
-              API base URL
-            </label>
-            <input
-              type="text"
-              value={form.apiBase}
-              onChange={(e) => update("apiBase", e.target.value)}
-              placeholder="Leave empty for same-origin (recommended with the Vite proxy), e.g. http://127.0.0.1:8000"
-              className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
-            />
-            <p className="mt-1 text-xs text-slate-500">
-              All routes are under <code className="rounded bg-slate-100 px-1">/api/v1/</code>.
-              In local dev the Vite server proxies <code className="rounded bg-slate-100 px-1">/api</code> to the backend, so you can leave this blank.
-            </p>
-          </div>
+        <CardBody className="space-y-4">
+          {isInitializing ? (
+            <div className="flex items-center gap-2 text-sm text-slate-600">
+              <Spinner className="h-4 w-4" /> Creating workspace…
+            </div>
+          ) : initError ? (
+            <Alert variant="danger" title="Workspace creation failed">
+              {initError}
+            </Alert>
+          ) : isConfigured ? (
+            <div className="space-y-3">
+              <div className="rounded-xl bg-slate-50 p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Workspace ID (user_id)</p>
+                <p className="mt-1 break-all font-mono text-sm font-medium text-slate-800">{credentials.userId}</p>
+                <p className="mt-2 text-xs text-slate-500">
+                  API base: {credentials.apiBase || "(same origin via Vite proxy)"} • token: {credentials.token.slice(0, 18)}…{" "}
+                  (hidden)
+                </p>
+                <p className="mt-2 text-xs text-slate-500">
+                  Data isolation: <code className="rounded bg-white px-1">Supabase documents.user_id</code>,{" "}
+                  <code className="rounded bg-white px-1">patient_snapshots.user_id</code>,{" "}
+                  <code className="rounded bg-white px-1">Chroma collection</code>,{" "}
+                  <code className="rounded bg-white px-1">Cloudinary mediscan/{credentials.userId}/</code>
+                </p>
+              </div>
 
-          <div>
-            <label className="block text-sm font-medium text-slate-700">
-              User ID <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="text"
-              value={form.userId}
-              onChange={(e) => update("userId", e.target.value)}
-              placeholder="e.g. 6620a1f2..."
-              className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
-            />
-            <p className="mt-1 text-xs text-slate-500">
-              Sent as the <code className="rounded bg-slate-100 px-1">X-User-Id</code> header. Must match the user id claim in the JWT.
-            </p>
-          </div>
+              {testResult && (
+                <Alert variant={testResult.ok ? "success" : "danger"}>
+                  <p className="break-all text-xs">{testResult.message}</p>
+                </Alert>
+              )}
 
-          <div>
-            <label className="block text-sm font-medium text-slate-700">
-              JWT access token <span className="text-red-500">*</span>
-            </label>
-            <textarea
-              value={form.token}
-              onChange={(e) => update("token", e.target.value)}
-              rows={4}
-              placeholder="Paste a Bearer JWT (without the 'Bearer ' prefix)"
-              className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-xs shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
-            />
-            <p className="mt-1 text-xs text-slate-500">
-              Sent as <code className="rounded bg-slate-100 px-1">Authorization: Bearer &lt;token&gt;</code>.
-              The token must be signed with the backend's <code className="rounded bg-slate-100 px-1">JWT_SECRET</code>.
-            </p>
-          </div>
-
-          {testResult && (
-            <Alert variant={testResult.ok ? "success" : "danger"}>
-              <p className="break-all text-sm">{testResult.message}</p>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={() => void handleTest()}
+                  disabled={testing}
+                  className="inline-flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  {testing && <Spinner className="h-4 w-4" />} Test connection
+                </button>
+                <button
+                  onClick={() => void createNewWorkspace()}
+                  className="inline-flex items-center rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
+                >
+                  Create new workspace
+                </button>
+                <button
+                  onClick={() => {
+                    clearCredentials();
+                    window.location.href = "/";
+                  }}
+                  className="inline-flex items-center rounded-xl px-4 py-2 text-sm font-medium text-slate-500 hover:text-slate-700"
+                >
+                  Clear & go to landing
+                </button>
+              </div>
+            </div>
+          ) : (
+            <Alert variant="info" title="No workspace yet">
+              Visit the landing page to create an anonymous MediMind workspace automatically.
             </Alert>
           )}
-
-          <div className="flex flex-wrap gap-3">
-            <button
-              onClick={handleTest}
-              disabled={!canTest || testing}
-              className="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {testing && <Spinner className="h-4 w-4" />}
-              Test connection
-            </button>
-            <button
-              onClick={handleSave}
-              disabled={!canTest}
-              className="inline-flex items-center rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              Save & continue
-            </button>
-            {isConfigured && (
-              <button
-                onClick={() => {
-                  clearCredentials();
-                  setForm({ apiBase: "", token: "", userId: "" });
-                  setTestResult(null);
-                }}
-                className="inline-flex items-center rounded-md px-4 py-2 text-sm font-medium text-slate-500 hover:text-slate-700"
-              >
-                Clear stored credentials
-              </button>
-            )}
-          </div>
         </CardBody>
       </Card>
 
       <Card>
-        <CardHeader title="What credentials do I need?" />
-        <CardBody className="space-y-2 text-sm text-slate-600">
-          <p>
-            This backend has no signup/login endpoint — it relies on a JWT issued
-            by your own authentication system. The token's payload must include a
-            user id claim under one of: <code className="rounded bg-slate-100 px-1">user_id</code>,{" "}
-            <code className="rounded bg-slate-100 px-1">userId</code>,{" "}
-            <code className="rounded bg-slate-100 px-1">id</code>,{" "}
-            <code className="rounded bg-slate-100 px-1">_id</code>, or{" "}
-            <code className="rounded bg-slate-100 px-1">sub</code>, and the value must match
-            the User ID field above.
+        <CardHeader title="Architecture for anonymous isolation" />
+        <CardBody className="space-y-3 text-sm text-slate-600">
+          <p className="font-mono text-xs leading-relaxed">
+            Open App → POST /api/v1/anonymous/session → {`{user_id, token, session_id}`} → localStorage.medimind.session.v1
+            → Dashboard → Upload Documents → POST /api/v1/documents (with Authorization + X-User-Id) → FastAPI → Clinical
+            Pipeline (OCR, Extract via Groq Llama 4 Scout, Safety checks) → Supabase + Cloudinary + Chroma → Patient Record
+            → History • Medicine • Labs • Safety • Ask
           </p>
           <p>
-            For local development you can mint a token with the same{" "}
-            <code className="rounded bg-slate-100 px-1">JWT_SECRET</code> the backend uses, for
-            example at <a className="text-brand-600 underline" href="https://jwt.io" target="_blank" rel="noreferrer">jwt.io</a>.
+            The backend <code className="rounded bg-slate-100 px-1">.env</code> already contains{" "}
+            <code className="rounded bg-slate-100 px-1">JWT_SECRET, GROQ_API_KEY, SUPABASE_URL, etc.</code>. The frontend never
+            asks for them — it just calls the anonymous session endpoint which signs a JWT server-side. This gives you
+            isolated workspaces without login, while keeping all routes still verified via{" "}
+            <code className="rounded bg-slate-100 px-1">auth.py:get_current_user</code>.
           </p>
+          <div className="rounded-xl bg-brand-50 p-3 text-xs text-brand-800 ring-1 ring-brand-200">
+            <p className="font-semibold text-brand-900">Why not ask for credentials in UI?</p>
+            <p className="mt-1">
+              Because they are already in <code className="rounded bg-brand-100 px-1">.env</code> on the server. Asking the
+              user for JWT + User ID duplicates config and leaks implementation detail. The anonymous flow hides that
+              and feels like a real consumer health app.
+            </p>
+          </div>
         </CardBody>
       </Card>
     </div>

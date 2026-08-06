@@ -1,141 +1,100 @@
-# `medical_extractor.py` reference
+# MediMind — Extraction Engine Reference
 
-Extraction → grouping → timeline → cross-check pipeline. This is the "source of truth" module: it turns raw documents into structured JSON and a per-patient timeline. [`retrieval.py`](../retrieval.py) builds on top of its output and imports `client` and `MODEL` from here — don't rename those without checking [retrieval.md](retrieval.md).
+`medical_extractor.py` is the core clinical pipeline. It turns raw files into normalized JSON and builds a single chronological record per anonymous workspace. `retrieval.py` depends on its `client` and `MODEL` exports — keep those names stable.
 
-## Install / env
+### Env & client
 
+```bash
+pip install openai pdfplumber pymupdf pillow python-dotenv python-dateutil --break-system-packages
+export GROQ_API_KEY=gsk_...
 ```
-pip install openai pdfplumber pymupdf pillow --break-system-packages
-export GROQ_API_KEY="gsk_..."   # Groq key — free at https://console.groq.com/keys
-```
 
-The client talks to Groq through its OpenAI-compatible endpoint
-(`https://api.groq.com/openai/v1`, overridable via `GROQ_BASE_URL`), so
-the OpenAI SDK is used unchanged. The module raises a clear `RuntimeError`
-at import time if `GROQ_API_KEY` is missing.
+- Calls Groq via OpenAI SDK at `https://api.groq.com/openai/v1` (`GROQ_BASE_URL` overridable).
+- Raises at import if `GROQ_API_KEY` missing — fail fast.
+- `MODEL` default `meta-llama/llama-4-scout-17b-16e-instruct` (vision + JSON schema). Overridable via `GROQ_MODEL`. `FALLBACK_MODEL` optional.
 
-Module-level constants:
-- `client` — the shared OpenAI-SDK client instance pointed at Groq (reused by `retrieval.py` for chat)
-- `MODEL` — defaults to `"meta-llama/llama-4-scout-17b-16e-instruct"` (Llama 4 Scout), overridable via the `GROQ_MODEL` env var. Vision-capable and supports `json_schema` structured output, used for extraction and cross-checking (and reused by `retrieval.py` as its chat model)
-- `FALLBACK_MODEL` — defaults to `"llama-3.1-8b-instant"` (cheaper, text-only), overridable via `GROQ_FALLBACK_MODEL`. Not currently wired up anywhere automatic; pass `model=FALLBACK_MODEL` explicitly if needed
+### 1. Schema — strict structured output
 
-## 1. Extraction schema
-
-`EXTRACTION_JSON_SCHEMA` / `EXTRACTION_RESPONSE_FORMAT` — OpenAI Structured Outputs (`strict: True`) schema that every extraction call is forced into. This is the shape of one extracted document:
+`EXTRACTION_JSON_SCHEMA` with `strict: True` forces every document into:
 
 ```jsonc
 {
-  "document_type": "prescription" | "lab_report" | "discharge_summary" | "other",
-  "date": "YYYY-MM-DD" | null,
-  "provider_or_doctor": string | null,
-  "patient_name": string | null,
-  "medications": [
-    {"name", "ingredients": [string], "dosage", "frequency", "duration", "confidence"}
-  ],
-  "lab_results": [
-    {"test_name", "value", "unit", "reference_range", "flag": "normal"|"high"|"low"|"unknown", "confidence"}
-  ],
-  "allergies_noted": [string],
-  "clinical_notes": string | null,
-  "illegible_or_low_confidence_fields": [string],
-  "overall_confidence": number
+  document_type: "prescription" | "lab_report" | "discharge_summary" | "other",
+  date, provider_or_doctor, patient_name,
+  medications: [{name, ingredients: [INN English], dosage, frequency, duration,
+                 dosage_value, dosage_unit, frequency_per_day, is_as_needed, confidence}],
+  lab_results: [{test_name, value, unit, reference_range, flag, confidence}],
+  allergies_noted: [string],
+  clinical_notes, illegible_or_low_confidence_fields, overall_confidence
 }
 ```
 
-If you need to add a field, update `EXTRACTION_JSON_SCHEMA` **and** the `"required"` list — with `strict: True` a field missing from `required` will error, not just be optional.
+- `ingredients` always English INN generic, even if source is Spanish/Japanese brand — needed for cross-language duplicate detection.
+- `dosage_value`/`dosage_unit` normalized to mg etc., `frequency_per_day` normalized numeric. Original strings kept for audit. Locale comma decimals handled (`1,5 g` → 1500 mg).
+- Confidence bands: 0.90-1.00 clear print, 0.60-0.89 judgment needed (brand→generic, abbreviation), <0.60 hard handwriting/blur.
 
-`ingredients` is inferred by the model even from brand names (e.g. "Panadol" → `["Paracetamol"]`) — this is what lets `cross_check_prescriptions()` match brand-name duplicates later.
+### 2. File-type routing
 
-## 2. File-type detection & preprocessing
-
-| Function | Purpose |
+| Helper | Purpose |
 |---|---|
-| `pdf_has_text_layer(pdf_path, min_chars=30)` | Samples first 3 pages; `True` if there's a real embedded text layer (digital PDF) |
-| `extract_text_from_pdf(pdf_path)` | Pulls plain text out of a digital PDF, page by page |
-| `pdf_pages_to_images(pdf_path, dpi=200)` | Rasterizes a scanned/image-only PDF into a list of `PIL.Image` (one per page) via PyMuPDF |
-| `image_to_base64(img)` | PNG-encodes a `PIL.Image` to base64 for the vision API payload |
+| `pdf_has_text_layer(path, min_chars=30)` | Samples first 3 pages for embedded text |
+| `extract_text_from_pdf(path)` | Plain text per page |
+| `pdf_pages_to_images(path, dpi=200)` | Rasterize scanned PDF via PyMuPDF |
+| `image_to_base64(img)` | PNG base64 for vision payload |
 
-Routing rule: digital PDF → text extraction (cheap, no vision call). Scanned PDF or a bare image file → vision OCR, one API call per page.
+- Digital PDF → text extraction (cheap).
+- Scanned PDF / image → vision OCR per page (one LLM call per page).
 
-## 3. Extraction calls
+### 3. LLM calls
 
-- `extract_from_image(img, model=MODEL) -> dict` — one page image → one extracted-document dict. Has a defensive fallback that strips stray markdown code fences if the model doesn't return clean JSON (shouldn't happen with `strict` mode, but kept as a safety net).
-- `extract_from_text(text, model=MODEL) -> dict` — same schema, plain text input (digital PDFs).
+- `extract_from_image(img)` — sends `EXTRACTION_SCHEMA_PROMPT` + image_url, expects strict JSON, strips code fences fallback.
+- `extract_from_text(text)` — same schema, text input.
 
-Neither function attaches `_source` — that's the caller's job (see `process_document`).
+Both do not attach `_source` — caller does.
 
-## 4. Top-level entry points
+- `_apply_confidence_ceiling(result, 0.85)` caps vision OCR results — handwritten read can never be 100% certain vs digital `text_layer`.
 
-### `process_document(file_path, model=MODEL) -> dict`
+### 4. Entry routers
 
-The router. Given one file path:
-- Validates the path first with **friendly, specific errors** for the mistakes people actually make: path still pointing inside a `.zip`, nonexistent path, a folder passed instead of a file, unsupported extension. If you're debugging a "why did this fail" report from a teammate, read the raised exception message — it's written to be actionable, not generic.
-- Digital PDF → `extract_from_text()`, result tagged `_source: {"file", "method": "text_layer"}`.
-- Scanned PDF → `extract_from_image()` per page, returns `{"multi_page": True, "pages": [...]}`, each page tagged `_source: {"file", "method": "vision_ocr", "page": N}`.
-- Image file → `extract_from_image()`, tagged `_source: {"file", "method": "vision_ocr"}`.
+`process_document(file_path)`:
 
-**Gotcha:** the multi-page-PDF return shape (`{"multi_page": True, "pages": [...]}`) is different from every other return shape (a flat document dict). Anything consuming a list of `process_document()` results must flatten first — that's what `_flatten_documents()` is for. Don't assume `process_document()` always returns a single dict.
+- Validates zip-inside-path, missing file, dir passed instead of file, unsupported extension — with actionable messages.
+- Returns single doc dict or `{multi_page: True, pages:[...]}` for scanned PDFs. Each page tagged `_source: {file, method, page}`.
 
-### `process_patient_folder(folder_path, model=MODEL) -> List[dict]`
+`process_patient_folder(folder_path)` — recursive `rglob`, supported extensions only, logs per-file failures.
 
-Walks a folder recursively (`rglob("*")`, so subfolders like "Year 1" / "Year 2" are included), processes every supported file (`.pdf .png .jpg .jpeg .webp`), and returns a flat list of whatever `process_document()` returned per file (so this list can still contain `multi_page` dicts mixed with regular ones). Catches and logs per-file failures rather than aborting the whole batch.
+### 5. Grouping & timeline
 
-## 5. Grouping & timeline
+`group_documents_by_patient(raw_results, drop_demo=True)`:
 
-### `group_documents_by_patient(raw_results, drop_demo_documents=True) -> dict[str, list[dict]]`
+- Flattens, drops `_is_demo_document` (DEMO/SAMPLE/DUMMY names), groups by lowercased `patient_name` → `unknown_patient` bucket for missing names, warns if >1 real patient.
 
-Run this **before** `build_patient_timeline()` whenever a batch might contain more than one patient or demo/sample data.
+`build_patient_timeline(raw_results)`:
 
-- Flattens via `_flatten_documents()`.
-- Drops anything `_is_demo_document()` flags (patient name or a medication name containing "DEMO"/"SAMPLE"/"DUMMY") — prevents sample/template pages from polluting a real patient's timeline.
-- Groups by `_normalize_patient_key()` (lowercased, stripped `patient_name`; missing/null → `"unknown_patient"`, a deliberate bucket rather than silent merging).
-- Prints a warning if more than one real patient shows up in one batch — those get **separate, non-cross-checked** timelines.
+- Assumes one patient (run group first if not guaranteed).
+- Sorting now parses dates via `dateutil.parser` fuzzy — fixes lexicographic bug for `05 Jan 2026` vs `20 Apr 2026`. Unparseable → end.
+- Output: `{visits: sorted, medications_timeline: flat with date+source_file, lab_results_timeline, known_allergies: deduped}` — primary contract with `retrieval.py`.
 
-Returns `{"amit sharma": [doc, doc, ...], ...}`.
+For MediMind anonymous flow, `user_id` from `POST /anonymous/session` IS patient key — every read/write scoped.
 
-### `build_patient_timeline(raw_results) -> dict`
+### 6. Cross-check
 
-**Assumes every document belongs to one patient already** — run `group_documents_by_patient()` first if that's not guaranteed. Output:
+`cross_check_prescriptions(timeline)` — LLM prompt with strict schema, returns interactions/duplicates/dosage conflicts/allergy conflicts + `overall_recommendation` that always defers to clinician and states not a validated DB.
 
-```python
-{
-    "visits": [...],                 # one entry per document, sorted by date (undated -> end)
-    "medications_timeline": [...],   # every medication across all visits, flattened, each with "date" + "source_file" merged in
-    "lab_results_timeline": [...],   # same, for lab results
-    "known_allergies": [...],        # deduped, sorted
-}
+Plus deterministic `detect_exact_duplicate_medications(timeline)` — exact match on `ingredients + dosage_value + dosage_unit` across distinct `(date, source_file)` — language-independent. Merged with LLM results, source-set deduped.
+
+### 7. Persistence helpers (CLI)
+
+- `patient_docs_<sanitized>.json` — raw flat docs for merging later.
+- `patient_report_<sanitized>.json` — timeline + cross-check + lab_trends.
+- API uses Supabase instead (see `db.py`).
+
+### 8. CLI
+
+```bash
+python medical_extractor.py file1.pdf file2.jpg
+python medical_extractor.py "C:/path/To Patient X"
+python medical_extractor.py <path> --chat   # interactive Q&A after indexing
 ```
 
-This dict is the primary interface between this file and `retrieval.py` — `build_chunks_from_timeline()` there consumes exactly this shape. If you change these key names or the per-entry fields (`date`, `source_file`, `name`, `ingredients`, `dosage`, `frequency`, `duration`, `test_name`, `value`, `unit`, `reference_range`, `flag`, `clinical_notes`), you **must** update the corresponding chunk-builder in `retrieval.py` too.
-
-## 6. Cross-checking
-
-### `cross_check_prescriptions(timeline, model=MODEL) -> dict`
-
-Sends `medications_timeline` + `known_allergies` to the model with `CROSS_CHECK_PROMPT`, gets back:
-
-```jsonc
-{
-  "potential_drug_interactions": [{"medications_involved", "explanation", "severity", "confidence"}],
-  "duplicate_prescriptions": [{"medication", "occurrences", "explanation", "confidence"}],
-  "conflicting_dosage_instructions": [{"medication", "conflicting_instructions", "explanation", "confidence"}],
-  "allergy_conflicts": [{"medication", "allergy", "explanation", "confidence"}],
-  "overall_recommendation": "always defers to a doctor/pharmacist"
-}
-```
-
-Matches medications by **active ingredient**, not brand name — a duplicate flag between "Panadol" and "Tylenol" is expected behavior, not a bug. Uses `response_format={"type": "json_object"}` (looser than the `strict` schema used for extraction) — if you need guaranteed field presence here too, consider tightening this the same way `EXTRACTION_RESPONSE_FORMAT` is defined.
-
-## 7. `__main__` — CLI flow
-
-```
-python medical_extractor.py file1.pdf file2.jpg ...
-python medical_extractor.py "C:\path\to\Patient x"        # folder mode, auto-detected when a single dir is passed
-python medical_extractor.py <path or files> --chat         # same, then interactive Q&A
-```
-
-Per run: extract → `group_documents_by_patient()` → for each patient: `build_patient_timeline()` → `cross_check_prescriptions()` → `index_patient_timeline()` (imported from `retrieval.py`, lazily inside `__main__` to avoid a circular import — `retrieval.py` imports `client`/`MODEL` from this module at its top level) → writes `patient_report_<sanitized_name>.json` (full timeline + cross-check report).
-
-If `--chat` was passed: after all patients are processed, prompts you to pick a patient (if more than one), then loops `input()` → `answer_question()` → prints JSON, carrying `chat_history` forward across turns in that session. See [retrieval.md](retrieval.md) for what that call actually does.
-
-**Note:** indexing failures are caught and logged per-patient (`  Indexing failed (Q&A won't be available for this patient): ...`) rather than aborting the run — a Chroma/embedding problem won't stop the extraction report from being written.
+Flow: extract → group → per patient: timeline → cross-check → `track_lab_trends` → `index_patient_timeline` (lazy import to avoid circular) → save JSON. Index failures logged not aborting. `--chat` picks patient if multiple then loops `input()` with conversation rewrite.
