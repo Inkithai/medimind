@@ -126,6 +126,34 @@ def _chat_completion(**kwargs) -> Any:
 _RETRYABLE_STATUS_CODES = frozenset({408, 409, 429, 500, 502, 503, 504})
 
 
+def _is_token_budget_error(exc: Exception) -> bool:
+    """Return True for Groq's 413 response when a request exceeds its TPM cap.
+
+    Groq reports this as ``413 Payload Too Large`` even though the uploaded
+    file itself can be tiny: input tokens (including image tokens) plus the
+    requested completion budget exceed the account's per-minute allowance.
+    It is safe to retry this specific 413 with a smaller completion budget;
+    unrelated 413 responses must still propagate.
+    """
+    if getattr(exc, "status_code", None) != 413:
+        return False
+
+    parts = [str(exc), str(getattr(exc, "message", "") or "")]
+    body = getattr(exc, "body", None)
+    if body is not None:
+        try:
+            parts.append(json.dumps(body))
+        except (TypeError, ValueError):
+            parts.append(str(body))
+    text = " ".join(parts).lower()
+    return any(marker in text for marker in (
+        "tokens per minute",
+        "tpm",
+        "rate_limit_exceeded",
+        "request too large for model",
+    ))
+
+
 def _is_json_validation_failure(exc: Exception) -> bool:
     """True if Groq rejected the request because the model's generation
     failed server-side JSON validation (400 'json_validate_failed'). This is
@@ -167,9 +195,46 @@ def _is_retryable_api_error(exc: Exception) -> bool:
     errors propagate immediately."""
     if isinstance(exc, APIConnectionError):
         return True
-    if _is_json_validation_failure(exc):
+    if _is_json_validation_failure(exc) or _is_token_budget_error(exc):
         return True
     return getattr(exc, "status_code", None) in _RETRYABLE_STATUS_CODES
+
+
+def _is_vision_content(user_content: Any) -> bool:
+    return isinstance(user_content, list) and any(
+        isinstance(part, dict) and part.get("type") == "image_url"
+        for part in user_content
+    )
+
+
+def _completion_token_budget(user_content: Any) -> int:
+    """Choose a completion budget that fits Groq's common 8K TPM tier.
+
+    Vision requests consume substantially more input tokens than text calls.
+    Reserving 4096 output tokens made even a 94 KB image request total about
+    8900 tokens and Groq rejected it before inference. Keep the legacy global
+    setting for text, but cap vision to 2048 by default. A dedicated setting
+    can tune vision independently for accounts with different limits.
+    """
+    try:
+        global_budget = int(os.environ.get("GROQ_MAX_TOKENS", "4096"))
+    except ValueError:
+        global_budget = 4096
+    global_budget = max(256, global_budget)
+
+    if not _is_vision_content(user_content):
+        return global_budget
+
+    configured = os.environ.get("GROQ_VISION_MAX_TOKENS")
+    if configured is not None:
+        try:
+            return max(256, int(configured))
+        except ValueError:
+            logger.warning(
+                "Ignoring invalid GROQ_VISION_MAX_TOKENS=%r; using 2048",
+                configured,
+            )
+    return min(global_budget, 2048)
 
 
 def _format_ladder(
@@ -199,7 +264,8 @@ def _format_ladder(
         "Do NOT output any step-by-step, do NOT describe the document structure, do NOT say 'The user wants...'.\n"
         "5. Do NOT prefix with 'Here is the JSON:' or similar — start immediately with '{'.\n"
         "6. Conform EXACTLY to this JSON Schema (all required fields present, no extra fields):\n"
-        f"{json.dumps(schema, indent=2)}\n"
+        # Compact JSON materially reduces prompt tokens on the 8K TPM tier.
+        f"{json.dumps(schema, separators=(',', ':'))}\n"
         "Example of the required shape (illustrative values, adapt to the actual document):\n"
         '{\n  "document_type": "prescription",\n  "date": "2024-03-15",\n  "provider_or_doctor": "Dr. Smith",\n  "patient_name": "John Doe",\n  "medications": [],\n  "lab_results": [],\n  "allergies_noted": [],\n  "clinical_notes": null,\n  "illegible_or_low_confidence_fields": [],\n  "overall_confidence": 0.92\n}\n'
     )
@@ -259,6 +325,7 @@ def _completion_resilient(
     last_error: Optional[Exception] = None
     total_attempts = 0
     last_raw_snippet: str = ""
+    max_tokens = _completion_token_budget(user_content)
 
     for level, (response_format, prompt_suffix) in enumerate(ladder):
         attempts = primary_attempts if level == 0 else fallback_attempts
@@ -275,13 +342,9 @@ def _completion_resilient(
                     "temperature": 0,
                     "top_p": 1,
                 }
-                # Ensure enough tokens for reasoning + JSON. Groq uses max_tokens / max_completion_tokens;
-                # openai SDK accepts max_tokens for compatibility. We set a generous limit but allow env override.
-                try:
-                    max_t = int(os.environ.get("GROQ_MAX_TOKENS", "4096"))
-                except ValueError:
-                    max_t = 4096
-                request_kwargs["max_tokens"] = max_t
+                # OpenAI SDK accepts max_tokens for Groq compatibility. Vision
+                # uses a lower budget because image tokens count toward TPM.
+                request_kwargs["max_tokens"] = max_tokens
                 if response_format is not None:
                     # response_format=None means plain-text mode — omit the kwarg entirely
                     request_kwargs["response_format"] = response_format
@@ -310,6 +373,18 @@ def _completion_resilient(
                     raise
                 last_error = e
                 last_raw_snippet = str(e)[:500]
+                if _is_token_budget_error(e):
+                    # A provider-side 413 here is not an oversized upload. It
+                    # means prompt/image tokens + max_tokens exceed TPM. Retry
+                    # with less output headroom instead of returning a 422.
+                    reduced_budget = max(256, max_tokens // 2)
+                    if reduced_budget < max_tokens:
+                        logger.warning(
+                            "Groq token budget rejected model='%s' request; "
+                            "reducing max_tokens from %d to %d",
+                            model, max_tokens, reduced_budget,
+                        )
+                        max_tokens = reduced_budget
                 if level == len(ladder) - 1 and attempt == attempts:
                     break  # last rung exhausted — no point sleeping first
                 time.sleep(backoff_seconds * attempt)
@@ -328,9 +403,7 @@ def _completion_resilient(
     if last_error is not None and ("could not be parsed" in str(last_error) or "empty response" in str(last_error)):
         # Strategy 1: If this was a vision call (user_content contains image), retry once with a very explicit repair prompt
         # that includes the original image and tells the model its previous output was invalid.
-        is_vision_call = isinstance(user_content, list) and any(
-            isinstance(c, dict) and c.get("type") == "image_url" for c in user_content
-        )
+        is_vision_call = _is_vision_content(user_content)
         if is_vision_call:
             try:
                 logger.info("Attempting vision repair retry with explicit JSON-only instruction for model=%s", model)
@@ -357,7 +430,7 @@ def _completion_resilient(
                     "messages": repair_messages,
                     "temperature": 0,
                     "top_p": 1,
-                    "max_tokens": int(os.environ.get("GROQ_MAX_TOKENS", "4096")),
+                    "max_tokens": max_tokens,
                     # No response_format — use plain text so we can parse ourselves even if model adds stray text
                 }
                 resp = _chat_completion(**repair_kwargs)
@@ -415,7 +488,7 @@ def _completion_resilient(
         "usually a transient hiccup on the model provider's side — please "
         "retry the upload. If the same file keeps failing, it may be too "
         "blurry, rotated, or mostly handwritten; try a clearer photo or a "
-        "higher-resolution scan. Last snippet: {last_raw_snippet[:250]!r}"
+        f"higher-resolution scan. Last snippet: {last_raw_snippet[:250]!r}"
     ) from last_error
 
 
