@@ -25,8 +25,11 @@ Install (in addition to Phase 1/2 dependencies):
     pip install fastapi uvicorn[standard] python-multipart pymongo cloudinary pyjwt
 
 Env:
-    OPENAI_API_KEY, MONGODB_URI, CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY,
+    XAI_API_KEY, MONGODB_URI, CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY,
     CLOUDINARY_API_SECRET, JWT_SECRET
+    (optional: OPENAI_API_KEY — used only for embeddings, since xAI has no
+    embeddings API; without it, embeddings run locally via Chroma's ONNX
+    MiniLM model)
 """
 
 import logging

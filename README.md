@@ -46,13 +46,23 @@ Create a `.env` file in the project root (already gitignored — copy
 `.env.example` and fill in real values):
 
 ```
-OPENAI_API_KEY=sk-...
+XAI_API_KEY=xai-...     # Grok (xAI) key — create one at https://console.x.ai
 CLOUDINARY_CLOUD_NAME=...
 CLOUDINARY_API_KEY=...
 CLOUDINARY_API_SECRET=...
 MONGODB_URI=mongodb+srv://...
 JWT_SECRET=...          # same secret your auth issuer signs tokens with
 ```
+
+Extraction, cross-checking, Q&A and conversation all run on **Grok (xAI)**
+through its OpenAI-compatible endpoint (`https://api.x.ai/v1`); the model
+defaults to `grok-4.5` and can be overridden with `GROK_MODEL`. One caveat:
+**xAI has no embeddings API**, so Q&A embeddings use, in order of
+preference: (1) OpenAI `text-embedding-3-small` if you also set
+`OPENAI_API_KEY`, or (2) Chroma's built-in local ONNX MiniLM model — no
+key needed, runs in-process. If you ever switch between those two
+embedding backends, delete `./chroma_db` and re-upload so the vectors are
+re-indexed (the backends produce different-dimensional embeddings).
 
 ## Running the API
 
@@ -75,10 +85,10 @@ are already set up — Railway's Nixpacks builder detects both automatically,
 so a plain "Deploy from GitHub repo" works with no extra build config.
 
 1. **Env vars** — in the Railway service's Variables tab, set everything
-   from `.env.example` (`OPENAI_API_KEY`, `CLOUDINARY_CLOUD_NAME`,
+   from `.env.example` (`XAI_API_KEY`, `CLOUDINARY_CLOUD_NAME`,
    `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`, `MONGODB_URI`,
-   `JWT_SECRET`). Don't upload `.env` itself — it's git-ignored and holds
-   live secrets.
+   `JWT_SECRET`; optionally `OPENAI_API_KEY` for embeddings). Don't upload
+   `.env` itself — it's git-ignored and holds live secrets.
 2. **Persisting the vector store** — Railway's container filesystem is
    rebuilt on every deploy, so anything written to disk (the local Chroma
    store under `./chroma_db`) would otherwise vanish on the next deploy or
@@ -421,7 +431,7 @@ Response `200` — same shape as `/qa`, plus `rewritten_query`:
 ```
 
 Errors: `404` unknown `session_id` (create one first via `POST /sessions`),
-`400` empty question, `502` if an underlying OpenAI call fails.
+`400` empty question, `502` if an underlying Grok/embedding call fails.
 
 #### `GET /api/v1/sessions/{session_id}`
 
@@ -469,7 +479,7 @@ different user.
 
 [`generate_lab_test_data.py`](generate_lab_test_data.py) produces
 synthetic but schema-valid `lab_report` documents — same shape
-`process_document()` returns — without any OCR or OpenAI calls, so you can
+`process_document()` returns — without any OCR or LLM calls, so you can
 exercise `build_patient_timeline()`, `document_filter.py`, and
 `lab_trends.py` for free:
 
@@ -499,7 +509,7 @@ through `/documents` (that endpoint only accepts real files).
 embeddings + metadata), keyed by `user_id` via the HTTP API (or by
 patient name when run through the CLI). [`inspect_chroma.py`](inspect_chroma.py)
 is a read-only CLI for browsing it without writing throwaway scripts — it
-never modifies the store or calls OpenAI.
+never modifies the store or calls the LLM/embedding APIs.
 
 ```
 python inspect_chroma.py                            # list every collection + chunk count
@@ -522,7 +532,7 @@ contains).
   MongoDB (`documents`, `patient_snapshots` collections), and only its
   embeddings live in the local `./chroma_db`. All three are scoped by the
   authenticated `user_id` (see [`auth.py`](auth.py), [`db.py`](db.py),
-  [`storage.py`](storage.py)) — no raw file bytes, OpenAI request/response
+  [`storage.py`](storage.py)) — no raw file bytes, LLM request/response
   payloads, or access tokens are ever persisted.
 - The CLI entry point in `medical_extractor.py` (`python medical_extractor.py ...`)
   is unauthenticated by design (local dev/testing tool) and still writes to

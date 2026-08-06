@@ -7,17 +7,26 @@ build_patient_timeline(). It does NOT re-read raw documents.
 
 Pipeline:
     patient timeline -> chunks (one per medication / lab result / clinical
-    note / allergy list) -> embed each chunk's text with
-    text-embedding-3-small -> store in a per-patient local Chroma
-    collection -> at query time, embed the question, retrieve the top_k
-    most similar chunks, and ask a chat model to answer strictly from that
-    retrieved context.
+    note / allergy list) -> embed each chunk's text -> store in a
+    per-patient local Chroma collection -> at query time, embed the
+    question, retrieve the top_k most similar chunks, and ask a chat
+    model to answer strictly from that retrieved context.
+
+Embedding provider: chat/extraction run on Grok (xAI), but xAI does not
+offer an embeddings API. So embeddings use, in order of preference:
+    1. OpenAI text-embedding-3-small, if OPENAI_API_KEY is set.
+    2. Chroma's built-in local ONNX MiniLM model (all-MiniLM-L6-v2) —
+       runs in-process, no API key or network calls (after a one-time
+       weights download on first use).
+NOTE: the two backends produce different-dimensional vectors, so after
+switching backends delete ./chroma_db and re-index.
 
 Install:
     pip install chromadb --break-system-packages
 
 Env:
-    export OPENAI_API_KEY="sk-..."   (same key used by medical_extractor.py)
+    export XAI_API_KEY="xai-..."         (same key used by medical_extractor.py)
+    export OPENAI_API_KEY="sk-..."       (optional — see embedding provider above)
 """
 
 import os
@@ -27,15 +36,34 @@ import hashlib
 from typing import Any, Dict, List, Optional
 
 import chromadb
-from openai import OpenAIError
+from openai import OpenAI, OpenAIError
 
 from medical_extractor import client, MODEL
 
-EMBEDDING_MODEL = "text-embedding-3-small"
+EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL", "text-embedding-3-small")
 CHAT_MODEL = MODEL  # reuse the same chat model configured in medical_extractor.py
 
 CHROMA_DIR = os.environ.get("CHROMA_DIR", "./chroma_db")
 EMBEDDING_BATCH_SIZE = 100  # keep well under the API's per-request item limit
+
+# xAI (Grok) has no embeddings endpoint. When an OpenAI key is available it
+# is used ONLY for embeddings (never for chat); otherwise fall back to
+# Chroma's built-in local ONNX MiniLM model, which needs no API key at all.
+_OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
+_openai_embedding_client = OpenAI(api_key=_OPENAI_API_KEY) if _OPENAI_API_KEY else None
+
+_local_embedding_fn = None
+
+
+def _get_local_embedding_function():
+    """Lazily initialise Chroma's default local embedding function
+    (all-MiniLM-L6-v2 via ONNX runtime). Weights download once on first
+    use, then everything runs in-process — no API key required."""
+    global _local_embedding_fn
+    if _local_embedding_fn is None:
+        from chromadb.utils.embedding_functions import ONNXMiniLM_L6_V2
+        _local_embedding_fn = ONNXMiniLM_L6_V2()
+    return _local_embedding_fn
 
 
 # ---------------------------------------------------------------------------
@@ -173,22 +201,29 @@ def build_chunks_from_timeline(patient_key: str, timeline: Dict[str, Any]) -> Li
 # ---------------------------------------------------------------------------
 
 def embed_texts(texts: List[str]) -> List[List[float]]:
-    """Embeds a list of strings with text-embedding-3-small, batching to
-    stay under the API's per-request item limit. Raises RuntimeError with
-    context if the embedding call fails (auth, rate limit, network, etc.)."""
+    """Embeds a list of strings, batching to stay under the API's
+    per-request item limit. Uses OpenAI's text-embedding-3-small when
+    OPENAI_API_KEY is set; otherwise Chroma's local ONNX MiniLM model
+    (xAI/Grok offers no embeddings API). Raises RuntimeError with context
+    if the embedding call fails (auth, rate limit, network, etc.)."""
     if not texts:
         return []
 
-    embeddings: List[List[float]] = []
-    for start in range(0, len(texts), EMBEDDING_BATCH_SIZE):
-        batch = texts[start:start + EMBEDDING_BATCH_SIZE]
-        try:
-            response = client.embeddings.create(model=EMBEDDING_MODEL, input=batch)
-        except OpenAIError as e:
-            raise RuntimeError(f"Embedding request failed for {len(batch)} chunk(s): {e}") from e
-        embeddings.extend(item.embedding for item in response.data)
+    if _openai_embedding_client is not None:
+        embeddings: List[List[float]] = []
+        for start in range(0, len(texts), EMBEDDING_BATCH_SIZE):
+            batch = texts[start:start + EMBEDDING_BATCH_SIZE]
+            try:
+                response = _openai_embedding_client.embeddings.create(model=EMBEDDING_MODEL, input=batch)
+            except OpenAIError as e:
+                raise RuntimeError(f"Embedding request failed for {len(batch)} chunk(s): {e}") from e
+            embeddings.extend(item.embedding for item in response.data)
+        return embeddings
 
-    return embeddings
+    try:
+        return _get_local_embedding_function()(texts)
+    except Exception as e:
+        raise RuntimeError(f"Local embedding failed for {len(texts)} chunk(s): {e}") from e
 
 
 def _sanitize_collection_name(patient_key: str) -> str:

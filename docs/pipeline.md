@@ -7,7 +7,7 @@ Two modules:
 
 ## 1. Extraction (`medical_extractor.py`)
 
-Turns a PDF or image (prescription, lab report, discharge summary) into structured JSON using an OpenAI vision-capable model (`MODEL = "gpt-5-mini"`, fallback `"gpt-5-nano"`).
+Turns a PDF or image (prescription, lab report, discharge summary) into structured JSON using a Grok (xAI) vision-capable model (`MODEL` defaults to `"grok-4.5"`, overridable via `GROK_MODEL`; fallback `"grok-4.3"`). xAI's API is OpenAI-compatible, so calls go through the standard OpenAI SDK pointed at `https://api.x.ai/v1`.
 
 - `pdf_has_text_layer()` / `extract_text_from_pdf()` — digital PDFs go straight to text extraction, skipping vision.
 - `pdf_pages_to_images()` — scanned PDFs are rasterized per page and sent through vision OCR instead.
@@ -72,7 +72,7 @@ Each chunk has a natural-language `text` (what gets embedded) and `metadata` (`p
    - forces `recommend_professional_consult: true` for anything touching risk, interactions, or dosage changes
    - requires structured JSON output: `{"answer", "confidence", "sources": [{"date", "source_file"}], "recommend_professional_consult"}`
 
-Returns a graceful "no information" answer (no API calls) if the patient was never indexed or their collection is empty. Raises `ValueError` for a missing `patient_key`/`question`, `RuntimeError` if an OpenAI call fails.
+Returns a graceful "no information" answer (no API calls) if the patient was never indexed or their collection is empty. Raises `ValueError` for a missing `patient_key`/`question`, `RuntimeError` if the embedding or Grok chat call fails.
 
 ## 5. Wiring (`medical_extractor.py` `__main__`)
 
@@ -90,7 +90,9 @@ pip install openai pdfplumber pymupdf pillow chromadb --break-system-packages
 ```
 
 ```
-export OPENAI_API_KEY="sk-..."
+export XAI_API_KEY="xai-..."        # Grok (xAI) key — extraction + chat
+# export OPENAI_API_KEY="sk-..."    # optional — embeddings only (xAI has no embeddings API);
+                                    # without it, embeddings run locally via Chroma's ONNX MiniLM
 ```
 
 ## Status / Next steps

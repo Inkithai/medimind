@@ -2,15 +2,19 @@
 Medical Document Extraction Pipeline
 =====================================
 Handles PDF (text-based or scanned) and image uploads (prescriptions, lab
-reports, discharge summaries), extracts structured data using an OpenAI
+reports, discharge summaries), extracts structured data using a Grok (xAI)
 vision-capable model, and returns clean JSON ready for timeline building,
 RAG indexing, and cross-checking.
+
+Grok is accessed through xAI's OpenAI-compatible endpoint
+(https://api.x.ai/v1) via the standard OpenAI SDK — only the base URL,
+API key, and model names differ.
 
 Install:
     pip install openai pdfplumber pymupdf pillow --break-system-packages
 
 Env:
-    export OPENAI_API_KEY="sk-..."
+    export XAI_API_KEY="xai-..."   (create one at https://console.x.ai)
 """
 
 import os
@@ -29,10 +33,22 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+# Grok (xAI) — xAI's API is OpenAI-compatible, so we reuse the OpenAI SDK
+# pointed at https://api.x.ai/v1. Get a key at https://console.x.ai.
+XAI_API_KEY = os.environ.get("XAI_API_KEY")
+if not XAI_API_KEY:
+    raise RuntimeError(
+        "XAI_API_KEY is not set — copy .env.example to .env and add your "
+        "Grok (xAI) API key (create one at https://console.x.ai)."
+    )
 
-MODEL = "gpt-5-mini"       # vision-capable, low cost, good enough for structured extraction
-FALLBACK_MODEL = "gpt-5-nano"    # even cheaper, use for high-volume / less critical docs
+client = OpenAI(
+    api_key=XAI_API_KEY,
+    base_url=os.environ.get("XAI_BASE_URL", "https://api.x.ai/v1"),
+)
+
+MODEL = os.environ.get("GROK_MODEL", "grok-4.5")                # vision-capable flagship, good for structured extraction
+FALLBACK_MODEL = os.environ.get("GROK_FALLBACK_MODEL", "grok-4.3")  # cheaper, use for high-volume / less critical docs
 
  #---------------------------------------------------------------------------
 # 1. Extraction schema — keeps every document's output shape consistent

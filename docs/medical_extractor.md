@@ -6,13 +6,18 @@ Extraction → grouping → timeline → cross-check pipeline. This is the "sour
 
 ```
 pip install openai pdfplumber pymupdf pillow --break-system-packages
-export OPENAI_API_KEY="sk-..."
+export XAI_API_KEY="xai-..."   # Grok (xAI) key — https://console.x.ai
 ```
 
+The client talks to Grok through xAI's OpenAI-compatible endpoint
+(`https://api.x.ai/v1`, overridable via `XAI_BASE_URL`), so the OpenAI SDK
+is used unchanged. The module raises a clear `RuntimeError` at import time
+if `XAI_API_KEY` is missing.
+
 Module-level constants:
-- `client` — the shared `OpenAI` client instance (reused by `retrieval.py`)
-- `MODEL = "gpt-5-mini"` — vision-capable, used for extraction and cross-checking (and reused by `retrieval.py` as its chat model)
-- `FALLBACK_MODEL = "gpt-5-nano"` — cheaper, not currently wired up anywhere automatic; pass `model=FALLBACK_MODEL` explicitly if needed
+- `client` — the shared OpenAI-SDK client instance pointed at xAI (reused by `retrieval.py` for chat)
+- `MODEL` — defaults to `"grok-4.5"`, overridable via the `GROK_MODEL` env var. Vision-capable, used for extraction and cross-checking (and reused by `retrieval.py` as its chat model)
+- `FALLBACK_MODEL` — defaults to `"grok-4.3"` (cheaper), overridable via `GROK_FALLBACK_MODEL`. Not currently wired up anywhere automatic; pass `model=FALLBACK_MODEL` explicitly if needed
 
 ## 1. Extraction schema
 
