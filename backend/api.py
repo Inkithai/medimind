@@ -34,6 +34,7 @@ Env:
 """
 
 import logging
+import os
 import re
 import uuid
 from pathlib import Path
@@ -41,6 +42,7 @@ from tempfile import TemporaryDirectory
 from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 import conversation
@@ -63,6 +65,19 @@ logger = logging.getLogger("api")
 SUPPORTED_EXTENSIONS = (".pdf", ".png", ".jpg", ".jpeg", ".webp")
 
 app = FastAPI(title="Medical Records Q&A API", version="1.0.0")
+
+# The authenticated routes require custom Authorization / X-User-Id headers,
+# which trigger a CORS preflight when the frontend is served from a different
+# origin than the API. Allow cross-origin requests from the browser app;
+# restrict via CORS_ORIGINS (comma-separated list of origins) when deployed.
+_default_origins = os.environ.get("CORS_ORIGINS", "*")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[o.strip() for o in _default_origins.split(",") if o.strip()],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.on_event("startup")
