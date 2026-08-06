@@ -22,6 +22,7 @@ import os
 import io
 import re
 import json
+import time
 import base64
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
@@ -29,7 +30,12 @@ from typing import List, Dict, Any, Optional, Tuple
 import pdfplumber
 import fitz  # PyMuPDF, used to rasterize scanned PDFs
 from PIL import Image, ImageOps
-from openai import OpenAI, NotFoundError
+from openai import (
+    OpenAI,
+    NotFoundError,
+    APIError,
+    APIConnectionError,
+)
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -60,9 +66,11 @@ client = OpenAI(
 #     openai/gpt-oss-120b, a production model with strict json_schema support.
 #   - VISION_MODEL (scanned PDFs, photos of documents) needs a multimodal
 #     model: qwen/qwen3.6-27b is currently Groq's only vision chat model.
-#     NOTE: it does NOT support strict json_schema — _response_format_for()
-#     automatically drops to JSON-object mode with the schema inlined in the
-#     prompt for models outside _STRICT_SCHEMA_MODELS.
+#     NOTE: it does NOT support strict json_schema — _format_ladder() drops
+#     to JSON-object mode with the schema inlined in the prompt for models
+#     outside _STRICT_SCHEMA_MODELS, and _completion_resilient() falls back
+#     further (plain text + client-side JSON parsing) if Groq rejects a
+#     generation server-side.
 MODEL = os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b")
 VISION_MODEL = os.environ.get("GROQ_VISION_MODEL", "qwen/qwen3.6-27b")
 FALLBACK_MODEL = os.environ.get("GROQ_FALLBACK_MODEL", "openai/gpt-oss-20b")        # cheap/fast text model for high-volume / less critical docs
@@ -76,27 +84,6 @@ _STRICT_SCHEMA_MODELS = frozenset({
     "openai/gpt-oss-120b",
     "openai/gpt-oss-safeguard-20b",
 })
-
-
-def _response_format_for(model: str, strict_format: Dict[str, Any]) -> Tuple[Dict[str, Any], str]:
-    """Picks a structured-output mode the target model actually supports.
-
-    Returns (response_format, prompt_suffix):
-    - strict-capable model: the caller's json_schema dict with strict=True,
-      and an empty suffix (Groq receives the schema as a request parameter).
-    - any other model: {"type": "json_object"}, plus a suffix that inlines
-      the JSON Schema into the system prompt — json_object mode never sends
-      the schema to Groq, so without it the model has no contract to follow.
-    """
-    if model in _STRICT_SCHEMA_MODELS:
-        return strict_format, ""
-    schema = strict_format["json_schema"]["schema"]
-    return (
-        {"type": "json_object"},
-        "\n\nRespond with a single valid JSON object (raw JSON only — no "
-        "markdown, no code fences, no commentary) conforming EXACTLY to this "
-        f"JSON Schema:\n{json.dumps(schema, indent=2)}\n",
-    )
 
 
 def _chat_completion(**kwargs) -> Any:
@@ -120,6 +107,192 @@ def _chat_completion(**kwargs) -> Any:
             f"change needed. Current defaults: text='{MODEL}', "
             f"vision='{VISION_MODEL}'."
         ) from e
+
+
+# ---------------------------------------------------------------------------
+# Structured-output resilience — retry + fallback ladder + tolerant parsing
+# ---------------------------------------------------------------------------
+# Groq validates the model's output SERVER-SIDE in json_object mode and in
+# strict json_schema mode: if the generation isn't valid JSON — or the model
+# hiccups and produces nothing at all, which surfaces as a 400
+# 'json_validate_failed' with `failed_generation: ''` — Groq discards the
+# output and rejects the whole request. The content never reaches the
+# client, so no amount of defensive parsing downstream can recover it; the
+# request itself must be retried and/or re-issued in a looser mode.
+
+_RETRYABLE_STATUS_CODES = frozenset({408, 409, 429, 500, 502, 503, 504})
+
+
+def _is_json_validation_failure(exc: Exception) -> bool:
+    """True if Groq rejected the request because the model's generation
+    failed server-side JSON validation (400 'json_validate_failed'). This is
+    a model-side hiccup (the generation is frequently empty — see
+    'failed_generation') rather than a problem with the request itself, so
+    retrying — and ultimately falling back to a mode where WE parse the raw
+    text — is the right recovery."""
+    body = getattr(exc, "body", None)
+    if not isinstance(body, dict):
+        return False
+    error = body.get("error")
+    if not isinstance(error, dict):
+        return False
+    if error.get("code") == "json_validate_failed":
+        return True
+    message = error.get("message")
+    return isinstance(message, str) and "Failed to validate JSON" in message
+
+
+def _is_retryable_api_error(exc: Exception) -> bool:
+    """Transient failures worth retrying: Groq-side JSON validation failures
+    (generation discarded before we saw it), rate limits / server errors,
+    and network blips. Auth (401), not-found (404), and other permanent
+    errors propagate immediately."""
+    if isinstance(exc, APIConnectionError):
+        return True
+    if _is_json_validation_failure(exc):
+        return True
+    return getattr(exc, "status_code", None) in _RETRYABLE_STATUS_CODES
+
+
+def _format_ladder(
+    model: str, strict_format: Dict[str, Any]
+) -> List[Tuple[Optional[Dict[str, Any]], str]]:
+    """Ordered (response_format, prompt_suffix) pairs to try for `model`,
+    from most to least server-side enforcement:
+
+    - Strict-capable models: strict json_schema -> json_object mode ->
+      plain text (no response_format).
+    - All other models (e.g. the qwen vision default): json_object mode ->
+      plain text.
+
+    For every rung below strict json_schema, the JSON Schema is inlined into
+    the system prompt — json_object mode never sends the schema to Groq, and
+    plain text obviously doesn't either, so without the inlined contract the
+    model would have nothing to conform to.
+    """
+    schema = strict_format["json_schema"]["schema"]
+    schema_suffix = (
+        "\n\nRespond with a single valid JSON object (raw JSON only — no "
+        "markdown, no code fences, no commentary) conforming EXACTLY to this "
+        f"JSON Schema:\n{json.dumps(schema, indent=2)}\n"
+    )
+    if model in _STRICT_SCHEMA_MODELS:
+        return [
+            (strict_format, ""),   # Groq enforces the schema server-side
+            ({"type": "json_object"}, schema_suffix),
+            (None, schema_suffix),  # raw text — we parse the JSON ourselves
+        ]
+    return [
+        ({"type": "json_object"}, schema_suffix),
+        (None, schema_suffix),
+    ]
+
+
+def _completion_resilient(
+    model: str,
+    system_prompt: str,
+    user_content: Any,
+    strict_format: Dict[str, Any],
+    primary_attempts: int = 3,
+    fallback_attempts: int = 2,
+    backoff_seconds: float = 1.0,
+) -> str:
+    """Runs a chat completion against `model`, recovering from Groq's
+    server-side JSON validation rejections.
+
+    Recovery ladder:
+      1. The primary response format (strict json_schema, or json_object
+         mode for models without strict support), retried `primary_attempts`
+         times — empty/invalid generations are usually transient.
+      2. Looser rungs from _format_ladder() (json_object mode, then plain
+         text with the schema still inlined in the prompt), retried
+         `fallback_attempts` times each. In plain-text mode Groq does not
+         validate anything, so the raw content comes back to us and is
+         parsed client-side (see _parse_json_object) — recovering
+         generations Groq would otherwise have discarded, e.g. JSON wrapped
+         in markdown fences or preceded by commentary.
+
+    Returns the raw assistant message content (callers parse it with
+    _parse_json_object). Raises RuntimeError with a plain-language
+    explanation if every attempt fails.
+    """
+    ladder = _format_ladder(model, strict_format)
+    last_error: Optional[Exception] = None
+    total_attempts = 0
+
+    for level, (response_format, prompt_suffix) in enumerate(ladder):
+        attempts = primary_attempts if level == 0 else fallback_attempts
+        messages = [
+            {"role": "system", "content": system_prompt + prompt_suffix},
+            {"role": "user", "content": user_content},
+        ]
+        for attempt in range(1, attempts + 1):
+            total_attempts += 1
+            try:
+                request_kwargs: Dict[str, Any] = {"model": model, "messages": messages}
+                if response_format is not None:
+                    # response_format=None means plain-text mode — omit the
+                    # kwarg entirely rather than sending "response_format":
+                    # null in the request body.
+                    request_kwargs["response_format"] = response_format
+                response = _chat_completion(**request_kwargs)
+                return response.choices[0].message.content or ""
+            except APIError as e:
+                if not _is_retryable_api_error(e):
+                    raise
+                last_error = e
+                if level == len(ladder) - 1 and attempt == attempts:
+                    break  # last rung exhausted — no point sleeping first
+                time.sleep(backoff_seconds * attempt)
+
+    raise RuntimeError(
+        f"Model '{model}' repeatedly failed to return valid structured JSON "
+        f"({total_attempts} attempt(s) across {len(ladder)} fallback "
+        "level(s), including retries with a looser output format). This is "
+        "usually a transient hiccup on the model provider's side — please "
+        "retry the upload. If the same file keeps failing, it may be too "
+        "blurry, rotated, or mostly handwritten; try a clearer photo or a "
+        "higher-resolution scan."
+    ) from last_error
+
+
+def _parse_json_object(raw: str) -> Dict[str, Any]:
+    """Robustly parse a model's raw output into a JSON object.
+
+    Tolerates the ways LLMs mangle JSON output even when told not to:
+    markdown code fences (```json ... ```), prose/commentary wrapped around
+    the object, and trailing junk after the closing brace. Raises ValueError
+    with a diagnostic snippet if nothing parseable is found.
+    """
+    if not isinstance(raw, str) or not raw.strip():
+        raise ValueError("model returned an empty response — no JSON to parse")
+
+    text = raw.strip()
+
+    # 1. Direct parse — the common case.
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    # 2. JSON inside a markdown code fence.
+    fenced = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", text, flags=re.DOTALL)
+    if fenced:
+        try:
+            return json.loads(fenced.group(1))
+        except json.JSONDecodeError:
+            pass
+
+    # 3. Outermost brace-delimited span (commentary before/after the JSON).
+    start, end = text.find("{"), text.rfind("}")
+    if start != -1 and end > start:
+        try:
+            return json.loads(text[start:end + 1])
+        except json.JSONDecodeError:
+            pass
+
+    snippet = text[:200].replace("\n", " ")
+    raise ValueError(f"model output could not be parsed as JSON (starts with: {snippet!r})")
 
  #---------------------------------------------------------------------------
 # 1. Extraction schema — keeps every document's output shape consistent
@@ -329,55 +502,47 @@ def image_to_base64(img: Image.Image) -> str:
 # ---------------------------------------------------------------------------
 
 def extract_from_image(img: Image.Image, model: str = VISION_MODEL) -> Dict[str, Any]:
-    """Send a single page image to the vision model and parse structured JSON."""
-    b64 = image_to_base64(img)
-    response_format, prompt_suffix = _response_format_for(model, EXTRACTION_RESPONSE_FORMAT)
+    """Send a single page image to the vision model and parse structured JSON.
 
-    response = _chat_completion(
+    Uses the resilient completion runner: Groq validates JSON output
+    server-side, and a model hiccup surfaces as a 400 'json_validate_failed'
+    with the generation discarded (commonly an empty `failed_generation`).
+    The runner retries, then falls back to looser output modes so the raw
+    text comes back to us for tolerant parsing instead of failing the whole
+    upload with a raw provider error.
+    """
+    b64 = image_to_base64(img)
+
+    raw = _completion_resilient(
         model=model,
-        messages=[
-            {"role": "system", "content": EXTRACTION_SCHEMA_PROMPT + prompt_suffix},
+        system_prompt=EXTRACTION_SCHEMA_PROMPT,
+        user_content=[
             {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": "Extract structured data from this medical document image.",
-                    },
-                    {
-                        "type": "image_url",
-                        "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
-                    },
-                ],
+                "type": "text",
+                "text": "Extract structured data from this medical document image.",
+            },
+            {
+                "type": "image_url",
+                "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
             },
         ],
-        response_format=response_format,
+        strict_format=EXTRACTION_RESPONSE_FORMAT,
     )
-    raw = response.choices[0].message.content
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        # Defensive fallback: strip stray code fences if the model added them
-        cleaned = raw.strip().strip("`").replace("json\n", "", 1)
-        return json.loads(cleaned)
+    return _parse_json_object(raw)
 
 
 def extract_from_text(text: str, model: str = MODEL) -> Dict[str, Any]:
-    """For digital PDFs — run the same schema extraction on plain text."""
-    response_format, prompt_suffix = _response_format_for(model, EXTRACTION_RESPONSE_FORMAT)
+    """For digital PDFs — run the same schema extraction on plain text.
 
-    response = _chat_completion(
+    Same server-side JSON-validation resilience as extract_from_image().
+    """
+    raw = _completion_resilient(
         model=model,
-        messages=[
-            {"role": "system", "content": EXTRACTION_SCHEMA_PROMPT + prompt_suffix},
-            {
-                "role": "user",
-                "content": f"Extract structured data from this document text:\n\n{text}",
-            },
-        ],
-        response_format=response_format,
+        system_prompt=EXTRACTION_SCHEMA_PROMPT,
+        user_content=f"Extract structured data from this document text:\n\n{text}",
+        strict_format=EXTRACTION_RESPONSE_FORMAT,
     )
-    return json.loads(response.choices[0].message.content)
+    return _parse_json_object(raw)
 
 
 VISION_OCR_CONFIDENCE_CEILING = 0.85  # a vision/handwriting read is never "fully certain"
@@ -973,20 +1138,13 @@ def cross_check_prescriptions(timeline: Dict[str, Any], model: str = MODEL) -> D
         "medications_timeline": timeline["medications_timeline"],
         "known_allergies": timeline["known_allergies"],
     }
-    response_format, prompt_suffix = _response_format_for(model, CROSS_CHECK_RESPONSE_FORMAT)
-
-    response = _chat_completion(
+    raw = _completion_resilient(
         model=model,
-        messages=[
-            {"role": "system", "content": CROSS_CHECK_PROMPT + prompt_suffix},
-            {
-                "role": "user",
-                "content": f"Patient medication data:\n\n{json.dumps(payload, indent=2)}",
-            },
-        ],
-        response_format=response_format,
+        system_prompt=CROSS_CHECK_PROMPT,
+        user_content=f"Patient medication data:\n\n{json.dumps(payload, indent=2)}",
+        strict_format=CROSS_CHECK_RESPONSE_FORMAT,
     )
-    result = json.loads(response.choices[0].message.content)
+    result = _parse_json_object(raw)
 
     deterministic_duplicates = detect_exact_duplicate_medications(timeline)
     existing = result.setdefault("duplicate_prescriptions", [])
