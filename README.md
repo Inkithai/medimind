@@ -7,7 +7,7 @@ single-shot Q&A call or a real multi-turn conversation. Exposed over HTTP
 under `/api/v1/`, scoped per authenticated user.
 
 ```
-documents --extract--> Cloudinary (file) + MongoDB (structured data)
+documents --extract--> Cloudinary (file) + Supabase/Postgres (structured data)
                 |
                 +--> timeline --cross-check--> safety report
                         |         |
@@ -29,7 +29,8 @@ documents --extract--> Cloudinary (file) + MongoDB (structured data)
 | [`conversation.py`](conversation.py) | Multi-turn sessions, query rewriting, safety-aware summarization (Phase 2) |
 | [`api.py`](api.py) | HTTP API over all of the above (Phase 3) |
 | [`auth.py`](auth.py) | Verifies the `Authorization`/`X-User-Id` headers on every API request (Phase 4) |
-| [`db.py`](db.py) | MongoDB persistence for uploaded documents + patient snapshots, scoped per user (Phase 4) |
+| [`db.py`](db.py) | Supabase (Postgres) persistence for uploaded documents + patient snapshots, scoped per user (Phase 4) |
+| [`supabase_schema.sql`](supabase_schema.sql) | One-time SQL to create the `documents` / `patient_snapshots` tables (+ indexes, RLS) in your Supabase project |
 | [`storage.py`](storage.py) | Uploads original documents to Cloudinary under `mediscan/<user_id>/` (Phase 4) |
 | [`inspect_chroma.py`](inspect_chroma.py) | Read-only CLI for browsing what's indexed in `./chroma_db` |
 | [`generate_lab_test_data.py`](generate_lab_test_data.py) | Generates synthetic, schema-valid lab_report test data — no OCR/API calls needed |
@@ -39,20 +40,47 @@ Deeper internals for each module are documented in [`docs/`](docs/).
 ## Setup
 
 ```
-pip install openai pdfplumber pymupdf pillow chromadb python-dotenv python-dateutil fastapi "uvicorn[standard]" python-multipart pymongo cloudinary pyjwt
+pip install openai pdfplumber pymupdf pillow chromadb python-dotenv python-dateutil fastapi "uvicorn[standard]" python-multipart supabase cloudinary pyjwt
 ```
 
 Create a `.env` file in the project root (already gitignored — copy
 `.env.example` and fill in real values):
 
 ```
-OPENAI_API_KEY=sk-...
+GROQ_API_KEY=gsk_...    # Groq key — free tier at https://console.groq.com/keys
 CLOUDINARY_CLOUD_NAME=...
 CLOUDINARY_API_KEY=...
 CLOUDINARY_API_SECRET=...
-MONGODB_URI=mongodb+srv://...
+SUPABASE_URL=https://your-project-ref.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=eyJ...   # service_role secret, NOT the anon key
 JWT_SECRET=...          # same secret your auth issuer signs tokens with
 ```
+
+### Supabase setup (one-time)
+
+1. Create a free project at [supabase.com](https://supabase.com).
+2. Open **Dashboard → SQL Editor**, paste the contents of
+   [`supabase_schema.sql`](supabase_schema.sql), and run it. This creates
+   the `documents` and `patient_snapshots` tables with the indexes and
+   row-level security the app expects (RLS on, no policies — only the
+   service-role key used by this backend can reach the tables).
+3. Copy **Project URL** and the **service_role** secret from
+   **Dashboard → Settings → API** into `.env` as `SUPABASE_URL` and
+   `SUPABASE_SERVICE_ROLE_KEY`. Never expose the service-role key to a
+   browser.
+
+Extraction, cross-checking, Q&A and conversation all run on **Groq**
+through its OpenAI-compatible endpoint (`https://api.groq.com/openai/v1`);
+the model defaults to `meta-llama/llama-4-scout-17b-16e-instruct` (Llama 4
+Scout — vision-capable, supports structured JSON output) and can be
+overridden with `GROQ_MODEL`. Groq's free tier needs no credit card and is
+rate-limited (~30 req/min per model). One caveat: **Groq has no embeddings
+API**, so Q&A embeddings use, in order of
+preference: (1) OpenAI `text-embedding-3-small` if you also set
+`OPENAI_API_KEY`, or (2) Chroma's built-in local ONNX MiniLM model — no
+key needed, runs in-process. If you ever switch between those two
+embedding backends, delete `./chroma_db` and re-upload so the vectors are
+re-indexed (the backends produce different-dimensional embeddings).
 
 ## Running the API
 
@@ -75,15 +103,16 @@ are already set up — Railway's Nixpacks builder detects both automatically,
 so a plain "Deploy from GitHub repo" works with no extra build config.
 
 1. **Env vars** — in the Railway service's Variables tab, set everything
-   from `.env.example` (`OPENAI_API_KEY`, `CLOUDINARY_CLOUD_NAME`,
-   `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`, `MONGODB_URI`,
-   `JWT_SECRET`). Don't upload `.env` itself — it's git-ignored and holds
-   live secrets.
+   from `.env.example` (`GROQ_API_KEY`, `CLOUDINARY_CLOUD_NAME`,
+   `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`, `SUPABASE_URL`,
+   `SUPABASE_SERVICE_ROLE_KEY`, `JWT_SECRET`; optionally `OPENAI_API_KEY`
+   for embeddings). Don't upload `.env` itself — it's git-ignored and
+   holds live secrets.
 2. **Persisting the vector store** — Railway's container filesystem is
    rebuilt on every deploy, so anything written to disk (the local Chroma
    store under `./chroma_db`) would otherwise vanish on the next deploy or
    restart, silently dropping every indexed patient's Q&A data even though
-   MongoDB/Cloudinary data is untouched. Fix: attach a
+   Supabase/Cloudinary data is untouched. Fix: attach a
    [Railway Volume](https://docs.railway.com/guides/volumes) to the
    service (Settings → Volumes), mount it at e.g. `/data/chroma_db`, and
    set the env var `CHROMA_DIR=/data/chroma_db`. `retrieval.py` reads
@@ -421,7 +450,7 @@ Response `200` — same shape as `/qa`, plus `rewritten_query`:
 ```
 
 Errors: `404` unknown `session_id` (create one first via `POST /sessions`),
-`400` empty question, `502` if an underlying OpenAI call fails.
+`400` empty question, `502` if an underlying Groq/embedding call fails.
 
 #### `GET /api/v1/sessions/{session_id}`
 
@@ -469,7 +498,7 @@ different user.
 
 [`generate_lab_test_data.py`](generate_lab_test_data.py) produces
 synthetic but schema-valid `lab_report` documents — same shape
-`process_document()` returns — without any OCR or OpenAI calls, so you can
+`process_document()` returns — without any OCR or LLM calls, so you can
 exercise `build_patient_timeline()`, `document_filter.py`, and
 `lab_trends.py` for free:
 
@@ -499,7 +528,7 @@ through `/documents` (that endpoint only accepts real files).
 embeddings + metadata), keyed by `user_id` via the HTTP API (or by
 patient name when run through the CLI). [`inspect_chroma.py`](inspect_chroma.py)
 is a read-only CLI for browsing it without writing throwaway scripts — it
-never modifies the store or calls OpenAI.
+never modifies the store or calls the LLM/embedding APIs.
 
 ```
 python inspect_chroma.py                            # list every collection + chunk count
@@ -519,15 +548,15 @@ contains).
   never persisted there; see `conversation.py`).
 - Document storage is split: the original uploaded file lives in
   Cloudinary (`mediscan/<user_id>/...`), its structured extraction lives in
-  MongoDB (`documents`, `patient_snapshots` collections), and only its
+  Supabase Postgres (`documents`, `patient_snapshots` tables), and only its
   embeddings live in the local `./chroma_db`. All three are scoped by the
   authenticated `user_id` (see [`auth.py`](auth.py), [`db.py`](db.py),
-  [`storage.py`](storage.py)) — no raw file bytes, OpenAI request/response
+  [`storage.py`](storage.py)) — no raw file bytes, LLM request/response
   payloads, or access tokens are ever persisted.
 - The CLI entry point in `medical_extractor.py` (`python medical_extractor.py ...`)
   is unauthenticated by design (local dev/testing tool) and still writes to
   local `patient_report_*.json` / `patient_docs_*.json` files — it does not
-  touch MongoDB or Cloudinary.
+  touch Supabase or Cloudinary.
 - See [`docs/pipeline.md`](docs/pipeline.md), [`docs/medical_extractor.md`](docs/medical_extractor.md),
   and [`docs/retrieval.md`](docs/retrieval.md) for how extraction, timeline
   building, and retrieval work internally.

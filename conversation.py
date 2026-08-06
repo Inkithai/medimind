@@ -19,10 +19,9 @@ is only meaningful in light of what was said earlier. This module:
        periodic summarization of older turns.
 
 Env:
-    export OPENAI_API_KEY="sk-..."   (same key used by the rest of the pipeline)
+    export GROQ_API_KEY="gsk_..."   (same Groq key used by the rest of the pipeline)
 """
 
-import json
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 

@@ -2,15 +2,20 @@
 Medical Document Extraction Pipeline
 =====================================
 Handles PDF (text-based or scanned) and image uploads (prescriptions, lab
-reports, discharge summaries), extracts structured data using an OpenAI
-vision-capable model, and returns clean JSON ready for timeline building,
-RAG indexing, and cross-checking.
+reports, discharge summaries), extracts structured data using a Groq-hosted
+vision-capable model (default: Meta's Llama 4 Scout), and returns clean
+JSON ready for timeline building, RAG indexing, and cross-checking.
+
+Groq is accessed through its OpenAI-compatible endpoint
+(https://api.groq.com/openai/v1) via the standard OpenAI SDK — only the
+base URL, API key, and model names differ. Groq's free tier needs no
+credit card (rate-limited; create a key at https://console.groq.com/keys).
 
 Install:
     pip install openai pdfplumber pymupdf pillow --break-system-packages
 
 Env:
-    export OPENAI_API_KEY="sk-..."
+    export GROQ_API_KEY="gsk_..."   (create one at https://console.groq.com/keys)
 """
 
 import os
@@ -23,16 +28,29 @@ from typing import List, Dict, Any, Optional, Tuple
 
 import pdfplumber
 import fitz  # PyMuPDF, used to rasterize scanned PDFs
-from PIL import Image
+from PIL import Image, ImageOps
 from openai import OpenAI
 from dotenv import load_dotenv
 
 load_dotenv()
 
-client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+# Groq — Groq's API is OpenAI-compatible, so we reuse the OpenAI SDK
+# pointed at https://api.groq.com/openai/v1. Free key (no credit card):
+# https://console.groq.com/keys
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
+if not GROQ_API_KEY:
+    raise RuntimeError(
+        "GROQ_API_KEY is not set — copy .env.example to .env and add your "
+        "Groq API key (create a free one at https://console.groq.com/keys)."
+    )
 
-MODEL = "gpt-5-mini"       # vision-capable, low cost, good enough for structured extraction
-FALLBACK_MODEL = "gpt-5-nano"    # even cheaper, use for high-volume / less critical docs
+client = OpenAI(
+    api_key=GROQ_API_KEY,
+    base_url=os.environ.get("GROQ_BASE_URL", "https://api.groq.com/openai/v1"),
+)
+
+MODEL = os.environ.get("GROQ_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct")  # vision-capable, supports json_schema output
+FALLBACK_MODEL = os.environ.get("GROQ_FALLBACK_MODEL", "llama-3.1-8b-instant")      # cheap/fast text model for high-volume / less critical docs
 
  #---------------------------------------------------------------------------
 # 1. Extraction schema — keeps every document's output shape consistent
@@ -366,6 +384,10 @@ def process_document(file_path: str, model: str = MODEL) -> Dict[str, Any]:
 
     else:  # image types
         img = Image.open(file_path)
+        # Phone photos carry an EXIF orientation tag instead of rotated
+        # pixels — apply it, or the vision model reads the document
+        # sideways/upside-down and extraction silently degrades.
+        img = ImageOps.exif_transpose(img)
         result = extract_from_image(img, model=model)
         result = _apply_confidence_ceiling(result, VISION_OCR_CONFIDENCE_CEILING)
         result["_source"] = {"file": path.name, "method": "vision_ocr"}
