@@ -42,14 +42,17 @@ def _get_client() -> Client:
     global _client
     if _client is None:
         url = os.environ.get("SUPABASE_URL")
-        key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ.get("SUPABASE_ANON_KEY")
-        if (not url or not key or 
-                url.strip() in ("", "https://your-project-ref.supabase.co") or 
+        # This must never fall back to SUPABASE_ANON_KEY. The tables use RLS
+        # with no browser-facing policies, so an anon key will be denied and
+        # using it would also hide a deployment configuration error.
+        key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+        if (not url or not key or
+                url.strip() in ("", "https://your-project-ref.supabase.co") or
                 key.strip() in ("", "your-supabase-service-role-key")):
             raise RuntimeError(
-                "SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set — "
-                "copy .env.example to .env and add your actual Supabase project "
-                "URL and service-role key (Dashboard -> Settings -> API)."
+                "SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set. "
+                "Use the secret service_role key (not the anon/publishable key) "
+                "from Supabase Dashboard -> Settings -> API, then restart the API."
             )
         _client = create_client(url, key)
     return _client
