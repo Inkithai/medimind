@@ -6,13 +6,18 @@ Extraction → grouping → timeline → cross-check pipeline. This is the "sour
 
 ```
 pip install openai pdfplumber pymupdf pillow --break-system-packages
-export OPENAI_API_KEY="sk-..."
+export GROQ_API_KEY="gsk_..."   # Groq key — free at https://console.groq.com/keys
 ```
 
+The client talks to Groq through its OpenAI-compatible endpoint
+(`https://api.groq.com/openai/v1`, overridable via `GROQ_BASE_URL`), so
+the OpenAI SDK is used unchanged. The module raises a clear `RuntimeError`
+at import time if `GROQ_API_KEY` is missing.
+
 Module-level constants:
-- `client` — the shared `OpenAI` client instance (reused by `retrieval.py`)
-- `MODEL = "gpt-5-mini"` — vision-capable, used for extraction and cross-checking (and reused by `retrieval.py` as its chat model)
-- `FALLBACK_MODEL = "gpt-5-nano"` — cheaper, not currently wired up anywhere automatic; pass `model=FALLBACK_MODEL` explicitly if needed
+- `client` — the shared OpenAI-SDK client instance pointed at Groq (reused by `retrieval.py` for chat)
+- `MODEL` — defaults to `"meta-llama/llama-4-scout-17b-16e-instruct"` (Llama 4 Scout), overridable via the `GROQ_MODEL` env var. Vision-capable and supports `json_schema` structured output, used for extraction and cross-checking (and reused by `retrieval.py` as its chat model)
+- `FALLBACK_MODEL` — defaults to `"llama-3.1-8b-instant"` (cheaper, text-only), overridable via `GROQ_FALLBACK_MODEL`. Not currently wired up anywhere automatic; pass `model=FALLBACK_MODEL` explicitly if needed
 
 ## 1. Extraction schema
 
