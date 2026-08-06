@@ -16,5 +16,8 @@ patient_docs_*.json
 venv/
 *.egg-info/
 .pytest_cache/
-dist/
-build/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/*.tsbuildinfo

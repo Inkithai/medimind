@@ -96,6 +96,77 @@ All application routes are under the `/api/v1/` prefix.
 
 ---
 
+## Frontend
+
+The frontend in `frontend/` is a **React + TypeScript + Vite + Tailwind CSS**
+single-page app. It replaces the original single-file `index.html` and exposes
+every capability of the backend API, not just upload + one-shot Q&A:
+
+- **Settings** — configure the API base URL and the `Bearer` JWT / `X-User-Id`
+  credentials the backend requires (see [Authentication](#authentication)).
+  Credentials are stored only in the browser's `localStorage`; there is no
+  separate login endpoint. A "Test connection" button calls `/health` and an
+  authenticated endpoint to verify both reachability and credentials.
+- **Dashboard / patient record** (`GET /timeline`, `/cross-check`, `/lab-trends`)
+  — a merged view of the chronological visit timeline, medications, lab
+  results, known allergies, the safety cross-check report, and lab trends.
+- **Upload & extract** (`POST /documents`) — drag-and-drop multipart upload for
+  one or more `.pdf/.png/.jpg/.jpeg/.webp` files, with explicit ML-processing
+  state, per-file validation, non-medical-document rejection, the
+  `indexed:false` / `index_error` state, and inline rendering of the returned
+  timeline, cross-check, and lab trends.
+- **Safety cross-check** (`GET /cross-check`) — allergy conflicts, drug
+  interactions (with severity), duplicate prescriptions, and conflicting
+  dosage instructions, plus the `overall_recommendation`.
+- **Lab trends** (`GET /lab-trends`) — per-test direction, reference-range
+  crossings, "approaching threshold" warnings, plain-language explanations,
+  and an inline SVG sparkline for every trend, with tests that had too few
+  data points listed under "insufficient data".
+- **Ask** (`POST /qa`) — single-shot RAG Q&A with a configurable `top_k`,
+  answer confidence, cited sources, and the `recommend_professional_consult`
+  warning.
+- **Conversations** (`POST /sessions`, `POST /sessions/{id}/messages`, `GET`,
+  `DELETE`) — multi-turn chat with server-side history, query rewriting
+  (shown as `rewritten_query`), session creation, resume-by-ID, graceful 404
+  handling when the in-memory session has expired (e.g. after an API restart),
+  and end-session cleanup.
+
+Loading, empty (HTTP 404 "no record yet"), authentication (401),
+validation (422 — e.g. non-medical document), ML-pipeline (502), and
+network/CORS failures are all surfaced as distinct states rather than raw
+JSON dumps.
+
+### Running the frontend
+
+```
+cd frontend
+npm install
+npm run dev      # http://localhost:5173
+```
+
+In local development the Vite dev server proxies `/api/*` to
+`http://127.0.0.1:8000` (see `vite.config.ts`), so you can leave **API base
+URL** blank in Settings and use same-origin relative URLs with no CORS setup.
+Point the proxy at a different backend with `VITE_API_PROXY_TARGET`, or set a
+fully-qualified **API base URL** in Settings (that backend must then allow the
+frontend's origin via CORS, since the authenticated routes require custom
+`Authorization` / `X-User-Id` headers).
+
+Production build:
+
+```
+npm run build    # outputs frontend/dist/
+npm run preview  # serve the production build locally
+```
+
+Type-checking:
+
+```
+npm run lint     # tsc --noEmit
+```
+
+---
+
 ## Deploying to Railway
 
 `requirements.txt` and `Procfile` (`web: uvicorn api:app --host 0.0.0.0 --port $PORT`)
