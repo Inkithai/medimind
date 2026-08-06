@@ -17,7 +17,7 @@ export GROQ_API_KEY=gsk_...
 
 ### 1. Schema — strict structured output
 
-`EXTRACTION_JSON_SCHEMA` with `strict: True` forces every document into the shape below. Strict json_schema is only supported on `openai/gpt-oss-*` models on Groq; for any other model (e.g. the vision default `qwen/qwen3.6-27b`) `_response_format_for()` automatically falls back to JSON-object mode and inlines the schema into the system prompt.
+`EXTRACTION_JSON_SCHEMA` with `strict: True` forces every document into the shape below. Strict json_schema is only supported on `openai/gpt-oss-*` models on Groq; for any other model (e.g. the vision default `qwen/qwen3.6-27b`) `_format_ladder()` falls back to JSON-object mode and inlines the schema into the system prompt.
 
 ```jsonc
 {
@@ -49,10 +49,18 @@ export GROQ_API_KEY=gsk_...
 
 ### 3. LLM calls
 
-- `extract_from_image(img)` — sends `EXTRACTION_SCHEMA_PROMPT` + image_url, expects strict JSON, strips code fences fallback.
+- `extract_from_image(img)` — sends `EXTRACTION_SCHEMA_PROMPT` + image_url, parses the response with `_parse_json_object`.
 - `extract_from_text(text)` — same schema, text input.
 
 Both do not attach `_source` — caller does.
+
+**Structured-output resilience** — Groq validates model output server-side in json_object and strict json_schema modes and discards any generation that isn't valid JSON, rejecting the request with `400 json_validate_failed` (often with an empty `failed_generation`, i.e. the model hiccuped and produced nothing). All structured calls (`extract_from_image`, `extract_from_text`, `cross_check_prescriptions`) go through `_completion_resilient()`, which:
+
+1. Retries the primary response format (`strict json_schema` on `openai/gpt-oss-*`; `json_object` + inlined schema otherwise) up to 3× with backoff — most such failures are transient.
+2. Falls back down `_format_ladder()`: `json_object` mode (schema inlined in the prompt), then plain text with no `response_format` at all. Groq does not validate the last rung, so the raw content comes back and `_parse_json_object()` recovers JSON wrapped in markdown fences or surrounded by commentary.
+3. If every attempt fails, raises a plain-language `RuntimeError` ("repeatedly failed to return valid structured JSON ... retry the upload") instead of the raw provider error body.
+
+`_is_retryable_api_error()` also retries transient 408/409/429/5xx statuses and connection errors; auth (401) and model-not-found (404) failures propagate immediately.
 
 - `_apply_confidence_ceiling(result, 0.85)` caps vision OCR results — handwritten read can never be 100% certain vs digital `text_layer`.
 
