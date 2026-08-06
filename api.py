@@ -34,6 +34,7 @@ Env:
 """
 
 import logging
+import re
 import uuid
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -113,38 +114,46 @@ async def upload_documents(
     new_docs: List[Dict[str, Any]] = []
 
     with TemporaryDirectory() as tmp_dir:
-        for upload in files:
-            suffix = Path(upload.filename or "").suffix.lower()
+        for file_index, upload in enumerate(files, start=1):
+            # Never trust the client-provided filename for an on-disk path:
+            # it may contain path separators / '..' segments (path
+            # traversal), and two uploads may share a name (the second
+            # would overwrite the first's temp file before Cloudinary
+            # archival). Write under a unique, sanitized name; keep the
+            # basename for display/labeling only.
+            original_name = Path(upload.filename or "").name or f"upload_{file_index}"
+            suffix = Path(original_name).suffix.lower()
             if suffix not in SUPPORTED_EXTENSIONS:
                 logger.warning(
                     "upload_documents: user=%s rejected '%s' (unsupported type '%s')",
-                    user_id, upload.filename, suffix or "(none)",
+                    user_id, original_name, suffix or "(none)",
                 )
                 raise HTTPException(
                     400,
                     f"Unsupported file type '{suffix or '(no extension)'}' for "
-                    f"'{upload.filename}'. Supported: {', '.join(SUPPORTED_EXTENSIONS)}",
+                    f"'{original_name}'. Supported: {', '.join(SUPPORTED_EXTENSIONS)}",
                 )
-            tmp_path = Path(tmp_dir) / upload.filename
+            safe_stem = re.sub(r"[^A-Za-z0-9._-]+", "_", Path(original_name).stem) or "upload"
+            tmp_path = Path(tmp_dir) / f"{file_index:03d}_{safe_stem}{suffix}"
             content = await upload.read()
             tmp_path.write_bytes(content)
             logger.info(
                 "upload_documents: user=%s processing '%s' (%d bytes)",
-                user_id, upload.filename, len(content),
+                user_id, original_name, len(content),
             )
             try:
                 result = process_document(str(tmp_path))
             except Exception as e:
                 logger.error(
                     "upload_documents: user=%s extraction failed for '%s': %s",
-                    user_id, upload.filename, e, exc_info=True,
+                    user_id, original_name, e, exc_info=True,
                 )
-                raise HTTPException(422, f"Extraction failed for '{upload.filename}': {e}")
+                raise HTTPException(422, f"Extraction failed for '{original_name}': {e}")
 
             if isinstance(result, dict) and result.get("multi_page"):
                 logger.info(
                     "upload_documents: user=%s '%s' extracted as %d page(s)",
-                    user_id, upload.filename, len(result["pages"]),
+                    user_id, original_name, len(result["pages"]),
                 )
                 pages = result["pages"]
             else:
@@ -158,7 +167,7 @@ async def upload_documents(
             # by process_document().
             kept_pages: List[Dict[str, Any]] = []
             for page_num, page in enumerate(pages, start=1):
-                label = upload.filename if len(pages) == 1 else f"{upload.filename} (page {page_num})"
+                label = original_name if len(pages) == 1 else f"{original_name} (page {page_num})"
                 if _is_demo_document(page):
                     logger.warning(
                         "upload_documents: user=%s skipped demo/placeholder page '%s'", user_id, label,
@@ -174,7 +183,7 @@ async def upload_documents(
                 kept_pages.append(page)
 
             if kept_pages:
-                per_file_pages.append((tmp_path, upload.filename, kept_pages))
+                per_file_pages.append((tmp_path, original_name, kept_pages))
 
         if not per_file_pages:
             raise HTTPException(

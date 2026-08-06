@@ -28,7 +28,7 @@ from typing import List, Dict, Any, Optional, Tuple
 
 import pdfplumber
 import fitz  # PyMuPDF, used to rasterize scanned PDFs
-from PIL import Image
+from PIL import Image, ImageOps
 from openai import OpenAI
 from dotenv import load_dotenv
 
@@ -384,6 +384,10 @@ def process_document(file_path: str, model: str = MODEL) -> Dict[str, Any]:
 
     else:  # image types
         img = Image.open(file_path)
+        # Phone photos carry an EXIF orientation tag instead of rotated
+        # pixels — apply it, or the vision model reads the document
+        # sideways/upside-down and extraction silently degrades.
+        img = ImageOps.exif_transpose(img)
         result = extract_from_image(img, model=model)
         result = _apply_confidence_ceiling(result, VISION_OCR_CONFIDENCE_CEILING)
         result["_source"] = {"file": path.name, "method": "vision_ocr"}

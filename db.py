@@ -83,7 +83,9 @@ def load_documents(user_id: str) -> List[Dict[str, Any]]:
         _documents()
         .select("user_id, uploaded_at, data")
         .eq("user_id", user_id)
-        .order("uploaded_at")
+        # id breaks ties between documents uploaded in the same batch
+        # (they share one uploaded_at timestamp), keeping merge order stable.
+        .order("uploaded_at, id")
         .execute()
     )
     return [
