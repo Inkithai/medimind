@@ -11,7 +11,7 @@ Different dimensionalities → after switching backend delete `./chroma_db` and 
 ### Constants
 
 - `EMBEDDING_MODEL` = `text-embedding-3-small` (env `EMBEDDING_MODEL` override) — only used if OpenAI key present.
-- `CHAT_MODEL = MODEL` — alias to `meta-llama/llama-4-scout-17b-16e-instruct`; change this not extractor's MODEL if Q&A model should diverge.
+- `CHAT_MODEL = MODEL` — alias to `openai/gpt-oss-120b`; change this not extractor's MODEL if Q&A model should diverge.
 - `CHROMA_DIR` = `CHROMA_DIR` env or `./chroma_db` (Railway volume override `/data/chroma_db`). Note: previously not gitignored — now listed.
 - `EMBEDDING_BATCH_SIZE = 100` — safeguards per-request limit.
 

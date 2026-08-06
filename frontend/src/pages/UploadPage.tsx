@@ -1,20 +1,27 @@
-import { useCallback, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { Alert } from "../components/Alert";
-import { CrossCheckView } from "../components/CrossCheckView";
 import { ErrorState } from "../components/ErrorState";
-import { LabTrendsView } from "../components/LabTrendsView";
+import { HealthSummaryCard } from "../components/HealthSummaryCard";
 import { ProcessingStatus, type ProcessingStepId } from "../components/ProcessingStatus";
 import { Spinner } from "../components/Spinner";
 import { TimelineView } from "../components/TimelineView";
 import { FileIcon, UploadIcon } from "../components/icons";
 import { useAuth } from "../context/AuthContext";
-import type { UploadResponse } from "../types/api";
-import { classNames } from "../utils/format";
+import type { Timeline, UploadResponse } from "../types/api";
+import { classNames, documentTypeLabel, fileSizeLabel, relativeTime } from "../utils/format";
 
 const ACCEPTED = [".pdf", ".png", ".jpg", ".jpeg", ".webp"];
 const MAX_MB = 25;
+
+const SUPPORTED_TYPES = [
+  "Prescriptions",
+  "Lab Reports",
+  "Discharge Summaries",
+  "Medical Images",
+  "Insurance Documents",
+];
 
 type Phase = "idle" | "uploading";
 
@@ -35,11 +42,33 @@ export function UploadPage() {
   const [error, setError] = useState<unknown>(null);
   const [processingStep, setProcessingStep] = useState<ProcessingStepId>("upload");
 
+  // Recent uploads + health summary fill the page's right column / bottom.
+  const [timeline, setTimeline] = useState<Timeline | null>(null);
+
+  useEffect(() => {
+    api
+      .getTimeline(credentials)
+      .then(setTimeline)
+      .catch(() => setTimeline(null)); // 404 = no record yet — page still works
+  }, [credentials, result]);
+
+  // Object URLs for image previews — revoked when the pending list changes.
+  const previewUrls = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const p of pending) {
+      if (/\.(png|jpe?g|webp)$/i.test(p.file.name)) {
+        map.set(p.id, URL.createObjectURL(p.file));
+      }
+    }
+    return map;
+  }, [pending]);
+  useEffect(() => {
+    return () => previewUrls.forEach((url) => URL.revokeObjectURL(url));
+  }, [previewUrls]);
+
   const addFiles = useCallback((fileList: FileList | File[]) => {
     const incoming = Array.from(fileList).map((file) => ({
       file,
-      // FIXED BUG: previously used random suffix so dedup via id never worked.
-      // Now dedup by real file identity: name-size-lastModified
       id: `${file.name}-${file.size}-${file.lastModified}`,
     }));
     setPending((prev) => {
@@ -59,14 +88,14 @@ export function UploadPage() {
   );
 
   const validate = (): Error | null => {
-    if (pending.length === 0) return new Error("Select at least one file.");
+    if (pending.length === 0) return new Error("Select at least one file first.");
     for (const { file } of pending) {
       const lower = file.name.toLowerCase();
       if (!ACCEPTED.some((ext) => lower.endsWith(ext))) {
-        return new Error(`Unsupported file: ${file.name}. Supported: ${ACCEPTED.join(", ")}`);
+        return new Error(`"${file.name}" isn't a file type we can read.`);
       }
       if (file.size > MAX_MB * 1024 * 1024) {
-        return new Error(`${file.name} exceeds ${MAX_MB} MB.`);
+        return new Error(`"${file.name}" is larger than ${MAX_MB} MB.`);
       }
     }
     return null;
@@ -81,18 +110,19 @@ export function UploadPage() {
     setError(null);
     setResult(null);
     setPhase("uploading");
-    setProcessingStep("reading");
+    setProcessingStep("upload");
 
-    // Simulate step progression for UX (real backend does all steps server-side)
+    // Gentle step progression for UX (all real work happens server-side)
     const stepTimers: number[] = [];
     const advance = (step: ProcessingStepId, afterMs: number) => {
       const t = window.setTimeout(() => setProcessingStep(step), afterMs);
       stepTimers.push(t);
     };
-    advance("extracting", 1500);
-    advance("organizing", 3500);
-    advance("safety", 5500);
-    advance("indexing", 7500);
+    advance("reading", 800);
+    advance("extracting", 2200);
+    advance("organizing", 4200);
+    advance("safety", 6200);
+    advance("indexing", 8000);
 
     try {
       const res = await api.uploadDocuments(
@@ -112,26 +142,22 @@ export function UploadPage() {
   }
 
   const uploadFailed = phase === "idle" && error !== null;
+  const busy = phase === "uploading";
+  const recent = timeline ? [...timeline.visits].slice(-5).reverse() : [];
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900">Upload & extract</h1>
-          <p className="mt-1 max-w-2xl text-sm text-slate-500">
-            Upload prescriptions, lab reports, or discharge summaries. Backend runs vision OCR / text extraction, merges
-            with prior uploads, rebuilds timeline, re-runs safety cross-checking and lab trend tracking, and re-indexes
-            for grounded Q&A. No refresh needed.
-          </p>
-        </div>
-        <div className="rounded-xl bg-slate-900 px-3 py-2 text-xs text-white">
-          Flow: <span className="font-mono">Frontend → /api/v1/documents → Clinical Pipeline → Patient Record</span>
-        </div>
-      </div>
+      <header>
+        <h1 className="page-title">Upload Medical Documents</h1>
+        <p className="secondary-text mt-2">
+          We'll read them, find the important details, and add them to your health record.
+        </p>
+      </header>
 
       <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
         <div className="space-y-4">
-          <div
+          {/* Drop zone */}
+          <section
             onDragOver={(e) => {
               e.preventDefault();
               setDragging(true);
@@ -139,21 +165,32 @@ export function UploadPage() {
             onDragLeave={() => setDragging(false)}
             onDrop={onDrop}
             className={classNames(
-              "rounded-xl border-2 border-dashed bg-white p-8 text-center transition",
+              "rounded-2xl border-2 border-dashed bg-white p-8 text-center transition sm:p-10",
               dragging ? "border-brand-500 bg-brand-50/40" : "border-slate-300"
             )}
+            aria-label="Document upload area"
           >
-            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-brand-50 text-brand-600">
-              <UploadIcon className="h-6 w-6" />
+            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-brand-50 text-brand-600">
+              <UploadIcon className="h-8 w-8" />
             </div>
-            <p className="mt-3 text-sm font-medium text-slate-700">Drag & drop medical documents here</p>
-            <p className="mt-1 text-xs text-slate-500">Supported: {ACCEPTED.join(" ")} — up to {MAX_MB} MB each</p>
-            <button
-              onClick={() => inputRef.current?.click()}
-              className="mt-4 inline-flex items-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
-            >
-              Browse files
+            <p className="mt-4 text-lg font-semibold text-slate-800">Drag files here</p>
+            <p className="secondary-text mt-1">or</p>
+            <button onClick={() => inputRef.current?.click()} className="btn-primary mt-3">
+              Browse Files
             </button>
+            <p className="secondary-text mt-4">
+              Supported: PDF • JPG • PNG • WEBP &nbsp;·&nbsp; Max {MAX_MB} MB each
+            </p>
+            <div className="mt-4 flex flex-wrap justify-center gap-2">
+              {SUPPORTED_TYPES.map((t) => (
+                <span
+                  key={t}
+                  className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600"
+                >
+                  {t}
+                </span>
+              ))}
+            </div>
             <input
               ref={inputRef}
               type="file"
@@ -165,66 +202,85 @@ export function UploadPage() {
                 e.target.value = "";
               }}
             />
-          </div>
+          </section>
 
+          {/* Pending files — with previews, not a disappearing list */}
           {pending.length > 0 && (
-            <div className="rounded-xl border border-slate-200 bg-white">
-              <div className="border-b border-slate-100 px-5 py-3">
-                <h2 className="text-sm font-semibold text-slate-800">{pending.length} file(s) ready to upload</h2>
+            <section
+              className="rounded-2xl border border-slate-200 bg-white shadow-sm"
+              aria-label="Files ready to upload"
+            >
+              <div className="border-b border-slate-100 px-5 py-4">
+                <h2 className="card-title">{pending.length} {pending.length === 1 ? "file" : "files"} ready</h2>
               </div>
               <ul className="divide-y divide-slate-100">
-                {pending.map((p) => (
-                  <li key={p.id} className="flex items-center justify-between gap-3 px-5 py-3">
-                    <div className="flex min-w-0 items-center gap-3">
-                      <FileIcon className="h-5 w-5 shrink-0 text-slate-400" />
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-medium text-slate-800">{p.file.name}</p>
-                        <p className="text-xs text-slate-400">{(p.file.size / 1024).toFixed(1)} KB</p>
+                {pending.map((p) => {
+                  const preview = previewUrls.get(p.id);
+                  return (
+                    <li key={p.id} className="flex items-center gap-4 px-5 py-3">
+                      {preview ? (
+                        <img
+                          src={preview}
+                          alt={`Preview of ${p.file.name}`}
+                          className="h-14 w-14 shrink-0 rounded-lg border border-slate-200 object-cover"
+                        />
+                      ) : (
+                        <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-slate-50 text-slate-400">
+                          <FileIcon className="h-7 w-7" />
+                        </div>
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-base font-medium text-slate-800">{p.file.name}</p>
+                        <p className="secondary-text">{fileSizeLabel(p.file.size)}</p>
                       </div>
-                    </div>
-                    <button
-                      onClick={() => setPending((prev) => prev.filter((x) => x.id !== p.id))}
-                      className="text-xs font-medium text-slate-400 hover:text-red-600"
-                    >
-                      Remove
-                    </button>
-                  </li>
-                ))}
+                      <div className="flex shrink-0 items-center gap-1">
+                        {preview && (
+                          <a
+                            href={preview}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="flex min-h-[44px] items-center rounded-lg px-3 text-sm font-medium text-brand-600 hover:bg-brand-50"
+                          >
+                            Preview
+                          </a>
+                        )}
+                        <button
+                          onClick={() => setPending((prev) => prev.filter((x) => x.id !== p.id))}
+                          className="flex min-h-[44px] items-center rounded-lg px-3 text-sm font-medium text-slate-400 hover:bg-red-50 hover:text-red-600"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </li>
+                  );
+                })}
               </ul>
-              <div className="flex items-center justify-end gap-3 border-t border-slate-100 px-5 py-3">
-                <button
-                  onClick={() => setPending([])}
-                  className="rounded-xl px-3 py-2 text-sm font-medium text-slate-500 hover:text-slate-700"
-                >
+              <div className="flex items-center justify-end gap-3 border-t border-slate-100 px-5 py-4">
+                <button onClick={() => setPending([])} className="btn-ghost">
                   Clear all
                 </button>
-                <button
-                  onClick={handleUpload}
-                  disabled={phase === "uploading"}
-                  className="inline-flex items-center gap-2 rounded-xl bg-brand-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 disabled:opacity-60"
-                >
-                  {phase === "uploading" ? (
+                <button onClick={handleUpload} disabled={busy} className="btn-primary">
+                  {busy ? (
                     <>
-                      <Spinner className="h-4 w-4" />
+                      <Spinner className="h-5 w-5" />
                       Processing…
                     </>
                   ) : (
                     <>
-                      <UploadIcon className="h-4 w-4" />
-                      Upload & extract
+                      <UploadIcon className="h-5 w-5" />
+                      Upload
                     </>
                   )}
                 </button>
               </div>
-            </div>
+            </section>
           )}
 
-          {phase === "uploading" && (
-            <Alert variant="info" title="ML pipeline running">
-              <p className="text-xs">
-                Each file is extracted (vision OCR for scans/images, text extraction for digital PDFs), validated as a
-                genuine medical document, merged with your existing record, and indexed for Q&A. Large batches and
-                scanned PDFs take longer.
+          {busy && (
+            <Alert variant="info" title="Hang tight — we're reading your documents">
+              <p className="text-sm">
+                Scanned pages and photos take a little longer than digital PDFs. You can leave this
+                page; everything is saved automatically.
               </p>
             </Alert>
           )}
@@ -240,57 +296,103 @@ export function UploadPage() {
           )}
         </div>
 
+        {/* Right column: live status while processing, success + next steps after */}
         <div className="space-y-4">
-          <ProcessingStatus current={phase === "uploading" ? processingStep : result ? "ready" : "upload"} error={null} />
+          {(busy || result) && (
+            <ProcessingStatus current={busy ? processingStep : "ready"} error={null} />
+          )}
 
           {result && (
-            <Alert variant="success" title="Processing complete">
-              <p className="text-xs">
-                Added <strong>{result.documents_added}</strong> document(s). You now have <strong>{result.documents_total}</strong>{" "}
-                in your record. Workspace: <code className="rounded bg-emerald-100 px-1">{result.user_id}</code>
-              </p>
-              {!result.indexed && result.index_error && (
-                <p className="mt-2 rounded bg-red-100/60 px-2 py-1 text-red-800">Q&A indexing failed: {result.index_error}</p>
-              )}
-            </Alert>
+            <>
+              <Alert variant="success" title="All done — your record is up to date">
+                <p className="text-sm">
+                  Added <strong>{result.documents_added}</strong>{" "}
+                  {result.documents_added === 1 ? "document" : "documents"}. Your record now holds{" "}
+                  <strong>{result.documents_total}</strong> in total.
+                </p>
+                {!result.indexed && result.index_error && (
+                  <p className="mt-2 rounded-lg bg-red-100/60 px-3 py-2 text-sm text-red-800">
+                    Your documents were saved, but question-answering couldn't be set up this time.
+                    It will retry on your next upload.
+                  </p>
+                )}
+              </Alert>
+
+              <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                <h2 className="card-title">What would you like to do next?</h2>
+                <div className="mt-4 grid grid-cols-2 gap-3">
+                  <button onClick={() => navigate("/medicines")} className="btn-secondary text-sm">
+                    💊 Medications
+                  </button>
+                  <button onClick={() => navigate("/labs")} className="btn-secondary text-sm">
+                    🧪 Lab Results
+                  </button>
+                  <button onClick={() => navigate("/safety")} className="btn-secondary text-sm">
+                    ⚠️ Safety Alerts
+                  </button>
+                  <button onClick={() => navigate("/ask")} className="btn-primary text-sm">
+                    🤖 Ask AI
+                  </button>
+                </div>
+              </section>
+
+              <details className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                <summary className="cursor-pointer text-base font-semibold text-slate-800">
+                  See everything we found in these documents
+                </summary>
+                <div className="mt-4">
+                  <TimelineView timeline={result.timeline} />
+                </div>
+              </details>
+            </>
           )}
         </div>
       </div>
 
-      {result && (
-        <div className="space-y-6">
-          <div className="flex flex-wrap gap-3">
-            <button
-              onClick={() => navigate("/safety")}
-              className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-            >
-              View safety cross-check
-            </button>
-            <button
-              onClick={() => navigate("/labs")}
-              className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-            >
-              View lab trends
-            </button>
-            <button
-              onClick={() => navigate("/ask")}
-              className="rounded-xl bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700"
-            >
-              Ask a question
-            </button>
-            <button
-              onClick={() => navigate("/documents")}
-              className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-            >
-              View documents
-            </button>
+      {/* Below the fold: status already shown above on mobile; this fills the
+          page so it never feels empty — recent uploads + health summary */}
+      <div className="grid gap-6 lg:grid-cols-2">
+        <section
+          className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"
+          aria-label="Recent uploads"
+        >
+          <div className="flex items-center justify-between">
+            <h2 className="card-title">Recent Uploads</h2>
+            {recent.length > 0 && (
+              <Link to="/documents" className="text-sm font-medium text-brand-600 hover:text-brand-700">
+                View all →
+              </Link>
+            )}
           </div>
+          {recent.length === 0 ? (
+            <p className="secondary-text mt-3">
+              Nothing here yet — your uploaded reports will show up in this list.
+            </p>
+          ) : (
+            <ul className="mt-4 space-y-2">
+              {recent.map((v, i) => (
+                <li key={`${v._source.file}-${i}`}>
+                  <Link
+                    to="/documents"
+                    className="flex items-center gap-3 rounded-xl border border-slate-100 px-4 py-3 transition hover:border-brand-200 hover:bg-slate-50"
+                  >
+                    <span className="text-xl" aria-hidden="true">
+                      {v.document_type === "lab_report" ? "🧪" : v.document_type === "prescription" ? "💊" : "📄"}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium text-slate-800">{v._source.file}</p>
+                      <p className="secondary-text">{documentTypeLabel(v.document_type)}</p>
+                    </div>
+                    <span className="secondary-text shrink-0">{relativeTime(v.date)}</span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
 
-          <TimelineView timeline={result.timeline} />
-          <CrossCheckView report={result.cross_check_report} />
-          <LabTrendsView report={result.lab_trends} />
-        </div>
-      )}
+        {timeline && <HealthSummaryCard timeline={timeline} />}
+      </div>
     </div>
   );
 }

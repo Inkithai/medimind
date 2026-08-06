@@ -143,11 +143,10 @@ export function SessionPage() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Conversations</h1>
-          <p className="mt-1 text-sm text-slate-500">
-            Multi-turn Q&amp;A. The server tracks turn history and rewrites
-            each follow-up into a self-contained retrieval query, so ambiguous
-            questions like “was that safe?” resolve correctly.
+          <h1 className="page-title">Conversations</h1>
+          <p className="secondary-text mt-2 max-w-2xl">
+            Chat about your records — follow-up questions like “was that safe?” understand what you
+            asked earlier.
           </p>
         </div>
         {sessionId ? (
@@ -182,7 +181,7 @@ export function SessionPage() {
         <Card className="flex flex-col overflow-hidden">
           <CardHeader
             title="Conversation"
-            description={`Session ${sessionId.slice(0, 12)}… · server-side history`}
+            description="Remembers what you've asked so far"
             icon={<SessionIcon className="h-5 w-5" />}
           />
           <div
@@ -200,7 +199,7 @@ export function SessionPage() {
             {sending && (
               <div className="flex items-center gap-2 text-sm text-slate-400">
                 <Spinner className="h-4 w-4" />
-                Rewriting query, retrieving, and answering…
+                Thinking…
               </div>
             )}
           </div>
@@ -229,27 +228,29 @@ export function SessionPage() {
                 Send
               </button>
             </div>
-            <div className="mt-2 flex items-center gap-2">
-              <label className="text-xs text-slate-500">Retrieved chunks:</label>
-              <input
-                type="range"
-                min={1}
-                max={20}
-                value={topK}
-                onChange={(e) => setTopK(parseInt(e.target.value, 10))}
-                className="w-32"
-              />
-              <span className="text-xs font-medium text-slate-700">{topK}</span>
-            </div>
+            <details className="mt-2 text-xs text-slate-500">
+              <summary className="cursor-pointer font-medium text-slate-600">Advanced</summary>
+              <div className="mt-2 flex items-center gap-2">
+                <label htmlFor="session-topk">How much of your record to read per answer:</label>
+                <input
+                  id="session-topk"
+                  type="range"
+                  min={1}
+                  max={20}
+                  value={topK}
+                  onChange={(e) => setTopK(parseInt(e.target.value, 10))}
+                  className="w-32"
+                />
+                <span className="font-medium text-slate-700">{topK}</span>
+              </div>
+            </details>
           </CardBody>
         </Card>
       )}
 
-      <Alert variant="info" title="About sessions">
-        Conversation sessions are held in the API process's memory. Restarting
-        the backend drops all active sessions (the underlying patient data in
-        Supabase/Cloudinary is unaffected). A 404 on sending means the session
-        expired — simply start a new one.
+      <Alert variant="info" title="About conversations">
+        Conversations are forgotten when the app restarts — your uploaded records are never
+        affected. If a message says the conversation is gone, just start a new one.
       </Alert>
     </div>
   );
@@ -318,8 +319,8 @@ function NoSessionView({
             Start a conversation
           </h2>
           <p className="mx-auto mt-1 max-w-md text-sm text-slate-500">
-            Create a session to ask multi-turn questions. The server remembers
-            the conversation and rewrites follow-ups for better retrieval.
+            Ask follow-up questions about your records — MediMind remembers the conversation, so you
+            never have to repeat yourself.
           </p>
         </div>
         <button

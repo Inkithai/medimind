@@ -15,23 +15,26 @@ export function ErrorState({
       : undefined;
 
   let variant: "danger" | "warning" | "info" = "danger";
-  let title = "Request failed";
+  let title = "Something went wrong";
 
   if (status === 401) {
     variant = "warning";
-    title = "Authentication required";
+    title = "Your session has expired";
   } else if (status === 404) {
     variant = "info";
-    title = "No data yet";
+    title = "Nothing here yet";
   } else if (status === 422) {
     variant = "warning";
-    title = "The backend could not process the request";
+    title = "We couldn't process that file";
   } else if (status === 502) {
     variant = "danger";
-    title = "ML pipeline error";
+    title = "Something went wrong while processing";
   } else if (status === 0) {
     variant = "danger";
-    title = "Cannot reach the API";
+    title = "Can't reach the server";
+  } else if (status === 503) {
+    variant = "warning";
+    title = "The server is still being set up";
   }
 
   return (
@@ -40,7 +43,7 @@ export function ErrorState({
       {onRetry && (
         <button
           onClick={onRetry}
-          className="mt-2 inline-flex items-center rounded-md bg-white/70 px-2.5 py-1 text-xs font-medium text-slate-700 ring-1 ring-inset ring-slate-300 hover:bg-white"
+          className="mt-2 inline-flex min-h-[44px] items-center rounded-lg bg-white/70 px-4 py-2 text-sm font-medium text-slate-700 ring-1 ring-inset ring-slate-300 hover:bg-white"
         >
           Try again
         </button>

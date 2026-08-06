@@ -34,10 +34,10 @@ export function CrossCheckView({ report }: { report: CrossCheckReport }) {
   return (
     <Card>
       <CardHeader
-        title="Safety cross-check"
+        title="Safety Alerts"
         description={
           totalIssues === 0
-            ? "No issues detected by the cross-check."
+            ? "No issues found across your medicines."
             : `${totalIssues} issue(s) flagged across medications and allergies.`
         }
         icon={<ShieldIcon className="h-5 w-5" />}
@@ -52,7 +52,7 @@ export function CrossCheckView({ report }: { report: CrossCheckReport }) {
         {totalIssues === 0 ? (
           <EmptyState
             title="No safety issues flagged"
-            description="The cross-check found no interactions, duplicates, dosage conflicts, or allergy conflicts."
+            description="We found no interactions, duplicates, dosage conflicts, or allergy conflicts across your medicines."
           />
         ) : (
           SECTIONS.map((section) => (

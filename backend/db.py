@@ -29,6 +29,7 @@ Env:
 """
 
 import os
+import functools
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -62,6 +63,18 @@ def _snapshots():
     return _get_client().table("patient_snapshots")
 
 
+class SchemaNotInitializedError(RuntimeError):
+    """Raised when the Supabase project is reachable but the app's tables
+    (documents / patient_snapshots) do not exist — i.e. supabase_schema.sql
+    has not been run against the project SUPABASE_URL points to (fresh
+    project, or .env pointing at the wrong project)."""
+
+
+# PostgREST surfaces a missing table as a 404 schema-cache miss with this
+# code ("Could not find the table 'public.<name>' in the schema cache").
+_MISSING_TABLE_CODE = "PGRST205"
+
+
 def ensure_indexes() -> None:
     """Called once at API startup. Kept for compatibility with the old
     MongoDB version — with Supabase the schema (tables, indexes, RLS) is
@@ -74,6 +87,35 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _translate_missing_schema(fn):
+    """Turn PostgREST's cryptic PGRST205 schema-cache miss into instructions.
+
+    Raw error ("Could not find the table 'public.patient_snapshots' in the
+    schema cache") gives no hint about the actual fix; the translated error
+    tells the operator exactly which setup step was missed.
+    """
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except Exception as e:
+            code = getattr(e, "code", None)
+            if code == _MISSING_TABLE_CODE or _MISSING_TABLE_CODE in str(e):
+                raise SchemaNotInitializedError(
+                    "Supabase schema is not initialized (PostgREST "
+                    f"{_MISSING_TABLE_CODE}): the app's tables "
+                    f"(documents, patient_snapshots) do not exist in the project at "
+                    f"SUPABASE_URL ({e}). Create them by running "
+                    "backend/supabase_schema.sql ONCE in that project's SQL editor "
+                    "(Supabase Dashboard -> SQL Editor -> New query -> paste -> Run), "
+                    "then retry. If the tables already exist, check that SUPABASE_URL "
+                    "points at the right project."
+                ) from e
+            raise
+    return wrapper
+
+
+@_translate_missing_schema
 def load_documents(user_id: str) -> List[Dict[str, Any]]:
     """Loads every previously-saved document for this user, oldest first —
     used to merge with newly-uploaded documents before rebuilding the
@@ -97,6 +139,7 @@ def load_documents(user_id: str) -> List[Dict[str, Any]]:
     ]
 
 
+@_translate_missing_schema
 def insert_documents(user_id: str, docs: List[Dict[str, Any]]) -> None:
     """Appends newly-extracted documents for this user (append-only — never
     rewrites or touches this user's existing documents). No-op on an empty
@@ -108,6 +151,7 @@ def insert_documents(user_id: str, docs: List[Dict[str, Any]]) -> None:
     _documents().insert(rows).execute()
 
 
+@_translate_missing_schema
 def load_patient_snapshot(user_id: str) -> Optional[Dict[str, Any]]:
     """Loads the {"patient_timeline", "cross_check_report"} snapshot last
     saved for this user, or None if they've never been processed."""
@@ -129,6 +173,7 @@ def load_patient_snapshot(user_id: str) -> Optional[Dict[str, Any]]:
     return snapshot
 
 
+@_translate_missing_schema
 def save_patient_snapshot(
     user_id: str,
     timeline: Dict[str, Any],

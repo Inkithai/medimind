@@ -38,11 +38,10 @@ export function LabTrendsPage() {
     <div className="space-y-6">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Lab trends</h1>
-          <p className="mt-1 text-sm text-slate-500">
-            Deterministic per-test tracking across visits — direction of drift,
-            reference-range crossings, and boundary approach. No LLM call is
-            used for the trends themselves.
+          <h1 className="page-title">Lab Results</h1>
+          <p className="secondary-text mt-2 max-w-2xl">
+            How each test result moves over time — and whether it's drifting toward, or past, its
+            healthy range.
           </p>
         </div>
         <button

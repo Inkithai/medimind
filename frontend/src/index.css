@@ -13,7 +13,42 @@ body,
 }
 
 body {
-  @apply bg-slate-50 text-slate-800 antialiased;
+  /* Calm, soft-gray canvas (#F8FAFC) with 16px base text */
+  @apply bg-slate-50 text-base text-slate-800 antialiased;
+}
+
+@layer components {
+  .page-title {
+    @apply text-page-title text-slate-900;
+  }
+  .section-title {
+    @apply text-section-title text-slate-900;
+  }
+  .card-title {
+    @apply text-card-title text-slate-900;
+  }
+  .secondary-text {
+    @apply text-sm text-slate-500;
+  }
+  /* Interactive controls never shrink below the 44px accessibility target */
+  .btn {
+    @apply inline-flex min-h-[44px] items-center justify-center gap-2 rounded-xl px-5 py-3 text-base font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 disabled:opacity-60;
+  }
+  .btn-primary {
+    @apply btn bg-brand-600 text-white shadow-sm hover:bg-brand-700;
+  }
+  .btn-secondary {
+    @apply btn border border-slate-300 bg-white text-slate-700 shadow-sm hover:bg-slate-50;
+  }
+  .btn-ghost {
+    @apply btn text-slate-500 hover:bg-slate-100 hover:text-slate-700;
+  }
+}
+
+/* Keyboard navigation must always be visible */
+:focus-visible {
+  outline: 2px solid #0f766e;
+  outline-offset: 2px;
 }
 
 /* Thin, unobtrusive scrollbars for data panels */

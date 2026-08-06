@@ -14,7 +14,7 @@ export function LabTrendsView({ report }: { report: LabTrendsReport }) {
     <Card>
       <CardHeader
         title="Lab result trends"
-        description="Deterministic trend tracking across visits — direction of drift, reference-range crossings, and boundary approach."
+        description="How each test has moved across your visits — and whether it's nearing or crossing its healthy range."
         icon={<ChartIcon className="h-5 w-5" />}
       />
       <CardBody className="space-y-5">

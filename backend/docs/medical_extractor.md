@@ -11,11 +11,13 @@ export GROQ_API_KEY=gsk_...
 
 - Calls Groq via OpenAI SDK at `https://api.groq.com/openai/v1` (`GROQ_BASE_URL` overridable).
 - Raises at import if `GROQ_API_KEY` missing — fail fast.
-- `MODEL` default `meta-llama/llama-4-scout-17b-16e-instruct` (vision + JSON schema). Overridable via `GROQ_MODEL`. `FALLBACK_MODEL` optional.
+- `MODEL` default `openai/gpt-oss-120b` (text: text-layer extraction, cross-check, chat). Overridable via `GROQ_MODEL`.
+- `VISION_MODEL` default `qwen/qwen3.6-27b` (multimodal: images + scanned PDFs). Overridable via `GROQ_VISION_MODEL`. `FALLBACK_MODEL` (env `GROQ_FALLBACK_MODEL`) optional, default `openai/gpt-oss-20b`.
+- Groq retires models on a schedule (Llama 4 Scout shut down 2026-07-17; Llama 3.1 8B / 3.3 70B shut down 2026-08-16) — a retired model ID 404s with `model_not_found`. `_chat_completion()` re-raises that as an actionable error pointing at https://console.groq.com/docs/deprecations and the env vars above.
 
 ### 1. Schema — strict structured output
 
-`EXTRACTION_JSON_SCHEMA` with `strict: True` forces every document into:
+`EXTRACTION_JSON_SCHEMA` with `strict: True` forces every document into the shape below. Strict json_schema is only supported on `openai/gpt-oss-*` models on Groq; for any other model (e.g. the vision default `qwen/qwen3.6-27b`) `_response_format_for()` automatically falls back to JSON-object mode and inlines the schema into the system prompt.
 
 ```jsonc
 {

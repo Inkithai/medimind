@@ -221,7 +221,7 @@ function TimelineVisit({ visit }: { visit: Visit }) {
 
           <p className="flex items-center gap-1.5 text-xs text-slate-400">
             <FileIcon className="h-3.5 w-3.5" />
-            {visit._source.file} · {visit._source.method === "text_layer" ? "digital text" : "vision OCR"}
+            {visit._source.file} · {visit._source.method === "text_layer" ? "Digital PDF" : "Scanned or photo"}
             {visit._source.page ? ` · page ${visit._source.page}` : ""}
           </p>
         </div>

@@ -4,18 +4,29 @@ export default {
   theme: {
     extend: {
       colors: {
+        // Calm teal — the product's primary color (#0F766E at the 600 step).
         brand: {
-          50: "#eef7f4",
-          100: "#d6ece5",
-          200: "#aedad0",
-          300: "#7fc0b3",
-          400: "#4f9e8d",
-          500: "#338271",
-          600: "#26685b",
-          700: "#21544a",
-          800: "#1d443d",
-          900: "#1a3833",
+          50: "#F0FDFA",
+          100: "#CCFBF1",
+          200: "#99F6E4",
+          300: "#5EEAD4",
+          400: "#2DD4BF",
+          500: "#14B8A6",
+          600: "#0F766E",
+          700: "#115E59",
+          800: "#134E4A",
+          900: "#0F3D3A",
         },
+        // Semantic medical tones
+        success: "#16A34A",
+        warning: "#F59E0B",
+        danger: "#DC2626",
+      },
+      fontSize: {
+        // Product typography scale
+        "page-title": ["32px", { lineHeight: "1.2", fontWeight: "700" }],
+        "section-title": ["22px", { lineHeight: "1.25", fontWeight: "600" }],
+        "card-title": ["18px", { lineHeight: "1.35", fontWeight: "600" }],
       },
       fontFamily: {
         sans: [

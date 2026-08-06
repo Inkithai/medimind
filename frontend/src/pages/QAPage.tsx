@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import { Alert } from "../components/Alert";
 import { ErrorState } from "../components/ErrorState";
@@ -43,19 +44,18 @@ export function QAPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-slate-900">Ask a question</h1>
-        <p className="mt-1 text-sm text-slate-500">
-          Single-shot retrieval-augmented Q&amp;A over your indexed medical
-          timeline. There is no server-side conversation state — each question
-          is answered independently. Use Conversations for multi-turn follow-ups.
+      <header>
+        <h1 className="page-title">Ask AI</h1>
+        <p className="secondary-text mt-2 max-w-2xl">
+          Ask anything about your records. Answers come only from your own documents — never from the
+          open internet — with the source file and page cited.
         </p>
-      </div>
+      </header>
 
       <Card>
         <CardHeader
-          title="Question"
-          description="Grounded only in your extracted records; the model never diagnoses."
+          title="Your question"
+          description="MediMind reads your records to answer. It never replaces a doctor."
           icon={<ChatIcon className="h-5 w-5" />}
         />
         <CardBody className="space-y-4">
@@ -84,18 +84,22 @@ export function QAPage() {
             </button>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <label className="text-xs text-slate-500">Retrieved chunks:</label>
-            <input
-              type="range"
-              min={1}
-              max={20}
-              value={topK}
-              onChange={(e) => setTopK(parseInt(e.target.value, 10))}
-              className="w-32"
-            />
-            <span className="text-xs font-medium text-slate-700">{topK}</span>
-          </div>
+          <details className="text-xs text-slate-500">
+            <summary className="cursor-pointer font-medium text-slate-600">Advanced</summary>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <label htmlFor="topk">How much of your record to read per answer:</label>
+              <input
+                id="topk"
+                type="range"
+                min={1}
+                max={20}
+                value={topK}
+                onChange={(e) => setTopK(parseInt(e.target.value, 10))}
+                className="w-32"
+              />
+              <span className="font-medium text-slate-700">{topK}</span>
+            </div>
+          </details>
 
           <div className="flex flex-wrap gap-2">
             {SUGGESTIONS.map((s) => (
@@ -116,9 +120,8 @@ export function QAPage() {
       </Card>
 
       {loading && (
-        <Alert variant="info" title="Retrieving and answering">
-          The question is being embedded, matched against your indexed record,
-          and answered strictly from the retrieved chunks.
+        <Alert variant="info" title="Reading your records…">
+          Looking through your documents for the most relevant passages, then writing the answer.
         </Alert>
       )}
 
@@ -126,12 +129,17 @@ export function QAPage() {
 
       {!loading && result && (
         <div className="space-y-3">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
-            Answer
-          </h2>
+          <h2 className="section-title">Answer</h2>
           <QAResultCard result={result} />
         </div>
       )}
+
+      <p className="secondary-text text-center">
+        Prefer a back-and-forth chat?{" "}
+        <Link to="/conversations" className="font-medium text-brand-600 hover:text-brand-700">
+          Open Conversations →
+        </Link>
+      </p>
     </div>
   );
 }

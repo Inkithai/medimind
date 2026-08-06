@@ -69,9 +69,10 @@ export function HistoryPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-slate-900">My History</h1>
-        <p className="mt-1 text-sm text-slate-500">
-          Chronological medical history derived from all processed documents. Not manually entered — built from extracted facts.
+        <h1 className="page-title">Timeline</h1>
+        <p className="secondary-text mt-2 max-w-2xl">
+          Your medical history in date order — built automatically from your uploaded documents. Nothing to
+          type in.
         </p>
       </div>
 

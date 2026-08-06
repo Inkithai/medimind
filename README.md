@@ -6,7 +6,7 @@ MediMind converts your private medical files into something you can actually nav
                Original file (PDF/JPG)
                         |
                    ┌────┴─────┐
-                   │ Extraction│ ← Groq Llama 4 Scout (vision + structured JSON)
+                   │ Extraction│ ← Groq (GPT-OSS 120B text + Qwen3.6 27B vision, structured JSON)
                    └────┬─────┘
                         |
         ┌───────────────┼────────────────┐

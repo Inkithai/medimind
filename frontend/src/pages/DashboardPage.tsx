@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
-import { Card, CardBody } from "../components/Card";
 import { ErrorState } from "../components/ErrorState";
 import { LoadingState } from "../components/Spinner";
 import { StatusBadge } from "../components/StatusBadge";
@@ -11,10 +10,11 @@ import {
   ShieldIcon,
   UploadIcon,
   FileIcon,
+  ChatIcon,
 } from "../components/icons";
 import { useAuth } from "../context/AuthContext";
 import type { CrossCheckReport, LabTrendsReport, Timeline } from "../types/api";
-import { formatDate } from "../utils/format";
+import { formatDate, documentTypeLabel, relativeTime } from "../utils/format";
 
 interface RecordState {
   timeline: Timeline;
@@ -55,10 +55,7 @@ export function DashboardPage() {
     return (
       <div className="space-y-6">
         <PageHeader onReload={() => setReloadKey((k) => k + 1)} reloading />
-        <LoadingState
-          label="Loading patient workspace"
-          description="Fetching timeline, safety report, and lab trends from MediMind backend."
-        />
+        <LoadingState label="Loading your health record" description="This usually takes a second or two." />
       </div>
     );
   }
@@ -72,45 +69,23 @@ export function DashboardPage() {
       return (
         <div className="space-y-6">
           <PageHeader onReload={() => setReloadKey((k) => k + 1)} />
-          <Card>
-            <CardBody>
-              <div className="flex flex-col items-center gap-4 py-12 text-center">
-                <div className="flex h-14 w-14 items-center justify-center rounded-full bg-brand-50 text-brand-600">
-                  <UploadIcon className="h-7 w-7" />
-                </div>
-                <div>
-                  <h2 className="text-lg font-semibold text-slate-900">No medical record yet</h2>
-                  <p className="mt-1 max-w-md text-sm text-slate-500">
-                    Upload your first prescription, lab report, or discharge summary. MediMind extracts structured
-                    data, builds a timeline, runs safety cross-checking, and indexes for grounded Q&A.
-                  </p>
-                </div>
-                <div className="flex flex-wrap justify-center gap-3">
-                  <Link
-                    to="/upload"
-                    className="inline-flex items-center gap-2 rounded-xl bg-brand-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-brand-700"
-                  >
-                    <UploadIcon className="h-4 w-4" /> Upload documents
-                  </Link>
-                  <Link
-                    to="/"
-                    className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-                  >
-                    How it works
-                  </Link>
-                </div>
-
-                <div className="mt-6 grid w-full max-w-2xl gap-3 rounded-xl bg-slate-50 p-4 text-left sm:grid-cols-3">
-                  <FlowStep
-                    title="Anonymous session"
-                    desc="session_id in localStorage, JWT from /anonymous/session"
-                  />
-                  <FlowStep title="Upload → Pipeline" desc="OCR, extraction, Supabase + Cloudinary, Chroma" />
-                  <FlowStep title="Ask & Verify" desc="RAG answers with source file • page citations" />
-                </div>
-              </div>
-            </CardBody>
-          </Card>
+          {/* Welcoming first-run empty state */}
+          <div className="flex flex-col items-center gap-5 rounded-2xl border border-slate-200 bg-white px-6 py-16 text-center shadow-sm">
+            <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-brand-50 text-brand-600">
+              <UploadIcon className="h-8 w-8" />
+            </div>
+            <div>
+              <h2 className="section-title">Welcome to MediMind</h2>
+              <p className="secondary-text mx-auto mt-2 max-w-md">
+                Upload your first medical record to build your personal health history.
+              </p>
+            </div>
+            <Link to="/upload" className="btn-primary">
+              <UploadIcon className="h-5 w-5" />
+              Upload Document
+            </Link>
+            <p className="secondary-text">Prescriptions • Lab reports • Discharge summaries</p>
+          </div>
         </div>
       );
     }
@@ -132,81 +107,133 @@ export function DashboardPage() {
     record.crossCheck.allergy_conflicts.length;
   const trendsCount = record.labTrends.trends.length;
   const docCount = record.timeline.visits.length;
+  const doctorCount = new Set(
+    record.timeline.visits.map((v) => (v.provider_or_doctor || "").trim().toLowerCase()).filter(Boolean)
+  ).size;
 
   const recentVisits = [...record.timeline.visits]
     .sort((a, b) => (b.date || "").localeCompare(a.date || ""))
     .slice(0, 5);
 
+  const lastVisit = record.timeline.visits
+    .map((v) => v.date)
+    .filter((d): d is string => Boolean(d))
+    .sort()
+    .pop();
+
   return (
     <div className="space-y-6">
       <PageHeader onReload={() => setReloadKey((k) => k + 1)} />
 
-      {/* Overview stats per spec */}
+      {/* Stat cards */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard
-          icon={<FileIcon className="h-5 w-5" />}
+          icon={<FileIcon className="h-6 w-6" />}
           label="Documents"
           value={docCount}
           to="/documents"
-          tone="brand"
-          sub="Supabase + Cloudinary + Chroma"
+          chip="bg-sky-50 text-sky-600"
+          sub="Reports, scans & summaries"
         />
         <StatCard
-          icon={<PillIcon className="h-5 w-5" />}
+          icon={<PillIcon className="h-6 w-6" />}
           label="Medicines"
           value={medCount}
           to="/medicines"
-          tone="brand"
-          sub="Traceable to source file"
+          chip="bg-emerald-50 text-emerald-600"
+          sub="Across all your records"
         />
         <StatCard
-          icon={<BeakerIcon className="h-5 w-5" />}
-          label="Test Results"
+          icon={<BeakerIcon className="h-6 w-6" />}
+          label="Lab Tests"
           value={labCount}
           to="/labs"
-          tone="info"
-          sub={`${trendsCount} trends`}
+          chip="bg-violet-50 text-violet-600"
+          sub={trendsCount > 0 ? `${trendsCount} trends spotted` : "Across all your reports"}
         />
         <StatCard
-          icon={<ShieldIcon className="h-5 w-5" />}
-          label="Safety"
+          icon={<ShieldIcon className="h-6 w-6" />}
+          label="Safety Alerts"
           value={issueCount}
           to="/safety"
-          tone={issueCount > 0 ? "danger" : "success"}
-          sub={issueCount > 0 ? "Needs attention" : "No issues flagged"}
+          chip={issueCount > 0 ? "bg-red-50 text-red-600" : "bg-emerald-50 text-emerald-600"}
+          sub={issueCount > 0 ? "Worth a look" : "Nothing flagged 🎉"}
         />
       </div>
 
       {allergyCount > 0 && (
-        <Card>
-          <CardBody>
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Known allergies</p>
-            <div className="mt-2 flex flex-wrap gap-2">
-              {record.timeline.known_allergies.map((a) => (
-                <StatusBadge key={a} tone="danger">
-                  {a}
-                </StatusBadge>
-              ))}
-            </div>
-          </CardBody>
-        </Card>
+        <div className="rounded-2xl border border-red-100 bg-red-50/60 p-5">
+          <p className="text-sm font-semibold text-red-900">⚠️ Known allergies — keep these handy</p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {record.timeline.known_allergies.map((a) => (
+              <StatusBadge key={a} tone="danger">
+                {a}
+              </StatusBadge>
+            ))}
+          </div>
+        </div>
       )}
 
       <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
-        <Card>
-          <CardBody>
+        {/* Recent records */}
+        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="flex items-center justify-between">
+            <h3 className="card-title">Recent Records</h3>
+            <Link to="/history" className="text-sm font-medium text-brand-600 hover:text-brand-700">
+              View timeline →
+            </Link>
+          </div>
+          <div className="mt-4 space-y-2">
+            {recentVisits.length === 0 ? (
+              <p className="secondary-text">No records yet.</p>
+            ) : (
+              recentVisits.map((v, i) => (
+                <Link
+                  key={i}
+                  to="/documents"
+                  className="flex items-center justify-between gap-3 rounded-xl border border-slate-100 px-4 py-3 transition hover:border-brand-200 hover:bg-slate-50"
+                >
+                  <div className="flex min-w-0 items-center gap-3">
+                    <span className="text-xl" aria-hidden="true">
+                      {v.document_type === "lab_report" ? "🧪" : v.document_type === "prescription" ? "💊" : "📄"}
+                    </span>
+                    <div className="min-w-0">
+                      <p className="truncate text-base font-medium text-slate-800">
+                        {documentTypeLabel(v.document_type)}
+                        {v.provider_or_doctor ? ` · ${v.provider_or_doctor}` : ""}
+                      </p>
+                      <p className="secondary-text truncate">{v._source.file}</p>
+                    </div>
+                  </div>
+                  <span className="secondary-text shrink-0">{formatDate(v.date)}</span>
+                </Link>
+              ))
+            )}
+          </div>
+
+          {lastVisit && (
+            <p className="secondary-text mt-4">
+              Last recorded visit: <strong className="text-slate-700">{relativeTime(lastVisit)}</strong>
+              {doctorCount > 0 && ` · ${doctorCount} ${doctorCount === 1 ? "doctor" : "doctors"} seen across your records`}
+            </p>
+          )}
+        </section>
+
+        {/* Safety + Ask AI */}
+        <div className="space-y-6">
+          <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
             <div className="flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-slate-900">Latest Safety Warnings</h3>
-              <Link to="/safety" className="text-xs font-medium text-brand-600 hover:text-brand-700">
+              <h3 className="card-title">Safety Alerts</h3>
+              <Link to="/safety" className="text-sm font-medium text-brand-600 hover:text-brand-700">
                 View all →
               </Link>
             </div>
             {issueCount === 0 ? (
-              <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
-                No safety issues flagged by cross-check.
+              <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-base text-emerald-800">
+                ✅ Nothing to worry about — no interactions, duplicates, or allergy conflicts found in your medicines.
               </div>
             ) : (
-              <div className="mt-3 space-y-2">
+              <div className="mt-4 space-y-2">
                 {[
                   ...record.crossCheck.allergy_conflicts.map((i) => ({
                     severity: "high",
@@ -231,85 +258,44 @@ export function DashboardPage() {
                 ]
                   .slice(0, 3)
                   .map((item, idx) => (
-                    <div key={idx} className="rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-2.5">
+                    <div key={idx} className="rounded-xl border border-amber-200 bg-amber-50/60 px-4 py-3">
                       <div className="flex items-center gap-2">
-                        <StatusBadge tone={item.severity === "high" ? "danger" : item.severity === "moderate" ? "warning" : "info"}>
+                        <StatusBadge
+                          tone={item.severity === "high" ? "danger" : item.severity === "moderate" ? "warning" : "info"}
+                        >
                           {item.severity}
                         </StatusBadge>
-                        <p className="text-sm font-medium text-slate-800">{item.title}</p>
+                        <p className="text-base font-medium text-slate-800">{item.title}</p>
                       </div>
-                      <p className="mt-1 line-clamp-2 text-xs text-slate-600">{item.desc}</p>
+                      <p className="secondary-text mt-1 line-clamp-2">{item.desc}</p>
                     </div>
                   ))}
                 {issueCount > 3 && (
-                  <p className="text-xs text-slate-500">+ {issueCount - 3} more — view safety page for details.</p>
+                  <p className="secondary-text">+ {issueCount - 3} more — see the full Safety Alerts page.</p>
                 )}
               </div>
             )}
-          </CardBody>
-        </Card>
+          </section>
 
-        <Card>
-          <CardBody>
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-slate-900">Recent Medical History</h3>
-              <Link to="/history" className="text-xs font-medium text-brand-600 hover:text-brand-700">
-                View timeline →
-              </Link>
+          {/* Ask AI nudge */}
+          <section className="rounded-2xl bg-gradient-to-br from-brand-600 to-brand-800 p-6 text-white shadow-sm">
+            <div className="flex items-center gap-3">
+              <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-white/15">
+                <ChatIcon className="h-6 w-6" />
+              </div>
+              <h3 className="card-title text-white">Ask about your records</h3>
             </div>
-            <div className="mt-3 space-y-2">
-              {recentVisits.length === 0 ? (
-                <p className="text-xs text-slate-500">No visits yet.</p>
-              ) : (
-                recentVisits.map((v, i) => (
-                  <Link
-                    key={i}
-                    to="/documents"
-                    className="flex items-center justify-between rounded-lg border border-slate-200 bg-white px-3 py-2 hover:bg-slate-50"
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm">
-                        {v.document_type === "lab_report" ? "🧪" : v.document_type === "prescription" ? "💊" : "🏥"}
-                      </span>
-                      <div>
-                        <p className="text-sm font-medium text-slate-800">
-                          {formatDate(v.date)} — {v.document_type.replace("_", " ")}
-                        </p>
-                        <p className="text-xs text-slate-500">{v._source.file}</p>
-                      </div>
-                    </div>
-                    <span className="text-xs text-slate-400">View →</span>
-                  </Link>
-                ))
-              )}
-            </div>
-
-            <div className="mt-5 rounded-lg bg-slate-50 p-3">
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Ask MediMind</p>
-              <p className="mt-1 text-xs text-slate-600">
-                Grounded Q&A over your indexed timeline. Sources cited with file • page.
-              </p>
-              <Link
-                to="/ask"
-                className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-brand-600 hover:text-brand-700"
-              >
-                Try: “What medications am I currently taking?” →
-              </Link>
-            </div>
-          </CardBody>
-        </Card>
-      </div>
-
-      <div className="rounded-xl border border-slate-200 bg-white p-4">
-        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Processing pipeline</p>
-        <div className="mt-2 flex flex-wrap gap-2 text-xs">
-          <code className="rounded bg-slate-100 px-2 py-1">Upload → /api/v1/documents</code>
-          <code className="rounded bg-slate-100 px-2 py-1">OCR / text_layer</code>
-          <code className="rounded bg-slate-100 px-2 py-1">Clinical extraction (Groq)</code>
-          <code className="rounded bg-slate-100 px-2 py-1">Supabase + Cloudinary</code>
-          <code className="rounded bg-slate-100 px-2 py-1">Safety + Lab trends</code>
-          <code className="rounded bg-slate-100 px-2 py-1">Chroma RAG chunks</code>
-          <code className="rounded bg-slate-100 px-2 py-1">Patient Record</code>
+            <p className="mt-3 text-sm leading-relaxed text-brand-100">
+              “What medications am I currently taking?” — answers come only from your documents,
+              with the source file and page cited.
+            </p>
+            <Link
+              to="/ask"
+              className="btn mt-4 bg-white text-brand-700 hover:bg-brand-50"
+            >
+              Ask AI 🤖
+            </Link>
+          </section>
         </div>
       </div>
     </div>
@@ -320,28 +306,20 @@ function PageHeader({ onReload, reloading }: { onReload: () => void; reloading?:
   return (
     <div className="flex flex-wrap items-start justify-between gap-4">
       <div>
-        <h1 className="flex items-center gap-2 text-2xl font-bold text-slate-900">
-          Patient workspace
-          <span className="rounded-full bg-brand-50 px-2.5 py-1 text-xs font-medium text-brand-700 ring-1 ring-brand-200">
-            Anonymous • MediMind
-          </span>
-        </h1>
-        <p className="mt-1 max-w-2xl text-sm text-slate-500">
-          Your merged medical timeline, safety report, lab trends, and grounded Q&A — derived from every document
-          uploaded in this anonymous workspace. Session ID stored only in this browser's localStorage.
+        <h1 className="page-title">Dashboard</h1>
+        <p className="secondary-text mt-2 max-w-2xl">
+          Your health record at a glance — everything in one place, private to this browser.
         </p>
       </div>
       <div className="flex gap-2">
-        <Link
-          to="/upload"
-          className="inline-flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-700"
-        >
-          <UploadIcon className="h-4 w-4" /> Add documents
+        <Link to="/upload" className="btn-primary">
+          <UploadIcon className="h-5 w-5" /> Upload Document
         </Link>
         <button
           onClick={onReload}
           disabled={reloading}
-          className="inline-flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-50"
+          className="btn-secondary"
+          aria-label="Refresh dashboard"
         >
           ↻ Refresh
         </button>
@@ -354,46 +332,28 @@ function StatCard({
   icon,
   label,
   value,
-  tone,
   to,
+  chip,
   sub,
 }: {
   icon: React.ReactNode;
   label: string;
   value: number;
-  tone: "brand" | "info" | "success" | "warning" | "danger" | "neutral";
   to: string;
+  chip: string;
   sub?: string;
 }) {
-  const tones: Record<string, string> = {
-    brand: "bg-brand-50 text-brand-600",
-    info: "bg-sky-50 text-sky-600",
-    success: "bg-emerald-50 text-emerald-600",
-    warning: "bg-amber-50 text-amber-600",
-    danger: "bg-red-50 text-red-600",
-    neutral: "bg-slate-100 text-slate-600",
-  };
   return (
-    <Link to={to}>
-      <Card className="transition hover:shadow-md">
-        <CardBody className="flex items-center gap-3">
-          <div className={`flex h-10 w-10 items-center justify-center rounded-xl ${tones[tone]}`}>{icon}</div>
-          <div className="min-w-0 flex-1">
-            <p className="text-2xl font-bold leading-tight text-slate-900">{value}</p>
-            <p className="text-xs font-medium text-slate-700">{label}</p>
-            {sub && <p className="truncate text-[11px] text-slate-500">{sub}</p>}
-          </div>
-        </CardBody>
-      </Card>
+    <Link
+      to={to}
+      className="group rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+    >
+      <div className={`flex h-11 w-11 items-center justify-center rounded-xl transition group-hover:scale-105 ${chip}`}>
+        {icon}
+      </div>
+      <p className="mt-3 text-3xl font-bold leading-tight text-slate-900">{value}</p>
+      <p className="mt-0.5 text-base font-semibold text-slate-700">{label}</p>
+      {sub && <p className="secondary-text mt-0.5 truncate">{sub}</p>}
     </Link>
-  );
-}
-
-function FlowStep({ title, desc }: { title: string; desc: string }) {
-  return (
-    <div>
-      <p className="text-xs font-semibold text-slate-800">{title}</p>
-      <p className="mt-0.5 text-[11px] leading-relaxed text-slate-500">{desc}</p>
-    </div>
   );
 }

@@ -48,7 +48,7 @@ export function DocumentViewer({ visit, onClose }: { visit: Visit; onClose?: () 
             Original
           </TabButton>
           <TabButton active={tab === "structured"} onClick={() => setTab("structured")}>
-            Structured
+            What We Found
           </TabButton>
         </div>
       </div>
@@ -65,13 +65,13 @@ export function DocumentViewer({ visit, onClose }: { visit: Visit; onClose?: () 
             </div>
           ) : (
             <p className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-8 text-center text-sm text-slate-500">
-              Original file URL not available (pre-cloudinary record or local CLI import). Structured data is still
-              viewable.
+              The original file isn't available for this record, but everything we found in it is still
+              here — switch to the extraction view.
             </p>
           )}
           <div className="mt-3 flex items-center gap-2 text-xs text-slate-500">
             <FileIcon className="h-4 w-4" />
-            {visit._source.file} • {visit._source.method === "text_layer" ? "digital text" : "vision OCR"}
+            {visit._source.file} • {visit._source.method === "text_layer" ? "Digital PDF" : "Scanned or photo"}
             {visit._source.page ? ` • page ${visit._source.page}` : ""}
           </div>
         </div>

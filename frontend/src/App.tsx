@@ -20,18 +20,18 @@ function RequireAuth({ children }: { children: JSX.Element }) {
     return (
       <div className="flex min-h-[60vh] flex-col items-center justify-center gap-3 text-center">
         <Spinner className="h-6 w-6 text-brand-600" />
-        <p className="text-sm font-medium text-slate-700">Creating your private MediMind workspace…</p>
-        <p className="text-xs text-slate-500">Anonymous session • JWT issued via /api/v1/anonymous/session</p>
+        <p className="text-base font-medium text-slate-700">Preparing your private workspace…</p>
+        <p className="text-sm text-slate-500">One moment</p>
       </div>
     );
   }
   if (initError) {
     return (
-      <div className="mx-auto max-w-md rounded-xl border border-red-200 bg-red-50 p-6 text-center">
-        <p className="text-sm font-semibold text-red-800">Could not create workspace</p>
-        <p className="mt-1 text-xs text-red-700">{initError}</p>
-        <p className="mt-3 text-xs text-slate-600">
-          Check that the backend is running and <code className="rounded bg-slate-100 px-1">/api</code> proxy is reachable.
+      <div className="mx-auto max-w-md rounded-2xl border border-red-200 bg-red-50 p-6 text-center">
+        <p className="text-base font-semibold text-red-800">We couldn't set up your workspace</p>
+        <p className="mt-1 text-sm text-red-700">{initError}</p>
+        <p className="mt-3 text-sm text-slate-600">
+          Check your connection, then refresh the page to try again.
         </p>
       </div>
     );
