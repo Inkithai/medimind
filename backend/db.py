@@ -42,10 +42,12 @@ def _get_client() -> Client:
     if _client is None:
         url = os.environ.get("SUPABASE_URL")
         key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ.get("SUPABASE_ANON_KEY")
-        if not url or not key:
+        if (not url or not key or 
+                url.strip() in ("", "https://your-project-ref.supabase.co") or 
+                key.strip() in ("", "your-supabase-service-role-key")):
             raise RuntimeError(
                 "SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set — "
-                "copy .env.example to .env and add your Supabase project "
+                "copy .env.example to .env and add your actual Supabase project "
                 "URL and service-role key (Dashboard -> Settings -> API)."
             )
         _client = create_client(url, key)

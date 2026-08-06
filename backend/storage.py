@@ -29,10 +29,24 @@ def _configure() -> None:
     global _configured
     if _configured:
         return
+    cloud_name = os.environ.get("CLOUDINARY_CLOUD_NAME")
+    api_key = os.environ.get("CLOUDINARY_API_KEY")
+    api_secret = os.environ.get("CLOUDINARY_API_SECRET")
+    
+    if (not cloud_name or not api_key or not api_secret or
+            cloud_name.strip() in ("", "your-cloudinary-cloud-name") or
+            api_key.strip() in ("", "your-cloudinary-api-key") or
+            api_secret.strip() in ("", "your-cloudinary-api-secret")):
+        raise RuntimeError(
+            "Cloudinary keys must be set and cannot be placeholders — "
+            "copy .env.example to .env and add your actual Cloudinary "
+            "configuration (cloud name, API key, and API secret)."
+        )
+        
     cloudinary.config(
-        cloud_name=os.environ["CLOUDINARY_CLOUD_NAME"],
-        api_key=os.environ["CLOUDINARY_API_KEY"],
-        api_secret=os.environ["CLOUDINARY_API_SECRET"],
+        cloud_name=cloud_name,
+        api_key=api_key,
+        api_secret=api_secret,
         secure=True,
     )
     _configured = True
