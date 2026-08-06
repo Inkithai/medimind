@@ -38,10 +38,10 @@ load_dotenv()
 # pointed at https://api.groq.com/openai/v1. Free key (no credit card):
 # https://console.groq.com/keys
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
-if not GROQ_API_KEY:
+if not GROQ_API_KEY or GROQ_API_KEY.strip() in ("", "your-groq-api-key"):
     raise RuntimeError(
-        "GROQ_API_KEY is not set — copy .env.example to .env and add your "
-        "Groq API key (create a free one at https://console.groq.com/keys)."
+        "GROQ_API_KEY is not set or is still the placeholder — copy .env.example to .env and add your "
+        "actual Groq API key (create a free one at https://console.groq.com/keys)."
     )
 
 client = OpenAI(
@@ -237,8 +237,21 @@ def pdf_pages_to_images(pdf_path: str, dpi: int = 200) -> List[Image.Image]:
 
 
 def image_to_base64(img: Image.Image) -> str:
+    # Downscale image if too large to prevent huge base64 payload size and potential network/timeout/size issues.
+    # 1600px is more than enough for medical document OCR.
+    max_side = 1600
+    if max(img.size) > max_side:
+        scale = max_side / max(img.size)
+        new_size = (int(img.size[0] * scale), int(img.size[1] * scale))
+        img = img.resize(new_size, Image.Resampling.LANCZOS)
+
+    # Save as JPEG with quality=85 (highly compressed yet legible for OCR).
+    # PNG format is uncompressed losslessly, inflating base64 payload sizes to 15-20MB.
+    # JPEG format reduces payload to ~150-300KB (100x lighter and faster).
     buf = io.BytesIO()
-    img.save(buf, format="PNG")
+    if img.mode in ("RGBA", "P"):
+        img = img.convert("RGB")
+    img.save(buf, format="JPEG", quality=85)
     return base64.b64encode(buf.getvalue()).decode("utf-8")
 
 
@@ -263,7 +276,7 @@ def extract_from_image(img: Image.Image, model: str = MODEL) -> Dict[str, Any]:
                     },
                     {
                         "type": "image_url",
-                        "image_url": {"url": f"data:image/png;base64,{b64}"},
+                        "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
                     },
                 ],
             },
@@ -318,6 +331,70 @@ def _apply_confidence_ceiling(result: Dict[str, Any], ceiling: float) -> Dict[st
     return result
 
 
+def looks_like_medical_text(text: str, filename: str) -> bool:
+    """
+    Analyzes raw text from a text-layer PDF to see if it represents a medical
+    document. This is a local, fast, deterministic check to avoid calling
+    the expensive LLM on completely non-medical text files like CVs,
+    receipts, boarding passes, etc.
+    """
+    text_lower = text.lower()
+    fn_lower = filename.lower()
+    
+    # 1. Filename-based non-medical indicators
+    has_cv_filename = any(p in fn_lower for p in ("cv", "resume", "portfolio"))
+    
+    # 2. Text-based non-medical indicators (e.g. CV / Resume keywords)
+    cv_keywords = [
+        "curriculum vitae", "education", "experience", "skills", "projects", 
+        "languages", "publications", "employment", "work history", "hobbies", 
+        "interests", "about me", "academic history", "professional summary"
+    ]
+    cv_matches = 0
+    for kw in cv_keywords:
+        if re.search(r'\b' + re.escape(kw) + r'\b', text_lower):
+            cv_matches += 1
+    
+    # 3. Medical keyword density
+    medical_keywords = [
+        "prescription", "rx", "medication", "medicine", "drug", "tablet", "capsule",
+        "dosage", "dose", "frequency", "mg", "g", "ml", "lab", "laboratory", "report",
+        "test", "results", "analysis", "allergy", "allergies", "clinical", "hospital",
+        "clinic", "treatment", "diagnosis", "discharge", "summary", "patient", "doctor",
+        "physician"
+    ]
+    medical_matches = 0
+    for kw in medical_keywords:
+        if re.search(r'\b' + re.escape(kw) + r'\b', text_lower):
+            medical_matches += 1
+    
+    # If the filename or the text has strong CV indicators and very low medical keyword matches, it is rejected.
+    if has_cv_filename and medical_matches < 3:
+        return False
+        
+    if re.search(r'\bcurriculum vitae\b|\bresume\b', text_lower) and medical_matches < 3:
+        return False
+        
+    if cv_matches >= 3 and medical_matches < 2:
+        return False
+        
+    return True
+
+
+def assert_text_looks_medical(text: str, filename: str) -> None:
+    """
+    Deterministic pre-LLM validation check. Raises NonMedicalDocumentError
+    if the raw text does not appear to be a medical document.
+    """
+    from document_filter import NonMedicalDocumentError
+    
+    if not looks_like_medical_text(text, filename):
+        raise NonMedicalDocumentError(
+            filename,
+            "raw text analysis indicates this is a non-medical document (e.g. CV/Resume) with low medical relevance."
+        )
+
+
 # ---------------------------------------------------------------------------
 # 4. Top-level entry point — routes any uploaded file correctly
 # ---------------------------------------------------------------------------
@@ -364,6 +441,8 @@ def process_document(file_path: str, model: str = MODEL) -> Dict[str, Any]:
     if suffix == ".pdf":
         if pdf_has_text_layer(file_path):
             text = extract_text_from_pdf(file_path)
+            # deterministic check on the text layer before calling OpenAI/Groq API
+            assert_text_looks_medical(text, path.name)
             result = extract_from_text(text, model=model)
             result["_source"] = {"file": path.name, "method": "text_layer"}
             return result

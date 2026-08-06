@@ -168,6 +168,12 @@ async def upload_documents(
             )
             try:
                 result = process_document(str(tmp_path))
+            except NonMedicalDocumentError as e:
+                logger.warning(
+                    "upload_documents: user=%s rejected '%s': %s",
+                    user_id, original_name, e.reason,
+                )
+                raise HTTPException(422, str(e))
             except Exception as e:
                 logger.error(
                     "upload_documents: user=%s extraction failed for '%s': %s",

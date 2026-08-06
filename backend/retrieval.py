@@ -50,6 +50,8 @@ EMBEDDING_BATCH_SIZE = 100  # keep well under the API's per-request item limit
 # is used ONLY for embeddings (never for chat); otherwise fall back to
 # Chroma's built-in local ONNX MiniLM model, which needs no API key at all.
 _OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
+if _OPENAI_API_KEY == "your-openai-api-key":
+    _OPENAI_API_KEY = None
 _openai_embedding_client = OpenAI(api_key=_OPENAI_API_KEY) if _OPENAI_API_KEY else None
 
 _local_embedding_fn = None
