@@ -130,16 +130,31 @@ def _is_json_validation_failure(exc: Exception) -> bool:
     'failed_generation') rather than a problem with the request itself, so
     retrying — and ultimately falling back to a mode where WE parse the raw
     text — is the right recovery."""
-    body = getattr(exc, "body", None)
-    if not isinstance(body, dict):
-        return False
-    error = body.get("error")
-    if not isinstance(error, dict):
-        return False
-    if error.get("code") == "json_validate_failed":
+    # 1. Check exception string or message first
+    exc_str = str(exc)
+    message = getattr(exc, "message", "") or ""
+    if "json_validate_failed" in exc_str or "Failed to validate JSON" in exc_str:
         return True
-    message = error.get("message")
-    return isinstance(message, str) and "Failed to validate JSON" in message
+    if "json_validate_failed" in message or "Failed to validate JSON" in message:
+        return True
+
+    # 2. Check body as dict if available
+    body = getattr(exc, "body", None)
+    if isinstance(body, dict):
+        error = body.get("error")
+        if isinstance(error, dict):
+            if error.get("code") == "json_validate_failed":
+                return True
+            err_msg = error.get("message")
+            if isinstance(err_msg, str) and "Failed to validate JSON" in err_msg:
+                return True
+
+    # 3. Check code attribute
+    code = getattr(exc, "code", None)
+    if code == "json_validate_failed":
+        return True
+
+    return False
 
 
 def _is_retryable_api_error(exc: Exception) -> bool:
