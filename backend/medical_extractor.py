@@ -187,9 +187,14 @@ def _format_ladder(
     """
     schema = strict_format["json_schema"]["schema"]
     schema_suffix = (
-        "\n\nRespond with a single valid JSON object (raw JSON only — no "
-        "markdown, no code fences, no commentary) conforming EXACTLY to this "
-        f"JSON Schema:\n{json.dumps(schema, indent=2)}\n"
+        "\n\nCRITICAL OUTPUT RULES — you MUST follow every single one:\n"
+        "1. Output ONE AND ONLY ONE valid JSON object. Raw JSON only.\n"
+        "2. No markdown, no code fences (no ```), no commentary, no preamble, no apologies.\n"
+        "3. NO <think>...</think> blocks, no chain-of-thought, no reasoning "
+        "explanations, no step numbering. The entire response body, from the "
+        "first character to the last character, must be the JSON object.\n"
+        "4. Conform EXACTLY to this JSON Schema:\n"
+        f"{json.dumps(schema, indent=2)}\n"
     )
     if model in _STRICT_SCHEMA_MODELS:
         return [
@@ -271,18 +276,77 @@ def _completion_resilient(
     ) from last_error
 
 
+# Tags used by reasoning models (e.g. DeepSeek-R1, Qwen-QwQ, Groq
+# "reasoning" variants) to delimit their chain-of-thought. These must be
+# stripped before we attempt to locate/parse the JSON object — otherwise
+# the <think> opener sits ahead of the first "{" and our brace-scan
+# returns a span that still contains the un-closed tag (or, in the
+# "unterminated think" case, the whole response is one long think block).
+_THINK_BLOCK_RE = re.compile(
+    r"<\s*think\s*>.*?<\s*/\s*think\s*>",
+    flags=re.DOTALL | re.IGNORECASE,
+)
+_THINK_OPEN_RE = re.compile(r"<\s*think\s*>", flags=re.IGNORECASE)
+
+
+def _strip_reasoning(text: str) -> str:
+    """Remove reasoning/chain-of-thought blocks (<think>...</think>) from
+    model output. Reasoning models commonly emit these BEFORE the final
+    answer even when told to reply with JSON only. Also handles the
+    "unterminated think" case, where the model opens <think> and never
+    closes it before the JSON (a few Groq reasoning variants do this
+    under load); in that case we take everything AFTER the last
+    "</think>" if present, otherwise everything after a heuristic point
+    where the think block ends (we look for the first "{" after <think>)."""
+    if not text:
+        return text
+
+    # Closed <think>...</think> blocks — remove them entirely (in any order
+    # and with case/whitespace-insensitive matching of the tags).
+    cleaned = _THINK_BLOCK_RE.sub("", text)
+
+    # If there's still a stray opening <think> with no closer (model was
+    # cut off / didn't close its reasoning block), drop everything from
+    # the opener up through the last </think>-like closer; if no closer,
+    # keep only what follows the first JSON-looking payload after the tag.
+    while _THINK_OPEN_RE.search(cleaned):
+        m = _THINK_OPEN_RE.search(cleaned)
+        assert m is not None
+        tail = cleaned[m.end():]
+        # If there's a closer after the opener (shouldn't, given the
+        # closed-block pass above, but be safe), drop up to it.
+        closer = re.search(r"<\s*/\s*think\s*>", tail, flags=re.IGNORECASE)
+        if closer:
+            tail = tail[closer.end():]
+        else:
+            # No closer: assume the first top-level "{" starts the actual
+            # JSON payload, and drop the reasoning preamble.
+            brace = tail.find("{")
+            if brace != -1:
+                tail = tail[brace:]
+            else:
+                # No JSON at all after <think> — just drop the opener and
+                # the rest of the trailing text; the parsers below will
+                # raise the appropriate "no JSON" error.
+                tail = ""
+        cleaned = cleaned[:m.start()] + tail
+
+    return cleaned
+
+
 def _parse_json_object(raw: str) -> Dict[str, Any]:
     """Robustly parse a model's raw output into a JSON object.
 
     Tolerates the ways LLMs mangle JSON output even when told not to:
-    markdown code fences (```json ... ```), prose/commentary wrapped around
-    the object, and trailing junk after the closing brace. Raises ValueError
-    with a diagnostic snippet if nothing parseable is found.
+    reasoning/chain-of-thought blocks (<think>...</think>), markdown code
+    fences (```json ... ```), prose/commentary wrapped around the object,
+    and trailing junk after the closing brace. Raises ValueError with a
+    diagnostic snippet if nothing parseable is found.
     """
     if not isinstance(raw, str) or not raw.strip():
         raise ValueError("model returned an empty response — no JSON to parse")
 
-    text = raw.strip()
+    text = _strip_reasoning(raw.strip())
 
     # 1. Direct parse — the common case.
     try:
@@ -294,19 +358,24 @@ def _parse_json_object(raw: str) -> Dict[str, Any]:
     fenced = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", text, flags=re.DOTALL)
     if fenced:
         try:
-            return json.loads(fenced.group(1))
+            return json.loads(fenced.group(1).strip())
         except json.JSONDecodeError:
             pass
 
     # 3. Outermost brace-delimited span (commentary before/after the JSON).
     start, end = text.find("{"), text.rfind("}")
     if start != -1 and end > start:
+        span = text[start:end + 1]
+        # Re-strip reasoning in case a think block leaked inside the span
+        # (can happen when the model opens <think>, writes JSON mid-think,
+        # then closes it — our brace scan would include the closer).
+        span = _strip_reasoning(span)
         try:
-            return json.loads(text[start:end + 1])
+            return json.loads(span)
         except json.JSONDecodeError:
             pass
 
-    snippet = text[:200].replace("\n", " ")
+    snippet = raw[:200].replace("\n", " ")
     raise ValueError(f"model output could not be parsed as JSON (starts with: {snippet!r})")
 
  #---------------------------------------------------------------------------

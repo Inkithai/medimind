@@ -38,7 +38,7 @@ from typing import Any, Dict, List, Optional
 import chromadb
 from openai import OpenAI, OpenAIError
 
-from medical_extractor import client, MODEL
+from medical_extractor import client, MODEL, _completion_resilient
 
 EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL", "text-embedding-3-small")
 CHAT_MODEL = MODEL  # reuse the same chat model configured in medical_extractor.py
@@ -428,21 +428,44 @@ def answer_question(
     ]
     context_str = "\n\n".join(context_blocks)
 
-    messages = [{"role": "system", "content": QA_SYSTEM_PROMPT}]
+    user_content = (
+        f"Retrieved patient records:\n\n{context_str}\n\nQuestion: {question}"
+    )
+    # Reuse the resilient completion runner so reasoning models'
+    # <think>...</think> blocks get stripped client-side and transient
+    # server-side JSON-validation rejections are retried, matching the
+    # behaviour of the extraction and cross-check paths.
     if chat_history:
+        # _completion_resilient takes a single user turn; if there's chat
+        # history we do one direct call with the strict response format and
+        # let any retryable error surface — history is only passed on
+        # follow-up turns in the same session and reasoning-tag leaks are
+        # still covered by the tolerant parse below.
+        messages = [{"role": "system", "content": QA_SYSTEM_PROMPT}]
         messages.extend(chat_history)
-    messages.append({
-        "role": "user",
-        "content": f"Retrieved patient records:\n\n{context_str}\n\nQuestion: {question}",
-    })
-
-    try:
-        response = client.chat.completions.create(
+        messages.append({"role": "user", "content": user_content})
+        try:
+            response = client.chat.completions.create(
+                model=CHAT_MODEL,
+                messages=messages,
+                response_format=ANSWER_RESPONSE_FORMAT,
+            )
+        except OpenAIError as e:
+            raise RuntimeError(f"Chat completion failed while answering question: {e}") from e
+        raw = response.choices[0].message.content or ""
+    else:
+        raw = _completion_resilient(
             model=CHAT_MODEL,
-            messages=messages,
-            response_format=ANSWER_RESPONSE_FORMAT,
+            system_prompt=QA_SYSTEM_PROMPT,
+            user_content=user_content,
+            strict_format=ANSWER_RESPONSE_FORMAT,
         )
-    except OpenAIError as e:
-        raise RuntimeError(f"Chat completion failed while answering question: {e}") from e
 
-    return json.loads(response.choices[0].message.content)
+    # Tolerant parse: reuse the same think-stripping logic the extractor
+    # uses, so a model that still emits <think> tags (e.g. under fallback
+    # to plain-text mode) doesn't blow up the Q&A endpoint.
+    from medical_extractor import _parse_json_object
+    try:
+        return _parse_json_object(raw)
+    except ValueError as e:
+        raise RuntimeError(f"Chat model returned unparseable output: {e}") from e
