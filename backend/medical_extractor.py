@@ -188,12 +188,13 @@ def _format_ladder(
     schema = strict_format["json_schema"]["schema"]
     schema_suffix = (
         "\n\nCRITICAL OUTPUT RULES — you MUST follow every single one:\n"
-        "1. Output ONE AND ONLY ONE valid JSON object. Raw JSON only.\n"
-        "2. No markdown, no code fences (no ```), no commentary, no preamble, no apologies.\n"
-        "3. NO <think>...</think> blocks, no chain-of-thought, no reasoning "
-        "explanations, no step numbering. The entire response body, from the "
-        "first character to the last character, must be the JSON object.\n"
-        "4. Conform EXACTLY to this JSON Schema:\n"
+        "1. Output **ONLY** a single valid JSON object as the entire response.\n"
+        "2. The very first character you emit must be '{' and the very last must be '}'.\n"
+        "3. No markdown, no ```json fences, no commentary, no preamble, no apologies.\n"
+        "4. **ABSOLUTELY NO** <think>, </think>, reasoning, chain-of-thought, explanations, "
+        "step-by-step, or any other text before, inside, or after the JSON.\n"
+        "   If your model normally uses <think> tags, suppress them completely for this task.\n"
+        "5. Conform EXACTLY to this JSON Schema:\n"
         f"{json.dumps(schema, indent=2)}\n"
     )
     if model in _STRICT_SCHEMA_MODELS:
@@ -334,6 +335,58 @@ def _strip_reasoning(text: str) -> str:
     return cleaned
 
 
+def _find_first_json_object(text: str) -> Optional[Dict[str, Any]]:
+    """Find and parse the *first* top-level JSON object in text using
+    proper brace-depth counting (handles strings, escaped quotes, etc.).
+    This is far more reliable than simple find('{') / rfind('}') when
+    the model emits commentary, markdown, or puts JSON inside <think> blocks.
+
+    Returns the dict if a valid top-level JSON *object* is found, else None.
+    """
+    if not text or not isinstance(text, str):
+        return None
+    text = text.strip()
+    i = 0
+    n = len(text)
+    while i < n:
+        if text[i] == "{":
+            depth = 0
+            start = i
+            j = i
+            in_string = False
+            escape = False
+            while j < n:
+                ch = text[j]
+                if escape:
+                    escape = False
+                elif ch == "\\":
+                    escape = True
+                elif ch == '"':
+                    in_string = not in_string
+                elif not in_string:
+                    if ch == "{":
+                        depth += 1
+                    elif ch == "}":
+                        depth -= 1
+                        if depth == 0:
+                            candidate = text[start : j + 1]
+                            try:
+                                obj = json.loads(candidate)
+                                if isinstance(obj, dict):
+                                    return obj
+                            except (json.JSONDecodeError, TypeError, ValueError):
+                                pass
+                            # continue searching after this failed candidate
+                            i = j + 1
+                            break
+                j += 1
+            else:
+                # unmatched brace, stop
+                break
+        i += 1
+    return None
+
+
 def _parse_json_object(raw: str) -> Dict[str, Any]:
     """Robustly parse a model's raw output into a JSON object.
 
@@ -346,36 +399,50 @@ def _parse_json_object(raw: str) -> Dict[str, Any]:
     if not isinstance(raw, str) or not raw.strip():
         raise ValueError("model returned an empty response — no JSON to parse")
 
+    # 1. First try the existing reasoning strip + direct parse
     text = _strip_reasoning(raw.strip())
 
-    # 1. Direct parse — the common case.
     try:
         return json.loads(text)
     except json.JSONDecodeError:
         pass
 
-    # 2. JSON inside a markdown code fence.
+    # 2. Try the new brace-depth JSON finder on the stripped text
+    obj = _find_first_json_object(text)
+    if obj is not None:
+        return obj
+
+    # 3. JSON inside a markdown code fence.
     fenced = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", text, flags=re.DOTALL)
     if fenced:
         try:
-            return json.loads(fenced.group(1).strip())
+            candidate = fenced.group(1).strip()
+            return json.loads(candidate)
         except json.JSONDecodeError:
-            pass
+            obj2 = _find_first_json_object(candidate)
+            if obj2 is not None:
+                return obj2
 
-    # 3. Outermost brace-delimited span (commentary before/after the JSON).
+    # 4. Outermost brace-delimited span (commentary before/after the JSON).
     start, end = text.find("{"), text.rfind("}")
     if start != -1 and end > start:
         span = text[start:end + 1]
         # Re-strip reasoning in case a think block leaked inside the span
-        # (can happen when the model opens <think>, writes JSON mid-think,
-        # then closes it — our brace scan would include the closer).
         span = _strip_reasoning(span)
         try:
             return json.loads(span)
         except json.JSONDecodeError:
-            pass
+            obj3 = _find_first_json_object(span)
+            if obj3 is not None:
+                return obj3
 
-    snippet = raw[:200].replace("\n", " ")
+    # 5. Last-ditch: search the *original raw* output (sometimes the think
+    # block itself contains the JSON for certain vision models).
+    obj4 = _find_first_json_object(raw)
+    if obj4 is not None:
+        return obj4
+
+    snippet = raw[:250].replace("\n", " ").replace("\r", "")
     raise ValueError(f"model output could not be parsed as JSON (starts with: {snippet!r})")
 
  #---------------------------------------------------------------------------
@@ -385,6 +452,15 @@ def _parse_json_object(raw: str) -> Dict[str, Any]:
 EXTRACTION_SCHEMA_PROMPT = """
 You are a medical document extraction engine. You will be shown an image of
 a medical document (prescription, lab report, or discharge summary).
+
+**CRITICAL INSTRUCTION — FOLLOW EXACTLY:**
+- Output **ONLY** a single valid JSON object. Nothing else.
+- Do **NOT** output any <think>, </think>, reasoning, chain-of-thought, 
+  explanations, bullet points, markdown, or any text before or after the JSON.
+- The very first character of your response must be '{' and the last must be '}'.
+- If you are a reasoning model, you MUST put any thinking inside your internal 
+  process only — the final answer sent to the user MUST be pure JSON with no 
+  <think> wrapper at all.
 
 Extract every field defined in the JSON schema provided. For medications,
 always attempt to identify the active ingredient(s) using your medical
