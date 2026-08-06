@@ -1,633 +1,211 @@
-# Medical Records Extraction, Retrieval & Q&A
+# MediMind — Anonymous Medical Document Intelligence
 
-Turns uploaded medical documents (prescriptions, lab reports, discharge
-summaries) into a structured per-patient timeline, cross-checks it for
-safety issues, and answers natural-language questions about it — as a
-single-shot Q&A call or a real multi-turn conversation. Exposed over HTTP
-under `/api/v1/`, scoped per authenticated user.
+MediMind converts your private medical files into something you can actually navigate. Drop in prescriptions, lab reports, and discharge summaries and you get a structured timeline, automatic safety checks, lab trend analysis, and grounded question answering. All of it lives inside a **private anonymous workspace** — no signup, no password, just a `session_id` stored locally in your browser.
 
 ```
-documents --extract--> Cloudinary (file) + Supabase/Postgres (structured data)
-                |
-                +--> timeline --cross-check--> safety report
-                        |         |
-                        |         +--trend-track--> lab result trends
+               Original file (PDF/JPG)
                         |
-                        +--------> index (Chroma)
-                                        |
-                                 question / conversation
-                                        |
-                                    JSON answer
+                   ┌────┴─────┐
+                   │ Extraction│ ← Groq Llama 4 Scout (vision + structured JSON)
+                   └────┬─────┘
+                        |
+        ┌───────────────┼────────────────┐
+        │               │                │
+   Supabase (JSON)  Cloudinary (file)   |
+   documents +       mediscan/<user>/   |
+   patient_snapshots                    |
+        └───────┬───────────────────────┘
+                |
+            Timeline (visits, meds, labs, allergies)
+                |
+     ┌──────────┼──────────┐
+     │          │          │
+ Safety     Lab Trends   Chroma (chunks+embeddings)
+ check      deterministic   |
+     │          │           └──→ RAG Q&A / Conversations (query rewrite)
+     └──────────┴──────────→ JSON answer with citations
 ```
 
-| Module | Responsibility |
+One browser = one isolated patient view. Scoping uses the `user_id` issued via `POST /api/v1/anonymous/session`.
+
+### Backend modules
+
+| File | What it handles |
 |---|---|
-| [`medical_extractor.py`](medical_extractor.py) | Extraction, timeline building, cross-checking, on-disk persistence (CLI) |
-| [`document_filter.py`](document_filter.py) | Rejects non-medical uploads (post-extraction, no extra API call) |
-| [`lab_trends.py`](lab_trends.py) | Tracks each lab test across visits — direction of drift, reference-range crossings, plain-language explanation (deterministic, no LLM call) |
-| [`retrieval.py`](retrieval.py) | Embedding + Chroma indexing, single-shot Q&A (Phase 1) |
-| [`conversation.py`](conversation.py) | Multi-turn sessions, query rewriting, safety-aware summarization (Phase 2) |
-| [`api.py`](api.py) | HTTP API over all of the above (Phase 3) |
-| [`auth.py`](auth.py) | Verifies the `Authorization`/`X-User-Id` headers on every API request (Phase 4) |
-| [`db.py`](db.py) | Supabase (Postgres) persistence for uploaded documents + patient snapshots, scoped per user (Phase 4) |
-| [`supabase_schema.sql`](supabase_schema.sql) | One-time SQL to create the `documents` / `patient_snapshots` tables (+ indexes, RLS) in your Supabase project |
-| [`storage.py`](storage.py) | Uploads original documents to Cloudinary under `mediscan/<user_id>/` (Phase 4) |
-| [`inspect_chroma.py`](inspect_chroma.py) | Read-only CLI for browsing what's indexed in `./chroma_db` |
-| [`generate_lab_test_data.py`](generate_lab_test_data.py) | Generates synthetic, schema-valid lab_report test data — no OCR/API calls needed |
+| `medical_extractor.py` | Vision / text extraction, patient grouping, timeline creation, safety LLM call plus deterministic duplicate detection, local CLI persistence |
+| `document_filter.py` | Fast post-extraction filter for non-medical files (no extra LLM call, reuses `document_type` + clinical fields) |
+| `lab_trends.py` | Pure Python trend engine — parses dates/values, computes direction, detects range crossings, flags approaching thresholds |
+| `retrieval.py` | Chunks timeline into Medication / Lab / ClinicalNote / Allergy texts, embeds (OpenAI `text-embedding-3-small` if set else local ONNX MiniLM), indexes per-user Chroma collection, single-shot Q&A |
+| `conversation.py` | In-memory conversation store, rewrites follow-ups like "was that safe?" into self-contained retrieval queries, summarizes older turns to keep context bounded |
+| `api.py` | FastAPI wrapper — lifespan startup, CORS, all `/api/v1/` routes, multipart upload handling, merges new docs with old |
+| `auth.py` | Validates `Authorization: Bearer <jwt>` + `X-User-Id`, plus issues anonymous JWTs via `issue_anonymous_token()` |
+| `db.py` | Supabase Postgres persistence (documents append-only + patient snapshot upsert), fixed chained `.order("uploaded_at").order("id")` |
+| `storage.py` | Uploads original file to Cloudinary `mediscan/<user_id>/...` |
+| `supabase_schema.sql` | One-time table creation with RLS enabled/no policies (only service-role key can access) |
+| `inspect_chroma.py` | Read-only CLI to list collections / inspect chunks |
+| `requirements.txt` / `Procfile` | Railway Nixpacks deployment |
 
-Deeper internals for each module are documented in [`docs/`](docs/).
+Deep dives live in `backend/docs/`.
 
-## Setup
+### Setup
 
-```
+Prerequisite: Python 3.10+, Node 18+.
+
+```bash
 pip install openai pdfplumber pymupdf pillow chromadb python-dotenv python-dateutil fastapi "uvicorn[standard]" python-multipart supabase cloudinary pyjwt
 ```
 
-Create a `.env` file in the project root (already gitignored — copy
-`.env.example` and fill in real values):
+Copy env template (gitignored — holds secrets):
+
+```bash
+cp backend/.env.example backend/.env
+# edit backend/.env
+```
+
+Required vars:
 
 ```
-GROQ_API_KEY=gsk_...    # Groq key — free tier at https://console.groq.com/keys
+GROQ_API_KEY=gsk_...    # free at console.groq.com/keys
 CLOUDINARY_CLOUD_NAME=...
 CLOUDINARY_API_KEY=...
 CLOUDINARY_API_SECRET=...
-SUPABASE_URL=https://your-project-ref.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=eyJ...   # service_role secret, NOT the anon key
-JWT_SECRET=...          # same secret your auth issuer signs tokens with
+SUPABASE_URL=https://your-ref.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=eyJ...   # service_role, NOT anon
+JWT_SECRET=some-long-random-string
+# optional
+OPENAI_API_KEY=sk-...   # only for embeddings, else local ONNX
+CORS_ORIGINS=*          # or https://your-frontend
+CHROMA_DIR=./chroma_db   # override to /data/chroma_db on Railway volume
 ```
 
-### Supabase setup (one-time)
+Groq runs extraction + cross-check + Chat; it has no embeddings endpoint, so embeddings fallback chain:
+1. OpenAI `text-embedding-3-small` if `OPENAI_API_KEY`
+2. Chroma's local `ONNXMiniLM_L6_V2`
 
-1. Create a free project at [supabase.com](https://supabase.com).
-2. Open **Dashboard → SQL Editor**, paste the contents of
-   [`supabase_schema.sql`](supabase_schema.sql), and run it. This creates
-   the `documents` and `patient_snapshots` tables with the indexes and
-   row-level security the app expects (RLS on, no policies — only the
-   service-role key used by this backend can reach the tables).
-3. Copy **Project URL** and the **service_role** secret from
-   **Dashboard → Settings → API** into `.env` as `SUPABASE_URL` and
-   `SUPABASE_SERVICE_ROLE_KEY`. Never expose the service-role key to a
-   browser.
+If you switch embedding backends, delete `./chroma_db` and re-upload.
 
-Extraction, cross-checking, Q&A and conversation all run on **Groq**
-through its OpenAI-compatible endpoint (`https://api.groq.com/openai/v1`);
-the model defaults to `meta-llama/llama-4-scout-17b-16e-instruct` (Llama 4
-Scout — vision-capable, supports structured JSON output) and can be
-overridden with `GROQ_MODEL`. Groq's free tier needs no credit card and is
-rate-limited (~30 req/min per model). One caveat: **Groq has no embeddings
-API**, so Q&A embeddings use, in order of
-preference: (1) OpenAI `text-embedding-3-small` if you also set
-`OPENAI_API_KEY`, or (2) Chroma's built-in local ONNX MiniLM model — no
-key needed, runs in-process. If you ever switch between those two
-embedding backends, delete `./chroma_db` and re-upload so the vectors are
-re-indexed (the backends produce different-dimensional embeddings).
+#### Supabase one-time setup
 
-## Running the API
+1. Create project at supabase.com.
+2. SQL Editor → paste `backend/supabase_schema.sql` → Run (creates `documents`, `patient_snapshots`, indexes, RLS).
+3. Copy Project URL + service_role key into `.env`.
 
-```
-python -m uvicorn api:app --reload
+### Running backend
 
+```bash
+cd backend
+uvicorn api:app --reload
+# docs at http://127.0.0.1:8000/docs
 ```
 
-- Base URL: `http://127.0.0.1:8000`
-- Interactive docs (Swagger UI): `http://127.0.0.1:8000/docs`
+Base URL `http://127.0.0.1:8000`, all routes under `/api/v1/`.
 
-All application routes are under the `/api/v1/` prefix.
+### Frontend — MediMind workspace
 
----
+`frontend/` is React + TS + Vite + Tailwind. Zero-login anonymous model:
 
-## Frontend
+- **Landing** `/` — hero, anonymous session explanation, Start My Health Record → auto-creates workspace via `POST /anonymous/session` (token stored in `localStorage.medimind.session.v1`).
+- **Overview / Dashboard** `/dashboard` — documents / medicines / labs / safety counts, latest safety warnings, recent history, pipeline hint.
+- **Upload** `/upload` — drag-drop, dedup fixed (`name-size-lastModified`), shows `ProcessingStatus` steps: Upload → Reading → Extracting → Organizing → Safety → Indexing → Ready.
+- **My Documents** `/documents` — list + `DocumentViewer` with Original (iframe/img via Cloudinary) vs Structured tabs.
+- **My History** `/history` — year-grouped timeline (2026 → Jul 20 🧪 Blood Test etc.) + full `TimelineView`.
+- **My Medicines** `/medicines` — current per ingredient (most recent) + historical log table, filterable, source file traceable.
+- **Test Results / Lab Trends** `/labs` — per-test direction, flag sequence, crossing point, approaching-threshold badge, SVG sparkline with reference band (robust parsing for `70-99 mg/dL`).
+- **Safety** `/safety` — allergy conflicts (danger), interactions with severity, dosage conflicts, duplicates, overall recommendation.
+- **Ask** `/ask` — single-shot RAG, configurable `top_k`, confidence, sources, `recommend_professional_consult`.
+- **Conversations** `/conversations` — multi-turn, query rewriting (`rewritten_query`), session resume by ID, 404 handling when in-memory session expired after restart.
 
-The frontend in `frontend/` is a **React + TypeScript + Vite + Tailwind CSS**
-single-page app. It replaces the original single-file `index.html` and exposes
-every capability of the backend API, not just upload + one-shot Q&A:
+States distinguished: loading, empty 404 (no record), 401 auth, 422 validation/non-medical, 502 ML pipeline, network/CORS.
 
-- **Settings** — configure the API base URL and the `Bearer` JWT / `X-User-Id`
-  credentials the backend requires (see [Authentication](#authentication)).
-  Credentials are stored only in the browser's `localStorage`; there is no
-  separate login endpoint. A "Test connection" button calls `/health` and an
-  authenticated endpoint to verify both reachability and credentials.
-- **Dashboard / patient record** (`GET /timeline`, `/cross-check`, `/lab-trends`)
-  — a merged view of the chronological visit timeline, medications, lab
-  results, known allergies, the safety cross-check report, and lab trends.
-- **Upload & extract** (`POST /documents`) — drag-and-drop multipart upload for
-  one or more `.pdf/.png/.jpg/.jpeg/.webp` files, with explicit ML-processing
-  state, per-file validation, non-medical-document rejection, the
-  `indexed:false` / `index_error` state, and inline rendering of the returned
-  timeline, cross-check, and lab trends.
-- **Safety cross-check** (`GET /cross-check`) — allergy conflicts, drug
-  interactions (with severity), duplicate prescriptions, and conflicting
-  dosage instructions, plus the `overall_recommendation`.
-- **Lab trends** (`GET /lab-trends`) — per-test direction, reference-range
-  crossings, "approaching threshold" warnings, plain-language explanations,
-  and an inline SVG sparkline for every trend, with tests that had too few
-  data points listed under "insufficient data".
-- **Ask** (`POST /qa`) — single-shot RAG Q&A with a configurable `top_k`,
-  answer confidence, cited sources, and the `recommend_professional_consult`
-  warning.
-- **Conversations** (`POST /sessions`, `POST /sessions/{id}/messages`, `GET`,
-  `DELETE`) — multi-turn chat with server-side history, query rewriting
-  (shown as `rewritten_query`), session creation, resume-by-ID, graceful 404
-  handling when the in-memory session has expired (e.g. after an API restart),
-  and end-session cleanup.
+#### Run frontend
 
-Loading, empty (HTTP 404 "no record yet"), authentication (401),
-validation (422 — e.g. non-medical document), ML-pipeline (502), and
-network/CORS failures are all surfaced as distinct states rather than raw
-JSON dumps.
-
-### Running the frontend
-
-```
+```bash
 cd frontend
 npm install
-npm run dev      # http://localhost:5173
+npm run dev       # http://localhost:5173, proxies /api → http://127.0.0.1:8000
 ```
 
-In local development the Vite dev server proxies `/api/*` to
-`http://127.0.0.1:8000` (see `vite.config.ts`), so you can leave **API base
-URL** blank in Settings and use same-origin relative URLs with no CORS setup.
-Point the proxy at a different backend with `VITE_API_PROXY_TARGET`, or set a
-fully-qualified **API base URL** in Settings (that backend must then allow the
-frontend's origin via CORS, since the authenticated routes require custom
-`Authorization` / `X-User-Id` headers).
+`vite.config.ts` proxy target overridable via `VITE_API_PROXY_TARGET`. For prod:
 
-Production build:
-
-```
-npm run build    # outputs frontend/dist/
-npm run preview  # serve the production build locally
+```bash
+npm run build
+npm run preview
 ```
 
-Type-checking:
+### Anonymous session design
+
+No Register → Login → Dashboard. Instead:
 
 ```
-npm run lint     # tsc --noEmit
+Open App → Create Anonymous Session (UUID) → Store in localStorage → Patient Workspace
+  → Upload → Process → Timeline / Medicines / Safety / Ask
 ```
 
----
+- Frontend never asks for JWT. It calls `POST /api/v1/anonymous/session` → `{user_id, token, session_id}`. Token minted server-side with `JWT_SECRET` from `.env`.
+- Every further call sends `Authorization: Bearer <token>` + `X-User-Id: <user_id>`.
+- Isolation: `Supabase user_id`, `Chroma collection sanitized name`, `Cloudinary mediscan/<user_id>/`.
+- New workspace = clear localStorage. Old Supabase rows stay but become orphaned (acceptable for demo).
 
-## Deploying to Railway
+### Deploying to Railway
 
-`requirements.txt` and `Procfile` (`web: uvicorn api:app --host 0.0.0.0 --port $PORT`)
-are already set up — Railway's Nixpacks builder detects both automatically,
-so a plain "Deploy from GitHub repo" works with no extra build config.
+`requirements.txt` + `Procfile` (`web: uvicorn api:app --host 0.0.0.0 --port $PORT`) enable Nixpacks auto-detect.
 
-1. **Env vars** — in the Railway service's Variables tab, set everything
-   from `.env.example` (`GROQ_API_KEY`, `CLOUDINARY_CLOUD_NAME`,
-   `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`, `SUPABASE_URL`,
-   `SUPABASE_SERVICE_ROLE_KEY`, `JWT_SECRET`; optionally `OPENAI_API_KEY`
-   for embeddings). Don't upload `.env` itself — it's git-ignored and
-   holds live secrets.
-2. **Persisting the vector store** — Railway's container filesystem is
-   rebuilt on every deploy, so anything written to disk (the local Chroma
-   store under `./chroma_db`) would otherwise vanish on the next deploy or
-   restart, silently dropping every indexed patient's Q&A data even though
-   Supabase/Cloudinary data is untouched. Fix: attach a
-   [Railway Volume](https://docs.railway.com/guides/volumes) to the
-   service (Settings → Volumes), mount it at e.g. `/data/chroma_db`, and
-   set the env var `CHROMA_DIR=/data/chroma_db`. `retrieval.py` reads
-   `CHROMA_DIR` from the environment (falling back to `./chroma_db` for
-   local dev), so no code change is needed beyond setting that variable.
-3. Deploy. Railway assigns `$PORT` automatically; the `Procfile` binds to
-   it.
+1. Set env vars from `.env.example` in Railway Variables.
+2. Persist vector store: attach Railway Volume mounted at `/data/chroma_db`, set `CHROMA_DIR=/data/chroma_db` (code reads env, falls back to `./chroma_db`).
+3. Deploy — `$PORT` assigned automatically.
 
----
+### Auth contract
 
-## Authentication
-
-Every route except `/health` requires two headers:
-
+- `GET /api/v1/health` + `POST /api/v1/anonymous/session` → public.
+- Everything else requires:
 ```
 Authorization: Bearer <jwt>
 X-User-Id: <user_id>
 ```
+- `user_id` claim may be under `user_id`, `userId`, `id`, `_id`, `sub` — must match header or 401.
 
-The JWT is verified locally (HS256, `JWT_SECRET`) — no database round-trip.
-The user id claim inside the token (`user_id` / `userId` / `id` / `_id` /
-`sub`, whichever is present) must match `X-User-Id`, or the request is
-rejected with `401`. There is one patient per user account: the
-authenticated `user_id` scopes every read and write, so one user can never
-see or modify another user's documents, timeline, or sessions.
+### API quick reference
 
-## API Reference
+#### Anonymous session
+`POST /api/v1/anonymous/session` → `201 {user_id, token, session_id}`
 
-### Health
+#### Documents
+`POST /api/v1/documents` — multipart `files` field. Merges with prior uploads. Validates non-medical via `document_filter.py` (422 if `other` with no clinical content). Returns timeline + cross-check + lab_trends + indexed flag. If `indexed:false` includes `index_error`.
 
-#### `GET /api/v1/health`
+`GET /api/v1/timeline`, `/cross-check`, `/lab-trends` — 404 if no snapshot yet. Lab trends recomputed on-the-fly for old snapshots lacking field.
 
-```
-curl http://127.0.0.1:8000/api/v1/health
-```
+#### Single-shot Q&A
+`POST /api/v1/qa {question, chat_history?, top_k}` → `{answer, confidence, sources[], recommend_professional_consult}`
 
-```json
-{"status": "ok"}
-```
+#### Conversations
+`POST /api/v1/sessions` → `{user_id, session_id}`  
+`POST /api/v1/sessions/{id}/messages {question, top_k}` → same as Q&A + `rewritten_query`  
+`GET /api/v1/sessions/{id}` → full transcript  
+`DELETE /api/v1/sessions/{id}` → 204
 
----
+Errors: 400 empty question, 401 auth, 404 unknown session/no record, 422 non-medical, 502 embedding/LLM failure.
 
-### Documents & Timeline
+### Inspecting vector store
 
-#### `POST /api/v1/documents`
-
-Uploads one or more files (`multipart/form-data`, field name `files`) for
-the authenticated user. Extracts each, archives the original file to
-Cloudinary (`mediscan/<user_id>/...`), **merges the structured data with
-any documents previously uploaded by this user**, rebuilds the timeline,
-re-runs cross-checking, and re-indexes for Q&A. Supported extensions:
-`.pdf .png .jpg .jpeg .webp`.
-
-```
-curl -X POST http://127.0.0.1:8000/api/v1/documents \
-  -H "Authorization: Bearer $TOKEN" -H "X-User-Id: $USER_ID" \
-  -F "files=@prescription_march.pdf" \
-  -F "files=@lab_report_april.jpg"
+```bash
+python backend/inspect_chroma.py
+python backend/inspect_chroma.py "anon_ab12cd34ef56" --limit 20
+python backend/inspect_chroma.py "anon_ab12cd34ef56" --type medication
 ```
 
-Response `201`:
+### Bugfixes in this release
 
-```json
-{
-  "user_id": "6620a1f2...",
-  "documents_added": 2,
-  "documents_total": 2,
-  "timeline": {
-    "visits": [
-      {
-        "document_type": "prescription",
-        "date": "2026-03-14",
-        "provider_or_doctor": "Dr. Rao",
-        "patient_name": "Amit Sharma",
-        "medications": [
-          {
-            "name": "Amoxicillin",
-            "ingredients": ["Amoxicillin"],
-            "dosage": "500mg",
-            "frequency": "3x daily",
-            "duration": "7 days",
-            "confidence": 0.95
-          }
-        ],
-        "lab_results": [],
-        "allergies_noted": ["Penicillin"],
-        "clinical_notes": "Patient presented with sinus infection.",
-        "illegible_or_low_confidence_fields": [],
-        "overall_confidence": 0.93,
-        "_source": {"file": "prescription_march.pdf", "method": "text_layer"},
-        "document_url": "https://res.cloudinary.com/.../mediscan/6620a1f2.../prescription_march_pdf_a1b2c3d4.pdf",
-        "cloudinary_public_id": "mediscan/6620a1f2.../prescription_march_pdf_a1b2c3d4"
-      }
-    ],
-    "medications_timeline": [
-      {
-        "name": "Amoxicillin",
-        "ingredients": ["Amoxicillin"],
-        "dosage": "500mg",
-        "frequency": "3x daily",
-        "duration": "7 days",
-        "confidence": 0.95,
-        "date": "2026-03-14",
-        "source_file": "prescription_march.pdf"
-      }
-    ],
-    "lab_results_timeline": [],
-    "known_allergies": ["Penicillin"]
-  },
-  "cross_check_report": {
-    "potential_drug_interactions": [],
-    "duplicate_prescriptions": [],
-    "conflicting_dosage_instructions": [],
-    "allergy_conflicts": [
-      {
-        "medication": "Amoxicillin",
-        "allergy": "Penicillin",
-        "explanation": "Amoxicillin is a penicillin-class antibiotic and may trigger a reaction in patients with a penicillin allergy.",
-        "confidence": 0.9
-      }
-    ],
-    "overall_recommendation": "Please consult your doctor or pharmacist before continuing this medication given your documented penicillin allergy."
-  },
-  "lab_trends": {
-    "trends": [],
-    "insufficient_data": [],
-    "note": "This trend analysis is computed directly from the extracted lab values and reference ranges — it is not a diagnosis and does not account for clinical context beyond the numbers shown. Consult the patient's doctor or a pharmacist to interpret what any trend means for their care."
-  },
-  "indexed": true
-}
-```
+- Fixed Supabase `order("uploaded_at, id")` invalid syntax → chained orders.
+- Replaced deprecated `@app.on_event("startup")` with lifespan.
+- Timeline sorting now parses dates via `dateutil.parser` (was lexicographic, broke for `05 Jan 2026`).
+- `_parse_range` / sparkline regex now robust to units like `70-99 mg/dL` and avoids `70-99` → `70,-99` misread.
+- Upload dedup fixed — previously random suffix prevented dedup.
+- Added anonymous session flow so frontend no longer asks for JWT/UserId (secrets stay in `.env`).
 
-If indexing fails (e.g. embeddings API error), `indexed: false` and an
-`index_error` field are included instead — the timeline/cross-check are
-still returned and saved.
+### Limitations
 
-Errors: `400` no files / unsupported extension, `422` extraction failed for
-a given file, `422` a file extracted successfully but doesn't look like a
-medical document (see below).
+- Conversations are in-memory per process — restart drops them (Supabase/Cloudinary data kept).
+- Splitting storage: file → Cloudinary, structured → Supabase, embeddings → local Chroma. No raw bytes or tokens persisted in DB.
+- CLI (`python medical_extractor.py`) still writes `patient_report_*.json` locally, unauthenticated, for dev.
 
-**Non-medical document rejection** — passing the `.pdf`/`.png`/`.jpg` file
-extension check doesn't mean a file *is* a medical document (a boarding
-pass or a receipt still uploads fine as an image). After extraction,
-[`document_filter.py`](document_filter.py) checks the result's
-`document_type` and clinical content (medications / lab results /
-allergies / notes) and rejects it with `422` before any timeline/cross-check/
-indexing work happens — no second model call, it just re-uses the
-extraction that already ran:
-
-```json
-{"detail": "'boarding_pass.jpg' does not appear to be a medical document: classified as 'other' with no medications, lab results, allergies, or clinical notes found (overall_confidence=0.4)."}
-```
-
-For multi-page PDFs, each page is checked individually and the page number
-is included in the error (`'file.pdf (page 2)'`).
-
-#### `GET /api/v1/timeline`
-
-Returns the authenticated user's last saved timeline (same shape as the
-`timeline` field above).
-
-```
-curl -H "Authorization: Bearer $TOKEN" -H "X-User-Id: $USER_ID" \
-  http://127.0.0.1:8000/api/v1/timeline
-```
-
-`404` if this user has never uploaded a document.
-
-#### `GET /api/v1/cross-check`
-
-Returns the authenticated user's last saved cross-check report (same shape
-as `cross_check_report` above).
-
-```
-curl -H "Authorization: Bearer $TOKEN" -H "X-User-Id: $USER_ID" \
-  http://127.0.0.1:8000/api/v1/cross-check
-```
-
-`404` if this user has never uploaded a document.
-
-#### `GET /api/v1/lab-trends`
-
-Returns the authenticated user's lab result trends (same shape as
-`lab_trends` above) — per-test direction of drift across visits, when/if
-it crossed out of the reference range, and a plain-language explanation.
-Computed by [`lab_trends.py`](lab_trends.py) deterministically from the
-numbers already in the timeline (no LLM call).
-
-```
-curl -H "Authorization: Bearer $TOKEN" -H "X-User-Id: $USER_ID" \
-  http://127.0.0.1:8000/api/v1/lab-trends
-```
-
-```json
-{
-  "trends": [
-    {
-      "test_name": "Fasting Glucose",
-      "unit": "mg/dL",
-      "reference_range": "70-99",
-      "data_points": [
-        {"date": "05 Jan 2026", "value": "91", "flag": "normal", "source_file": "John_Lab_Report_1.pdf"},
-        {"date": "20 Apr 2026", "value": "103", "flag": "high", "source_file": "John_Lab_Report_2.pdf"},
-        {"date": "30 Aug 2026", "value": "118", "flag": "high", "source_file": "John_Lab_Report_3.pdf"}
-      ],
-      "direction": "increasing",
-      "flag_sequence": "normal → high → high",
-      "crossed_into_abnormal_at": {"date": "20 Apr 2026", "flag": "high"},
-      "approaching_threshold": false,
-      "confidence": 0.95,
-      "explanation": "Fasting Glucose has risen across 3 tests (reference range 70-99 mg/dL), from 91 mg/dL to 118 mg/dL ... It moved from within the normal range into the 'high' range starting with the 20 Apr 2026 test, and has stayed there since."
-    }
-  ],
-  "insufficient_data": [
-    {"test_name": "TSH", "reason": "only 1 usable data point(s) with a parseable date and numeric value (need at least 2 to establish a trend); 0 entrie(s) were dropped."}
-  ],
-  "note": "This trend analysis is computed directly from the extracted lab values and reference ranges — it is not a diagnosis and does not account for clinical context beyond the numbers shown. Consult the patient's doctor or a pharmacist to interpret what any trend means for their care."
-}
-```
-
-A test still flagged `"normal"` can still show `"approaching_threshold": true`
-if it's been drifting toward a reference-range boundary across visits (e.g.
-Creatinine rising from 0.92 → 1.08 → 1.32 against a 0.74–1.35 range) — this
-surfaces that drift before it's officially out of range, not just after.
-
-Tests with fewer than 2 usable (dated + numeric) readings are listed under
-`insufficient_data` with a reason, rather than a fabricated single-point
-"trend". Reports saved before this feature existed don't have a
-`lab_trends` field on disk — this endpoint recomputes it on the fly from
-the saved timeline in that case.
-
-`404` if this patient has never been processed.
-
----
-
-### Single-shot Q&A (Phase 1)
-
-#### `POST /api/v1/qa`
-
-Answers one question grounded in the authenticated user's indexed
-timeline. No server-side session — if you want multi-turn context, pass
-`chat_history` yourself, or use the conversation endpoints below instead.
-
-Request body:
-
-```json
-{
-  "question": "What was I prescribed for my sinus infection?",
-  "chat_history": [],
-  "top_k": 8
-}
-```
-
-`chat_history` and `top_k` are optional (`chat_history` defaults to none,
-`top_k` defaults to `8`).
-
-```
-curl -X POST http://127.0.0.1:8000/api/v1/qa \
-  -H "Authorization: Bearer $TOKEN" -H "X-User-Id: $USER_ID" \
-  -H "Content-Type: application/json" \
-  -d '{"question": "What was I prescribed for my sinus infection?"}'
-```
-
-Response `200`:
-
-```json
-{
-  "answer": "You were prescribed Amoxicillin 500mg, three times daily for 7 days, on 2026-03-14.",
-  "confidence": 0.9,
-  "sources": [
-    {"date": "2026-03-14", "source_file": "prescription_march.pdf"}
-  ],
-  "recommend_professional_consult": false
-}
-```
-
-Errors: `400` empty question, `502` if the embedding/chat call fails.
-
----
-
-### Multi-turn conversation (Phase 2)
-
-A conversation session tracks turn history server-side (in-memory) and
-rewrites each follow-up into a self-contained search query before
-retrieval, so ambiguous questions like *"was that safe?"* retrieve well.
-
-#### `POST /api/v1/sessions`
-
-Starts a new session for the authenticated user. No request body.
-
-```
-curl -X POST http://127.0.0.1:8000/api/v1/sessions \
-  -H "Authorization: Bearer $TOKEN" -H "X-User-Id: $USER_ID"
-```
-
-Response `201`:
-
-```json
-{"user_id": "6620a1f2...", "session_id": "29d7891954a543f1a48f19c9e06c7479"}
-```
-
-#### `POST /api/v1/sessions/{session_id}/messages`
-
-Asks one question within an existing session. `404`s if `session_id`
-doesn't exist, or belongs to a different user.
-
-Request body:
-
-```json
-{
-  "question": "Was that safe with my allergy?",
-  "top_k": 8
-}
-```
-
-```
-curl -X POST http://127.0.0.1:8000/api/v1/sessions/29d7891954a543f1a48f19c9e06c7479/messages \
-  -H "Authorization: Bearer $TOKEN" -H "X-User-Id: $USER_ID" \
-  -H "Content-Type: application/json" \
-  -d '{"question": "Was that safe with my allergy?"}'
-```
-
-Response `200` — same shape as `/qa`, plus `rewritten_query`:
-
-```json
-{
-  "answer": "You have a documented Penicillin allergy, and Amoxicillin is a penicillin-class antibiotic — this is a potential allergy conflict. Please consult your doctor or pharmacist before continuing this medication.",
-  "confidence": 0.85,
-  "sources": [
-    {"date": "2026-03-14", "source_file": "prescription_march.pdf"}
-  ],
-  "recommend_professional_consult": true,
-  "rewritten_query": "Is Amoxicillin, prescribed to the patient on 2026-03-14, safe given the patient's known drug allergies?"
-}
-```
-
-Errors: `404` unknown `session_id` (create one first via `POST /sessions`),
-`400` empty question, `502` if an underlying Groq/embedding call fails.
-
-#### `GET /api/v1/sessions/{session_id}`
-
-Returns the full, untrimmed transcript of a session (for logging/export) —
-never summarized or truncated, regardless of how the session compacts
-history internally for prompting.
-
-```
-curl -H "Authorization: Bearer $TOKEN" -H "X-User-Id: $USER_ID" \
-  http://127.0.0.1:8000/api/v1/sessions/29d7891954a543f1a48f19c9e06c7479
-```
-
-Response `200`:
-
-```json
-{
-  "user_id": "6620a1f2...",
-  "session_id": "29d7891954a543f1a48f19c9e06c7479",
-  "turns": [
-    {"role": "user", "content": "What was I prescribed in March?", "timestamp": "2026-08-03T10:15:00+00:00"},
-    {"role": "assistant", "content": "In March you were prescribed Amoxicillin 500mg...", "timestamp": "2026-08-03T10:15:02+00:00"},
-    {"role": "user", "content": "Was that safe with my allergy?", "timestamp": "2026-08-03T10:16:10+00:00"},
-    {"role": "assistant", "content": "You have a documented Penicillin allergy...", "timestamp": "2026-08-03T10:16:13+00:00"}
-  ]
-}
-```
-
-`404` if `session_id` doesn't exist, or belongs to a different user.
-
-#### `DELETE /api/v1/sessions/{session_id}`
-
-Ends a session, freeing its in-memory turn history.
-
-```
-curl -X DELETE -H "Authorization: Bearer $TOKEN" -H "X-User-Id: $USER_ID" \
-  http://127.0.0.1:8000/api/v1/sessions/29d7891954a543f1a48f19c9e06c7479
-```
-
-`204` on success, `404` if `session_id` doesn't exist, or belongs to a
-different user.
-
----
-
-## Test data
-
-[`generate_lab_test_data.py`](generate_lab_test_data.py) produces
-synthetic but schema-valid `lab_report` documents — same shape
-`process_document()` returns — without any OCR or LLM calls, so you can
-exercise `build_patient_timeline()`, `document_filter.py`, and
-`lab_trends.py` for free:
-
-```
-python generate_lab_test_data.py --patient "jane doe" --visits 4 --out test_data/lab_results_fixture.json
-```
-
-```python
-import json
-from medical_extractor import build_patient_timeline
-from document_filter import filter_non_medical_documents
-from lab_trends import track_lab_trends
-
-docs = json.load(open("test_data/lab_results_fixture.json"))
-kept, rejected = filter_non_medical_documents(docs)
-timeline = build_patient_timeline(kept)
-trends = track_lab_trends(timeline)
-```
-
-Note this bypasses OCR — it feeds directly into the pipeline at the
-"already extracted" stage, so it's not something you multipart-upload
-through `/documents` (that endpoint only accepts real files).
-
-## Inspecting the vector store
-
-`./chroma_db` holds one Chroma collection per user (chunk text +
-embeddings + metadata), keyed by `user_id` via the HTTP API (or by
-patient name when run through the CLI). [`inspect_chroma.py`](inspect_chroma.py)
-is a read-only CLI for browsing it without writing throwaway scripts — it
-never modifies the store or calls the LLM/embedding APIs.
-
-```
-python inspect_chroma.py                            # list every collection + chunk count
-python inspect_chroma.py "<user_id>"                 # show chunks for one user
-python inspect_chroma.py "<user_id>" --limit 20      # show more chunks
-python inspect_chroma.py "<user_id>" --type medication   # filter by chunk_type
-```
-
-`--type` accepts `medication`, `lab_result`, `clinical_note`, or `allergy`
-(see [`docs/retrieval.md`](docs/retrieval.md) for what each chunk_type
-contains).
-
-## Notes / limitations
-
-- Sessions are held in-memory per process — restarting the API drops all
-  active conversations (turn history isn't lost from disk, since it was
-  never persisted there; see `conversation.py`).
-- Document storage is split: the original uploaded file lives in
-  Cloudinary (`mediscan/<user_id>/...`), its structured extraction lives in
-  Supabase Postgres (`documents`, `patient_snapshots` tables), and only its
-  embeddings live in the local `./chroma_db`. All three are scoped by the
-  authenticated `user_id` (see [`auth.py`](auth.py), [`db.py`](db.py),
-  [`storage.py`](storage.py)) — no raw file bytes, LLM request/response
-  payloads, or access tokens are ever persisted.
-- The CLI entry point in `medical_extractor.py` (`python medical_extractor.py ...`)
-  is unauthenticated by design (local dev/testing tool) and still writes to
-  local `patient_report_*.json` / `patient_docs_*.json` files — it does not
-  touch Supabase or Cloudinary.
-- See [`docs/pipeline.md`](docs/pipeline.md), [`docs/medical_extractor.md`](docs/medical_extractor.md),
-  and [`docs/retrieval.md`](docs/retrieval.md) for how extraction, timeline
-  building, and retrieval work internally.
+See `backend/docs/` for pipeline, extraction, and retrieval internals.
