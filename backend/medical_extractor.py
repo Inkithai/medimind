@@ -237,8 +237,21 @@ def pdf_pages_to_images(pdf_path: str, dpi: int = 200) -> List[Image.Image]:
 
 
 def image_to_base64(img: Image.Image) -> str:
+    # Downscale image if too large to prevent huge base64 payload size and potential network/timeout/size issues.
+    # 1600px is more than enough for medical document OCR.
+    max_side = 1600
+    if max(img.size) > max_side:
+        scale = max_side / max(img.size)
+        new_size = (int(img.size[0] * scale), int(img.size[1] * scale))
+        img = img.resize(new_size, Image.Resampling.LANCZOS)
+
+    # Save as JPEG with quality=85 (highly compressed yet legible for OCR).
+    # PNG format is uncompressed losslessly, inflating base64 payload sizes to 15-20MB.
+    # JPEG format reduces payload to ~150-300KB (100x lighter and faster).
     buf = io.BytesIO()
-    img.save(buf, format="PNG")
+    if img.mode in ("RGBA", "P"):
+        img = img.convert("RGB")
+    img.save(buf, format="JPEG", quality=85)
     return base64.b64encode(buf.getvalue()).decode("utf-8")
 
 
@@ -263,7 +276,7 @@ def extract_from_image(img: Image.Image, model: str = MODEL) -> Dict[str, Any]:
                     },
                     {
                         "type": "image_url",
-                        "image_url": {"url": f"data:image/png;base64,{b64}"},
+                        "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
                     },
                 ],
             },
