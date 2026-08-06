@@ -9,15 +9,20 @@ import type {
   UploadResponse,
 } from "../types/api";
 
-// Credentials are supplied by the user at runtime in Settings and persisted
-// to localStorage. The backend verifies the JWT locally (HS256, JWT_SECRET)
-// and requires that the token's user-id claim matches X-User-Id — see
-// backend/auth.py. There is no login endpoint; the token is issued by
-// whichever auth system fronts this app.
+// MediMind anonymous workspace: the backend issues a signed JWT for a
+// random anon_* user_id via POST /api/v1/anonymous/session. The frontend
+// stores {userId, token, apiBase} in localStorage (medimind.session.v1)
+// and uses it for all subsequent calls. User never sees credentials.
 export interface Credentials {
   apiBase: string;
   token: string;
   userId: string;
+}
+
+export interface AnonymousSession {
+  user_id: string;
+  token: string;
+  session_id: string;
 }
 
 export class ApiError extends Error {
@@ -32,9 +37,6 @@ export class ApiError extends Error {
   }
 }
 
-// Resolves a base URL + path into a fetch URL. Empty/relative apiBase
-// means "same origin" (works with the Vite dev proxy and any production
-// reverse proxy in front of both apps).
 function buildUrl(apiBase: string, path: string): string {
   const base = apiBase.trim().replace(/\/+$/, "");
   if (!base) return path;
@@ -45,6 +47,53 @@ interface RequestOptions {
   method?: string;
   body?: BodyInit | null;
   headers?: Record<string, string>;
+}
+
+async function publicRequest<T>(
+  apiBase: string,
+  path: string,
+  options: RequestOptions = {}
+): Promise<T> {
+  let response: Response;
+  try {
+    response = await fetch(buildUrl(apiBase, path), {
+      method: options.method || "GET",
+      headers: options.headers || {},
+      body: options.body ?? undefined,
+    });
+  } catch (err) {
+    throw new ApiError(
+      0,
+      `Could not reach the API at ${apiBase || "(same origin)"}. Check that the backend is running.`,
+      err
+    );
+  }
+
+  if (response.status === 204) {
+    return undefined as T;
+  }
+
+  const text = await response.text();
+  let data: unknown = null;
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = text;
+    }
+  }
+
+  if (!response.ok) {
+    const message =
+      (typeof data === "object" && data !== null && "detail" in data
+        ? String((data as { detail: unknown }).detail)
+        : null) ||
+      (typeof data === "string" ? data : null) ||
+      `Request failed with status ${response.status}`;
+    throw new ApiError(response.status, message, data);
+  }
+
+  return data as T;
 }
 
 async function request<T>(
@@ -68,8 +117,7 @@ async function request<T>(
   } catch (err) {
     throw new ApiError(
       0,
-      `Could not reach the API at ${credentials.apiBase || "(same origin)"}. ` +
-        "Check the API base URL and that the backend is running.",
+      `Could not reach the API at ${credentials.apiBase || "(same origin)"}. Check that the backend is running.`,
       err
     );
   }
@@ -102,10 +150,22 @@ async function request<T>(
 }
 
 export const api = {
+  // Public, no auth needed
+  healthUnauthenticated(apiBase = ""): Promise<HealthResponse> {
+    return publicRequest<HealthResponse>(apiBase, "/api/v1/health");
+  },
+
+  // Creates anonymous workspace — no auth needed. Returns user_id + token
+  createAnonymousSession(apiBase = ""): Promise<AnonymousSession> {
+    return publicRequest<AnonymousSession>(apiBase, "/api/v1/anonymous/session", {
+      method: "POST",
+    });
+  },
+
+  // Backward compat: health used to require credentials arg
   health(credentials: Credentials): Promise<HealthResponse> {
-    // /health is the only unauthenticated route — don't send credentials
-    // for it (and it works even before the user has configured any).
-    return request<HealthResponse>(credentials, "/api/v1/health");
+    // Use public path — works even without credentials
+    return publicRequest<HealthResponse>(credentials.apiBase, "/api/v1/health");
   },
 
   uploadDocuments(credentials: Credentials, files: File[]): Promise<UploadResponse> {
@@ -114,7 +174,6 @@ export const api = {
     return request<UploadResponse>(credentials, "/api/v1/documents", {
       method: "POST",
       body: form,
-      // Do NOT set Content-Type — the browser sets the multipart boundary.
     });
   },
 
@@ -130,11 +189,7 @@ export const api = {
     return request<LabTrendsReport>(credentials, "/api/v1/lab-trends");
   },
 
-  ask(
-    credentials: Credentials,
-    question: string,
-    topK = 8
-  ): Promise<QAResponse> {
+  ask(credentials: Credentials, question: string, topK = 8): Promise<QAResponse> {
     return request<QAResponse>(credentials, "/api/v1/qa", {
       method: "POST",
       headers: { "Content-Type": "application/json" },

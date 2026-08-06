@@ -504,6 +504,19 @@ def group_documents_by_patient(
     return groups
 
 
+def _parse_timeline_date(date_str: Optional[str]):
+    """Best-effort parse of wildly varying date formats in extracted docs.
+    Returns datetime or None for unparseable/missing dates. Used only for
+    sorting, so failure falls back to far-future."""
+    if not date_str or not isinstance(date_str, str):
+        return None
+    try:
+        from dateutil import parser as _date_parser
+        return _date_parser.parse(date_str, fuzzy=True)
+    except Exception:
+        return None
+
+
 def build_patient_timeline(raw_results: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
     Merge extracted documents (output of process_document, one per file) into
@@ -517,9 +530,13 @@ def build_patient_timeline(raw_results: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
     docs = _flatten_documents(raw_results)
 
-    # Sort by date; undated docs go to the end
+    # Sort by parsed date; undated/unparseable docs go to the end.
+    # Previously sorted by raw string which broke for formats like
+    # "05 Jan 2026" vs "20 Apr 2026" (lexicographic != chronological).
     def sort_key(d):
-        return d.get("date") or "9999-99-99"
+        dt = _parse_timeline_date(d.get("date"))
+        # Use max datetime for missing, and original string as tiebreaker for stability
+        return (dt is None, dt or d.get("date") or "9999-99-99")
 
     docs_sorted = sorted(docs, key=sort_key)
 

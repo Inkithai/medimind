@@ -61,16 +61,43 @@ def _parse_value(value: Any) -> Optional[float]:
 def _parse_range(reference_range: Optional[str]) -> Optional[Tuple[float, float]]:
     if not reference_range or not isinstance(reference_range, str):
         return None
-    # Match "low - high" as an explicit pair, not a free-for-all number scan:
-    # a naive findall(r"-?\d+...") on "70-99" mis-reads the separating hyphen
-    # as a negative sign and parses it as [70, -99] instead of [70, 99].
-    match = re.match(
-        r"^\s*(-?\d+(?:\.\d+)?)\s*-\s*(-?\d+(?:\.\d+)?)\s*$", reference_range.strip()
-    )
-    if not match:
-        return None
-    low, high = float(match.group(1)), float(match.group(2))
-    return (low, high) if low <= high else (high, low)
+    # Robust parsing for real-world ranges that may include units or extra text:
+    # e.g. "70-99", "70 - 99 mg/dL", "Reference: 0.74-1.35 mg/dL", "7-56 U/L"
+    # Avoid naive findall on "70-99" which can mis-read as [70, -99] if hyphen
+    # is treated as sign. Search for explicit low-high pattern anywhere in string.
+    # The pattern looks for number, optional spaces, hyphen, optional spaces, number.
+    # This works even when units follow, e.g. "70-99 mg/dL" -> 70,99.
+    s = reference_range.strip()
+    # First try strict anchored regex (keeps previous behavior for clean inputs)
+    m = re.match(r"^\s*(-?\d+(?:\.\d+)?)\s*-\s*(-?\d+(?:\.\d+)?)\s*$", s)
+    if m:
+        low, high = float(m.group(1)), float(m.group(2))
+        return (low, high) if low <= high else (high, low)
+    # Fallback: find low-high pattern anywhere (handles units / prefix text)
+    m2 = re.search(r"(-?\d+(?:\.\d+)?)\s*-\s*(-?\d+(?:\.\d+)?)", s)
+    if m2:
+        try:
+            low, high = float(m2.group(1)), float(m2.group(2))
+            # Guard against still mis-reading hyphen as negative when low is positive
+            # and high negative with same abs as expected positive: e.g. if we still
+            # get 70 and -99, the second number's absolute value is plausible but
+            # sign is wrong — if low>0 and high<0 and abs(high) >0, flip sign if
+            # that makes sense: e.g. 70 and -99 -> treat -99 as 99.
+            # Simpler: if high <0 and low>=0 and reference_range contains "-"
+            # as separator, and abs(high) != low, assume separator mis-read.
+            # However our regex already avoids that by requiring spaces around dash
+            #? Actually it allows no spaces, but group for second number includes optional
+            # leading minus. To disambiguate "70-99" vs "70 - -5", we check:
+            # if low>=0 and high<0 and f"{int(low)}-{int(abs(high))}" in s.replace(" ",""),
+            # then high should be positive.
+            if low >= 0 and high < 0:
+                # Check if the string contains "low-abs(high)" as substring without second minus
+                if f"{m2.group(1)}-{abs(high):g}" in s.replace(" ", "") or f"{int(low)}-{int(abs(high))}" in s:
+                    high = abs(high)
+            return (low, high) if low <= high else (high, low)
+        except ValueError:
+            return None
+    return None
 
 
 def _group_by_test(lab_results_timeline: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:

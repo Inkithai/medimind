@@ -48,7 +48,7 @@ from pydantic import BaseModel, Field
 import conversation
 import db
 import storage
-from auth import get_current_user
+from auth import get_current_user, issue_anonymous_token
 from document_filter import NonMedicalDocumentError, assert_medical_document
 from lab_trends import track_lab_trends
 from medical_extractor import (
@@ -64,7 +64,22 @@ logger = logging.getLogger("api")
 
 SUPPORTED_EXTENSIONS = (".pdf", ".png", ".jpg", ".jpeg", ".webp")
 
-app = FastAPI(title="Medical Records Q&A API", version="1.0.0")
+from contextlib import asynccontextmanager
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: ensure tables exist (Supabase schema is created via SQL editor,
+    # so this is a no-op but kept for compatibility)
+    try:
+        db.ensure_indexes()
+    except Exception as e:
+        logger.warning("ensure_indexes failed on startup: %s", e)
+    yield
+    # Shutdown: nothing to clean up (Chroma client is short-lived per request)
+
+
+app = FastAPI(title="MediMind API", version="1.0.0", lifespan=lifespan)
 
 # The authenticated routes require custom Authorization / X-User-Id headers,
 # which trigger a CORS preflight when the frontend is served from a different
@@ -78,11 +93,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-@app.on_event("startup")
-def _startup() -> None:
-    db.ensure_indexes()
 
 
 # ---------------------------------------------------------------------------
@@ -385,9 +395,33 @@ async def delete_session(session_id: str, user_id: str = Depends(get_current_use
 
 
 # ---------------------------------------------------------------------------
+# Anonymous session — zero-login flow for MediMind frontend
+# ---------------------------------------------------------------------------
+
+@app.post("/api/v1/anonymous/session", status_code=201)
+async def create_anonymous_session() -> Dict[str, str]:
+    """
+    Creates an anonymous workspace for the MediMind frontend. No auth
+    required. Issues a signed JWT whose user_id claim is a fresh anon_*
+    identifier. The frontend stores {user_id, token} in localStorage and
+    uses them as Authorization + X-User-Id for all subsequent calls, so
+    existing authenticated routes keep working without any manual credential
+    entry. One browser = one isolated patient record.
+    """
+    user_id, token = issue_anonymous_token()
+    logger.info("anonymous session created: user_id=%s", user_id)
+    return {"user_id": user_id, "token": token, "session_id": user_id}
+
+
+# ---------------------------------------------------------------------------
 # Health check
 # ---------------------------------------------------------------------------
 
 @app.get("/api/v1/health")
 async def health() -> Dict[str, str]:
-    return {"status": "ok"}
+    return {"status": "ok", "service": "MediMind"}
+
+
+@app.get("/")
+async def root() -> Dict[str, str]:
+    return {"service": "MediMind", "status": "ok", "docs": "/docs"}

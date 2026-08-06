@@ -17,7 +17,9 @@ Env:
 """
 
 import os
-from typing import Optional
+import uuid
+from datetime import datetime, timedelta, timezone
+from typing import Optional, Tuple
 
 import jwt
 from fastapi import Header, HTTPException
@@ -66,3 +68,27 @@ def get_current_user(
         raise HTTPException(401, "X-User-Id header does not match the authenticated access token.")
 
     return token_user_id
+
+
+def issue_anonymous_token() -> Tuple[str, str]:
+    """Creates a fresh anonymous user_id + signed JWT for MediMind's
+    zero-login flow. The token is signed with the server's JWT_SECRET, so
+    all subsequent calls using Authorization: Bearer <token> + X-User-Id
+    will pass get_current_user verification without any manual credential
+    entry. Used by POST /api/v1/anonymous/session."""
+    secret = os.environ.get("JWT_SECRET")
+    if not secret:
+        raise HTTPException(500, "Server misconfigured: JWT_SECRET is not set.")
+    user_id = f"anon_{uuid.uuid4().hex[:12]}"
+    now = datetime.now(timezone.utc)
+    payload = {
+        "user_id": user_id,
+        "sub": user_id,
+        "iat": int(now.timestamp()),
+        # long-lived for demo workspaces: 1 year
+        "exp": int((now + timedelta(days=365)).timestamp()),
+        "anon": True,
+        "iss": "medimind",
+    }
+    token = jwt.encode(payload, secret, algorithm=JWT_ALGORITHMS[0])
+    return user_id, token
