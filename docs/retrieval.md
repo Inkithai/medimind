@@ -1,20 +1,20 @@
 # `retrieval.py` reference
 
-Retrieval-augmented Q&A layer (Phase 1). Imports `client` and `MODEL` from [`medical_extractor.py`](../medical_extractor.py) — chat/Q&A runs on Grok (xAI) through that shared client, so `XAI_API_KEY` only needs to be set once. It operates entirely on the already-extracted structured timeline (the dict `build_patient_timeline()` returns) — it never re-reads a PDF/image.
+Retrieval-augmented Q&A layer (Phase 1). Imports `client` and `MODEL` from [`medical_extractor.py`](../medical_extractor.py) — chat/Q&A runs on Groq through that shared client, so `GROQ_API_KEY` only needs to be set once. It operates entirely on the already-extracted structured timeline (the dict `build_patient_timeline()` returns) — it never re-reads a PDF/image.
 
-**Embeddings are the one exception:** xAI offers no embeddings API, so this module does NOT use the Grok client for them. Embeddings use OpenAI's `text-embedding-3-small` when `OPENAI_API_KEY` is set, and otherwise fall back to Chroma's built-in local ONNX MiniLM model (`all-MiniLM-L6-v2`) which runs in-process with no API key. The two backends produce different-dimensional vectors — after switching backends, delete `./chroma_db` and re-index.
+**Embeddings are the one exception:** Groq offers no embeddings API, so this module does NOT use the Groq client for them. Embeddings use OpenAI's `text-embedding-3-small` when `OPENAI_API_KEY` is set, and otherwise fall back to Chroma's built-in local ONNX MiniLM model (`all-MiniLM-L6-v2`) which runs in-process with no API key. The two backends produce different-dimensional vectors — after switching backends, delete `./chroma_db` and re-index.
 
 ## Install / env
 
 ```
 pip install chromadb --break-system-packages
-export XAI_API_KEY="xai-..."        # same Grok key medical_extractor.py uses (chat/Q&A)
+export GROQ_API_KEY="gsk_..."       # same Groq key medical_extractor.py uses (chat/Q&A)
 # export OPENAI_API_KEY="sk-..."    # optional — embeddings only (see above)
 ```
 
 Module-level constants:
 - `EMBEDDING_MODEL` — defaults to `"text-embedding-3-small"`, overridable via the `EMBEDDING_MODEL` env var. Only consulted when `OPENAI_API_KEY` is set
-- `CHAT_MODEL = MODEL` — currently just aliases `medical_extractor.MODEL` (Grok, default `"grok-4.5"`); change this constant, not `medical_extractor.MODEL`, if the QA model should diverge from the extraction model
+- `CHAT_MODEL = MODEL` — currently just aliases `medical_extractor.MODEL` (Groq, default `"meta-llama/llama-4-scout-17b-16e-instruct"`); change this constant, not `medical_extractor.MODEL`, if the QA model should diverge from the extraction model
 - `CHROMA_DIR = "./chroma_db"` — local persistent Chroma store, relative to wherever the process is run from. **Not currently gitignored** — check before committing if you run this locally, it'll create a `chroma_db/` folder with binary index files.
 - `EMBEDDING_BATCH_SIZE = 100` — chunking safeguard for the embeddings API's per-request item limit
 
@@ -71,7 +71,7 @@ Each chunk: `{"id": <sha256 hex>, "text": <natural-language string, this is what
 `embed_texts(texts: List[str]) -> List[List[float]]`
 
 Two backends, chosen once at import time:
-- **With `OPENAI_API_KEY`**: batches into groups of `EMBEDDING_BATCH_SIZE` and calls the OpenAI embeddings API via a dedicated OpenAI client (never the xAI/Grok client).
+- **With `OPENAI_API_KEY`**: batches into groups of `EMBEDDING_BATCH_SIZE` and calls the OpenAI embeddings API via a dedicated OpenAI client (never the Groq client).
 - **Without it**: runs Chroma's `ONNXMiniLM_L6_V2` locally (lazily initialised on first call; model weights download once, then everything runs in-process with no API key).
 
 Empty input returns `[]` without any call. Raises `RuntimeError` (not the raw `OpenAIError`) on failure, with the batch size in the message — used both for indexing (chunk texts) and for embedding the incoming question in `answer_question()`.

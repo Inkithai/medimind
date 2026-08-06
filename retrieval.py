@@ -12,7 +12,7 @@ Pipeline:
     question, retrieve the top_k most similar chunks, and ask a chat
     model to answer strictly from that retrieved context.
 
-Embedding provider: chat/extraction run on Grok (xAI), but xAI does not
+Embedding provider: chat/extraction run on Groq, but Groq does not
 offer an embeddings API. So embeddings use, in order of preference:
     1. OpenAI text-embedding-3-small, if OPENAI_API_KEY is set.
     2. Chroma's built-in local ONNX MiniLM model (all-MiniLM-L6-v2) —
@@ -25,7 +25,7 @@ Install:
     pip install chromadb --break-system-packages
 
 Env:
-    export XAI_API_KEY="xai-..."         (same key used by medical_extractor.py)
+    export GROQ_API_KEY="gsk_..."        (same key used by medical_extractor.py)
     export OPENAI_API_KEY="sk-..."       (optional — see embedding provider above)
 """
 
@@ -46,7 +46,7 @@ CHAT_MODEL = MODEL  # reuse the same chat model configured in medical_extractor.
 CHROMA_DIR = os.environ.get("CHROMA_DIR", "./chroma_db")
 EMBEDDING_BATCH_SIZE = 100  # keep well under the API's per-request item limit
 
-# xAI (Grok) has no embeddings endpoint. When an OpenAI key is available it
+# Groq has no embeddings endpoint. When an OpenAI key is available it
 # is used ONLY for embeddings (never for chat); otherwise fall back to
 # Chroma's built-in local ONNX MiniLM model, which needs no API key at all.
 _OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
@@ -204,7 +204,7 @@ def embed_texts(texts: List[str]) -> List[List[float]]:
     """Embeds a list of strings, batching to stay under the API's
     per-request item limit. Uses OpenAI's text-embedding-3-small when
     OPENAI_API_KEY is set; otherwise Chroma's local ONNX MiniLM model
-    (xAI/Grok offers no embeddings API). Raises RuntimeError with context
+    (Groq offers no embeddings API). Raises RuntimeError with context
     if the embedding call fails (auth, rate limit, network, etc.)."""
     if not texts:
         return []

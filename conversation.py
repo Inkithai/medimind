@@ -19,7 +19,7 @@ is only meaningful in light of what was said earlier. This module:
        periodic summarization of older turns.
 
 Env:
-    export XAI_API_KEY="xai-..."   (same Grok key used by the rest of the pipeline)
+    export GROQ_API_KEY="gsk_..."   (same Groq key used by the rest of the pipeline)
 """
 
 import json

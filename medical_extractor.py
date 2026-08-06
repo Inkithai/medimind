@@ -2,19 +2,20 @@
 Medical Document Extraction Pipeline
 =====================================
 Handles PDF (text-based or scanned) and image uploads (prescriptions, lab
-reports, discharge summaries), extracts structured data using a Grok (xAI)
-vision-capable model, and returns clean JSON ready for timeline building,
-RAG indexing, and cross-checking.
+reports, discharge summaries), extracts structured data using a Groq-hosted
+vision-capable model (default: Meta's Llama 4 Scout), and returns clean
+JSON ready for timeline building, RAG indexing, and cross-checking.
 
-Grok is accessed through xAI's OpenAI-compatible endpoint
-(https://api.x.ai/v1) via the standard OpenAI SDK — only the base URL,
-API key, and model names differ.
+Groq is accessed through its OpenAI-compatible endpoint
+(https://api.groq.com/openai/v1) via the standard OpenAI SDK — only the
+base URL, API key, and model names differ. Groq's free tier needs no
+credit card (rate-limited; create a key at https://console.groq.com/keys).
 
 Install:
     pip install openai pdfplumber pymupdf pillow --break-system-packages
 
 Env:
-    export XAI_API_KEY="xai-..."   (create one at https://console.x.ai)
+    export GROQ_API_KEY="gsk_..."   (create one at https://console.groq.com/keys)
 """
 
 import os
@@ -33,22 +34,23 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Grok (xAI) — xAI's API is OpenAI-compatible, so we reuse the OpenAI SDK
-# pointed at https://api.x.ai/v1. Get a key at https://console.x.ai.
-XAI_API_KEY = os.environ.get("XAI_API_KEY")
-if not XAI_API_KEY:
+# Groq — Groq's API is OpenAI-compatible, so we reuse the OpenAI SDK
+# pointed at https://api.groq.com/openai/v1. Free key (no credit card):
+# https://console.groq.com/keys
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
+if not GROQ_API_KEY:
     raise RuntimeError(
-        "XAI_API_KEY is not set — copy .env.example to .env and add your "
-        "Grok (xAI) API key (create one at https://console.x.ai)."
+        "GROQ_API_KEY is not set — copy .env.example to .env and add your "
+        "Groq API key (create a free one at https://console.groq.com/keys)."
     )
 
 client = OpenAI(
-    api_key=XAI_API_KEY,
-    base_url=os.environ.get("XAI_BASE_URL", "https://api.x.ai/v1"),
+    api_key=GROQ_API_KEY,
+    base_url=os.environ.get("GROQ_BASE_URL", "https://api.groq.com/openai/v1"),
 )
 
-MODEL = os.environ.get("GROK_MODEL", "grok-4.5")                # vision-capable flagship, good for structured extraction
-FALLBACK_MODEL = os.environ.get("GROK_FALLBACK_MODEL", "grok-4.3")  # cheaper, use for high-volume / less critical docs
+MODEL = os.environ.get("GROQ_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct")  # vision-capable, supports json_schema output
+FALLBACK_MODEL = os.environ.get("GROQ_FALLBACK_MODEL", "llama-3.1-8b-instant")      # cheap/fast text model for high-volume / less critical docs
 
  #---------------------------------------------------------------------------
 # 1. Extraction schema — keeps every document's output shape consistent

@@ -25,10 +25,10 @@ Install (in addition to Phase 1/2 dependencies):
     pip install fastapi uvicorn[standard] python-multipart supabase cloudinary pyjwt
 
 Env:
-    XAI_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
+    GROQ_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
     CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET,
     JWT_SECRET
-    (optional: OPENAI_API_KEY — used only for embeddings, since xAI has no
+    (optional: OPENAI_API_KEY — used only for embeddings, since Groq has no
     embeddings API; without it, embeddings run locally via Chroma's ONNX
     MiniLM model)
 """

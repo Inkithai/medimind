@@ -47,7 +47,7 @@ Create a `.env` file in the project root (already gitignored — copy
 `.env.example` and fill in real values):
 
 ```
-XAI_API_KEY=xai-...     # Grok (xAI) key — create one at https://console.x.ai
+GROQ_API_KEY=gsk_...    # Groq key — free tier at https://console.groq.com/keys
 CLOUDINARY_CLOUD_NAME=...
 CLOUDINARY_API_KEY=...
 CLOUDINARY_API_SECRET=...
@@ -69,10 +69,13 @@ JWT_SECRET=...          # same secret your auth issuer signs tokens with
    `SUPABASE_SERVICE_ROLE_KEY`. Never expose the service-role key to a
    browser.
 
-Extraction, cross-checking, Q&A and conversation all run on **Grok (xAI)**
-through its OpenAI-compatible endpoint (`https://api.x.ai/v1`); the model
-defaults to `grok-4.5` and can be overridden with `GROK_MODEL`. One caveat:
-**xAI has no embeddings API**, so Q&A embeddings use, in order of
+Extraction, cross-checking, Q&A and conversation all run on **Groq**
+through its OpenAI-compatible endpoint (`https://api.groq.com/openai/v1`);
+the model defaults to `meta-llama/llama-4-scout-17b-16e-instruct` (Llama 4
+Scout — vision-capable, supports structured JSON output) and can be
+overridden with `GROQ_MODEL`. Groq's free tier needs no credit card and is
+rate-limited (~30 req/min per model). One caveat: **Groq has no embeddings
+API**, so Q&A embeddings use, in order of
 preference: (1) OpenAI `text-embedding-3-small` if you also set
 `OPENAI_API_KEY`, or (2) Chroma's built-in local ONNX MiniLM model — no
 key needed, runs in-process. If you ever switch between those two
@@ -100,7 +103,7 @@ are already set up — Railway's Nixpacks builder detects both automatically,
 so a plain "Deploy from GitHub repo" works with no extra build config.
 
 1. **Env vars** — in the Railway service's Variables tab, set everything
-   from `.env.example` (`XAI_API_KEY`, `CLOUDINARY_CLOUD_NAME`,
+   from `.env.example` (`GROQ_API_KEY`, `CLOUDINARY_CLOUD_NAME`,
    `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`, `SUPABASE_URL`,
    `SUPABASE_SERVICE_ROLE_KEY`, `JWT_SECRET`; optionally `OPENAI_API_KEY`
    for embeddings). Don't upload `.env` itself — it's git-ignored and
@@ -447,7 +450,7 @@ Response `200` — same shape as `/qa`, plus `rewritten_query`:
 ```
 
 Errors: `404` unknown `session_id` (create one first via `POST /sessions`),
-`400` empty question, `502` if an underlying Grok/embedding call fails.
+`400` empty question, `502` if an underlying Groq/embedding call fails.
 
 #### `GET /api/v1/sessions/{session_id}`
 
