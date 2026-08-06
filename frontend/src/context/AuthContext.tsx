@@ -116,8 +116,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setInitializing(true);
       setInitError(null);
       try {
-        // Use empty apiBase = same-origin (Vite proxy)
-        const apiBase = "";
+        // Use VITE_API_URL if set (production), else empty string (same-origin/Vite proxy)
+        const apiBase = (import.meta.env.VITE_API_URL as string) || "";
         // Quick health check before creating session
         try {
           await api.healthUnauthenticated(apiBase);
