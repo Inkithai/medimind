@@ -2,8 +2,8 @@
 Medical Document Extraction Pipeline
 =====================================
 Handles PDF (text-based or scanned) and image uploads (prescriptions, lab
-reports, discharge summaries), extracts structured data using a Groq-hosted
-vision-capable model (default: Meta's Llama 4 Scout), and returns clean
+reports, discharge summaries), extracts structured data using Groq-hosted
+models (text: GPT-OSS 120B; vision: Qwen3.6 27B), and returns clean
 JSON ready for timeline building, RAG indexing, and cross-checking.
 
 Groq is accessed through its OpenAI-compatible endpoint
@@ -29,7 +29,7 @@ from typing import List, Dict, Any, Optional, Tuple
 import pdfplumber
 import fitz  # PyMuPDF, used to rasterize scanned PDFs
 from PIL import Image, ImageOps
-from openai import OpenAI
+from openai import OpenAI, NotFoundError
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -49,8 +49,77 @@ client = OpenAI(
     base_url=os.environ.get("GROQ_BASE_URL", "https://api.groq.com/openai/v1"),
 )
 
-MODEL = os.environ.get("GROQ_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct")  # vision-capable, supports json_schema output
-FALLBACK_MODEL = os.environ.get("GROQ_FALLBACK_MODEL", "llama-3.1-8b-instant")      # cheap/fast text model for high-volume / less critical docs
+# Groq retires hosted models on a schedule — keep an eye on
+# https://console.groq.com/docs/deprecations and override the models below
+# via env vars rather than editing code.
+#   * meta-llama/llama-4-scout-17b-16e-instruct shut down 2026-07-17 (old
+#     default MODEL — requests to it now 404 with model_not_found).
+#   * llama-3.1-8b-instant / llama-3.3-70b-versatile shut down 2026-08-16.
+# Per Groq's migration guidance:
+#   - MODEL (text-layer extraction, cross-checking, chat) defaults to
+#     openai/gpt-oss-120b, a production model with strict json_schema support.
+#   - VISION_MODEL (scanned PDFs, photos of documents) needs a multimodal
+#     model: qwen/qwen3.6-27b is currently Groq's only vision chat model.
+#     NOTE: it does NOT support strict json_schema — _response_format_for()
+#     automatically drops to JSON-object mode with the schema inlined in the
+#     prompt for models outside _STRICT_SCHEMA_MODELS.
+MODEL = os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b")
+VISION_MODEL = os.environ.get("GROQ_VISION_MODEL", "qwen/qwen3.6-27b")
+FALLBACK_MODEL = os.environ.get("GROQ_FALLBACK_MODEL", "openai/gpt-oss-20b")        # cheap/fast text model for high-volume / less critical docs
+
+# Groq's constrained-decoding strict json_schema mode is only available on
+# these models (https://console.groq.com/docs/structured-outputs). Every
+# other model — including the current vision model — gets JSON Object Mode
+# instead (valid JSON guaranteed; schema adherence via the inlined prompt).
+_STRICT_SCHEMA_MODELS = frozenset({
+    "openai/gpt-oss-20b",
+    "openai/gpt-oss-120b",
+    "openai/gpt-oss-safeguard-20b",
+})
+
+
+def _response_format_for(model: str, strict_format: Dict[str, Any]) -> Tuple[Dict[str, Any], str]:
+    """Picks a structured-output mode the target model actually supports.
+
+    Returns (response_format, prompt_suffix):
+    - strict-capable model: the caller's json_schema dict with strict=True,
+      and an empty suffix (Groq receives the schema as a request parameter).
+    - any other model: {"type": "json_object"}, plus a suffix that inlines
+      the JSON Schema into the system prompt — json_object mode never sends
+      the schema to Groq, so without it the model has no contract to follow.
+    """
+    if model in _STRICT_SCHEMA_MODELS:
+        return strict_format, ""
+    schema = strict_format["json_schema"]["schema"]
+    return (
+        {"type": "json_object"},
+        "\n\nRespond with a single valid JSON object (raw JSON only — no "
+        "markdown, no code fences, no commentary) conforming EXACTLY to this "
+        f"JSON Schema:\n{json.dumps(schema, indent=2)}\n",
+    )
+
+
+def _chat_completion(**kwargs) -> Any:
+    """client.chat.completions.create() with a Groq-churn-aware error.
+
+    A request against a retired model ID comes back as a 404
+    'model_not_found' (the Novice-unfriendly raw error that prompted this
+    wrapper). Translate that into an actionable fix hint instead of a bare
+    stack trace.
+    """
+    try:
+        return client.chat.completions.create(**kwargs)
+    except NotFoundError as e:
+        model = kwargs.get("model")
+        raise RuntimeError(
+            f"Groq rejected model '{model}' (404 model_not_found) — it has most "
+            "likely been decommissioned; Groq retires hosted models regularly. "
+            "Check https://console.groq.com/docs/deprecations for the "
+            "recommended replacement, then set GROQ_MODEL (text jobs) and/or "
+            "GROQ_VISION_MODEL (image/scanned-PDF jobs) in .env — no code "
+            f"change needed. Current defaults: text='{MODEL}', "
+            f"vision='{VISION_MODEL}'."
+        ) from e
 
  #---------------------------------------------------------------------------
 # 1. Extraction schema — keeps every document's output shape consistent
@@ -259,14 +328,15 @@ def image_to_base64(img: Image.Image) -> str:
 # 3. Vision extraction call
 # ---------------------------------------------------------------------------
 
-def extract_from_image(img: Image.Image, model: str = MODEL) -> Dict[str, Any]:
+def extract_from_image(img: Image.Image, model: str = VISION_MODEL) -> Dict[str, Any]:
     """Send a single page image to the vision model and parse structured JSON."""
     b64 = image_to_base64(img)
+    response_format, prompt_suffix = _response_format_for(model, EXTRACTION_RESPONSE_FORMAT)
 
-    response = client.chat.completions.create(
+    response = _chat_completion(
         model=model,
         messages=[
-            {"role": "system", "content": EXTRACTION_SCHEMA_PROMPT},
+            {"role": "system", "content": EXTRACTION_SCHEMA_PROMPT + prompt_suffix},
             {
                 "role": "user",
                 "content": [
@@ -281,7 +351,7 @@ def extract_from_image(img: Image.Image, model: str = MODEL) -> Dict[str, Any]:
                 ],
             },
         ],
-        response_format=EXTRACTION_RESPONSE_FORMAT,
+        response_format=response_format,
     )
     raw = response.choices[0].message.content
     try:
@@ -294,16 +364,18 @@ def extract_from_image(img: Image.Image, model: str = MODEL) -> Dict[str, Any]:
 
 def extract_from_text(text: str, model: str = MODEL) -> Dict[str, Any]:
     """For digital PDFs — run the same schema extraction on plain text."""
-    response = client.chat.completions.create(
+    response_format, prompt_suffix = _response_format_for(model, EXTRACTION_RESPONSE_FORMAT)
+
+    response = _chat_completion(
         model=model,
         messages=[
-            {"role": "system", "content": EXTRACTION_SCHEMA_PROMPT},
+            {"role": "system", "content": EXTRACTION_SCHEMA_PROMPT + prompt_suffix},
             {
                 "role": "user",
                 "content": f"Extract structured data from this document text:\n\n{text}",
             },
         ],
-        response_format=EXTRACTION_RESPONSE_FORMAT,
+        response_format=response_format,
     )
     return json.loads(response.choices[0].message.content)
 
@@ -399,11 +471,16 @@ def assert_text_looks_medical(text: str, filename: str) -> None:
 # 4. Top-level entry point — routes any uploaded file correctly
 # ---------------------------------------------------------------------------
 
-def process_document(file_path: str, model: str = MODEL) -> Dict[str, Any]:
+def process_document(
+    file_path: str,
+    model: str = MODEL,
+    vision_model: str = VISION_MODEL,
+) -> Dict[str, Any]:
     """
     Accepts a path to a PDF or image file. Detects type and routes to the
-    right extraction path. Returns structured JSON (or a list of per-page
-    JSON objects for multi-page scanned PDFs).
+    right extraction path (`model` for text-layer PDFs, `vision_model` for
+    scanned pages and image files). Returns structured JSON (or a list of
+    per-page JSON objects for multi-page scanned PDFs).
     """
     path = Path(file_path)
     suffix = path.suffix.lower()
@@ -451,7 +528,7 @@ def process_document(file_path: str, model: str = MODEL) -> Dict[str, Any]:
             pages = pdf_pages_to_images(file_path)
             page_results = []
             for i, img in enumerate(pages):
-                res = extract_from_image(img, model=model)
+                res = extract_from_image(img, model=vision_model)
                 res = _apply_confidence_ceiling(res, VISION_OCR_CONFIDENCE_CEILING)
                 res["_source"] = {
                     "file": path.name,
@@ -467,13 +544,17 @@ def process_document(file_path: str, model: str = MODEL) -> Dict[str, Any]:
         # pixels — apply it, or the vision model reads the document
         # sideways/upside-down and extraction silently degrades.
         img = ImageOps.exif_transpose(img)
-        result = extract_from_image(img, model=model)
+        result = extract_from_image(img, model=vision_model)
         result = _apply_confidence_ceiling(result, VISION_OCR_CONFIDENCE_CEILING)
         result["_source"] = {"file": path.name, "method": "vision_ocr"}
         return result
 
 
-def process_patient_folder(folder_path: str, model: str = MODEL) -> List[Dict[str, Any]]:
+def process_patient_folder(
+    folder_path: str,
+    model: str = MODEL,
+    vision_model: str = VISION_MODEL,
+) -> List[Dict[str, Any]]:
     """
     Walks a patient's folder (including subfolders like 'Year 1', 'Year 2')
     and processes every supported document it finds. Returns a flat list of
@@ -498,7 +579,7 @@ def process_patient_folder(folder_path: str, model: str = MODEL) -> List[Dict[st
     for f in files:
         print(f"Extracting {f} ...")
         try:
-            result = process_document(str(f), model=model)
+            result = process_document(str(f), model=model, vision_model=vision_model)
             results.append(result)
         except Exception as e:
             print(f"  Failed: {e}")
@@ -892,17 +973,18 @@ def cross_check_prescriptions(timeline: Dict[str, Any], model: str = MODEL) -> D
         "medications_timeline": timeline["medications_timeline"],
         "known_allergies": timeline["known_allergies"],
     }
+    response_format, prompt_suffix = _response_format_for(model, CROSS_CHECK_RESPONSE_FORMAT)
 
-    response = client.chat.completions.create(
+    response = _chat_completion(
         model=model,
         messages=[
-            {"role": "system", "content": CROSS_CHECK_PROMPT},
+            {"role": "system", "content": CROSS_CHECK_PROMPT + prompt_suffix},
             {
                 "role": "user",
                 "content": f"Patient medication data:\n\n{json.dumps(payload, indent=2)}",
             },
         ],
-        response_format=CROSS_CHECK_RESPONSE_FORMAT,
+        response_format=response_format,
     )
     result = json.loads(response.choices[0].message.content)
 

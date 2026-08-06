@@ -23,7 +23,7 @@ Anonymous workspaces, no login. One browser → one isolated patient view.
       Clinical Pipeline          RAG Retrieval (Chroma)
       ┌─────────────┐                   │
       │ OCR / text  │                   ▼
-      │ Extraction  │ ← Groq Llama 4 Scout vision + strict JSON schema
+      │ Extraction  │ ← Groq Qwen3.6 27B vision + GPT-OSS 120B text (strict JSON)
       │ Filter      │   (document_filter: no extra LLM call)
       │ Timeline    │   (group + sort with dateutil, merge meds/labs/allergies)
       │ Safety      │   (LLM cross-check + deterministic duplicate)

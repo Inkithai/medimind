@@ -41,8 +41,9 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, Dict, List, Optional, Tuple
 
-from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 import conversation
@@ -93,6 +94,15 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(db.SchemaNotInitializedError)
+async def schema_not_initialized_handler(request: Request, exc: db.SchemaNotInitializedError):
+    """Supabase is reachable but the app's tables don't exist (setup SQL
+    never run). Surface the fix as a 503 with instructions instead of a
+    bare 500 with a PostgREST PGRST205 stack trace."""
+    logger.error("schema not initialized for %s %s: %s", request.method, request.url.path, exc)
+    return JSONResponse(status_code=503, content={"detail": str(exc)})
 
 
 # ---------------------------------------------------------------------------
