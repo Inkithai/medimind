@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"><title>Nalam</title></head>
+<body>
+<h1>Nalam Medical Q&A</h1>
+<div>
+  <h2>Upload Document</h2>
+  <input type="file" id="docFiles" multiple>
+  <button onclick="upload()">Upload</button>
+  <pre id="uploadRes"></pre>
+</div>
+<div>
+  <h2>Ask Question</h2>
+  <input id="q" placeholder="Question"><button onclick="ask()">Ask</button>
+  <pre id="qaRes"></pre>
+</div>
+<script>
+async function upload(){
+  const fd=new FormData();
+  for(let f of document.getElementById('docFiles').files) fd.append('files',f);
+  const r=await fetch('/api/v1/documents',{method:'POST',body:fd, headers:{'Authorization':'Bearer test','X-User-Id':'u1'}});
+  document.getElementById('uploadRes').textContent=await r.text();
+}
+async function ask(){
+  const r=await fetch('/api/v1/qa',{method:'POST', headers:{'Content-Type':'application/json','Authorization':'Bearer test','X-User-Id':'u1'}, body:JSON.stringify({question:document.getElementById('q').value})});
+  document.getElementById('qaRes').textContent=await r.text();
+}
+</script>
+</body>
+</html>
