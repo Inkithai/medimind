@@ -1,9 +1,5 @@
 import type { LabTrend, LabTrendsReport } from "../types/api";
-import {
-  classNames,
-  flagTone,
-  formatConfidence,
-} from "../utils/format";
+import { classNames, flagTone, formatConfidence } from "../utils/format";
 import { Alert } from "./Alert";
 import { Card, CardBody, CardHeader } from "./Card";
 import { EmptyState } from "./EmptyState";
@@ -50,10 +46,7 @@ export function LabTrendsView({ report }: { report: LabTrendsReport }) {
             </h3>
             <div className="space-y-2">
               {report.insufficient_data.map((item, idx) => (
-                <div
-                  key={idx}
-                  className="rounded-md border border-slate-200 bg-slate-50/60 px-3 py-2 text-sm"
-                >
+                <div key={idx} className="rounded-md border border-slate-200 bg-slate-50/60 px-3 py-2 text-sm">
                   <p className="font-medium text-slate-700">{item.test_name}</p>
                   <p className="text-xs text-slate-500">{item.reason}</p>
                 </div>
@@ -76,17 +69,13 @@ function TrendCard({ trend }: { trend: LabTrend }) {
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <h4 className="text-base font-semibold text-slate-900">{trend.test_name}</h4>
-            <StatusBadge tone={directionBadgeTone(trend.direction)}>
-              {trend.direction}
-            </StatusBadge>
+            <StatusBadge tone={directionBadgeTone(trend.direction)}>{trend.direction}</StatusBadge>
             {crossed && (
               <StatusBadge tone="danger">
                 crossed to {crossed.flag} on {crossed.date || "unknown date"}
               </StatusBadge>
             )}
-            {approaching && !crossed && (
-              <StatusBadge tone="warning">approaching threshold</StatusBadge>
-            )}
+            {approaching && !crossed && <StatusBadge tone="warning">approaching threshold</StatusBadge>}
           </div>
           <p className="mt-1 text-xs text-slate-500">
             {trend.unit && <span>unit: {trend.unit} · </span>}
@@ -119,12 +108,7 @@ function TrendCard({ trend }: { trend: LabTrend }) {
                 <td className="py-1 pr-4 text-slate-600">{p.date || "—"}</td>
                 <td className="py-1 pr-4 font-medium text-slate-700">{p.value}</td>
                 <td className="py-1 pr-4">
-                  <span
-                    className={classNames(
-                      "inline-flex rounded-full px-2 py-0.5 ring-1 ring-inset",
-                      flagTone(p.flag)
-                    )}
-                  >
+                  <span className={classNames("inline-flex rounded-full px-2 py-0.5 ring-1 ring-inset", flagTone(p.flag))}>
                     {p.flag}
                   </span>
                 </td>
@@ -145,7 +129,6 @@ function directionBadgeTone(direction: string): "danger" | "info" | "success" | 
   return "warning";
 }
 
-// Inline SVG sparkline. Reference-range band is shaded when parseable.
 function Sparkline({ trend }: { trend: LabTrend }) {
   const W = 160;
   const H = 48;
@@ -153,7 +136,7 @@ function Sparkline({ trend }: { trend: LabTrend }) {
 
   const numericPoints = trend.data_points
     .map((p) => {
-      const m = /-?\d+(\.\d+)?/.exec(p.value);
+      const m = /-?\d+(?:\.\d+)?/.exec(p.value);
       return m ? parseFloat(m[0]) : NaN;
     })
     .filter((v) => !Number.isNaN(v));
@@ -169,21 +152,37 @@ function Sparkline({ trend }: { trend: LabTrend }) {
     max += 1;
   }
 
-  const rangeMatch = /^\s*(-?\d+(?:\.\d+)?)\s*-\s*(-?\d+(?:\.\d+)?)\s*$/.exec(
-    trend.reference_range || ""
-  );
+  // Robust range parsing: handles "70-99", "70 - 99 mg/dL", "Reference: 0.74-1.35 mg/dL"
+  const rangeStr = trend.reference_range || "";
   let refLow = NaN;
   let refHigh = NaN;
-  if (rangeMatch) {
-    refLow = parseFloat(rangeMatch[1]);
-    refHigh = parseFloat(rangeMatch[2]);
+  const strictMatch = /^\s*(-?\d+(?:\.\d+)?)\s*-\s*(-?\d+(?:\.\d+)?)\s*$/.exec(rangeStr);
+  if (strictMatch) {
+    refLow = parseFloat(strictMatch[1]);
+    refHigh = parseFloat(strictMatch[2]);
+  } else {
+    const m = /(-?\d+(?:\.\d+)?)\s*-\s*(-?\d+(?:\.\d+)?)/.exec(rangeStr);
+    if (m) {
+      let low = parseFloat(m[1]);
+      let high = parseFloat(m[2]);
+      if (low >= 0 && high < 0) {
+        const cleaned = rangeStr.replace(/\s/g, "");
+        if (cleaned.includes(`${m[1]}-${Math.abs(high)}`)) {
+          high = Math.abs(high);
+        }
+      }
+      refLow = low;
+      refHigh = high;
+    }
+  }
+
+  if (!Number.isNaN(refLow) && !Number.isNaN(refHigh)) {
     min = Math.min(min, refLow);
     max = Math.max(max, refHigh);
   }
 
   const xStep = (W - PAD * 2) / (numericPoints.length - 1);
-  const yFor = (v: number) =>
-    H - PAD - ((v - min) / (max - min || 1)) * (H - PAD * 2);
+  const yFor = (v: number) => H - PAD - ((v - min) / (max - min || 1)) * (H - PAD * 2);
 
   const points = numericPoints.map((v, i) => ({
     x: PAD + i * xStep,
@@ -191,9 +190,7 @@ function Sparkline({ trend }: { trend: LabTrend }) {
     flag: trend.data_points[i]?.flag || "unknown",
   }));
 
-  const path = points
-    .map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`)
-    .join(" ");
+  const path = points.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(" ");
 
   return (
     <svg width={W} height={H} className="shrink-0" role="img" aria-label="Lab trend sparkline">

@@ -1,118 +1,109 @@
-# `retrieval.py` reference
+# MediMind — Retrieval & Q&A Layer
 
-Retrieval-augmented Q&A layer (Phase 1). Imports `client` and `MODEL` from [`medical_extractor.py`](../medical_extractor.py) — chat/Q&A runs on Groq through that shared client, so `GROQ_API_KEY` only needs to be set once. It operates entirely on the already-extracted structured timeline (the dict `build_patient_timeline()` returns) — it never re-reads a PDF/image.
+Phase 1 (single-shot) + Phase 2 (conversations) over structured timelines. Imports `client` + `MODEL` from `medical_extractor.py` — chat runs on Groq shared client. Never re-reads raw PDFs/images; works purely on `build_patient_timeline()` output.
 
-**Embeddings are the one exception:** Groq offers no embeddings API, so this module does NOT use the Groq client for them. Embeddings use OpenAI's `text-embedding-3-small` when `OPENAI_API_KEY` is set, and otherwise fall back to Chroma's built-in local ONNX MiniLM model (`all-MiniLM-L6-v2`) which runs in-process with no API key. The two backends produce different-dimensional vectors — after switching backends, delete `./chroma_db` and re-index.
+**Embeddings:** Groq has no embeddings API. Chain:
+1. OpenAI `text-embedding-3-small` when `OPENAI_API_KEY` set (OpenAI client used only for embeddings).
+2. Fallback: Chroma local ONNX `all-MiniLM-L6-v2` — no key, runs in-process, one-time weight download.
 
-## Install / env
+Different dimensionalities → after switching backend delete `./chroma_db` and re-upload.
 
-```
-pip install chromadb --break-system-packages
-export GROQ_API_KEY="gsk_..."       # same Groq key medical_extractor.py uses (chat/Q&A)
-# export OPENAI_API_KEY="sk-..."    # optional — embeddings only (see above)
-```
+### Constants
 
-Module-level constants:
-- `EMBEDDING_MODEL` — defaults to `"text-embedding-3-small"`, overridable via the `EMBEDDING_MODEL` env var. Only consulted when `OPENAI_API_KEY` is set
-- `CHAT_MODEL = MODEL` — currently just aliases `medical_extractor.MODEL` (Groq, default `"meta-llama/llama-4-scout-17b-16e-instruct"`); change this constant, not `medical_extractor.MODEL`, if the QA model should diverge from the extraction model
-- `CHROMA_DIR = "./chroma_db"` — local persistent Chroma store, relative to wherever the process is run from. **Not currently gitignored** — check before committing if you run this locally, it'll create a `chroma_db/` folder with binary index files.
-- `EMBEDDING_BATCH_SIZE = 100` — chunking safeguard for the embeddings API's per-request item limit
+- `EMBEDDING_MODEL` = `text-embedding-3-small` (env `EMBEDDING_MODEL` override) — only used if OpenAI key present.
+- `CHAT_MODEL = MODEL` — alias to `meta-llama/llama-4-scout-17b-16e-instruct`; change this not extractor's MODEL if Q&A model should diverge.
+- `CHROMA_DIR` = `CHROMA_DIR` env or `./chroma_db` (Railway volume override `/data/chroma_db`). Note: previously not gitignored — now listed.
+- `EMBEDDING_BATCH_SIZE = 100` — safeguards per-request limit.
 
-## Data flow
+### Flow
 
 ```
 build_patient_timeline() dict
-        │
-        ▼
-build_chunks_from_timeline()  →  [{"id", "text", "metadata"}, ...]
-        │
-        ▼
-embed_texts()  →  one vector per chunk (OpenAI text-embedding-3-small, or local ONNX MiniLM)
-        │
-        ▼
-index_patient_timeline()  →  Chroma collection.upsert(), one collection per patient, persisted to ./chroma_db
+  → build_chunks_from_timeline() → [{id, text, metadata}, ...]
+  → embed_texts(texts) → vectors
+  → index_patient_timeline() → Chroma collection.upsert() per anon user_id
+
+question (+ optional chat_history)
+  → effective retrieval query (original or rewritten by conversation.py)
+  → embed_texts([retrieval_query])
+  → collection.query(n_results=min(top_k,count))
+  → context blocks [date | source_file | type]\ntext
+  → chat.completions.create(response_format=ANSWER_RESPONSE_FORMAT)
+  → parsed JSON answer
 ```
 
-```
-question
-        │
-        ▼
-answer_question()
-  1. embed_texts([question])
-  2. collection.query(query_embeddings=..., n_results=top_k)
-  3. build a context string from the returned chunks (cited by date + source_file)
-  4. chat.completions.create(..., response_format=ANSWER_RESPONSE_FORMAT)
-  5. return parsed JSON
-```
+### Chunking
 
-## Chunking
+`build_chunks_from_timeline(patient_key, timeline)`:
 
-`build_chunks_from_timeline(patient_key, timeline) -> List[dict]`
+- Expects `medications_timeline`, `lab_results_timeline`, `visits` for `_source.file` + `clinical_notes`, `known_allergies`.
+- One chunk per:
 
-Reads exactly the shape `build_patient_timeline()` in `medical_extractor.py` produces: `medications_timeline`, `lab_results_timeline`, `visits` (for `clinical_notes` + `_source.file`), `known_allergies`. **If those keys or their per-entry fields change upstream, this function breaks silently** (missing fields just render as "unknown"/"not specified" in chunk text rather than raising) — worth a periodic sanity check if `medical_extractor.py` changes.
-
-Produces one chunk per:
-
-| `chunk_type` | one per... | text helper |
+| Type | Source | Text helper |
 |---|---|---|
-| `medication` | entry in `medications_timeline` | `_medication_chunk_text()` |
-| `lab_result` | entry in `lab_results_timeline` | `_lab_result_chunk_text()` |
-| `clinical_note` | visit with non-null `clinical_notes` | `_clinical_note_chunk_text()` |
-| `allergy` | the whole `known_allergies` list (0 or 1 chunk total) | `_allergy_chunk_text()` |
+| `medication` | each med entry | `_medication_chunk_text()` includes INN + normalized dose/freq + printed dose + date + source |
+| `lab_result` | each lab entry | `_lab_result_chunk_text()` test, value+unit, flag, ref range, date, source |
+| `clinical_note` | visit with non-null notes | `_clinical_note_chunk_text()` date + source + notes |
+| `allergy` | whole list (0/1 chunk) | `_allergy_chunk_text()` |
 
-Each chunk: `{"id": <sha256 hex>, "text": <natural-language string, this is what gets embedded>, "metadata": {"patient_key", "date", "source_file", "chunk_type"}}`. Metadata values are always strings (`""` instead of `None`/missing) because Chroma metadata doesn't accept `None`.
+Chunk: `{id: sha256 hex, text: natural language, metadata: {patient_key, date, source_file, chunk_type}}`. Date/source_file empty string not None (Chroma metadata restriction).
 
-**Chunk IDs are deterministic**, not random: `sha256(f"{patient_key}|{source_file}|{chunk_type}|{index}")`. `index` is the position within that entry's list in the timeline (e.g. the 3rd medication overall gets index `2` regardless of which document it came from). This means:
-- Re-running `index_patient_timeline()` on the same timeline re-embeds and `upsert()`s the same IDs — no duplicates, safe to call on every pipeline run.
-- If the *order* of `medications_timeline`/`lab_results_timeline` changes between runs (e.g. a new document gets inserted earlier chronologically, shifting indices), some IDs will collide with different content and old chunks won't be cleaned up automatically — there's no deletion/reconciliation logic yet. Not a bug per se, just a known Phase-1 limitation: stale/renamed chunks can accumulate if timeline ordering shifts. Worth knowing before treating `./chroma_db` as fully authoritative.
+IDs deterministic: `sha256(f"{patient_key}|{source_file}|{chunk_type}|{index}")`. Index is position in list. So re-index upserts, safe to call each upload. Known limitation: if order shifts due to new doc inserted earlier chronologically, some IDs collide with different content and old chunks not auto-deleted — stale chunks may linger (not a bug, Phase-1 scope).
 
-## Embedding
+### Embeddings
 
-`embed_texts(texts: List[str]) -> List[List[float]]`
+`embed_texts(texts)`:
 
-Two backends, chosen once at import time:
-- **With `OPENAI_API_KEY`**: batches into groups of `EMBEDDING_BATCH_SIZE` and calls the OpenAI embeddings API via a dedicated OpenAI client (never the Groq client).
-- **Without it**: runs Chroma's `ONNXMiniLM_L6_V2` locally (lazily initialised on first call; model weights download once, then everything runs in-process with no API key).
+- Empty → `[]`.
+- OpenAI path batches by `EMBEDDING_BATCH_SIZE`.
+- Raises `RuntimeError` wrapped around `OpenAIError` with batch size context — used both for indexing and question embedding.
 
-Empty input returns `[]` without any call. Raises `RuntimeError` (not the raw `OpenAIError`) on failure, with the batch size in the message — used both for indexing (chunk texts) and for embedding the incoming question in `answer_question()`.
+### Storage
 
-## Storage
+- `_sanitize_collection_name(patient_key)` → `[a-z0-9._-]+`, 3-63 chars, start/end alphanumeric, stable for anon ids like `anon_ab12cd...` → `anon_ab12cd...`.
+- `_get_chroma_client()` → `PersistentClient(path=CHROMA_DIR)` fresh per call (fine for CLI; for server consider caching).
+- `_get_patient_collection(key, create)` — `create=True` → `get_or_create_collection` (indexing); `False` → `get_collection` returns None on miss (querying).
+- `index_patient_timeline(patient_key, timeline)` — validates key, chunks, embeds, upserts. No-op logging if zero chunks.
 
-- `_sanitize_collection_name(patient_key) -> str` — Chroma collection names must be 3-63 chars, `[a-zA-Z0-9._-]` only, start/end alphanumeric. This lowercases, replaces disallowed chars with `_`, and pads/prefixes as needed so any `patient_key` (e.g. `"amit sharma"` → `"amit_sharma"`) maps to a valid, **stable** name — same patient_key always produces the same collection name, which is what makes `create=False` lookups in `answer_question()` work.
-- `_get_chroma_client()` — `chromadb.PersistentClient(path=CHROMA_DIR)`. Called fresh each time rather than cached at module level — fine for CLI/script usage, but if this gets used inside a long-lived server process, consider caching the client instead of reopening it per call.
-- `_get_patient_collection(patient_key, create)` — `create=True` does `get_or_create_collection()` (used by indexing); `create=False` does `get_collection()` and returns `None` on any failure (used by querying — a patient who was never indexed simply isn't found, rather than raising).
+### Q&A entry
 
-`index_patient_timeline(patient_key, timeline) -> None` — the indexing entry point. Chunks → embeds → `collection.upsert()`. Raises `ValueError` for an empty/missing `patient_key`. If chunking produces zero chunks (empty timeline), logs and returns without touching Chroma or the embeddings API.
+`answer_question(patient_key, question, chat_history?, top_k=8, retrieval_query?)`:
 
-## Q&A
+- Validates non-empty key/question.
+- Effective query = `retrieval_query` if provided and non-empty else `question` — allows conversation module to rewrite ambiguous follow-ups while final prompt still shows original question.
+- If no collection or count 0 → returns `_NO_INFO_ANSWER` no API calls.
+- Else embed query, `collection.query(query_embeddings=[...], n_results=min(top_k,count))`, build context blocks tagged with date/source/type, splice optional `chat_history` (list of `{role, content}` passed straight through), final user message `Retrieved patient records:\n\n{context}\n\nQuestion: {question}`.
+- System prompt rules: answer only from retrieved context else "I don't have enough information", never diagnose, force `recommend_professional_consult=true` for risk/interaction/allergy/dosage, cite sources.
+- Strict `ANSWER_RESPONSE_FORMAT` JSON schema: `{answer, confidence, sources[{date, source_file}], recommend_professional_consult}`.
+- Raises `RuntimeError` on chat failure; embedding failures bubble as `RuntimeError`.
 
-`answer_question(patient_key, question, chat_history=None, top_k=8) -> dict`
+### Conversation integration — Phase 2
 
-- Raises `ValueError` if `patient_key` or `question` is empty.
-- If the patient's collection doesn't exist or is empty, returns `_NO_INFO_ANSWER` immediately — **no embedding or chat API call is made**, so asking about an un-indexed patient is free and instant, not just handled gracefully.
-- Otherwise: embeds the question, queries `min(top_k, collection.count())` nearest chunks (so a patient with 3 chunks won't error asking for 8), formats each retrieved chunk into a `[date: ... | source_file: ... | type: ...]` tagged block, and sends that plus optional `chat_history` (a list of `{"role", "content"}` dicts, passed straight through as prior turns) plus the question to the chat model.
-- `QA_SYSTEM_PROMPT` enforces: answer only from retrieved context ("I don't have enough information" otherwise), never diagnose, force `recommend_professional_consult: true` for anything about risk/interactions/dosage changes, and cite `sources`.
-- Response is constrained by `ANSWER_RESPONSE_FORMAT` (OpenAI Structured Outputs, `strict: True`) to exactly `{"answer": str, "confidence": number, "sources": [{"date": str, "source_file": str}], "recommend_professional_consult": bool}` — same pattern as `EXTRACTION_RESPONSE_FORMAT` in `medical_extractor.py`.
-- Raises `RuntimeError` if the chat call itself fails (auth/rate-limit/network) — embedding failures inside this call also surface as `RuntimeError` via `embed_texts()`.
+`conversation.py` wraps this:
 
-## Known Phase-1 limitations (be aware before extending)
+- History window 6 turns, summary after 20 total (keeps safety details).
+- `rewrite_query_with_context()` resolves pronouns, keeps risk framing words (safe/danger/interact/allergy), returns only rewritten query, falls back raw on failure.
+- `ask(session, question)` → history → rewritten → `answer_question(question=original, chat_history=history, retrieval_query=rewritten)` → record user + assistant turn → return result + `rewritten_query` for UI transparency.
 
-- No deletion/reconciliation of stale chunk IDs if a patient's document set changes in a way that shifts list ordering (see chunking section above).
-- No access control on `./chroma_db` — anyone with filesystem access to that directory can read any patient's indexed chunk text directly (it's stored as plaintext `documents` alongside the vectors).
-- Retrieval is over structured fields only — raw document text/pages are not indexed, so questions about things not captured by the extraction schema (formatting, marginal handwritten notes, etc.) will correctly come back as "I don't have enough information."
-- `chat_history` is trusted as-is and inserted directly into the message list — if this is ever exposed to an untrusted caller (e.g. a web API), validate/sanitize `chat_history` contents before passing them through, since they sit alongside the system prompt in the same conversation.
+### Security notes
 
-## Quick usage
+- `./chroma_db` plaintext chunk texts readable by filesystem.
+- Retrieval only structured fields, not raw page formatting.
+- `chat_history` trusted as-is — sanitize if exposed to untrusted callers (it sits beside system prompt).
+
+### Usage snippet
 
 ```python
 from medical_extractor import build_patient_timeline
 from retrieval import index_patient_timeline, answer_question
 
-timeline = build_patient_timeline(docs)          # docs = one patient's extracted documents
-index_patient_timeline("amit sharma", timeline)  # embeds + upserts into ./chroma_db
+timeline = build_patient_timeline(docs)  # docs from process_document
+index_patient_timeline("anon_ab12cd34ef56", timeline)
 
-result = answer_question("amit sharma", "What was I prescribed for headaches?")
-# {"answer": "...", "confidence": 0.85, "sources": [...], "recommend_professional_consult": False}
+res = answer_question("anon_ab12cd34ef56", "What was I prescribed for sinus infection?")
+# {"answer": "...", "confidence": 0.9, "sources": [...], "recommend_professional_consult": False}
 ```
 
-Also wired into `medical_extractor.py`'s `__main__` — see [medical_extractor.md](medical_extractor.md#7-main--cli-flow) for the `--chat` CLI flow.
+Used by CLI `--chat` and API `/qa` + `/sessions/.../messages`.
+
+For anonymous MediMind workspace, `patient_key` is `user_id` from `POST /anonymous/session` → stored in `localStorage.medimind.session.v1` → isolation via Supabase + Chroma + Cloudinary.
