@@ -24,7 +24,7 @@ export function LandingPage() {
           </div>
           <div>
             <p className="text-lg font-bold leading-tight text-slate-900">MediMind</p>
-            <p className="text-xs text-slate-500">Medical Records Intelligence</p>
+            <p className="text-xs text-slate-500">Your health, in one place</p>
           </div>
         </div>
         {isConfigured && (
@@ -42,7 +42,7 @@ export function LandingPage() {
           <div className="space-y-8">
             <div className="inline-flex items-center gap-2 rounded-full border border-brand-200 bg-brand-50 px-3 py-1 text-xs font-medium text-brand-700">
               <span className="h-2 w-2 animate-pulse rounded-full bg-brand-600" />
-              Zero-login • Private anonymous workspace
+              No sign-up • Private — lives in this browser
             </div>
 
             <div className="space-y-4">
@@ -50,9 +50,9 @@ export function LandingPage() {
                 Understand your medical documents in one place.
               </h1>
               <p className="max-w-xl text-lg leading-relaxed text-slate-600">
-                Upload prescriptions, lab reports, and discharge summaries. MediMind extracts structured data,
-                builds a timeline, runs safety checks, and lets you ask grounded questions — all inside a private
-                anonymous session stored only in this browser.
+                Upload prescriptions, lab reports, and discharge summaries. MediMind finds the medicines,
+                test results, and allergies inside, builds your personal health history, watches for safety
+                issues, and answers your questions — all private to this browser.
               </p>
             </div>
 
@@ -65,8 +65,8 @@ export function LandingPage() {
               ) : initError ? (
                 <div className="space-y-3">
                   <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
-                    Could not create workspace: {initError}. Check that the backend is running at{" "}
-                    <code className="rounded bg-red-100 px-1">/api</code>.
+                    We couldn't set up your workspace: {initError}. Please check your connection and try
+                    again.
                   </div>
                   <button
                     onClick={() => void createNewWorkspace()}
@@ -94,17 +94,17 @@ export function LandingPage() {
               <Feature
                 icon={<UploadIcon className="h-5 w-5" />}
                 title="Upload reports"
-                desc="PDF, JPG, PNG, WebP — text or scanned"
+                desc="PDF, JPG, PNG, WebP — printed or scanned"
               />
               <Feature
                 icon={<PillIcon className="h-5 w-5" />}
-                title="View timeline"
-                desc="Meds, labs, visits merged chronologically"
+                title="See your history"
+                desc="Medicines, labs and visits in date order"
               />
               <Feature
                 icon={<SparkleIcon className="h-5 w-5" />}
                 title="Ask questions"
-                desc="RAG answers with citations to source pages"
+                desc="Answers from your own documents, with sources"
               />
             </div>
           </div>
@@ -120,21 +120,12 @@ export function LandingPage() {
               </div>
 
               <div className="mt-5 space-y-3">
-                <Step done label="Create Anonymous Session" sub="session_id stored in localStorage" />
-                <Step done label="Generate workspace" sub="JWT issued by backend /anonymous/session" />
-                <Step active label="Upload Medical Documents" sub="Prescriptions • Lab reports • Discharge summary" />
-                <Step label="Process Documents" sub="OCR → Clinical extraction → Safety → RAG indexing" />
-                <Step label="Build Patient Record" />
-                <Step label="Timeline / Medicines / Safety / Ask" />
-              </div>
-
-              <div className="mt-6 rounded-xl bg-slate-50 p-4">
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Flow</p>
-                <div className="mt-2 font-mono text-xs leading-relaxed text-slate-600">
-                  Frontend → Anonymous Session → Dashboard
-                  <br />→ Upload → FastAPI → Clinical Pipeline (OCR, Extract, Safety) → Patient Record
-                  <br />→ History, Medicine, Labs, Safety, Chat
-                </div>
+                <Step done label="Open MediMind" sub="Nothing to install, nothing to sign up for" />
+                <Step done label="Your private workspace is ready" sub="Created automatically, only in this browser" />
+                <Step active label="Upload medical documents" sub="Prescriptions • Lab reports • Discharge summaries" />
+                <Step label="We read them for you" sub="Medicines, lab results, allergies, safety alerts" />
+                <Step label="Your health record comes together" />
+                <Step label="Browse history, track trends, ask questions" />
               </div>
             </div>
 
@@ -163,7 +154,7 @@ export function LandingPage() {
           <Pillar
             icon={<ChartIcon className="h-5 w-5" />}
             title="Ask"
-            items={["Grounded in your docs", "Citations", "Multi-turn conversations"]}
+            items={["Answers from your records", "Source file & page cited", "Follow-up questions"]}
           />
         </div>
       </main>

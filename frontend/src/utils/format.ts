@@ -85,6 +85,29 @@ export function classNames(...parts: Array<string | false | null | undefined>): 
   return parts.filter(Boolean).join(" ");
 }
 
+// Relative recency for lists, e.g. "Yesterday", "3 days ago", "Last week".
+// Falls back to formatDate for anything older than a month or unparseable.
+export function relativeTime(date: string | null | undefined): string {
+  if (!date) return "—";
+  const trimmed = date.trim();
+  if (!trimmed) return "—";
+  const d = new Date(trimmed);
+  if (Number.isNaN(d.getTime())) return trimmed;
+  const days = Math.floor((Date.now() - d.getTime()) / 86_400_000);
+  if (days <= 0) return "Today";
+  if (days === 1) return "Yesterday";
+  if (days < 7) return `${days} days ago`;
+  if (days < 14) return "Last week";
+  if (days < 31) return `${Math.floor(days / 7)} weeks ago`;
+  return formatDate(trimmed);
+}
+
+// Human file size: "1.2 MB", "340 KB".
+export function fileSizeLabel(bytes: number): string {
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
 // Human-readable label for the backend's document_type enum.
 export function documentTypeLabel(type: string): string {
   switch (type) {

@@ -88,16 +88,16 @@ export function MedicinesPage() {
               <PillIcon className="h-5 w-5" />
             </div>
             <div>
-              <p className="text-sm font-semibold text-slate-900">My Medicines</p>
+              <p className="text-sm font-semibold text-slate-900">Medications</p>
               <p className="text-xs text-slate-500">
-                Derived from all processed documents. Traceable to source file • page.
+                Found in your uploaded documents — every entry links back to its source.
               </p>
             </div>
           </div>
           <input
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
-            placeholder="Filter by name, ingredient, source file…"
+            placeholder="Search by medicine or ingredient…"
             className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm shadow-sm placeholder:text-slate-400 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 sm:w-72"
           />
         </CardBody>
@@ -126,7 +126,7 @@ export function MedicinesPage() {
         </Card>
       ) : (
         <div className="space-y-6">
-          <Section title="Current (most recent per active ingredient)">
+          <Section title="Current medicines">
             <div className="grid gap-3 sm:grid-cols-2">
               {sortedIngredients.map(([ingredient, entries]) => {
                 const mostRecent = entries.reduce((latest, cur) => {
@@ -152,7 +152,7 @@ export function MedicinesPage() {
                       </p>
                       {(mostRecent.dosage_value != null || mostRecent.frequency_per_day != null) && (
                         <p className="text-[11px] text-slate-400">
-                          normalized:{" "}
+                          Standard dose:{" "}
                           {mostRecent.dosage_value != null && mostRecent.dosage_unit
                             ? `${mostRecent.dosage_value} ${mostRecent.dosage_unit}`
                             : "—"}
@@ -186,7 +186,7 @@ export function MedicinesPage() {
             </div>
           </Section>
 
-          <Section title="Historical log (all entries)">
+          <Section title="Full history">
             <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
               <table className="min-w-full text-sm">
                 <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
@@ -227,9 +227,11 @@ export function MedicinesPage() {
 function Header({ count }: { count: number | null }) {
   return (
     <div>
-      <h1 className="text-2xl font-bold text-slate-900">My Medicines</h1>
-      <p className="mt-1 text-sm text-slate-500">
-        {count != null ? `${count} medication entries across all documents. Click any entry to see its source.` : "Loading medicines…"}
+      <h1 className="page-title">Medications</h1>
+      <p className="secondary-text mt-2">
+        {count != null
+          ? `${count} entries found across your documents. Click any medicine to see where it came from.`
+          : "Loading your medicines…"}
       </p>
     </div>
   );
@@ -238,7 +240,7 @@ function Header({ count }: { count: number | null }) {
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div>
-      <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">{title}</h2>
+      <h2 className="section-title mb-3">{title}</h2>
       {children}
     </div>
   );

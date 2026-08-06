@@ -40,17 +40,13 @@ export function DocumentsPage() {
     <div className="space-y-6">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">My Documents</h1>
-          <p className="mt-1 text-sm text-slate-500">
-            All uploaded medical documents. Original + structured extraction. Each file traceable via{" "}
-            <code className="rounded bg-slate-100 px-1">document_url</code> stored in Cloudinary.
+          <h1 className="page-title">Medical Records</h1>
+          <p className="secondary-text mt-2">
+            Every document you've uploaded — and what we found inside each one.
           </p>
         </div>
-        <Link
-          to="/upload"
-          className="inline-flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700"
-        >
-          <UploadIcon className="h-4 w-4" /> Upload
+        <Link to="/upload" className="btn-primary">
+          <UploadIcon className="h-5 w-5" /> Upload
         </Link>
       </div>
 
@@ -84,7 +80,7 @@ export function DocumentsPage() {
                   <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                     {timeline.visits.length} document(s)
                   </p>
-                  <p className="text-xs text-slate-400">Click to view structured + original</p>
+                  <p className="text-xs text-slate-400">Click a file to view it</p>
                 </div>
 
                 <div className="space-y-2">
@@ -107,7 +103,7 @@ export function DocumentsPage() {
                               <p className="truncate text-sm font-semibold text-slate-900">{visit._source.file}</p>
                               <p className="flex items-center gap-1.5 text-xs text-slate-500">
                                 <StatusBadge tone="brand">{documentTypeLabel(visit.document_type)}</StatusBadge>
-                                {formatDate(visit.date)} • {visit._source.method === "text_layer" ? "digital text" : "vision OCR"}
+                                {formatDate(visit.date)} • {visit._source.method === "text_layer" ? "Digital PDF" : "Scanned or photo"}
                               </p>
                             </div>
                           </div>
@@ -151,10 +147,9 @@ export function DocumentsPage() {
                 ) : (
                   <Card>
                     <CardBody className="py-16 text-center">
-                      <p className="text-sm font-medium text-slate-700">Select a document</p>
-                      <p className="mx-auto mt-1 max-w-sm text-xs text-slate-500">
-                        Choose a file on the left to see its original (Cloudinary) and structured extraction side-by-side
-                        with traceability to medication, lab, and visit sections.
+                      <p className="text-base font-medium text-slate-700">Select a document</p>
+                      <p className="secondary-text mx-auto mt-1 max-w-sm">
+                        Choose a file on the left to see the original and everything we found inside it.
                       </p>
                     </CardBody>
                   </Card>

@@ -9,7 +9,6 @@ import {
   PillIcon,
   SettingsIcon,
   ShieldIcon,
-  SparkleIcon,
   TimelineIcon,
   UploadIcon,
 } from "./icons";
@@ -18,21 +17,19 @@ interface NavItem {
   to: string;
   label: string;
   icon: (p: { className?: string }) => ReactNode;
-  description: string;
-  badge?: string;
+  // Soft background tint for the icon chip — keeps the nav calm but alive.
+  chip: string;
 }
 
 const NAV: NavItem[] = [
-  { to: "/dashboard", label: "Overview", icon: TimelineIcon, description: "Patient workspace" },
-  { to: "/upload", label: "Upload", icon: UploadIcon, description: "Add documents" },
-  { to: "/documents", label: "My Documents", icon: FileIcon, description: "PDFs & images" },
-  { to: "/history", label: "My History", icon: TimelineIcon, description: "Chronological" },
-  { to: "/medicines", label: "My Medicines", icon: PillIcon, description: "Traceable meds" },
-  { to: "/labs", label: "Test Results", icon: BeakerIcon, description: "Labs + trends" },
-  { to: "/safety", label: "Safety", icon: ShieldIcon, description: "Warnings" },
-  { to: "/ask", label: "Ask", icon: ChatIcon, description: "Grounded Q&A" },
-  { to: "/conversations", label: "Conversations", icon: SparkleIcon, description: "Multi-turn" },
-  { to: "/settings", label: "Workspace", icon: SettingsIcon, description: "Session & API" },
+  { to: "/dashboard", label: "Dashboard", icon: TimelineIcon, chip: "bg-brand-50 text-brand-600" },
+  { to: "/documents", label: "Medical Records", icon: FileIcon, chip: "bg-sky-50 text-sky-600" },
+  { to: "/medicines", label: "Medications", icon: PillIcon, chip: "bg-emerald-50 text-emerald-600" },
+  { to: "/labs", label: "Lab Results", icon: BeakerIcon, chip: "bg-violet-50 text-violet-600" },
+  { to: "/history", label: "Timeline", icon: TimelineIcon, chip: "bg-sky-50 text-sky-600" },
+  { to: "/safety", label: "Safety Alerts", icon: ShieldIcon, chip: "bg-amber-50 text-amber-600" },
+  { to: "/ask", label: "Ask AI", icon: ChatIcon, chip: "bg-brand-50 text-brand-600" },
+  { to: "/settings", label: "Settings", icon: SettingsIcon, chip: "bg-slate-100 text-slate-500" },
 ];
 
 export function Layout() {
@@ -45,16 +42,14 @@ export function Layout() {
       {/* Mobile header */}
       <div className="flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3 lg:hidden">
         <div className="flex items-center gap-2">
-          <Logo />
-          <span className="font-semibold text-slate-900">MediMind</span>
-          <span className="ml-2 rounded-full bg-brand-50 px-2 py-0.5 text-[10px] font-medium text-brand-700 ring-1 ring-brand-200">
-            anonymous
-          </span>
+          <Logo small />
+          <span className="text-lg font-bold text-slate-900">MediMind</span>
         </div>
         <button
           onClick={() => setSidebarOpen((v) => !v)}
-          className="rounded-md p-2 text-slate-600 hover:bg-slate-100"
-          aria-label="Toggle navigation"
+          className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg text-slate-600 hover:bg-slate-100"
+          aria-label="Toggle navigation menu"
+          aria-expanded={sidebarOpen}
         >
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-6 w-6">
             <line x1="3" y1="6" x2="21" y2="6" />
@@ -70,32 +65,31 @@ export function Layout() {
           "fixed inset-y-0 left-0 z-30 w-72 transform border-r border-slate-200 bg-white transition-transform lg:static lg:translate-x-0",
           sidebarOpen ? "translate-x-0" : "-translate-x-full"
         )}
+        aria-label="Main navigation"
       >
         <div className="flex h-full flex-col">
-          <div className="flex items-center gap-3 border-b border-slate-100 px-6 py-5">
+          <div className="flex items-center gap-3 px-6 pb-5 pt-6">
             <Logo />
             <div className="min-w-0 flex-1">
-              <p className="flex items-center gap-2 text-lg font-bold leading-tight text-slate-900">
-                MediMind
-                <span className="rounded-full bg-slate-900 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wider text-white">
-                  beta
-                </span>
-              </p>
-              <p className="truncate text-xs text-slate-500">Understand your medical docs</p>
+              <p className="text-lg font-bold leading-tight text-slate-900">MediMind</p>
+              <p className="truncate text-sm text-slate-500">Your health, in one place</p>
             </div>
           </div>
 
-          <div className="px-3 py-3">
-            <div className="rounded-xl bg-gradient-to-br from-brand-600 to-brand-800 p-4 text-white shadow-sm">
-              <p className="text-xs font-medium uppercase tracking-wide text-brand-100">Anonymous workspace</p>
-              <p className="mt-1 text-sm font-semibold">No login required</p>
-              <p className="mt-1 text-xs leading-relaxed text-brand-100/90">
-                Session stored only in this browser. Clear anytime.
-              </p>
+          {isConfigured && (
+            <div className="px-4 pb-3">
+              <NavLink
+                to="/upload"
+                onClick={() => setSidebarOpen(false)}
+                className="btn-primary w-full"
+              >
+                <UploadIcon className="h-5 w-5" />
+                Upload Document
+              </NavLink>
             </div>
-          </div>
+          )}
 
-          <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-1 scroll-thin">
+          <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-2 scroll-thin">
             {NAV.map((item) => {
               const Icon = item.icon;
               const isSettings = item.to === "/settings";
@@ -111,28 +105,31 @@ export function Layout() {
                     }
                     setSidebarOpen(false);
                   }}
+                  aria-disabled={disabled}
                   className={({ isActive }) =>
                     classNames(
-                      "group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition",
+                      "group flex min-h-[48px] items-center gap-3 rounded-xl px-3 py-2.5 text-base transition",
                       disabled
                         ? "pointer-events-none cursor-not-allowed text-slate-300"
                         : isActive
-                        ? "bg-brand-50 font-semibold text-brand-700 ring-1 ring-brand-100"
+                        ? "bg-brand-50 font-semibold text-brand-700"
                         : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
                     )
                   }
                 >
-                  <Icon className="h-5 w-5 shrink-0" />
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate">{item.label}</p>
-                    <p className="truncate text-xs text-slate-400 group-hover:text-slate-500">
-                      {item.description}
-                    </p>
-                  </div>
-                  {item.badge && (
-                    <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-700">
-                      {item.badge}
-                    </span>
+                  {({ isActive }) => (
+                    <>
+                      <span
+                        className={classNames(
+                          "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition",
+                          item.chip,
+                          !isActive && "opacity-80 group-hover:opacity-100"
+                        )}
+                      >
+                        <Icon className="h-[18px] w-[18px]" />
+                      </span>
+                      <span className="truncate">{item.label}</span>
+                    </>
                   )}
                 </NavLink>
               );
@@ -141,37 +138,30 @@ export function Layout() {
 
           {isConfigured && (
             <div className="border-t border-slate-100 p-4">
-              <div className="rounded-xl bg-slate-50 px-3 py-3">
-                <p className="text-[10px] font-medium uppercase tracking-wide text-slate-400">
-                  Workspace ID
+              <div className="rounded-xl bg-brand-50 p-4 ring-1 ring-brand-100">
+                <p className="text-sm font-semibold text-brand-900">Private — no account needed</p>
+                <p className="mt-1 text-xs leading-relaxed text-brand-800/80">
+                  Your records are tied to this browser only. Nothing to sign up for.
                 </p>
-                <p className="mt-1 truncate font-mono text-xs font-medium text-slate-700" title={credentials.userId}>
-                  {credentials.userId}
-                </p>
-                <div className="mt-2 flex gap-2">
-                  <button
-                    onClick={() => void createNewWorkspace()}
-                    className="rounded-md bg-slate-900 px-2.5 py-1 text-xs font-medium text-white hover:bg-slate-800"
-                  >
-                    New workspace
-                  </button>
-                  <button
-                    onClick={() => {
-                      clearCredentials();
-                      navigate("/");
-                    }}
-                    className="rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50"
-                  >
-                    Reset
-                  </button>
-                </div>
               </div>
-              <button
-                onClick={() => navigate("/")}
-                className="mt-3 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50"
-              >
-                ← Landing page
-              </button>
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <button
+                  onClick={() => void createNewWorkspace()}
+                  className="flex min-h-[44px] items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
+                  title={`Start a fresh workspace (current: ${credentials.userId})`}
+                >
+                  New workspace
+                </button>
+                <button
+                  onClick={() => {
+                    clearCredentials();
+                    navigate("/");
+                  }}
+                  className="flex min-h-[44px] items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
+                >
+                  Reset data
+                </button>
+              </div>
             </div>
           )}
         </div>
@@ -181,6 +171,7 @@ export function Layout() {
         <div
           className="fixed inset-0 z-20 bg-slate-900/30 lg:hidden"
           onClick={() => setSidebarOpen(false)}
+          aria-hidden="true"
         />
       )}
 
@@ -194,10 +185,15 @@ export function Layout() {
   );
 }
 
-function Logo() {
+function Logo({ small }: { small?: boolean }) {
   return (
-    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-600 text-white shadow-sm">
-      <span className="text-[18px] font-black tracking-tight">M</span>
+    <div
+      className={classNames(
+        "flex items-center justify-center rounded-xl bg-brand-600 text-white shadow-sm",
+        small ? "h-8 w-8" : "h-10 w-10"
+      )}
+    >
+      <span className={classNames("font-black tracking-tight", small ? "text-sm" : "text-[18px]")}>M</span>
     </div>
   );
 }
