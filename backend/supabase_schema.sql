@@ -35,6 +35,12 @@ create table if not exists public.patient_snapshots (
 );
 
 -- Deny all access through the anon/authenticated keys; only the
--- service-role key (used by the backend) can reach these tables.
+-- service-role key (used by the backend) can reach these tables. Explicit
+-- grants are needed because tables created in the SQL editor are owned by
+-- postgres and service_role may not otherwise have table privileges.
+grant select, insert, update, delete on table public.documents to service_role;
+grant select, insert, update, delete on table public.patient_snapshots to service_role;
+grant usage, select on sequence public.documents_id_seq to service_role;
+
 alter table public.documents enable row level security;
 alter table public.patient_snapshots enable row level security;
