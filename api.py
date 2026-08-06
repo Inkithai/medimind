@@ -15,18 +15,19 @@ There is one patient per user — user_id from the verified token IS the
 patient key used throughout the pipeline, so every read/write is naturally
 scoped to the caller. Uploaded files are archived to Cloudinary
 (storage.py) and their structured extraction + document_url is persisted
-in MongoDB (db.py), keyed by user_id.
+in Supabase Postgres (db.py), keyed by user_id.
 
 Run:
     uvicorn api:app --reload
     # then see interactive docs at http://127.0.0.1:8000/docs
 
 Install (in addition to Phase 1/2 dependencies):
-    pip install fastapi uvicorn[standard] python-multipart pymongo cloudinary pyjwt
+    pip install fastapi uvicorn[standard] python-multipart supabase cloudinary pyjwt
 
 Env:
-    XAI_API_KEY, MONGODB_URI, CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY,
-    CLOUDINARY_API_SECRET, JWT_SECRET
+    XAI_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
+    CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET,
+    JWT_SECRET
     (optional: OPENAI_API_KEY — used only for embeddings, since xAI has no
     embeddings API; without it, embeddings run locally via Chroma's ONNX
     MiniLM model)
@@ -105,7 +106,7 @@ async def upload_documents(
         raise HTTPException(400, "No files were uploaded.")
 
     # Pass 1: extract + validate every file/page first. Nothing is uploaded
-    # to Cloudinary or written to Mongo until the whole batch passes, so a
+    # to Cloudinary or written to Supabase until the whole batch passes, so a
     # bad file later in the batch never leaves an orphaned upload behind
     # for a good file earlier in it.
     per_file_pages: List[Tuple[Path, str, List[Dict[str, Any]]]] = []

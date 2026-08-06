@@ -1,57 +1,71 @@
 """
-MongoDB persistence (Phase 4)
+Supabase (Postgres) persistence (Phase 4)
 =========================================
 Replaces the local patient_docs_*.json / patient_report_*.json files used
 by the CLI (see medical_extractor.py) with per-user, access-controlled
-storage in MongoDB, for the HTTP API only. Every read/write is scoped by
-user_id — there is no query in this module that can return another user's
-data.
+storage in Supabase Postgres, for the HTTP API only. Every read/write is
+scoped by user_id — there is no query in this module that can return
+another user's data.
 
-Two collections (database name comes from MONGODB_URI, same "mediscan" DB
-the existing `users` collection already lives in):
+All access is server-side through the Supabase REST API (supabase-py)
+using the project's service-role key, which bypasses RLS. RLS is enabled
+on both tables with NO policies, so the browser-facing anon key can read
+or write nothing — only this backend (holding the service-role key) can
+touch the data.
 
-    documents          one record per extracted page/file, includes the
+Two tables — create them once by running `supabase_schema.sql` in the
+Supabase SQL editor (Dashboard -> SQL Editor):
+
+    documents           one row per extracted page/file, includes the
                         Cloudinary document_url — no raw file bytes, no
-                        OpenAI request/response payloads, no access tokens.
-    patient_snapshots   one record per user: the last-built patient_timeline
-                        + cross_check_report + lab_trends (mirrors what the
-                        CLI writes to patient_report_<name>.json).
+                        LLM request/response payloads, no access tokens.
+    patient_snapshots   one row per user: the last-built patient_timeline
+                        + cross_check_report + lab_trends (mirrors what
+                        the CLI writes to patient_report_<name>.json).
 
 Env:
-    MONGODB_URI   connection string (database name taken from its path)
+    SUPABASE_URL                e.g. https://abcdefgh.supabase.co
+    SUPABASE_SERVICE_ROLE_KEY   Settings -> API -> service_role (secret)
 """
 
 import os
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from pymongo import MongoClient
-from pymongo.collection import Collection
+from supabase import Client, create_client
 
-_client: Optional[MongoClient] = None
+_client: Optional[Client] = None
 
 
-def _get_db():
+def _get_client() -> Client:
     global _client
     if _client is None:
-        _client = MongoClient(os.environ["MONGODB_URI"])
-    return _client.get_default_database()
+        url = os.environ.get("SUPABASE_URL")
+        key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ.get("SUPABASE_ANON_KEY")
+        if not url or not key:
+            raise RuntimeError(
+                "SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set — "
+                "copy .env.example to .env and add your Supabase project "
+                "URL and service-role key (Dashboard -> Settings -> API)."
+            )
+        _client = create_client(url, key)
+    return _client
 
 
-def _documents() -> Collection:
-    return _get_db()["documents"]
+def _documents():
+    return _get_client().table("documents")
 
 
-def _snapshots() -> Collection:
-    return _get_db()["patient_snapshots"]
+def _snapshots():
+    return _get_client().table("patient_snapshots")
 
 
 def ensure_indexes() -> None:
-    """Called once at API startup. user_id is the access-control boundary
-    for both collections, so both are indexed on it; patient_snapshots is
-    additionally unique per user_id since it's a single materialized view."""
-    _documents().create_index("user_id")
-    _snapshots().create_index("user_id", unique=True)
+    """Called once at API startup. Kept for compatibility with the old
+    MongoDB version — with Supabase the schema (tables, indexes, RLS) is
+    created once via `supabase_schema.sql` in the SQL editor, so this is
+    a no-op. `user_id` is indexed on documents and is the primary key of
+    patient_snapshots, which is the access-control boundary for both."""
 
 
 def _now_iso() -> str:
@@ -61,9 +75,21 @@ def _now_iso() -> str:
 def load_documents(user_id: str) -> List[Dict[str, Any]]:
     """Loads every previously-saved document for this user, oldest first —
     used to merge with newly-uploaded documents before rebuilding the
-    timeline. Returns [] if this user has never uploaded anything."""
-    cursor = _documents().find({"user_id": user_id}, {"_id": 0}).sort("uploaded_at", 1)
-    return list(cursor)
+    timeline. Returns [] if this user has never uploaded anything. The
+    extracted document body lives in the `data` JSONB column; user_id and
+    uploaded_at are merged back in so callers see the same flat shape the
+    old MongoDB records had."""
+    response = (
+        _documents()
+        .select("user_id, uploaded_at, data")
+        .eq("user_id", user_id)
+        .order("uploaded_at")
+        .execute()
+    )
+    return [
+        {**row["data"], "user_id": row["user_id"], "uploaded_at": row["uploaded_at"]}
+        for row in (response.data or [])
+    ]
 
 
 def insert_documents(user_id: str, docs: List[Dict[str, Any]]) -> None:
@@ -73,14 +99,29 @@ def insert_documents(user_id: str, docs: List[Dict[str, Any]]) -> None:
     if not docs:
         return
     now = _now_iso()
-    records = [{**d, "user_id": user_id, "uploaded_at": now} for d in docs]
-    _documents().insert_many(records)
+    rows = [{"user_id": user_id, "uploaded_at": now, "data": doc} for doc in docs]
+    _documents().insert(rows).execute()
 
 
 def load_patient_snapshot(user_id: str) -> Optional[Dict[str, Any]]:
     """Loads the {"patient_timeline", "cross_check_report"} snapshot last
     saved for this user, or None if they've never been processed."""
-    return _snapshots().find_one({"user_id": user_id}, {"_id": 0})
+    response = (
+        _snapshots()
+        .select("user_id, patient_timeline, cross_check_report, lab_trends, updated_at")
+        .eq("user_id", user_id)
+        .limit(1)
+        .execute()
+    )
+    rows = response.data or []
+    if not rows:
+        return None
+    snapshot = rows[0]
+    # Match the old MongoDB shape: drop lab_trends when it was never saved,
+    # so callers' `"lab_trends" in snapshot` checks behave the same way.
+    if snapshot.get("lab_trends") is None:
+        snapshot.pop("lab_trends", None)
+    return snapshot
 
 
 def save_patient_snapshot(
@@ -99,4 +140,4 @@ def save_patient_snapshot(
     }
     if lab_trends is not None:
         fields["lab_trends"] = lab_trends
-    _snapshots().update_one({"user_id": user_id}, {"$set": fields}, upsert=True)
+    _snapshots().upsert(fields, on_conflict="user_id").execute()

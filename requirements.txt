@@ -8,6 +8,6 @@ python-dateutil
 fastapi
 uvicorn[standard]
 python-multipart
-pymongo
+supabase
 cloudinary
 pyjwt
