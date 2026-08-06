@@ -184,11 +184,37 @@ async def upload_documents(
                     user_id, original_name, e.reason,
                 )
                 raise HTTPException(422, str(e))
+            except RuntimeError as e:
+                # ML pipeline failure — model repeatedly failed to return valid JSON, rate-limit exhaustion, etc.
+                # Surface as 502 so frontend shows "Something went wrong while processing" with retry, and logs include full trace.
+                logger.error(
+                    "upload_documents: user=%s processing failed for '%s': %s",
+                    user_id, original_name, e, exc_info=True,
+                )
+                raise HTTPException(502, f"Processing failed for '{original_name}': {e}. Please retry — this is usually transient. If it keeps happening, try a clearer photo or higher-resolution scan.")
+            except ValueError as e:
+                # Fallback for JSON-parse ValueError that escaped the resilient runner (very rare now)
+                msg = str(e)
+                if "could not be parsed as JSON" in msg or "model returned" in msg:
+                    logger.error(
+                        "upload_documents: user=%s extraction parse failed for '%s': %s",
+                        user_id, original_name, e, exc_info=True,
+                    )
+                    raise HTTPException(502, f"Extraction failed for '{original_name}': {e}. The AI had trouble reading this file — please retry or try a clearer image.")
+                logger.error(
+                    "upload_documents: user=%s extraction failed for '%s': %s",
+                    user_id, original_name, e, exc_info=True,
+                )
+                raise HTTPException(422, f"Extraction failed for '{original_name}': {e}")
             except Exception as e:
                 logger.error(
                     "upload_documents: user=%s extraction failed for '%s': %s",
                     user_id, original_name, e, exc_info=True,
                 )
+                # Heuristic: JSON / model errors are 502 (transient), everything else 422
+                msg = str(e).lower()
+                if "could not be parsed" in msg or "model output" in msg or "json_validate_failed" in msg or "model" in msg and "repeatedly failed" in msg:
+                    raise HTTPException(502, f"Processing failed for '{original_name}': {e}. Please retry.")
                 raise HTTPException(422, f"Extraction failed for '{original_name}': {e}")
 
             if isinstance(result, dict) and result.get("multi_page"):
@@ -250,8 +276,17 @@ async def upload_documents(
         user_id, len(new_docs), len(all_docs),
     )
 
-    timeline = build_patient_timeline(all_docs)
-    cross_check = cross_check_prescriptions(timeline)
+    try:
+        timeline = build_patient_timeline(all_docs)
+        cross_check = cross_check_prescriptions(timeline)
+    except NonMedicalDocumentError as e:
+        raise HTTPException(422, str(e))
+    except RuntimeError as e:
+        logger.error("upload_documents: user=%s cross-check failed: %s", user_id, e, exc_info=True)
+        raise HTTPException(502, f"Cross-check failed: {e}. Please retry.")
+    except Exception as e:
+        logger.error("upload_documents: user=%s cross-check failed: %s", user_id, e, exc_info=True)
+        raise HTTPException(502, f"Cross-check failed: {e}")
     issue_count = sum(len(v) for v in cross_check.values() if isinstance(v, list))
     logger.info(
         "upload_documents: user=%s timeline rebuilt, cross-check found %d issue(s)",

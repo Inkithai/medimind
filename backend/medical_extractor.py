@@ -37,8 +37,11 @@ from openai import (
     APIConnectionError,
 )
 from dotenv import load_dotenv
+import logging
 
 load_dotenv()
+
+logger = logging.getLogger("medical_extractor")
 
 # Groq — Groq's API is OpenAI-compatible, so we reuse the OpenAI SDK
 # pointed at https://api.groq.com/openai/v1. Free key (no credit card):
@@ -187,15 +190,18 @@ def _format_ladder(
     """
     schema = strict_format["json_schema"]["schema"]
     schema_suffix = (
-        "\n\nCRITICAL OUTPUT RULES — you MUST follow every single one:\n"
-        "1. Output **ONLY** a single valid JSON object as the entire response.\n"
-        "2. The very first character you emit must be '{' and the very last must be '}'.\n"
-        "3. No markdown, no ```json fences, no commentary, no preamble, no apologies.\n"
-        "4. **ABSOLUTELY NO** <think>, </think>, reasoning, chain-of-thought, explanations, "
-        "step-by-step, or any other text before, inside, or after the JSON.\n"
-        "   If your model normally uses <think> tags, suppress them completely for this task.\n"
-        "5. Conform EXACTLY to this JSON Schema:\n"
+        "\n\nCRITICAL OUTPUT RULES — you MUST follow every single one — VIOLATION WILL CAUSE SYSTEM FAILURE:\n"
+        "1. Output **ONLY** a single valid JSON object as the entire response — no other text, ever.\n"
+        "2. The VERY FIRST character you emit must be '{' and the VERY LAST must be '}'.\n"
+        "3. No markdown, no ``` or ```json fences, no bullet points, no analysis, no preamble, no apologies, no explanations.\n"
+        "4. **ABSOLUTELY NO** <think>, </think>, <thought>, <reasoning>, or any reasoning/chain-of-thought tags or hidden thinking. "
+        "Your internal reasoning MUST remain hidden and MUST NOT appear in the output. "
+        "Do NOT output any step-by-step, do NOT describe the document structure, do NOT say 'The user wants...'.\n"
+        "5. Do NOT prefix with 'Here is the JSON:' or similar — start immediately with '{'.\n"
+        "6. Conform EXACTLY to this JSON Schema (all required fields present, no extra fields):\n"
         f"{json.dumps(schema, indent=2)}\n"
+        "Example of the required shape (illustrative values, adapt to the actual document):\n"
+        '{\n  "document_type": "prescription",\n  "date": "2024-03-15",\n  "provider_or_doctor": "Dr. Smith",\n  "patient_name": "John Doe",\n  "medications": [],\n  "lab_results": [],\n  "allergies_noted": [],\n  "clinical_notes": null,\n  "illegible_or_low_confidence_fields": [],\n  "overall_confidence": 0.92\n}\n'
     )
     if model in _STRICT_SCHEMA_MODELS:
         return [
@@ -219,7 +225,7 @@ def _completion_resilient(
     backoff_seconds: float = 1.0,
 ) -> str:
     """Runs a chat completion against `model`, recovering from Groq's
-    server-side JSON validation rejections.
+    server-side JSON validation rejections and from client-side non-JSON outputs.
 
     Recovery ladder:
       1. The primary response format (strict json_schema, or json_object
@@ -233,13 +239,26 @@ def _completion_resilient(
          generations Groq would otherwise have discarded, e.g. JSON wrapped
          in markdown fences or preceded by commentary.
 
+    Additionally validates that the returned content is actually parseable
+    as JSON (via _parse_json_object). If the model returns a non-JSON
+    reasoning dump (e.g. "<think> The user wants..." without any JSON),
+    that is treated as a transient failure and retried — previously this
+    would have been returned as success and only failed later in the
+    caller with a confusing "could not be parsed" error.
+
     Returns the raw assistant message content (callers parse it with
     _parse_json_object). Raises RuntimeError with a plain-language
     explanation if every attempt fails.
     """
     ladder = _format_ladder(model, strict_format)
+    # Tune attempts: vision models (non-strict) tend to fail json_object consistently with <think>,
+    # so waste fewer retries there and give more retries to plain-text where we control parsing.
+    if model not in _STRICT_SCHEMA_MODELS:
+        primary_attempts = min(primary_attempts, 2)
+        fallback_attempts = max(fallback_attempts, 3)
     last_error: Optional[Exception] = None
     total_attempts = 0
+    last_raw_snippet: str = ""
 
     for level, (response_format, prompt_suffix) in enumerate(ladder):
         attempts = primary_attempts if level == 0 else fallback_attempts
@@ -250,21 +269,144 @@ def _completion_resilient(
         for attempt in range(1, attempts + 1):
             total_attempts += 1
             try:
-                request_kwargs: Dict[str, Any] = {"model": model, "messages": messages}
+                request_kwargs: Dict[str, Any] = {
+                    "model": model,
+                    "messages": messages,
+                    "temperature": 0,
+                    "top_p": 1,
+                }
+                # Ensure enough tokens for reasoning + JSON. Groq uses max_tokens / max_completion_tokens;
+                # openai SDK accepts max_tokens for compatibility. We set a generous limit but allow env override.
+                try:
+                    max_t = int(os.environ.get("GROQ_MAX_TOKENS", "4096"))
+                except ValueError:
+                    max_t = 4096
+                request_kwargs["max_tokens"] = max_t
                 if response_format is not None:
-                    # response_format=None means plain-text mode — omit the
-                    # kwarg entirely rather than sending "response_format":
-                    # null in the request body.
+                    # response_format=None means plain-text mode — omit the kwarg entirely
                     request_kwargs["response_format"] = response_format
                 response = _chat_completion(**request_kwargs)
-                return response.choices[0].message.content or ""
+                raw = response.choices[0].message.content or ""
+                if not raw or not raw.strip():
+                    raise ValueError("model returned an empty response — no JSON to parse")
+                # Validate parseability before returning: if raw contains no parseable JSON,
+                # treat as transient failure and retry (covers <think>-only outputs in plain-text mode)
+                try:
+                    _parse_json_object(raw)
+                except ValueError as parse_err:
+                    last_error = parse_err
+                    last_raw_snippet = raw[:500]
+                    logger.warning(
+                        "_completion_resilient: model='%s' level=%d attempt=%d returned non-JSON (snippet %r), retrying: %s",
+                        model, level, attempt, raw[:250].replace(chr(10), " "), parse_err,
+                    )
+                    if level == len(ladder) - 1 and attempt == attempts:
+                        break
+                    time.sleep(backoff_seconds * attempt)
+                    continue
+                return raw
             except APIError as e:
                 if not _is_retryable_api_error(e):
                     raise
                 last_error = e
+                last_raw_snippet = str(e)[:500]
                 if level == len(ladder) - 1 and attempt == attempts:
                     break  # last rung exhausted — no point sleeping first
                 time.sleep(backoff_seconds * attempt)
+            except ValueError as e:
+                # Empty or non-parseable that we raised above already handled; but also catch direct raise
+                last_error = e
+                if level == len(ladder) - 1 and attempt == attempts:
+                    break
+                # Already logged for parse case; log empty case here
+                if "empty response" in str(e):
+                    logger.warning("_completion_resilient: model='%s' empty response on attempt %d", model, attempt)
+                time.sleep(backoff_seconds * attempt)
+                continue
+
+    # All ladder rungs exhausted — try repair strategies before giving up
+    if last_error is not None and ("could not be parsed" in str(last_error) or "empty response" in str(last_error)):
+        # Strategy 1: If this was a vision call (user_content contains image), retry once with a very explicit repair prompt
+        # that includes the original image and tells the model its previous output was invalid.
+        is_vision_call = isinstance(user_content, list) and any(
+            isinstance(c, dict) and c.get("type") == "image_url" for c in user_content
+        )
+        if is_vision_call:
+            try:
+                logger.info("Attempting vision repair retry with explicit JSON-only instruction for model=%s", model)
+                repair_system_vision = (
+                    "You are a medical document extraction engine. Your previous response was INVALID because it contained "
+                    "reasoning, analysis, or <think> tags instead of ONLY JSON. Now you MUST output ONLY a single valid JSON object. "
+                    "The very first character must be '{' and the last must be '}'. No <think>, no markdown, no explanations. "
+                    "Conform exactly to the provided JSON Schema."
+                )
+                # Build repair user content: keep the original image but replace text with repair instruction
+                repair_text = (
+                    f"Previous attempt failed: {str(last_error)[:300]}. Last snippet: {last_raw_snippet[:400]!r}. "
+                    "Now extract structured data from this medical document image and output ONLY the JSON object, starting with '{'."
+                )
+                # Preserve image_url entries from original user_content
+                image_parts = [c for c in user_content if isinstance(c, dict) and c.get("type") == "image_url"]
+                repair_user_content = [{"type": "text", "text": repair_text}] + image_parts
+                repair_messages = [
+                    {"role": "system", "content": repair_system_vision + "\nSchema: " + json.dumps(strict_format["json_schema"]["schema"], indent=2)},
+                    {"role": "user", "content": repair_user_content},
+                ]
+                repair_kwargs: Dict[str, Any] = {
+                    "model": model,
+                    "messages": repair_messages,
+                    "temperature": 0,
+                    "top_p": 1,
+                    "max_tokens": int(os.environ.get("GROQ_MAX_TOKENS", "4096")),
+                    # No response_format — use plain text so we can parse ourselves even if model adds stray text
+                }
+                resp = _chat_completion(**repair_kwargs)
+                raw_repair_vision = resp.choices[0].message.content or ""
+                if raw_repair_vision and raw_repair_vision.strip():
+                    try:
+                        _parse_json_object(raw_repair_vision)
+                        logger.info("Vision repair retry succeeded")
+                        return raw_repair_vision
+                    except ValueError as ve:
+                        logger.warning("Vision repair also not parseable: %s (snippet %r)", ve, raw_repair_vision[:250])
+                        last_error = ve
+                        last_raw_snippet = raw_repair_vision[:500]
+            except Exception as repair_e:
+                logger.warning("Vision repair attempt failed: %s", repair_e)
+        # Strategy 2: Fallback to text model stub (no image) so upload does not completely fail
+        if model != FALLBACK_MODEL and FALLBACK_MODEL:
+            try:
+                logger.info("Attempting fallback text-model repair via %s for final JSON recovery", FALLBACK_MODEL)
+                repair_system = (
+                    "You are a medical document extraction fallback. The primary vision model failed to produce valid JSON. "
+                    "You will be given the error snippet and must output a minimal valid JSON object conforming to the required schema. "
+                    "If you cannot infer fields, use null/empty arrays with low confidence and note the failure in illegible_or_low_confidence_fields. "
+                    "Output ONLY JSON, starting with '{' ."
+                )
+                repair_user = (
+                    f"Primary model '{model}' failed after {total_attempts} attempts. Last error: {last_error}. "
+                    f"Last raw snippet: {last_raw_snippet[:800]!r}. "
+                    f"Schema: {json.dumps(strict_format['json_schema']['schema'], indent=2)}. "
+                    "Produce a valid JSON object now."
+                )
+                strict_kwargs: Dict[str, Any] = {
+                    "model": FALLBACK_MODEL,
+                    "messages": [{"role": "system", "content": repair_system}, {"role": "user", "content": repair_user}],
+                    "response_format": strict_format,
+                    "temperature": 0,
+                    "max_tokens": 2000,
+                }
+                resp = _chat_completion(**strict_kwargs)
+                raw_repair = resp.choices[0].message.content or ""
+                if raw_repair and raw_repair.strip():
+                    try:
+                        _parse_json_object(raw_repair)
+                        logger.info("Fallback repair succeeded via %s", FALLBACK_MODEL)
+                        return raw_repair
+                    except ValueError:
+                        logger.warning("Fallback repair also not parseable, discarding")
+            except Exception as repair_e:
+                logger.warning("Fallback repair failed: %s", repair_e)
 
     raise RuntimeError(
         f"Model '{model}' repeatedly failed to return valid structured JSON "
@@ -273,7 +415,7 @@ def _completion_resilient(
         "usually a transient hiccup on the model provider's side — please "
         "retry the upload. If the same file keeps failing, it may be too "
         "blurry, rotated, or mostly handwritten; try a clearer photo or a "
-        "higher-resolution scan."
+        "higher-resolution scan. Last snippet: {last_raw_snippet[:250]!r}"
     ) from last_error
 
 
@@ -283,55 +425,71 @@ def _completion_resilient(
 # the <think> opener sits ahead of the first "{" and our brace-scan
 # returns a span that still contains the un-closed tag (or, in the
 # "unterminated think" case, the whole response is one long think block).
+# Covers <think>, <thinking>, <thought>, <reasoning>, <analysis> variants
+# and handles HTML-encoded forms (&lt;think&gt;) that appear in logs.
 _THINK_BLOCK_RE = re.compile(
-    r"<\s*think\s*>.*?<\s*/\s*think\s*>",
+    r"<\s*(think|thinking|thought|reasoning|analysis)\s*>.*?<\s*/\s*(think|thinking|thought|reasoning|analysis)\s*>",
     flags=re.DOTALL | re.IGNORECASE,
 )
-_THINK_OPEN_RE = re.compile(r"<\s*think\s*>", flags=re.IGNORECASE)
+_THINK_OPEN_RE = re.compile(r"<\s*(think|thinking|thought|reasoning|analysis)\s*>", flags=re.IGNORECASE)
+# Also handle HTML-entity encoded tags that sometimes surface in logging/transport
+_THINK_ENCODED_BLOCK_RE = re.compile(
+    r"&lt;\s*(think|thinking|thought|reasoning|analysis)\s*&gt;.*?&lt;\s*/\s*(think|thinking|thought|reasoning|analysis)\s*&gt;",
+    flags=re.DOTALL | re.IGNORECASE,
+)
+_THINK_ENCODED_OPEN_RE = re.compile(r"&lt;\s*(think|thinking|thought|reasoning|analysis)\s*&gt;", flags=re.IGNORECASE)
 
 
 def _strip_reasoning(text: str) -> str:
-    """Remove reasoning/chain-of-thought blocks (<think>...</think>) from
-    model output. Reasoning models commonly emit these BEFORE the final
-    answer even when told to reply with JSON only. Also handles the
-    "unterminated think" case, where the model opens <think> and never
+    """Remove reasoning/chain-of-thought blocks from model output.
+
+    Covers <think>...</think> and variants (<thinking>, <thought>,
+    <reasoning>, <analysis>) plus HTML-encoded forms. Also handles the
+    "unterminated think" case where the model opens a tag and never
     closes it before the JSON (a few Groq reasoning variants do this
-    under load); in that case we take everything AFTER the last
-    "</think>" if present, otherwise everything after a heuristic point
-    where the think block ends (we look for the first "{" after <think>)."""
+    under load); in that case we keep everything from the first "{" after
+    the opener onward, dropping the reasoning preamble.
+    """
     if not text:
         return text
+    # Decode HTML entities for tag detection but keep original for JSON extraction
+    # First remove encoded blocks
+    cleaned = _THINK_ENCODED_BLOCK_RE.sub("", text)
+    # Then standard blocks
+    cleaned = _THINK_BLOCK_RE.sub("", cleaned)
 
-    # Closed <think>...</think> blocks — remove them entirely (in any order
-    # and with case/whitespace-insensitive matching of the tags).
-    cleaned = _THINK_BLOCK_RE.sub("", text)
-
-    # If there's still a stray opening <think> with no closer (model was
-    # cut off / didn't close its reasoning block), drop everything from
-    # the opener up through the last </think>-like closer; if no closer,
-    # keep only what follows the first JSON-looking payload after the tag.
-    while _THINK_OPEN_RE.search(cleaned):
-        m = _THINK_OPEN_RE.search(cleaned)
-        assert m is not None
-        tail = cleaned[m.end():]
-        # If there's a closer after the opener (shouldn't, given the
-        # closed-block pass above, but be safe), drop up to it.
-        closer = re.search(r"<\s*/\s*think\s*>", tail, flags=re.IGNORECASE)
-        if closer:
-            tail = tail[closer.end():]
-        else:
-            # No closer: assume the first top-level "{" starts the actual
-            # JSON payload, and drop the reasoning preamble.
-            brace = tail.find("{")
-            if brace != -1:
-                tail = tail[brace:]
+    # Handle any remaining open tags (no closer) — drop preamble up to first JSON brace
+    # Do this for both literal and encoded openers
+    for pattern in (_THINK_OPEN_RE, _THINK_ENCODED_OPEN_RE):
+        while pattern.search(cleaned):
+            m = pattern.search(cleaned)
+            assert m is not None
+            tail = cleaned[m.end():]
+            # Check if there's a closer of either form after opener
+            closer = re.search(r"<\s*/\s*(think|thinking|thought|reasoning|analysis)\s*>", tail, flags=re.IGNORECASE)
+            closer_enc = re.search(r"&lt;\s*/\s*(think|thinking|thought|reasoning|analysis)\s*&gt;", tail, flags=re.IGNORECASE)
+            closer_pos = None
+            if closer and closer_enc:
+                closer_pos = closer.start() if closer.start() < closer_enc.start() else closer_enc.start()
+                closer_end = closer.end() if closer.start() < closer_enc.start() else closer_enc.end()
+            elif closer:
+                closer_pos = closer.start()
+                closer_end = closer.end()
+            elif closer_enc:
+                closer_pos = closer_enc.start()
+                closer_end = closer_enc.end()
+            if closer_pos is not None:
+                tail = tail[closer_end:]
             else:
-                # No JSON at all after <think> — just drop the opener and
-                # the rest of the trailing text; the parsers below will
-                # raise the appropriate "no JSON" error.
-                tail = ""
-        cleaned = cleaned[:m.start()] + tail
-
+                # No closer: assume first top-level "{" starts JSON payload
+                brace = tail.find("{")
+                if brace != -1:
+                    tail = tail[brace:]
+                else:
+                    # No JSON at all after <think> — drop the opener and rest
+                    # so downstream parsers raise appropriate error
+                    tail = ""
+            cleaned = cleaned[:m.start()] + tail
     return cleaned
 
 
@@ -346,6 +504,8 @@ def _find_first_json_object(text: str) -> Optional[Dict[str, Any]]:
     if not text or not isinstance(text, str):
         return None
     text = text.strip()
+    if "{" not in text:
+        return None
     i = 0
     n = len(text)
     while i < n:
@@ -362,7 +522,8 @@ def _find_first_json_object(text: str) -> Optional[Dict[str, Any]]:
                 elif ch == "\\":
                     escape = True
                 elif ch == '"':
-                    in_string = not in_string
+                    if not escape:
+                        in_string = not in_string
                 elif not in_string:
                     if ch == "{":
                         depth += 1
@@ -375,15 +536,61 @@ def _find_first_json_object(text: str) -> Optional[Dict[str, Any]]:
                                 if isinstance(obj, dict):
                                     return obj
                             except (json.JSONDecodeError, TypeError, ValueError):
-                                pass
-                            # continue searching after this failed candidate
+                                repaired = _try_repair_json(candidate)
+                                if repaired is not None:
+                                    return repaired
                             i = j + 1
                             break
                 j += 1
             else:
-                # unmatched brace, stop
                 break
         i += 1
+    return None
+
+
+def _try_repair_json(candidate: str) -> Optional[Dict[str, Any]]:
+    """Attempt to repair common LLM JSON mistakes and parse.
+
+    Handles: trailing commas, single-quoted strings, unescaped control chars,
+    and BOM. Returns dict if repair succeeds, else None.
+    """
+    if not candidate:
+        return None
+    cleaned = candidate.lstrip("\ufeff\u200b\u200c\u200d").strip()
+    try:
+        obj = json.loads(cleaned)
+        if isinstance(obj, dict):
+            return obj
+    except json.JSONDecodeError:
+        pass
+    try:
+        no_trailing = re.sub(r",\s*([}\]])", r"\1", cleaned)
+        obj = json.loads(no_trailing)
+        if isinstance(obj, dict):
+            return obj
+    except json.JSONDecodeError:
+        pass
+    if "'" in cleaned and '"' not in cleaned[:500]:
+        try:
+            import ast
+            obj = ast.literal_eval(cleaned)
+            if isinstance(obj, dict):
+                return json.loads(json.dumps(obj))
+        except Exception:
+            pass
+    try:
+        m = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", cleaned, flags=re.DOTALL)
+        if m:
+            inner = m.group(1).strip()
+            obj = json.loads(inner)
+            if isinstance(obj, dict):
+                return obj
+            no_trailing2 = re.sub(r",\s*([}\]])", r"\1", inner)
+            obj = json.loads(no_trailing2)
+            if isinstance(obj, dict):
+                return obj
+    except json.JSONDecodeError:
+        pass
     return None
 
 
@@ -393,59 +600,83 @@ def _parse_json_object(raw: str) -> Dict[str, Any]:
     Tolerates the ways LLMs mangle JSON output even when told not to:
     reasoning/chain-of-thought blocks (<think>...</think>), markdown code
     fences (```json ... ```), prose/commentary wrapped around the object,
-    and trailing junk after the closing brace. Raises ValueError with a
-    diagnostic snippet if nothing parseable is found.
+    trailing commas, single quotes, and trailing junk after the closing brace.
+    Raises ValueError with a diagnostic snippet if nothing parseable is found.
     """
     if not isinstance(raw, str) or not raw.strip():
         raise ValueError("model returned an empty response — no JSON to parse")
 
-    # 1. First try the existing reasoning strip + direct parse
-    text = _strip_reasoning(raw.strip())
+    raw_stripped = raw.strip().lstrip("\ufeff")
+
+    text = _strip_reasoning(raw_stripped)
+    text = text.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&")
 
     try:
         return json.loads(text)
     except json.JSONDecodeError:
         pass
+    repaired = _try_repair_json(text)
+    if repaired is not None:
+        return repaired
 
-    # 2. Try the new brace-depth JSON finder on the stripped text
     obj = _find_first_json_object(text)
     if obj is not None:
         return obj
 
-    # 3. JSON inside a markdown code fence.
-    fenced = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", text, flags=re.DOTALL)
-    if fenced:
-        try:
+    for source in (text, raw_stripped):
+        fenced = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", source, flags=re.DOTALL | re.IGNORECASE)
+        if fenced:
             candidate = fenced.group(1).strip()
-            return json.loads(candidate)
-        except json.JSONDecodeError:
+            candidate = candidate.replace("&lt;", "<").replace("&gt;", ">")
+            try:
+                return json.loads(candidate)
+            except json.JSONDecodeError:
+                pass
+            repaired2 = _try_repair_json(candidate)
+            if repaired2 is not None:
+                return repaired2
             obj2 = _find_first_json_object(candidate)
             if obj2 is not None:
                 return obj2
 
-    # 4. Outermost brace-delimited span (commentary before/after the JSON).
     start, end = text.find("{"), text.rfind("}")
     if start != -1 and end > start:
         span = text[start:end + 1]
-        # Re-strip reasoning in case a think block leaked inside the span
         span = _strip_reasoning(span)
+        span = span.replace("&lt;", "<").replace("&gt;", ">")
         try:
             return json.loads(span)
         except json.JSONDecodeError:
-            obj3 = _find_first_json_object(span)
-            if obj3 is not None:
-                return obj3
+            pass
+        repaired3 = _try_repair_json(span)
+        if repaired3 is not None:
+            return repaired3
+        obj3 = _find_first_json_object(span)
+        if obj3 is not None:
+            return obj3
 
-    # 5. Last-ditch: search the *original raw* output (sometimes the think
-    # block itself contains the JSON for certain vision models).
-    obj4 = _find_first_json_object(raw)
+    raw_decoded = raw_stripped.replace("&lt;", "<").replace("&gt;", ">")
+    obj4 = _find_first_json_object(raw_decoded)
     if obj4 is not None:
         return obj4
+    obj5 = _find_first_json_object(raw_stripped)
+    if obj5 is not None:
+        return obj5
 
-    snippet = raw[:250].replace("\n", " ").replace("\r", "")
+    s_idx, e_idx = raw_decoded.find("{"), raw_decoded.rfind("}")
+    if s_idx != -1 and e_idx > s_idx:
+        candidate = raw_decoded[s_idx:e_idx+1]
+        repaired4 = _try_repair_json(candidate)
+        if repaired4 is not None:
+            return repaired4
+        obj6 = _find_first_json_object(candidate)
+        if obj6 is not None:
+            return obj6
+
+    snippet = raw_stripped[:350].replace("\n", " ").replace("\r", "")
     raise ValueError(f"model output could not be parsed as JSON (starts with: {snippet!r})")
 
- #---------------------------------------------------------------------------
+#---------------------------------------------------------------------------
 # 1. Extraction schema — keeps every document's output shape consistent
 # ---------------------------------------------------------------------------
 
