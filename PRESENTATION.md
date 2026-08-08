@@ -216,7 +216,7 @@
 
 #### 5. External AI Services & Circuit Breakers
 * **Primary LLMs:** Groq (`openai/gpt-oss-120b`, `qwen/qwen3.6-27b`) or Google Gemini (`gemini-3.6-flash`).
-* **Auto-Activated Fallback:** Automated circuit breaker that seamlessly routes calls to OpenRouter (`google/gemma-3-27b-it:free`) if the primary provider hits hard quota limits.
+* **Auto-Activated Fallback:** Automated circuit breaker that seamlessly routes calls to OpenRouter (`openrouter/free` dynamic router) if the primary provider hits hard quota limits.
 
 > **Speaker Note:**  
 > *"Our architecture is clean, modular, and built for production. The React/Vite frontend communicates via REST with a FastAPI Python backend. The AI layer decouples extraction, RAG retrieval, and conversation memory into distinct modules, backed by Supabase Postgres, Cloudinary, and local zero-network ONNX embeddings."*
@@ -333,7 +333,7 @@
 * **Frontend:** React 18, Vite, TypeScript, Tailwind CSS, Lucide Icons, Axios.
 * **Backend & API:** Python 3.11, FastAPI, Uvicorn Async Server, Pydantic v2, PyMuPDF, `pdfplumber`, Pillow.
 * **Database & Vector Store:** Supabase Postgres (`supabase-py`), Cloudinary Encrypted Storage, ChromaDB / ONNX Runtime (`all-MiniLM-L6-v2`).
-* **AI / LLM Engine:** Groq (`gpt-oss-120b`, `qwen3.6-27b`), Google Gemini (`gemini-3.6-flash`), OpenRouter Fallback (`google/gemma-3-27b-it:free`).
+* **AI / LLM Engine:** Groq (`gpt-oss-120b`, `qwen3.6-27b`), Google Gemini (`gemini-3.6-flash`), OpenRouter Fallback (`openrouter/free` dynamic router).
 * **Cloud & Hosting:** Vercel (Frontend CDN), Render / Railway / Docker (Backend Container), Supabase Cloud.
 
 ```
