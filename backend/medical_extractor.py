@@ -51,7 +51,7 @@ from openai import (
 from dotenv import load_dotenv
 import logging
 
-load_dotenv()
+load_dotenv(override=True)
 
 logger = logging.getLogger("medical_extractor")
 
@@ -189,35 +189,102 @@ def _configured_secret(name: str) -> str:
     value = os.environ.get(name, "").strip()
     return "" if not value or value.startswith("your-") else value
 
-_OPENROUTER_FALLBACK_ENABLED = os.environ.get("OPENROUTER_FALLBACK_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"}
-_OPENROUTER_API_KEY = _configured_secret("OPENROUTER_API_KEY")
-_OPENROUTER_MODEL = os.environ.get("OPENROUTER_FALLBACK_MODEL", "").strip()
-_OPENROUTER_VISION_MODEL = os.environ.get("OPENROUTER_FALLBACK_VISION_MODEL", "").strip() or _OPENROUTER_MODEL
+
 _openrouter_fallback_lock = threading.Lock()
 _openrouter_fallback_active = False
+openrouter_fallback_client: Optional[OpenAI] = None
+_OPENROUTER_FALLBACK_ENABLED = False
+_OPENROUTER_API_KEY = ""
+_OPENROUTER_MODEL = ""
+_OPENROUTER_VISION_MODEL = ""
 
-if _OPENROUTER_FALLBACK_ENABLED and (not _OPENROUTER_API_KEY or not _OPENROUTER_MODEL):
-    raise RuntimeError(
-        "OPENROUTER_FALLBACK_ENABLED requires OPENROUTER_API_KEY and "
-        "OPENROUTER_FALLBACK_MODEL. Set OPENROUTER_FALLBACK_VISION_MODEL too "
-        "when the text fallback model cannot read images."
-    )
 
-openrouter_fallback_client = (
-    OpenAI(
-        api_key=_OPENROUTER_API_KEY,
-        base_url=os.environ.get("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
-        max_retries=0,
-    )
-    if _OPENROUTER_FALLBACK_ENABLED
-    else None
-)
+def _ensure_openrouter_fallback_client() -> Optional[OpenAI]:
+    """Resolve and return an OpenRouter fallback client if configured.
+
+    Checks os.environ (and reloads .env) so credentials added without a
+    process restart or enabled via alias environment variables are picked up
+    automatically. Setting an OpenRouter API key and fallback model is sufficient
+    to enable fallback (unless explicitly disabled with OPENROUTER_FALLBACK_ENABLED=false).
+    """
+    global openrouter_fallback_client, _OPENROUTER_FALLBACK_ENABLED
+    global _OPENROUTER_API_KEY, _OPENROUTER_MODEL, _OPENROUTER_VISION_MODEL
+
+    with _openrouter_fallback_lock:
+        if openrouter_fallback_client is not None:
+            return openrouter_fallback_client
+
+        load_dotenv(override=True)
+        enabled_raw = (
+            os.environ.get("OPENROUTER_FALLBACK_ENABLED", "").strip().lower()
+            or os.environ.get("OPENROUTER_FALLBACK", "").strip().lower()
+            or os.environ.get("OPENROUTER_ENABLED", "").strip().lower()
+            or os.environ.get("FALLBACK_OPENROUTER_ENABLED", "").strip().lower()
+        )
+        api_key = (
+            _configured_secret("OPENROUTER_API_KEY")
+            or _configured_secret("OPENROUTER_KEY")
+            or _configured_secret("OPENROUTER_FALLBACK_API_KEY")
+            or _configured_secret("OPENROUTER_FALLBACK_KEY")
+        )
+        model = (
+            os.environ.get("OPENROUTER_FALLBACK_MODEL", "").strip()
+            or os.environ.get("OPENROUTER_MODEL", "").strip()
+            or os.environ.get("OPENROUTER_DEFAULT_MODEL", "").strip()
+            or (
+                os.environ.get("LLM_FALLBACK_MODEL", "").strip()
+                if os.environ.get("LLM_FALLBACK_PROVIDER", "").strip().lower() == "openrouter"
+                or os.environ.get("FALLBACK_PROVIDER", "").strip().lower() == "openrouter"
+                or "openrouter" in os.environ.get("LLM_FALLBACK_MODEL", "").strip().lower()
+                else ""
+            )
+        )
+        vision_model = (
+            os.environ.get("OPENROUTER_FALLBACK_VISION_MODEL", "").strip()
+            or os.environ.get("OPENROUTER_VISION_MODEL", "").strip()
+            or model
+        )
+
+        enabled = (
+            enabled_raw in {"1", "true", "yes", "on"}
+            or os.environ.get("FALLBACK_PROVIDER", "").strip().lower() == "openrouter"
+            or os.environ.get("LLM_FALLBACK_PROVIDER", "").strip().lower() == "openrouter"
+            or (
+                enabled_raw not in {"0", "false", "no", "off"}
+                and bool(api_key and model)
+            )
+        )
+
+        if enabled and api_key and model:
+            _OPENROUTER_FALLBACK_ENABLED = True
+            _OPENROUTER_API_KEY = api_key
+            _OPENROUTER_MODEL = model
+            _OPENROUTER_VISION_MODEL = vision_model
+            openrouter_fallback_client = OpenAI(
+                api_key=_OPENROUTER_API_KEY,
+                base_url=os.environ.get("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
+                max_retries=0,
+            )
+            return openrouter_fallback_client
+
+        if enabled_raw in {"1", "true", "yes", "on"} and (not api_key or not model):
+            logger.warning(
+                "OpenRouter fallback explicitly enabled but missing OPENROUTER_API_KEY or OPENROUTER_FALLBACK_MODEL; fallback disabled."
+            )
+            _OPENROUTER_FALLBACK_ENABLED = False
+
+        return None
+
+
+# Initialize at import time if already configured
+_ensure_openrouter_fallback_client()
 
 
 def _activate_openrouter_fallback() -> bool:
     """Trip the process-wide circuit breaker after a hard primary quota error."""
     global _openrouter_fallback_active
-    if not openrouter_fallback_client:
+    client_instance = _ensure_openrouter_fallback_client()
+    if not client_instance:
         return False
     with _openrouter_fallback_lock:
         newly_activated = not _openrouter_fallback_active
@@ -231,7 +298,9 @@ def _activate_openrouter_fallback() -> bool:
 
 
 def _openrouter_fallback_is_active() -> bool:
-    return _openrouter_fallback_active and openrouter_fallback_client is not None
+    if not _openrouter_fallback_active:
+        return False
+    return openrouter_fallback_client is not None or _ensure_openrouter_fallback_client() is not None
 
 
 # Model defaults — provider-specific, overridable via env vars. LLM_* generic
@@ -345,15 +414,28 @@ def _chat_completion(**kwargs) -> Any:
     # the safety/cross-check call from hitting a 429 after file extractions
     # have already consumed the free-tier budget.
     _call_pacer.acquire()
-    active_client = openrouter_fallback_client if _openrouter_fallback_is_active() else client
+    active_client = (
+        openrouter_fallback_client or _ensure_openrouter_fallback_client() or client
+        if _openrouter_fallback_is_active()
+        else client
+    )
     if _openrouter_fallback_is_active():
         # The caller still supplies its primary model name. Translate only at
         # the transport boundary so extraction/cross-check code remains
         # provider-agnostic. Image calls use the separately configured vision model.
         kwargs = dict(kwargs)
+        is_vision = (
+            (kwargs.get("model") == VISION_MODEL and VISION_MODEL != MODEL)
+            or any(
+                isinstance(msg.get("content"), list)
+                and any(isinstance(part, dict) and part.get("type") == "image_url" for part in msg["content"])
+                for msg in kwargs.get("messages", [])
+                if isinstance(msg, dict)
+            )
+        )
         kwargs["model"] = (
             _OPENROUTER_VISION_MODEL
-            if kwargs.get("model") == VISION_MODEL
+            if is_vision
             else _OPENROUTER_MODEL
         )
     try:
@@ -363,10 +445,11 @@ def _chat_completion(**kwargs) -> Any:
         model_env = _PROVIDER_CFG.get("model_env", "LLM_MODEL")
         vision_env = _PROVIDER_CFG.get("vision_env", "LLM_VISION_MODEL")
         docs = _PROVIDER_CFG.get("docs_url") or "provider docs"
+        provider_name = "openrouter" if _openrouter_fallback_is_active() else LLM_PROVIDER
         logger.error(
             "Provider '%s' rejected model '%s' (404 model_not_found). Check %s, then update %s/%s. "
             "Current defaults: text='%s', vision='%s'.",
-            LLM_PROVIDER,
+            provider_name,
             model,
             docs,
             model_env,
@@ -375,7 +458,7 @@ def _chat_completion(**kwargs) -> Any:
             VISION_MODEL,
         )
         raise ProviderRateLimitError(
-            provider=LLM_PROVIDER,
+            provider=provider_name,
             model=model,
             hard_quota=True,
             retired_model=True,
@@ -1188,14 +1271,15 @@ def _completion_resilient(
                                     model,
                                 )
                                 continue
+                            provider_name = "openrouter" if _openrouter_fallback_is_active() else LLM_PROVIDER
                             logger.error(
                                 "Provider '%s' has no usable quota for model='%s' "
                                 "(hard_quota=%s retired=%s); not retrying: %s",
-                                "openrouter" if _openrouter_fallback_is_active() else LLM_PROVIDER,
+                                provider_name,
                                 model, hard_quota, retired_model, _error_detail(e),
                             )
                             raise ProviderRateLimitError(
-                                provider=LLM_PROVIDER,
+                                provider=provider_name,
                                 model=model,
                                 retry_after_seconds=sleep_s,
                                 hard_quota=True,
@@ -1204,7 +1288,7 @@ def _completion_resilient(
 
                         if rate_limit_waits >= max_rate_limit_waits:
                             raise ProviderRateLimitError(
-                                provider=LLM_PROVIDER,
+                                provider="openrouter" if _openrouter_fallback_is_active() else LLM_PROVIDER,
                                 model=model,
                                 retry_after_seconds=sleep_s,
                             ) from e
@@ -1314,7 +1398,7 @@ def _completion_resilient(
     total_429s = sum(count for (status, _code), count in status_counts.items() if status == 429)
     if total_429s and last_error is not None and getattr(last_error, "status_code", None) == 429:
         raise ProviderRateLimitError(
-            provider=LLM_PROVIDER,
+            provider="openrouter" if _openrouter_fallback_is_active() else LLM_PROVIDER,
             model=model,
             retry_after_seconds=last_retry_after,
         ) from last_error
