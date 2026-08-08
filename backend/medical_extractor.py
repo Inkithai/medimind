@@ -11,8 +11,8 @@ the standard OpenAI SDK — only base URL, API key, and model names differ.
 
   groq (default):  GROQ_API_KEY (gsk_...), https://api.groq.com/openai/v1
                    text openai/gpt-oss-120b, vision qwen/qwen3.6-27b — free, no card
-  gemini (free):   GEMINI_API_KEY (or GOOGLE_API_KEY), https://generativelanguage.googleapis.com/v1beta/openai/
-                   text/vision gemini-2.0-flash — 15 RPM / 1M tokens/day free, 2M context, excellent vision
+  gemini:          GEMINI_API_KEY (or GOOGLE_API_KEY), https://generativelanguage.googleapis.com/v1beta/openai/
+                   text/vision gemini-3.6-flash — current stable multimodal model
 
 Generic OpenAI-compatible providers (cerebras, openrouter, openai, custom)
 work via LLM_API_KEY + LLM_BASE_URL + LLM_MODEL env vars.
@@ -32,7 +32,7 @@ import json
 import time
 import base64
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional, Tuple, Callable
 
 import pdfplumber
 try:
@@ -58,9 +58,9 @@ logger = logging.getLogger("medical_extractor")
 # ---------------------------------------------------------------------------
 # LLM_PROVIDER selects the backend (default "groq" for backward compat).
 # All providers use the OpenAI SDK; only base_url / api_key / model names
-# differ. Free-tier ranking (Aug 2026): Gemini ~15 RPM / 1M tokens/day
-# (no card, beats Groq's 6K TPM for vision-heavy workloads) > Cerebras
-# 1M tokens/day (no vision, 8K context) > OpenRouter 50 req/day free.
+# differ. Provider quotas vary by project and model, so the upload worker pool
+# (api.py) deliberately keeps LLM concurrency bounded instead of assuming a
+# fixed free-tier allowance.
 LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "groq").strip().lower() or "groq"
 
 _PROVIDER_DEFAULTS = {
@@ -83,14 +83,19 @@ _PROVIDER_DEFAULTS = {
         "api_key_alts": ("GOOGLE_API_KEY",),
         "base_url_default": "https://generativelanguage.googleapis.com/v1beta/openai/",
         "base_url_env": "GEMINI_BASE_URL",
-        "model_default": "gemini-2.0-flash",
+        # Gemini 2.0 Flash was shut down on 2026-06-01. Google may report
+        # requests to that retired model as quota limit=0 / HTTP 429 rather
+        # than model_not_found, so keeping the retired ID here causes an
+        # endless-looking rate-limit failure. 3.6 Flash is Google's stable
+        # replacement and supports image input + structured output.
+        "model_default": "gemini-3.6-flash",
         "model_env": "GEMINI_MODEL",
-        "vision_default": "gemini-2.0-flash",
+        "vision_default": "gemini-3.6-flash",
         "vision_env": "GEMINI_VISION_MODEL",
-        "fallback_default": "gemini-2.0-flash-lite",
+        "fallback_default": "gemini-3.5-flash-lite",
         "fallback_env": "GEMINI_FALLBACK_MODEL",
         "key_url": "https://aistudio.google.com/app/apikey",
-        "docs_url": "https://ai.google.dev/gemini-api/docs/rate-limits",
+        "docs_url": "https://ai.google.dev/gemini-api/docs/deprecations",
     },
 }
 
@@ -212,17 +217,26 @@ def _chat_completion(**kwargs) -> Any:
     try:
         return client.chat.completions.create(**kwargs)
     except NotFoundError as e:
-        model = kwargs.get("model")
-        _model_env = _PROVIDER_CFG.get("model_env", "LLM_MODEL")
-        _vision_env = _PROVIDER_CFG.get("vision_env", "LLM_VISION_MODEL")
-        _docs = _PROVIDER_CFG.get("docs_url") or "provider docs"
-        raise RuntimeError(
-            f"Provider '{LLM_PROVIDER}' rejected model '{model}' (404 model_not_found) — it has most "
-            "likely been decommissioned or is not available on this provider. "
-            f"Check {_docs} for the recommended replacement, then set {_model_env} (text jobs) and/or "
-            f"{_vision_env} (image/scanned-PDF jobs) in .env — no code "
-            f"change needed. Current defaults: text='{MODEL}', "
-            f"vision='{VISION_MODEL}'. Active provider: '{LLM_PROVIDER}' base_url='{_PROVIDER_BASE_URL}'."
+        model = str(kwargs.get("model") or "unknown")
+        model_env = _PROVIDER_CFG.get("model_env", "LLM_MODEL")
+        vision_env = _PROVIDER_CFG.get("vision_env", "LLM_VISION_MODEL")
+        docs = _PROVIDER_CFG.get("docs_url") or "provider docs"
+        logger.error(
+            "Provider '%s' rejected model '%s' (404 model_not_found). Check %s, then update %s/%s. "
+            "Current defaults: text='%s', vision='%s'.",
+            LLM_PROVIDER,
+            model,
+            docs,
+            model_env,
+            vision_env,
+            MODEL,
+            VISION_MODEL,
+        )
+        raise ProviderRateLimitError(
+            provider=LLM_PROVIDER,
+            model=model,
+            hard_quota=True,
+            retired_model=True,
         ) from e
 
 
@@ -238,6 +252,102 @@ def _chat_completion(**kwargs) -> Any:
 # request itself must be retried and/or re-issued in a looser mode.
 
 _RETRYABLE_STATUS_CODES = frozenset({408, 409, 429, 500, 502, 503, 504})
+
+
+class ProviderRateLimitError(RuntimeError):
+    """A user-safe, machine-readable provider capacity failure.
+
+    ``hard_quota`` distinguishes a project/model with no usable quota (daily
+    allowance exhausted, billing disabled, or a retired model whose quota is
+    now zero) from a short per-minute throttle. Callers use this distinction
+    to stop sending the remaining files in a batch instead of multiplying one
+    provider outage into N files × N retries.
+    """
+
+    def __init__(
+        self,
+        *,
+        provider: str,
+        model: str,
+        retry_after_seconds: Optional[float] = None,
+        hard_quota: bool = False,
+        retired_model: bool = False,
+    ) -> None:
+        self.provider = provider
+        self.model = model
+        self.retry_after_seconds = retry_after_seconds
+        self.hard_quota = hard_quota
+        self.retired_model = retired_model
+        if retired_model:
+            self.code = "provider_model_unavailable"
+            message = (
+                f"The configured {provider} model '{model}' is no longer available. "
+                "Update the server's model setting before retrying."
+            )
+        elif hard_quota:
+            self.code = "provider_quota_exhausted"
+            message = (
+                f"The {provider} document-reading quota is currently unavailable or exhausted. "
+                "Trying the same file again now will not help."
+            )
+        else:
+            self.code = "provider_rate_limited"
+            wait = (
+                f" Try again in about {max(1, round(retry_after_seconds))} seconds."
+                if retry_after_seconds
+                else " Please wait a minute before trying again."
+            )
+            message = f"The {provider} document-reading service is temporarily busy (HTTP 429).{wait}"
+        super().__init__(message)
+
+
+# Models which Google has fully shut down. The OpenAI-compatible endpoint has
+# been observed returning HTTP 429 with quota limit=0 for these IDs, so detect
+# them explicitly instead of telling users to retry a document that can never
+# succeed with the configured model.
+_RETIRED_GEMINI_MODELS = {
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-001",
+    "gemini-2.0-flash-lite",
+    "gemini-2.0-flash-lite-001",
+}
+
+
+def _provider_error_text(exc: Exception) -> str:
+    """Flatten an SDK exception/body to searchable lower-case text."""
+    parts = [str(exc), str(getattr(exc, "message", "") or "")]
+    body = getattr(exc, "body", None)
+    if body is not None:
+        try:
+            parts.append(json.dumps(body, ensure_ascii=False))
+        except (TypeError, ValueError):
+            parts.append(str(body))
+    return " ".join(parts).lower()
+
+
+def _is_hard_quota_error(exc: Exception) -> bool:
+    """True when waiting a few seconds cannot make this HTTP 429 usable.
+
+    Gemini includes quota IDs in the body. Per-day exhaustion, an explicit
+    ``limit: 0``, and billing/account quota failures should fail immediately;
+    only ordinary per-minute throttles should consume retry sleeps.
+    """
+    text = _provider_error_text(exc)
+    hard_markers = (
+        "generaterequestsperday",
+        "requestsperday",
+        "requests_per_day",
+        "per-day",
+        "per day",
+        "daily quota",
+        "limit: 0",
+        '"limit": 0',
+    )
+    return any(marker in text for marker in hard_markers)
+
+
+def _is_retired_provider_model(model: str) -> bool:
+    return LLM_PROVIDER == "gemini" and model.lower() in _RETIRED_GEMINI_MODELS
 
 
 def _is_token_budget_error(exc: Exception) -> bool:
@@ -341,9 +451,15 @@ def _error_detail(exc: Exception) -> str:
 
 
 def _retry_after_seconds(exc: Exception, fallback: float) -> float:
-    """Best-effort parse of a provider Retry-After header (seconds or
-    HTTP-date) from a 429/5xx APIError; falls back to `fallback` when the
-    header is absent or unparseable."""
+    """Best-effort parse of a provider's requested retry delay.
+
+    OpenAI-compatible providers normally use ``Retry-After``. Gemini's
+    compatibility endpoint often omits that header and puts either
+    ``google.rpc.RetryInfo.retryDelay: \"14s\"`` or ``Please retry in
+    14.3s`` in the JSON error body instead. Honouring the body prevents the
+    old 1s/2s retry loop from hammering a provider which explicitly asked us
+    to wait close to a minute.
+    """
     headers = getattr(exc, "headers", None)
     if headers is None:
         response = getattr(exc, "response", None)
@@ -355,10 +471,24 @@ def _retry_after_seconds(exc: Exception, fallback: float) -> float:
             raw = None
         if raw:
             try:
-                return float(raw)
+                return max(0.0, float(raw))
             except (TypeError, ValueError):
-                # HTTP-date form ("Wed, 21 Oct 2015 07:28:00 GMT") — rare;
-                # fall back to exponential backoff below.
+                # HTTP-date form is uncommon for these APIs. Continue to the
+                # provider-body parser before using exponential backoff.
+                pass
+
+    text = _provider_error_text(exc)
+    body_patterns = (
+        r'retrydelay["\'\s:]+([0-9]+(?:\.[0-9]+)?)\s*s',
+        r'please\s+retry\s+in\s+([0-9]+(?:\.[0-9]+)?)\s*s',
+        r'retry\s+in\s+([0-9]+(?:\.[0-9]+)?)\s*seconds?',
+    )
+    for pattern in body_patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if match:
+            try:
+                return max(0.0, float(match.group(1)))
+            except (TypeError, ValueError):
                 pass
     return fallback
 
@@ -374,9 +504,9 @@ def _completion_token_budget(user_content: Any) -> int:
     """Choose a completion budget that fits the active provider's limits.
 
     Groq's common 8K TPM tier needs a tight vision budget (2048) or even a
-    94 KB image + 4096 max_tokens exceeds TPM (reported as 413). Gemini's
-    free tier is 1M tokens/day with 2M context, so the cap is unnecessary
-    there — but we keep the same default for safety. Provider-specific
+    94 KB image + 4096 max_tokens exceeds TPM (reported as 413). Gemini
+    quotas vary by project/model, so a conservative cap is useful there too.
+    Provider-specific
     env vars (GEMINI_MAX_TOKENS, GROQ_MAX_TOKENS, LLM_MAX_TOKENS) override.
 
     Vision requests consume substantially more input tokens than text calls,
@@ -689,10 +819,10 @@ def _completion_resilient(
     Groq discards a generation server-side (400 'json_validate_failed'),
     the SAME request is unlikely to succeed on retry, so the runner
     advances to the next rung immediately instead of burning attempts.
-    Rate limits (429) are paced using Groq's Retry-After header (falling
-    back to exponential backoff), with a cap on consecutive waits so a
-    hard-throttled account fails fast with an actionable message rather
-    than stalling an upload for many minutes.
+    Temporary rate limits (429) are paced using Retry-After or Gemini's
+    body-level RetryInfo delay (falling back to exponential backoff). Daily
+    quota / limit=0 failures stop immediately, and consecutive temporary
+    waits are capped so uploads cannot stall indefinitely.
 
     Returns the raw assistant message content (callers parse it with
     _parse_json_object). Raises RuntimeError with a plain-language
@@ -708,6 +838,7 @@ def _completion_resilient(
     last_error: Optional[Exception] = None
     total_attempts = 0
     rate_limit_waits = 0
+    last_retry_after: Optional[float] = None
     # Provider-aware rate-limit cap: check {PROVIDER}_MAX_RATE_LIMIT_RETRIES, LLM_*, then legacy GROQ_*
     _rate_limit_cap_env = None
     for _env in [f"{LLM_PROVIDER.upper()}_MAX_RATE_LIMIT_RETRIES", "LLM_MAX_RATE_LIMIT_RETRIES", "GROQ_MAX_RATE_LIMIT_RETRIES", "GEMINI_MAX_RATE_LIMIT_RETRIES"]:
@@ -895,18 +1026,39 @@ def _completion_resilient(
                     if getattr(e, "status_code", None) == 429:
                         rate_limit_waits += 1
                         last_error = e
-                        if rate_limit_waits > max_rate_limit_waits:
-                            raise RuntimeError(
-                                f"Provider '{LLM_PROVIDER}' kept returning 429 (rate limit) for model '{model}' after "
-                                f"{rate_limit_waits} wait(s). This usually means the account's "
-                                "per-minute token budget is exhausted (Groq free tier is heavily "
-                                "rate-limited). Please wait a minute and retry the upload."
-                            ) from e
                         sleep_s = min(_retry_after_seconds(e, backoff_seconds * attempt), 60.0)
+                        last_retry_after = sleep_s
+
+                        # A daily/account quota, explicit limit=0, or a
+                        # retired model cannot recover after a short sleep.
+                        # Fail on the first response so a four-file upload
+                        # does not turn into twenty identical provider calls.
+                        hard_quota = _is_hard_quota_error(e)
+                        retired_model = _is_retired_provider_model(model)
+                        if hard_quota or retired_model:
+                            logger.error(
+                                "Provider '%s' has no usable quota for model='%s' "
+                                "(hard_quota=%s retired=%s); not retrying: %s",
+                                LLM_PROVIDER, model, hard_quota, retired_model, _error_detail(e),
+                            )
+                            raise ProviderRateLimitError(
+                                provider=LLM_PROVIDER,
+                                model=model,
+                                retry_after_seconds=sleep_s,
+                                hard_quota=True,
+                                retired_model=retired_model,
+                            ) from e
+
+                        if rate_limit_waits >= max_rate_limit_waits:
+                            raise ProviderRateLimitError(
+                                provider=LLM_PROVIDER,
+                                model=model,
+                                retry_after_seconds=sleep_s,
+                            ) from e
                         logger.warning(
-                            f"Provider '{LLM_PROVIDER}' rate-limited (429) model='%s' — sleeping %.0fs before retry "
+                            "Provider '%s' rate-limited (429) model='%s' — sleeping %.0fs before retry "
                             "(wait %d/%d): %s",
-                            model, sleep_s, rate_limit_waits, max_rate_limit_waits, _error_detail(e),
+                            LLM_PROVIDER, model, sleep_s, rate_limit_waits, max_rate_limit_waits, _error_detail(e),
                         )
                         if is_last_rung and attempt == attempts:
                             break
@@ -1007,10 +1159,16 @@ def _completion_resilient(
     # which often hides the earlier, more informative ones).
     cause_bits: List[str] = []
     total_429s = sum(count for (status, _code), count in status_counts.items() if status == 429)
+    if total_429s and last_error is not None and getattr(last_error, "status_code", None) == 429:
+        raise ProviderRateLimitError(
+            provider=LLM_PROVIDER,
+            model=model,
+            retry_after_seconds=last_retry_after,
+        ) from last_error
     if total_429s:
         cause_bits.append(
             f"the provider rate-limited (HTTP 429) {total_429s} attempt(s), which usually means "
-            "the account's per-minute token budget is saturated — wait a minute and retry, or upload fewer files at once"
+            "the account's per-minute token budget is saturated"
         )
     provider_summary = ", ".join(
         f"HTTP {status}{f' ({code})' if code else ''} ×{count}"
@@ -1645,10 +1803,28 @@ def assert_text_looks_medical(text: str, filename: str) -> None:
 # 4. Top-level entry point — routes any uploaded file correctly
 # ---------------------------------------------------------------------------
 
+DocumentProgressCallback = Callable[[str, str], None]
+
+
+def _emit_document_progress(
+    callback: Optional[DocumentProgressCallback],
+    step: str,
+    message: str,
+) -> None:
+    """Progress reporting must never be able to break extraction itself."""
+    if callback is None:
+        return
+    try:
+        callback(step, message)
+    except Exception as exc:  # pragma: no cover - defensive observer isolation
+        logger.warning("Document progress callback failed: %s", exc)
+
+
 def process_document(
     file_path: str,
     model: str = MODEL,
     vision_model: str = VISION_MODEL,
+    progress_callback: Optional[DocumentProgressCallback] = None,
 ) -> Dict[str, Any]:
     """
     Accepts a path to a PDF or image file. Detects type and routes to the
@@ -1658,6 +1834,7 @@ def process_document(
     """
     path = Path(file_path)
     suffix = path.suffix.lower()
+    _emit_document_progress(progress_callback, "reading", "Opening and checking the document")
 
     # --- Friendly diagnostics for the most common mistakes ---
     if ".zip" in file_path.lower():
@@ -1692,8 +1869,9 @@ def process_document(
     if suffix == ".pdf":
         if pdf_has_text_layer(file_path):
             text = extract_text_from_pdf(file_path)
-            # deterministic check on the text layer before calling OpenAI/Groq API
+            # deterministic check on the text layer before calling the LLM
             assert_text_looks_medical(text, path.name)
+            _emit_document_progress(progress_callback, "extracting", "Finding medical details in the text")
             result = extract_from_text(text, model=model)
             result["_source"] = {"file": path.name, "method": "text_layer"}
             return result
@@ -1702,6 +1880,11 @@ def process_document(
             pages = pdf_pages_to_images(file_path)
             page_results = []
             for i, img in enumerate(pages):
+                _emit_document_progress(
+                    progress_callback,
+                    "extracting",
+                    f"Finding medical details on page {i + 1} of {len(pages)}",
+                )
                 res = extract_from_image(img, model=vision_model)
                 res = _apply_confidence_ceiling(res, VISION_OCR_CONFIDENCE_CEILING)
                 res["_source"] = {
@@ -1718,6 +1901,7 @@ def process_document(
         # pixels — apply it, or the vision model reads the document
         # sideways/upside-down and extraction silently degrades.
         img = ImageOps.exif_transpose(img)
+        _emit_document_progress(progress_callback, "extracting", "Finding medical details in the image")
         result = extract_from_image(img, model=vision_model)
         result = _apply_confidence_ceiling(result, VISION_OCR_CONFIDENCE_CEILING)
         result["_source"] = {"file": path.name, "method": "vision_ocr"}

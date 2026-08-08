@@ -192,14 +192,29 @@ export interface PatientSnapshot {
 
 export interface FailedFile {
   file: string;
+  file_id?: string;
+  file_index?: number;
   error: string;
-  kind?: "not_medical" | "transient" | "invalid" | "unsupported";
+  kind?:
+    | "not_medical"
+    | "transient"
+    | "invalid"
+    | "unsupported"
+    | "rate_limited"
+    | "provider_unavailable";
+  code?: string;
+  retryable?: boolean;
+  retry_after_seconds?: number | null;
 }
 
 export interface UploadResponse {
   user_id: string;
+  // Page/document counts retained for backward compatibility.
   documents_added: number;
   documents_total: number;
+  // File counts make multi-page upload summaries unambiguous.
+  files_received?: number;
+  files_added?: number;
   timeline: Timeline;
   cross_check_report: CrossCheckReport;
   lab_trends: LabTrendsReport;

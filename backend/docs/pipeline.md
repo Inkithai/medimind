@@ -23,7 +23,7 @@ Anonymous workspaces, no login. One browser → one isolated patient view.
       Clinical Pipeline          RAG Retrieval (Chroma)
       ┌─────────────┐                   │
       │ OCR / text  │                   ▼
-      │ Extraction  │ ← LLM_PROVIDER (Groq Qwen3.6 27B + GPT-OSS 120B or Gemini 2.0 Flash multimodal, strict JSON)
+      │ Extraction  │ ← LLM_PROVIDER (Groq Qwen3.6 27B + GPT-OSS 120B or Gemini 3.6 Flash multimodal, structured JSON)
       │ Filter      │   (document_filter: no extra LLM call)
       │ Timeline    │   (group + sort with dateutil, merge meds/labs/allergies)
       │ Safety      │   (LLM cross-check + deterministic duplicate)
