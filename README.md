@@ -21,8 +21,8 @@ MediMind converts your private medical files into something you can actually nav
                 |
      ┌──────────┼──────────┐
      │          │          │
- Safety     Lab Trends   Chroma (chunks+embeddings)
- check      deterministic   |
+ Safety     Lab Trends   Vector Store (Chroma or Supabase `chunks`)
+ check      deterministic   |  ← VECTOR_STORE=chroma (local) or supabase (no volume)
      │          │           └──→ RAG Q&A / Conversations (query rewrite)
      └──────────┴──────────→ JSON answer with citations
 ```
@@ -48,9 +48,11 @@ Vision+text use the same Gemini model; Groq needs two. All three are OpenAI-comp
 | `medical_extractor.py` | `LLM_PROVIDER` layer, vision / text extraction, patient grouping, timeline creation, safety LLM call plus deterministic duplicate detection, local CLI persistence |
 | `document_filter.py` | Fast post-extraction filter for non-medical files (no extra LLM call, reuses `document_type` + clinical fields) |
 | `lab_trends.py` | Pure Python trend engine — parses dates/values, computes direction, detects range crossings, flags approaching thresholds |
-| `retrieval.py` | Chunks timeline into Medication / Lab / ClinicalNote / Allergy texts, embeds (OpenAI `text-embedding-3-small` if set else local ONNX MiniLM), indexes per-user Chroma collection, single-shot Q&A |
+| `retrieval.py` | Chunks timeline into Medication / Lab / ClinicalNote / Allergy texts, embeds (OpenAI `text-embedding-3-small` if set else local ONNX MiniLM), indexes via `vector_store` abstraction, single-shot Q&A |
+| `vector_store.py` | Abstraction over Chroma (`VECTOR_STORE=chroma`, local `CHROMA_DIR`) and Supabase `chunks` table (`VECTOR_STORE=supabase`, no volume, brute-force cosine) |
+| `jobs.py` | In-memory + optional Supabase `jobs` table for async uploads (202 + polling, real progress) |
 | `conversation.py` | In-memory conversation store, rewrites follow-ups like “was that safe?” into self-contained retrieval queries, summarizes older turns to keep context bounded |
-| `api.py` | FastAPI wrapper — lifespan startup, CORS (fixed `*` + credentials handling), all `/api/v1/` routes, multipart upload handling, merges new docs with old, fixes `_source.file` to original filename |
+| `api.py` | FastAPI wrapper — lifespan startup, CORS (fixed `*` + credentials handling), all `/api/v1/` routes, multipart upload handling (sync 201 or async 202 via `USE_BACKGROUND_JOBS`/`?async=true`), merges new docs with old, fixes `_source.file` to original filename |
 | `auth.py` | Validates `Authorization: Bearer <jwt>` + `X-User-Id`, plus issues anonymous JWTs via `issue_anonymous_token()` |
 | `db.py` | Supabase Postgres persistence (documents append-only + patient snapshot upsert), chained `.order("uploaded_at").order("id")` |
 | `storage.py` | Uploads original file to Cloudinary `mediscan/<user_id>/...` |
@@ -92,8 +94,10 @@ JWT_SECRET=some-long-random-string  # openssl rand -hex 32
 
 # optional
 OPENAI_API_KEY=sk-...   # only for embeddings, else local ONNX
+VECTOR_STORE=supabase   # or chroma — supabase uses Supabase `chunks` table (no volume, recommended for Railway)
+CHROMA_DIR=./chroma_db   # only for VECTOR_STORE=chroma, override to /data/chroma_db on Railway volume
+USE_BACKGROUND_JOBS=true # async 202 + polling for uploads (avoids free-tier 429 timeouts)
 CORS_ORIGINS=*          # or https://your-frontend
-CHROMA_DIR=./chroma_db   # override to /data/chroma_db on Railway volume
 
 # optional provider overrides
 # GEMINI_MODEL=gemini-2.0-flash
@@ -179,9 +183,10 @@ Open App → Create Anonymous Session (UUID) → Store in localStorage → Patie
 
 `requirements.txt` + `Procfile` (`web: uvicorn api:app --host 0.0.0.0 --port $PORT`) enable Nixpacks auto-detect.
 
-1. Set env vars from `.env.example` in Railway Variables (`LLM_PROVIDER` + provider key, plus `SUPABASE_*`, `CLOUDINARY_*`, `JWT_SECRET`).
-2. Persist vector store: attach Railway Volume mounted at `/data/chroma_db`, set `CHROMA_DIR=/data/chroma_db` (code reads env, falls back to `./chroma_db`).
-3. Deploy — `$PORT` assigned automatically.
+1. Set env vars from `.env.example` in Railway Variables (`LLM_PROVIDER` + provider key, plus `SUPABASE_*`, `CLOUDINARY_*`, `JWT_SECRET`, `VECTOR_STORE=supabase` recommended).
+2. **No volume needed if `VECTOR_STORE=supabase`** (uses Supabase `chunks` table). For `VECTOR_STORE=chroma`, attach Railway Volume mounted at `/data/chroma_db`, set `CHROMA_DIR=/data/chroma_db`.
+3. For free-tier stability, set `USE_BACKGROUND_JOBS=true` — uploads return 202 immediately and frontend polls real progress (avoids 429 timeouts on large scans).
+4. Deploy — `$PORT` assigned automatically.
 
 ### Auth contract
 
@@ -212,19 +217,33 @@ X-User-Id: <user_id>
 `GET /api/v1/sessions/{id}` → full transcript  
 `DELETE /api/v1/sessions/{id}` → 204
 
+#### Jobs (async uploads)
+`POST /api/v1/documents?async=true` (or `Prefer: respond-async` or `USE_BACKGROUND_JOBS=true`) → `202 {job_id, status}` + background `extract → safety → index` with real `progress.step`  
+`GET /api/v1/jobs/{job_id}` → `{job_id, status, progress, result, error}` (poll, `status` = pending|processing|completed|failed)  
+`GET /api/v1/jobs` → `{jobs: [...]}` (recent 20, per-user)  
+Frontend `UploadPage` uses `api.uploadDocumentsAsync` + `api.pollJobUntilDone` for large scans (shows server progress), falls back to sync for small uploads/tests (`201`).
+
+#### Vector Store
+`VECTOR_STORE=chroma` (default, local `CHROMA_DIR`) or `supabase` (Supabase `chunks` table, no volume). `inspect_chroma.py` works with both (`VECTOR_STORE=supabase python inspect_chroma.py`). After switching backends, delete `chroma_db` or clear `chunks` table and re-upload.
+
 Errors: 400 empty question, 401 auth, 404 unknown session/no record, 422 non-medical, 502 embedding/LLM failure (provider-aware: `Provider 'gemini' ...` / `Provider 'groq' ...`).
 
 ### Inspecting vector store
 
 ```bash
+# Chroma (default)
 python backend/inspect_chroma.py
 python backend/inspect_chroma.py "anon_ab12cd34ef56" --limit 20
 python backend/inspect_chroma.py "anon_ab12cd34ef56" --type medication
+# Supabase (no volume)
+VECTOR_STORE=supabase python backend/inspect_chroma.py "anon_ab12cd34ef56"
 ```
 
 ### What changed
 
 - **LLM provider layer** — `LLM_PROVIDER=groq|gemini|LLM_API_KEY` via OpenAI SDK, no code change to switch. Gemini (`generativelanguage.googleapis.com/v1beta/openai/`, `gemini-2.0-flash`) is now best free vision (15 RPM / 1M tokens/day, 2M context) and ends Groq 6K TPM 429s. Generic `LLM_*` covers Cerebras/OpenRouter.
+- **Vector store abstraction** — `vector_store.py` with `VECTOR_STORE=chroma` (local `CHROMA_DIR`, needs volume) or `supabase` (Supabase `chunks` table, no volume, brute-force cosine). `retrieval.py` now delegates, `inspect_chroma.py` supports both, `supabase_schema.sql` adds `chunks` table. Recommended for Railway: `VECTOR_STORE=supabase`.
+- **Background jobs** — `jobs.py` + `api.py` `POST /documents?async=true` / `Prefer: respond-async` / `USE_BACKGROUND_JOBS=true` → `202 {job_id}` + `GET /jobs/{id}` polling with real `progress.step` (`reading → extracting → safety → indexing → ready`). Frontend `UploadPage` uses `uploadDocumentsAsync` + `pollJobUntilDone` for large scans, falls back to sync (201) for tests/small uploads.
 - **CORS** — `CORS_ORIGINS="*"` now correctly sets `allow_credentials=False` (previously `True` with `*` is rejected by browsers).
 - **Upload `_source.file`** — now stores original filename, not temp sanitized path (`001_upload.pdf` → real name), so timeline/medicines correctly trace sources.
 - **`GROQ_API_KEY` placeholder handling** — legacy var now treats `your-groq-api-key` / `your-*` as missing, not valid.
@@ -235,8 +254,8 @@ python backend/inspect_chroma.py "anon_ab12cd34ef56" --type medication
 
 ### Limitations
 
-- Conversations are in-memory per process — restart drops them (Supabase/Cloudinary data kept).
-- Splitting storage: file → Cloudinary, structured → Supabase, embeddings → local Chroma. No raw bytes or tokens persisted in DB.
+- Conversations and background jobs are in-memory per process (with optional Supabase `jobs` table if `USE_SUPABASE_JOBS=true`) — restart drops in-memory (Supabase/Cloudinary data kept). For prod, move to Supabase `jobs` + `chunks` fully.
+- Splitting storage: file → Cloudinary, structured → Supabase, embeddings → Chroma or Supabase `chunks` (via `VECTOR_STORE`). No raw bytes or tokens persisted in DB.
 - CLI (`python medical_extractor.py`) still writes `patient_report_*.json` locally, unauthenticated, for dev.
 
 See `backend/docs/` for pipeline, extraction, and retrieval internals.

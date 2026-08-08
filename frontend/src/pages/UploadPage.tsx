@@ -113,19 +113,64 @@ export function UploadPage() {
     setPhase("uploading");
     setProcessingStep("upload");
 
-    // Gentle step progression for UX (all real work happens server-side)
-    const stepTimers: number[] = [];
-    const advance = (step: ProcessingStepId, afterMs: number) => {
-      const t = window.setTimeout(() => setProcessingStep(step), afterMs);
-      stepTimers.push(t);
+    // Map job progress step -> ProcessingStepId (real progress from server)
+    const toStep = (s: string): ProcessingStepId => {
+      if (s === "reading" || s === "upload") return "reading";
+      if (s === "extracting") return "extracting";
+      if (s === "organizing") return "organizing";
+      if (s === "safety") return "safety";
+      if (s === "indexing") return "indexing";
+      if (s === "ready" || s === "completed") return "ready";
+      return "upload";
     };
-    advance("reading", 800);
-    advance("extracting", 2200);
-    advance("organizing", 4200);
-    advance("safety", 6200);
-    advance("indexing", 8000);
 
+    // Try async (202 + poll) first — avoids free-tier 429 timeouts and shows real progress.
+    // Falls back to sync if server doesn't support jobs (old deployment).
     try {
+      // Heuristic: use async for >1 file or any file >2MB (likely scan) or if USE_BACKGROUND_JOBS set
+      const shouldUseAsync = pending.length > 1 || pending.some((p) => p.file.size > 2 * 1024 * 1024);
+      if (shouldUseAsync) {
+        try {
+          const { job_id } = await api.uploadDocumentsAsync(
+            credentials,
+            pending.map((p) => p.file)
+          );
+          // Poll until done, updating step from server progress
+          const final = await api.pollJobUntilDone(credentials, job_id, (job) => {
+            if (job.progress?.step) setProcessingStep(toStep(job.progress.step));
+          });
+          if (final.status === "failed") {
+            throw new Error(final.error || "Processing failed");
+          }
+          const res = final.result as UploadResponse;
+          if (!res) throw new Error("Job completed but no result");
+          setResult(res);
+          setPending([]);
+          setProcessingStep("ready");
+          return;
+        } catch (e: any) {
+          // If async not supported (404) or other, fall through to sync
+          if (e?.status === 404 || e?.status === 405) {
+            // server doesn't support jobs — use sync
+          } else if (e?.message?.includes("timed out")) {
+            throw e;
+          } else if (String(e?.message || "").includes("Failed")) {
+            // Check if it's a real job failure vs unsupported
+            // If we got a job_id but it failed, don't fallback — show error
+            if (String(e?.message || "").includes("Processing failed") || String(e?.message || "").includes("does not appear")) {
+              throw e;
+            }
+          }
+          // For other errors, try sync as fallback only if we never got a job
+          // If we already have a job error, rethrow
+          if (!String(e?.message || "").includes("job")) {
+            // fallback to sync below
+          } else {
+            throw e;
+          }
+        }
+      }
+      // Sync fallback (used by tests and small uploads)
       const res = await api.uploadDocuments(
         credentials,
         pending.map((p) => p.file)
@@ -138,7 +183,6 @@ export function UploadPage() {
       setProcessingStep("reading");
     } finally {
       setPhase("idle");
-      stepTimers.forEach((t) => clearTimeout(t));
     }
   }
 
