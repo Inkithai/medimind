@@ -57,7 +57,7 @@ export function DocumentViewer({ visit, onClose }: { visit: Visit; onClose?: () 
         <div className="p-4">
           {visit.document_url ? (
             <div className="overflow-hidden rounded-lg border border-slate-200 bg-slate-50">
-              {visit._source.method === "text_layer" || visit.document_url.toLowerCase().endsWith(".pdf") ? (
+              {visit._source.method === "text_layer" || visit.document_url.toLowerCase().split("?")[0].endsWith(".pdf") ? (
                 <iframe src={visit.document_url} title="Original document" className="h-[600px] w-full bg-white" />
               ) : (
                 <img src={visit.document_url} alt="Original document" className="max-h-[600px] w-full object-contain bg-white" />

@@ -23,7 +23,7 @@ Anonymous workspaces, no login. One browser → one isolated patient view.
       Clinical Pipeline          RAG Retrieval (Chroma)
       ┌─────────────┐                   │
       │ OCR / text  │                   ▼
-      │ Extraction  │ ← Groq Qwen3.6 27B vision + GPT-OSS 120B text (strict JSON)
+      │ Extraction  │ ← LLM_PROVIDER (Groq Qwen3.6 27B + GPT-OSS 120B or Gemini 2.0 Flash multimodal, strict JSON)
       │ Filter      │   (document_filter: no extra LLM call)
       │ Timeline    │   (group + sort with dateutil, merge meds/labs/allergies)
       │ Safety      │   (LLM cross-check + deterministic duplicate)
@@ -48,7 +48,7 @@ Anonymous workspaces, no login. One browser → one isolated patient view.
 ### 1. Extraction — medical_extractor.py
 
 - Detects digital PDF vs scanned PDF vs image.
-- Digital → `pdfplumber` text extraction; scanned → `PyMuPDF` rasterize → `PIL.Image` → base64 → Groq vision.
+- Digital → `pdfplumber` text extraction; scanned → `PyMuPDF` rasterize → `PIL.Image` → base64 → LLM vision (Groq Qwen3.6 or Gemini Flash).
 - Strict `json_schema` output ensures fields always present: `document_type`, dates, provider, patient, meds with INN ingredients + normalized `dosage_value/unit` + `frequency_per_day`, lab results with flags, allergies, notes, confidences.
 - `process_document()` returns single doc or `{multi_page, pages}` shape — callers must flatten.
 - Friendly errors for zip-inside-path, missing file, folder passed, unsupported extension.

@@ -25,10 +25,11 @@ Install (in addition to Phase 1/2 dependencies):
     pip install fastapi uvicorn[standard] python-multipart supabase cloudinary pyjwt
 
 Env:
-    GROQ_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
+    LLM_PROVIDER + provider key (GROQ_API_KEY or GEMINI_API_KEY / GOOGLE_API_KEY),
+    SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
     CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET,
     JWT_SECRET
-    (optional: OPENAI_API_KEY — used only for embeddings, since Groq has no
+    (optional: OPENAI_API_KEY — used only for embeddings, since Groq/Gemini have no
     embeddings API; without it, embeddings run locally via Chroma's ONNX
     MiniLM model)
 """
@@ -86,11 +87,19 @@ app = FastAPI(title="MediMind API", version="1.0.0", lifespan=lifespan)
 # which trigger a CORS preflight when the frontend is served from a different
 # origin than the API. Allow cross-origin requests from the browser app;
 # restrict via CORS_ORIGINS (comma-separated list of origins) when deployed.
-_default_origins = os.environ.get("CORS_ORIGINS", "*")
+# NOTE: allow_credentials=True is invalid with allow_origins=["*"] (browsers
+# reject it). When CORS_ORIGINS is "*" we allow all origins without credentials.
+_cors_origins_raw = os.environ.get("CORS_ORIGINS", "*").strip()
+if _cors_origins_raw == "*":
+    _cors_allow_origins = ["*"]
+    _cors_allow_credentials = False
+else:
+    _cors_allow_origins = [o.strip() for o in _cors_origins_raw.split(",") if o.strip()]
+    _cors_allow_credentials = True
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[o.strip() for o in _default_origins.split(",") if o.strip()],
-    allow_credentials=True,
+    allow_origins=_cors_allow_origins,
+    allow_credentials=_cors_allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -247,6 +256,9 @@ async def upload_documents(
                         "upload_documents: user=%s rejected '%s': %s", user_id, label, e.reason,
                     )
                     raise HTTPException(422, str(e))
+                # Fix _source.file to original filename (process_document used temp sanitized path)
+                if isinstance(page.get("_source"), dict):
+                    page["_source"]["file"] = original_name
                 kept_pages.append(page)
 
             if kept_pages:

@@ -19,7 +19,8 @@ is only meaningful in light of what was said earlier. This module:
        periodic summarization of older turns.
 
 Env:
-    export GROQ_API_KEY="gsk_..."   (same Groq key used by the rest of the pipeline)
+    export LLM_PROVIDER=gemini   (or groq; same provider key used by the rest of the pipeline)
+    export GEMINI_API_KEY="AIza..."  (or GROQ_API_KEY="gsk_..." for groq)
 """
 
 from datetime import datetime, timezone

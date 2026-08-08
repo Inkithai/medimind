@@ -6,18 +6,20 @@
 
 ```bash
 pip install openai pdfplumber pymupdf pillow python-dotenv python-dateutil --break-system-packages
-export GROQ_API_KEY=gsk_...
+export LLM_PROVIDER=gemini  # or groq
+# gemini: export GEMINI_API_KEY=AIza...  # aistudio.google.com/app/apikey (15 RPM / 1M tok/day free)
+# groq:   export GROQ_API_KEY=gsk_...    # console.groq.com/keys
 ```
 
-- Calls Groq via OpenAI SDK at `https://api.groq.com/openai/v1` (`GROQ_BASE_URL` overridable).
-- Raises at import if `GROQ_API_KEY` missing — fail fast.
-- `MODEL` default `openai/gpt-oss-120b` (text: text-layer extraction, cross-check, chat). Overridable via `GROQ_MODEL`.
-- `VISION_MODEL` default `qwen/qwen3.6-27b` (multimodal: images + scanned PDFs). Overridable via `GROQ_VISION_MODEL`. `FALLBACK_MODEL` (env `GROQ_FALLBACK_MODEL`) optional, default `openai/gpt-oss-20b`.
-- Groq retires models on a schedule (Llama 4 Scout shut down 2026-07-17; Llama 3.1 8B / 3.3 70B shut down 2026-08-16) — a retired model ID 404s with `model_not_found`. `_chat_completion()` re-raises that as an actionable error pointing at https://console.groq.com/docs/deprecations and the env vars above.
+- Calls LLM via OpenAI SDK (provider selected by `LLM_PROVIDER`). Groq: `https://api.groq.com/openai/v1` (`GROQ_BASE_URL`), Gemini: `https://generativelanguage.googleapis.com/v1beta/openai/` (`GEMINI_BASE_URL`), generic `LLM_BASE_URL` for Cerebras/OpenRouter.
+- Raises at import if provider key missing (`GROQ_API_KEY` for groq, `GEMINI_API_KEY`/`GOOGLE_API_KEY` for gemini, `LLM_API_KEY` for generic) — fail fast.
+- `MODEL` default `openai/gpt-oss-120b` (groq) or `gemini-2.0-flash` (gemini). Overridable via `GROQ_MODEL` / `GEMINI_MODEL` / `LLM_MODEL`.
+- `VISION_MODEL` default `qwen/qwen3.6-27b` (groq) or `gemini-2.0-flash` multimodal (gemini). Overridable via `GROQ_VISION_MODEL` / `GEMINI_VISION_MODEL` / `LLM_VISION_MODEL`. `FALLBACK_MODEL` optional.
+- Groq retires models on a schedule (Llama 4 Scout shut down 2026-07-17; Llama 3.1 8B / 3.3 70B shut down 2026-08-16) — a retired model ID 404s with `model_not_found`. `_chat_completion()` re-raises that as a provider-aware error pointing at `docs_url` and the env vars above.
 
 ### 1. Schema — strict structured output
 
-`EXTRACTION_JSON_SCHEMA` with `strict: True` forces every document into the shape below. Strict json_schema is only supported on `openai/gpt-oss-*` models on Groq; for any other model (e.g. the vision default `qwen/qwen3.6-27b`) `_format_ladder()` falls back to JSON-object mode and inlines the schema into the system prompt.
+`EXTRACTION_JSON_SCHEMA` with `strict: True` forces every document into the shape below. Strict json_schema is only supported on `openai/gpt-oss-*` models on Groq; for any other model (e.g. the vision default `qwen/qwen3.6-27b` or any Gemini model) `_format_ladder()` falls back to JSON-object mode and inlines the schema into the system prompt.
 
 ```jsonc
 {
@@ -54,10 +56,10 @@ export GROQ_API_KEY=gsk_...
 
 Both do not attach `_source` — caller does.
 
-**Structured-output resilience** — Groq validates model output server-side in json_object and strict json_schema modes and discards any generation that isn't valid JSON, rejecting the request with `400 json_validate_failed` (the body includes `failed_generation`, which is logged so a 400 is diagnosable instead of a mystery). All structured calls (`extract_from_image`, `extract_from_text`, `cross_check_prescriptions`) go through `_completion_resilient()`, which walks down `_format_ladder()` (`strict json_schema` on `openai/gpt-oss-*` → `json_object` + inlined schema → plain text with no `response_format` at all, where Groq does not validate and `_parse_json_object()` recovers JSON wrapped in markdown fences or surrounded by commentary) with these rules:
+**Structured-output resilience** — The provider validates model output server-side in json_object and strict json_schema modes and discards any generation that isn't valid JSON, rejecting the request with `400 json_validate_failed` (the body includes `failed_generation`, which is logged so a 400 is diagnosable instead of a mystery). All structured calls (`extract_from_image`, `extract_from_text`, `cross_check_prescriptions`) go through `_completion_resilient()`, which walks down `_format_ladder()` (`strict json_schema` on `openai/gpt-oss-*` → `json_object` + inlined schema → plain text with no `response_format` at all, where the provider does not validate and `_parse_json_object()` recovers JSON wrapped in markdown fences or surrounded by commentary) with these rules:
 
 1. A response-format rung is retried only for genuinely transient errors (5xx, 408/409, network). A `400 json_validate_failed` or a client-side non-JSON parse failure (e.g. a `<think>`-only dump from the qwen vision model) means the SAME format will fail again, so the runner advances to the next looser rung immediately instead of burning doomed retries — previously one file could trigger several doomed json_object retries plus repair round-trips.
-2. Rate limits (429) are paced using Groq's `Retry-After` header (falling back to exponential backoff), capped by `GROQ_MAX_RATE_LIMIT_RETRIES` (default 5) so a hard-throttled account fails fast with an actionable message instead of stalling an upload for many minutes. The OpenAI SDK's own retry loop is disabled (`max_retries=0`) so SDK Retry-After sleeps don't stack on top of our ladder.
+2. Rate limits (429) are paced using the provider's `Retry-After` header (falling back to exponential backoff), capped by `GEMINI_MAX_RATE_LIMIT_RETRIES` / `GROQ_MAX_RATE_LIMIT_RETRIES` / `LLM_MAX_RATE_LIMIT_RETRIES` (default 5) so a hard-throttled account fails fast with an actionable message instead of stalling an upload for many minutes. The OpenAI SDK's own retry loop is disabled (`max_retries=0`) so SDK Retry-After sleeps don't stack on top of our ladder.
 3. Every provider error is logged with its full body via `_error_detail()` (status, code, message, response body) before retry or propagation, and non-retryable errors (401, 404 model_not_found, non-json_validate 400s) propagate immediately.
 4. If every rung fails, two last-resort repairs run (a vision repair retry with the original image, then a cheap text-model repair), and only then does it raise a plain-language `RuntimeError` ("repeatedly failed to return valid structured JSON ... retry the upload").
 

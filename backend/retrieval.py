@@ -12,8 +12,8 @@ Pipeline:
     question, retrieve the top_k most similar chunks, and ask a chat
     model to answer strictly from that retrieved context.
 
-Embedding provider: chat/extraction run on Groq, but Groq does not
-offer an embeddings API. So embeddings use, in order of preference:
+Embedding provider: chat/extraction run on the active LLM_PROVIDER (groq/gemini),
+but neither Groq nor Gemini offers an embeddings API. So embeddings use, in order of preference:
     1. OpenAI text-embedding-3-small, if OPENAI_API_KEY is set.
     2. Chroma's built-in local ONNX MiniLM model (all-MiniLM-L6-v2) —
        runs in-process, no API key or network calls (after a one-time
@@ -25,7 +25,8 @@ Install:
     pip install chromadb --break-system-packages
 
 Env:
-    export GROQ_API_KEY="gsk_..."        (same key used by medical_extractor.py)
+    export LLM_PROVIDER=gemini           (or groq; same provider used by medical_extractor.py)
+    export GEMINI_API_KEY="AIza..."      (or GROQ_API_KEY="gsk_..." for groq)
     export OPENAI_API_KEY="sk-..."       (optional — see embedding provider above)
 """
 

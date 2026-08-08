@@ -180,6 +180,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const empty = EMPTY;
     setState(empty);
     persist(empty);
+    provisioningStarted.current = false;
   }, []);
 
   const refreshSession = useCallback(async () => {
@@ -188,6 +189,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [createAnonymous, state.apiBase]);
 
   const createNewWorkspace = useCallback(async () => {
+    provisioningStarted.current = false;
     clearCredentials();
     setInitializing(true);
     setInitError(null);
