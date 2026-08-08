@@ -251,8 +251,15 @@ def _sanitize_collection_name(patient_key: str) -> str:
     return name[:63]
 
 
-def _get_chroma_client() -> "chromadb.ClientAPI":
-    return chromadb.PersistentClient(path=CHROMA_DIR)
+def _get_chroma_client():
+    # Delegate to vector_store's lazily-imported, process-cached client.
+    # (Previously this referenced `chromadb` without ever importing it —
+    # `from chromadb.utils... import ONNXMiniLM_L6_V2` above only binds the
+    # function name, not the package — so every Chroma-path call raised
+    # "NameError: name 'chromadb' is not defined", silently degrading
+    # uploads to indexed=False and 500-ing /qa.) Delegation keeps one Chroma
+    # client per process and one actionable 'not installed' message.
+    return vector_store.get_chroma_client()
 
 
 def _get_patient_collection(patient_key: str, create: bool):

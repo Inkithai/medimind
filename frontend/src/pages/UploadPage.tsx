@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { api } from "../api/client";
+import { api, ApiError } from "../api/client";
 import { Alert } from "../components/Alert";
 import { ErrorState } from "../components/ErrorState";
 import { HealthSummaryCard } from "../components/HealthSummaryCard";
@@ -140,7 +140,16 @@ export function UploadPage() {
             if (job.progress?.step) setProcessingStep(toStep(job.progress.step));
           });
           if (final.status === "failed") {
-            throw new Error(final.error || "Processing failed");
+            // The job ran and REPORTED failure — this is terminal. The old
+            // code let this fall through to the sync fallback below, which
+            // silently re-uploaded every file and paid the provider cost
+            // twice for the same rejection (seen as two full processing
+            // runs in the server logs).
+            const jobError = new Error(final.error || "Processing failed") as Error & {
+              __jobTerminal?: boolean;
+            };
+            jobError.__jobTerminal = true;
+            throw jobError;
           }
           const res = final.result as UploadResponse;
           if (!res) throw new Error("Job completed but no result");
@@ -149,25 +158,21 @@ export function UploadPage() {
           setProcessingStep("ready");
           return;
         } catch (e: any) {
-          // If async not supported (404) or other, fall through to sync
-          if (e?.status === 404 || e?.status === 405) {
-            // server doesn't support jobs — use sync
-          } else if (e?.message?.includes("timed out")) {
-            throw e;
-          } else if (String(e?.message || "").includes("Failed")) {
-            // Check if it's a real job failure vs unsupported
-            // If we got a job_id but it failed, don't fallback — show error
-            if (String(e?.message || "").includes("Processing failed") || String(e?.message || "").includes("does not appear")) {
-              throw e;
-            }
-          }
-          // For other errors, try sync as fallback only if we never got a job
-          // If we already have a job error, rethrow
-          if (!String(e?.message || "").includes("job")) {
-            // fallback to sync below
-          } else {
+          // Sync fallback ONLY when the async path itself couldn't be used:
+          // old server without jobs (404/405) or a network-level failure
+          // (ApiError status 0). Any real HTTP rejection, timeout, or job
+          // failure is rethrown — a sync retry would fail identically and
+          // double the upload cost.
+          if (e?.__jobTerminal) {
             throw e;
           }
+          if (e?.message?.includes("timed out")) {
+            throw e;
+          }
+          if (e instanceof ApiError && e.status >= 400 && e.status !== 404 && e.status !== 405) {
+            throw e;
+          }
+          // else: 404/405 (jobs unsupported) or network error — try sync below
         }
       }
       // Sync fallback (used by tests and small uploads)
@@ -360,6 +365,25 @@ export function UploadPage() {
                     Your documents were saved, but question-answering couldn't be set up this time.
                     It will retry on your next upload.
                   </p>
+                )}
+                {result.failed_files && result.failed_files.length > 0 && (
+                  <div className="mt-2 rounded-lg bg-amber-100/70 px-3 py-2 text-sm text-amber-900">
+                    <p className="font-medium">
+                      {result.failed_files.length === 1
+                        ? "1 file couldn't be processed (the rest went through fine):"
+                        : `${result.failed_files.length} files couldn't be processed (the rest went through fine):`}
+                    </p>
+                    <ul className="mt-1 list-disc space-y-1 pl-5">
+                      {result.failed_files.map((f, i) => (
+                        <li key={`${f.file}-${i}`}>
+                          <strong>{f.file}</strong>
+                          {f.kind === "not_medical"
+                            ? " — doesn't look like a medical document."
+                            : " — processing failed; try uploading just this file again."}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
                 )}
               </Alert>
 

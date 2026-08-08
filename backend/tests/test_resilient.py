@@ -55,7 +55,10 @@ def test_client_disables_sdk_retries():
 
 def test_think_only_advances_rung():
     """json_object returns a <think>-only dump (non-JSON): must NOT retry
-    json_object; must advance to plain text and succeed there."""
+    json_object; must advance to plain text and succeed there.
+
+    Suppression probing is disabled here so this test covers the pure
+    output-format ladder; probing behavior has its own tests below."""
     calls = []
 
     def fake_create(**kwargs):
@@ -65,6 +68,7 @@ def test_think_only_advances_rung():
         return _resp("<think>ok</think>\n" + VALID_JSON)
 
     with mock.patch.object(me.client.chat.completions, "create", fake_create), \
+         mock.patch.dict(os.environ, {"GROQ_DISABLE_REASONING": "false"}), \
          mock.patch.object(me, "time") as fake_time:
         fake_time.sleep = lambda s: None
         raw = me._completion_resilient(
@@ -98,6 +102,7 @@ def test_json_validate_failed_400_advances_rung():
         return _resp(VALID_JSON)
 
     with mock.patch.object(me.client.chat.completions, "create", fake_create), \
+         mock.patch.dict(os.environ, {"GROQ_DISABLE_REASONING": "false"}), \
          mock.patch.object(me, "time") as fake_time:
         fake_time.sleep = lambda s: None
         raw = me._completion_resilient(
@@ -108,6 +113,240 @@ def test_json_validate_failed_400_advances_rung():
         )
     assert len(calls) == 2, calls
     assert VALID_JSON in raw
+
+
+def test_suppression_probe_sent_and_cached():
+    """A reasoning model gets the Qwen3 enable_thinking=false probe attached
+    (via extra_body); when the provider honors it, the FIRST call succeeds
+    and the probe is cached as the model's default for later calls."""
+    me._SUPPRESS_STATE.clear()
+    calls = []
+
+    def fake_create(**kwargs):
+        calls.append(kwargs.get("extra_body"))
+        # Provider honors enable_thinking=false: no <think>, clean JSON.
+        return _resp(VALID_JSON)
+
+    with mock.patch.object(me.client.chat.completions, "create", fake_create), \
+         mock.patch.object(me, "time") as fake_time:
+        fake_time.sleep = lambda s: None
+        for _ in range(2):  # second call must reuse the cached probe
+            raw = me._completion_resilient(
+                model="qwen/qwen3.6-27b",
+                system_prompt="sys",
+                user_content=[{"type": "text", "text": "t"}, {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,x"}}],
+                strict_format=me.EXTRACTION_RESPONSE_FORMAT,
+            )
+            assert VALID_JSON in raw
+    assert calls == [
+        {"chat_template_kwargs": {"enable_thinking": False}},
+        {"chat_template_kwargs": {"enable_thinking": False}},
+    ], calls
+    assert me._SUPPRESS_STATE["qwen/qwen3.6-27b"]["good"] == 0
+
+
+def test_unsupported_probe_param_crossed_off():
+    """If the provider 400-rejects the first probe as an unknown parameter,
+    the runner crosses it off (forever) and succeeds with the next probe —
+    the probe error must NOT surface as a request failure."""
+    me._SUPPRESS_STATE.clear()
+    calls = []
+
+    def fake_create(**kwargs):
+        extra = kwargs.get("extra_body")
+        calls.append(extra)
+        if extra and "chat_template_kwargs" in extra:
+            raise _api_error(400, {"error": {"message": 'Unknown field "chat_template_kwargs"'}})
+        return _resp(VALID_JSON)
+
+    with mock.patch.object(me.client.chat.completions, "create", fake_create), \
+         mock.patch.object(me, "time") as fake_time:
+        fake_time.sleep = lambda s: None
+        raw = me._completion_resilient(
+            model="qwen/qwen3.6-27b",
+            system_prompt="sys",
+            user_content=[{"type": "text", "text": "t"}, {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,x"}}],
+            strict_format=me.EXTRACTION_RESPONSE_FORMAT,
+        )
+    assert VALID_JSON in raw
+    assert calls == [
+        {"chat_template_kwargs": {"enable_thinking": False}},  # 400 unknown param
+        {"reasoning_format": "hidden"},                        # accepted, clean JSON
+    ], calls
+    state = me._SUPPRESS_STATE["qwen/qwen3.6-27b"]
+    assert state["dead"] == {0} and state["good"] == 1, state
+
+
+def test_suppression_ignored_falls_through_and_remembers():
+    """If the provider silently IGNORES the suppression switches (still
+    emits <think>), both probes get crossed off via the reasoning-dump
+    detection and the bare plain-text rung still recovers the JSON."""
+    me._SUPPRESS_STATE.clear()
+    calls = []
+
+    def fake_create(**kwargs):
+        extra = kwargs.get("extra_body")
+        fmt = kwargs.get("response_format")
+        calls.append((fmt, extra))
+        if extra:  # probe attached but provider ignores it
+            return _resp("<think> full reasoning dump, no JSON </think>")
+        if fmt == {"type": "json_object"}:
+            raise _api_error(
+                400,
+                {"error": {"code": "json_validate_failed", "message": "Failed to validate JSON"}},
+                code="json_validate_failed",
+            )
+        return _resp(VALID_JSON)
+
+    with mock.patch.object(me.client.chat.completions, "create", fake_create), \
+         mock.patch.object(me, "time") as fake_time:
+        fake_time.sleep = lambda s: None
+        raw = me._completion_resilient(
+            model="qwen/qwen3.6-27b",
+            system_prompt="sys",
+            user_content=[{"type": "text", "text": "t"}, {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,x"}}],
+            strict_format=me.EXTRACTION_RESPONSE_FORMAT,
+        )
+    assert VALID_JSON in raw
+    # json_object×2 probes (both ignored: <think> leak), json_object bare (400),
+    # then plain-text bare succeeds (probes skipped on later formats — crossed off).
+    assert calls == [
+        ({"type": "json_object"}, {"chat_template_kwargs": {"enable_thinking": False}}),
+        ({"type": "json_object"}, {"reasoning_format": "hidden"}),
+        ({"type": "json_object"}, None),
+        (None, None),
+    ], calls
+    state = me._SUPPRESS_STATE["qwen/qwen3.6-27b"]
+    assert state["dead"] == {0, 1}, state
+
+
+def test_no_fabricated_stub_fallback_on_total_failure():
+    """When every rung fails, _completion_resilient raises RuntimeError —
+    it must NOT call the FALLBACK_MODEL to fabricate a minimal empty JSON
+    (which the medical filter then rejected with a misleading 422)."""
+    me._SUPPRESS_STATE.clear()
+    called_models = []
+
+    def fake_create(**kwargs):
+        called_models.append(kwargs.get("model"))
+        raise _api_error(
+            400,
+            {"error": {"code": "json_validate_failed", "message": "Failed to validate JSON", "failed_generation": ""}},
+            code="json_validate_failed",
+        )
+
+    with mock.patch.object(me.client.chat.completions, "create", fake_create), \
+         mock.patch.object(me, "time") as fake_time:
+        fake_time.sleep = lambda s: None
+        try:
+            me._completion_resilient(
+                model="qwen/qwen3.6-27b",
+                system_prompt="sys",
+                user_content=[{"type": "text", "text": "t"}, {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,x"}}],
+                strict_format=me.EXTRACTION_RESPONSE_FORMAT,
+            )
+        except RuntimeError as e:
+            msg = str(e)
+            assert "repeatedly failed" in msg
+            assert "HTTP 400" in msg  # root-cause hint survives to the API layer
+        else:
+            raise AssertionError("expected RuntimeError on total ladder failure")
+    # Only the vision model was ever called — never the text fallback stub.
+    assert set(called_models) == {"qwen/qwen3.6-27b"}, set(called_models)
+    assert me.FALLBACK_MODEL not in called_models
+
+
+def test_probe_not_crossed_off_on_ambiguous_validate_failure():
+    """A 400 json_validate_failed with an EMPTY/ambiguous failed_generation
+    must NOT cross the probe off — suppression may have worked and the
+    answer JSON failed for another reason (e.g. truncation). The probe must
+    still lead the NEXT call. Only positive think evidence kills a probe."""
+    me._SUPPRESS_STATE.clear()
+    calls = []
+
+    def fake_create(**kwargs):
+        calls.append(kwargs.get("extra_body"))
+        if kwargs.get("response_format") == {"type": "json_object"}:
+            raise _api_error(
+                400,
+                {"error": {"code": "json_validate_failed", "message": "Failed to validate JSON", "failed_generation": ""}},
+                code="json_validate_failed",
+            )
+        return _resp(VALID_JSON)
+
+    with mock.patch.object(me.client.chat.completions, "create", fake_create), \
+         mock.patch.object(me, "time") as fake_time:
+        fake_time.sleep = lambda s: None
+        for _ in range(2):  # two independent calls (cold cache), same story
+            raw = me._completion_resilient(
+                model="qwen/qwen3.6-27b",
+                system_prompt="sys",
+                user_content=[{"type": "text", "text": "t"}, {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,x"}}],
+                strict_format=me.EXTRACTION_RESPONSE_FORMAT,
+            )
+            assert VALID_JSON in raw
+    # Each call: json_object×3 probes all 400-ambiguous, plain-text rung
+    # SUCCEEDS on the first probe -> that probe is marked 'good' (it produced
+    # clean JSON) and leads the second call, but neither probe was crossed off.
+    assert me._SUPPRESS_STATE["qwen/qwen3.6-27b"]["dead"] == set(), me._SUPPRESS_STATE
+    first_call = calls[: len(calls) // 2]
+    assert first_call[0] == {"chat_template_kwargs": {"enable_thinking": False}}, first_call
+
+
+def test_probe_crossed_off_only_on_positive_think_evidence():
+    """A 400 json_validate_failed whose discarded failed_generation still
+    visibly contains <think> is proof the probe was ignored -> cross off."""
+    me._SUPPRESS_STATE.clear()
+
+    def fake_create(**kwargs):
+        if kwargs.get("response_format") == {"type": "json_object"}:
+            raise _api_error(
+                400,
+                {"error": {"code": "json_validate_failed", "message": "Failed to validate JSON",
+                           "failed_generation": "<think> The user wants me to extract... truncated\n{broken json"}},
+                code="json_validate_failed",
+            )
+        return _resp(VALID_JSON)
+
+    with mock.patch.object(me.client.chat.completions, "create", fake_create), \
+         mock.patch.object(me, "time") as fake_time:
+        fake_time.sleep = lambda s: None
+        raw = me._completion_resilient(
+            model="qwen/qwen3.6-27b",
+            system_prompt="sys",
+            user_content=[{"type": "text", "text": "t"}, {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,x"}}],
+            strict_format=me.EXTRACTION_RESPONSE_FORMAT,
+        )
+    assert VALID_JSON in raw
+    state = me._SUPPRESS_STATE["qwen/qwen3.6-27b"]
+    assert state["dead"] == {0, 1}, state  # both probes provably ignored
+
+
+def test_422_body_validation_crosses_probe_off():
+    """OpenAI-compatible validators reject unknown request fields with 422
+    (not 400) — the probe must be crossed off all the same, then succeed."""
+    me._SUPPRESS_STATE.clear()
+    calls = []
+
+    def fake_create(**kwargs):
+        extra = kwargs.get("extra_body")
+        calls.append(extra)
+        if extra and "chat_template_kwargs" in extra:
+            raise _api_error(422, {"detail": [{"msg": "extra inputs are not permitted", "loc": ["body", "chat_template_kwargs"]}]})
+        return _resp(VALID_JSON)
+
+    with mock.patch.object(me.client.chat.completions, "create", fake_create), \
+         mock.patch.object(me, "time") as fake_time:
+        fake_time.sleep = lambda s: None
+        raw = me._completion_resilient(
+            model="qwen/qwen3.6-27b",
+            system_prompt="sys",
+            user_content=[{"type": "text", "text": "t"}, {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,x"}}],
+            strict_format=me.EXTRACTION_RESPONSE_FORMAT,
+        )
+    assert VALID_JSON in raw
+    assert calls[0] == {"chat_template_kwargs": {"enable_thinking": False}}
+    assert me._SUPPRESS_STATE["qwen/qwen3.6-27b"]["dead"] == {0}
 
 
 def test_429_uses_retry_after_then_succeeds():
