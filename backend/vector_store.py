@@ -45,9 +45,24 @@ _chroma_client = None
 def _get_chroma_client():
     global _chroma_client
     if _chroma_client is None:
-        import chromadb  # lazy, so supabase mode doesn't require chromadb
+        try:
+            import chromadb  # lazy, so supabase mode doesn't require chromadb
+        except ImportError as e:
+            raise RuntimeError(
+                "chromadb is not installed but VECTOR_STORE=chroma is active. "
+                "Install it with: pip install chromadb  (or: pip install -r requirements.txt) "
+                "— or set VECTOR_STORE=supabase to keep vectors in Supabase instead "
+                "(no local volume, no chromadb dependency)."
+            ) from e
         _chroma_client = chromadb.PersistentClient(path=CHROMA_DIR)
     return _chroma_client
+
+def get_chroma_client():
+    """Public alias so sibling modules (retrieval.py) share this process's
+    single, lazily-constructed Chroma client — and its one actionable
+    'chromadb not installed' message — instead of each constructing their
+    own PersistentClient per call."""
+    return _get_chroma_client()
 
 def _sanitize_collection_name(patient_key: str) -> str:
     name = re.sub(r"[^a-z0-9._-]+", "_", patient_key.strip().lower()).strip("_.-")
