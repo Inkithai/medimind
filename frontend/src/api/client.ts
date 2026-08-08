@@ -2,6 +2,7 @@ import type {
   CrossCheckReport,
   HealthResponse,
   LabTrendsReport,
+  PatientSnapshot,
   QAResponse,
   SessionHistory,
   SessionInfo,
@@ -175,6 +176,13 @@ export const api = {
       method: "POST",
       body: form,
     });
+  },
+
+  // One request returns timeline + cross-check + lab trends together (the
+  // dashboard's whole record). Individual getters below remain for pages
+  // that need just one slice, and for backward compatibility.
+  getPatientSnapshot(credentials: Credentials): Promise<PatientSnapshot> {
+    return request<PatientSnapshot>(credentials, "/api/v1/patient-snapshot");
   },
 
   getTimeline(credentials: Credentials): Promise<Timeline> {

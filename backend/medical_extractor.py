@@ -28,7 +28,10 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 
 import pdfplumber
-import fitz  # PyMuPDF, used to rasterize scanned PDFs
+try:
+    import pymupdf  # PyMuPDF >= 1.24 exposes the modern module name (no deprecation warning)
+except ImportError:  # older PyMuPDF releases only ship the legacy `fitz` module name
+    import fitz as pymupdf
 from PIL import Image, ImageOps
 from openai import (
     OpenAI,
@@ -56,6 +59,13 @@ if not GROQ_API_KEY or GROQ_API_KEY.strip() in ("", "your-groq-api-key"):
 client = OpenAI(
     api_key=GROQ_API_KEY,
     base_url=os.environ.get("GROQ_BASE_URL", "https://api.groq.com/openai/v1"),
+    # Retries are handled inside _completion_resilient() so one SDK call is
+    # exactly one HTTP request. With the SDK's own retry loop enabled (the
+    # default max_retries=2), a rate-limited call used to stack Groq's
+    # Retry-After waits (28s, 37s, 45s ...) on top of our ladder retries,
+    # turning a single upload into a multi-minute stall. Now 429s surface
+    # immediately and _completion_resilient() paces them deliberately.
+    max_retries=0,
 )
 
 # Groq retires hosted models on a schedule — keep an eye on
@@ -200,6 +210,55 @@ def _is_retryable_api_error(exc: Exception) -> bool:
     return getattr(exc, "status_code", None) in _RETRYABLE_STATUS_CODES
 
 
+def _error_detail(exc: Exception) -> str:
+    """Best-effort serialization of an OpenAI/Groq APIError for logging:
+    status code, error code, message, and the raw response body — which for
+    Groq includes the model's discarded generation on a 400
+    'json_validate_failed' (`error.failed_generation`), i.e. exactly the
+    evidence needed to see WHY a request was rejected."""
+    parts = []
+    status = getattr(exc, "status_code", None)
+    if status is not None:
+        parts.append(f"status={status}")
+    code = getattr(exc, "code", None)
+    if code:
+        parts.append(f"code={code}")
+    message = getattr(exc, "message", None) or str(exc)
+    if message:
+        parts.append(f"message={message!r}")
+    body = getattr(exc, "body", None)
+    if body is not None:
+        try:
+            body_str = json.dumps(body, ensure_ascii=False)
+        except (TypeError, ValueError):
+            body_str = str(body)
+        parts.append(f"body={body_str[:1500]}")
+    return " ".join(parts) or repr(exc)
+
+
+def _retry_after_seconds(exc: Exception, fallback: float) -> float:
+    """Best-effort parse of a provider Retry-After header (seconds or
+    HTTP-date) from a 429/5xx APIError; falls back to `fallback` when the
+    header is absent or unparseable."""
+    headers = getattr(exc, "headers", None)
+    if headers is None:
+        response = getattr(exc, "response", None)
+        headers = getattr(response, "headers", None) if response is not None else None
+    if headers is not None:
+        try:
+            raw = headers.get("retry-after") or headers.get("Retry-After")
+        except Exception:
+            raw = None
+        if raw:
+            try:
+                return float(raw)
+            except (TypeError, ValueError):
+                # HTTP-date form ("Wed, 21 Oct 2015 07:28:00 GMT") — rare;
+                # fall back to exponential backoff below.
+                pass
+    return fallback
+
+
 def _is_vision_content(user_content: Any) -> bool:
     return isinstance(user_content, list) and any(
         isinstance(part, dict) and part.get("type") == "image_url"
@@ -295,10 +354,12 @@ def _completion_resilient(
 
     Recovery ladder:
       1. The primary response format (strict json_schema, or json_object
-         mode for models without strict support), retried `primary_attempts`
-         times — empty/invalid generations are usually transient.
+         mode for models without strict support), tried up to
+         `primary_attempts` times. A rung is only re-tried for genuinely
+         transient errors (5xx/network/rate limit); empty or invalid
+         generations advance to the next rung instead (see below).
       2. Looser rungs from _format_ladder() (json_object mode, then plain
-         text with the schema still inlined in the prompt), retried
+         text with the schema still inlined in the prompt), up to
          `fallback_attempts` times each. In plain-text mode Groq does not
          validate anything, so the raw content comes back to us and is
          parsed client-side (see _parse_json_object) — recovering
@@ -307,10 +368,16 @@ def _completion_resilient(
 
     Additionally validates that the returned content is actually parseable
     as JSON (via _parse_json_object). If the model returns a non-JSON
-    reasoning dump (e.g. "<think> The user wants..." without any JSON),
-    that is treated as a transient failure and retried — previously this
-    would have been returned as success and only failed later in the
-    caller with a confusing "could not be parsed" error.
+    reasoning dump (e.g. "<think> The user wants..." without any JSON), or
+    Groq discards a generation server-side (400 'json_validate_failed'),
+    the SAME response format is unlikely to succeed on retry, so the
+    runner advances to the next looser rung immediately instead of burning
+    attempts — previously a <think>-emitting vision model could consume
+    several doomed json_object retries plus a repair round-trip per file.
+    Rate limits (429) are paced using Groq's Retry-After header (falling
+    back to exponential backoff), with a cap on consecutive waits so a
+    hard-throttled account fails fast with an actionable message rather
+    than stalling an upload for many minutes.
 
     Returns the raw assistant message content (callers parse it with
     _parse_json_object). Raises RuntimeError with a plain-language
@@ -324,6 +391,11 @@ def _completion_resilient(
         fallback_attempts = max(fallback_attempts, 3)
     last_error: Optional[Exception] = None
     total_attempts = 0
+    rate_limit_waits = 0
+    try:
+        max_rate_limit_waits = int(os.environ.get("GROQ_MAX_RATE_LIMIT_RETRIES", "5"))
+    except ValueError:
+        max_rate_limit_waits = 5
     last_raw_snippet: str = ""
     max_tokens = _completion_token_budget(user_content)
 
@@ -351,56 +423,117 @@ def _completion_resilient(
                 response = _chat_completion(**request_kwargs)
                 raw = response.choices[0].message.content or ""
                 if not raw or not raw.strip():
-                    raise ValueError("model returned an empty response — no JSON to parse")
-                # Validate parseability before returning: if raw contains no parseable JSON,
-                # treat as transient failure and retry (covers <think>-only outputs in plain-text mode)
+                    last_error = ValueError("model returned an empty response — no JSON to parse")
+                    logger.warning(
+                        "_completion_resilient: model='%s' level=%d attempt=%d returned an EMPTY "
+                        "response — advancing to the next output mode",
+                        model, level, attempt,
+                    )
+                    # An empty generation is a model-side hiccup; retrying the
+                    # exact same request usually repeats it, so move to a looser
+                    # rung (plain text lets US parse whatever comes back).
+                    break
+                # Validate parseability before returning: if raw contains no parseable JSON
+                # (e.g. a <think>-only reasoning dump), the same response format will likely
+                # fail again — advance to the looser rung instead of burning retries.
                 try:
                     _parse_json_object(raw)
                 except ValueError as parse_err:
                     last_error = parse_err
                     last_raw_snippet = raw[:500]
                     logger.warning(
-                        "_completion_resilient: model='%s' level=%d attempt=%d returned non-JSON (snippet %r), retrying: %s",
+                        "_completion_resilient: model='%s' level=%d attempt=%d returned non-JSON "
+                        "(snippet %r) — advancing to the next output mode: %s",
                         model, level, attempt, raw[:250].replace(chr(10), " "), parse_err,
                     )
-                    if level == len(ladder) - 1 and attempt == attempts:
-                        break
-                    time.sleep(backoff_seconds * attempt)
-                    continue
+                    break
                 return raw
             except APIError as e:
                 if not _is_retryable_api_error(e):
+                    logger.error(
+                        "Groq request failed for model='%s' (non-retryable, not retrying): %s",
+                        model, _error_detail(e),
+                    )
                     raise
-                last_error = e
-                last_raw_snippet = str(e)[:500]
+                if _is_json_validation_failure(e):
+                    # Groq validated the generation server-side and discarded
+                    # it (typically because a reasoning model emitted a
+                    # <think> preamble, or produced nothing). Re-issuing the
+                    # SAME response_format will fail again — jump to the next,
+                    # looser rung so we get the raw text and parse it ourselves.
+                    last_error = e
+                    logger.warning(
+                        "Groq rejected model='%s' generation server-side (JSON validation) — "
+                        "advancing to a looser output mode: %s",
+                        model, _error_detail(e),
+                    )
+                    break
                 if _is_token_budget_error(e):
                     # A provider-side 413 here is not an oversized upload. It
                     # means prompt/image tokens + max_tokens exceed TPM. Retry
                     # with less output headroom instead of returning a 422.
+                    last_error = e
                     reduced_budget = max(256, max_tokens // 2)
                     if reduced_budget < max_tokens:
                         logger.warning(
                             "Groq token budget rejected model='%s' request; "
-                            "reducing max_tokens from %d to %d",
-                            model, max_tokens, reduced_budget,
+                            "reducing max_tokens from %d to %d: %s",
+                            model, max_tokens, reduced_budget, _error_detail(e),
                         )
                         max_tokens = reduced_budget
+                    if level == len(ladder) - 1 and attempt == attempts:
+                        break
+                    time.sleep(backoff_seconds * attempt)
+                    continue
+                if getattr(e, "status_code", None) == 429:
+                    rate_limit_waits += 1
+                    last_error = e
+                    if rate_limit_waits > max_rate_limit_waits:
+                        raise RuntimeError(
+                            f"Groq kept returning 429 (rate limit) for model '{model}' after "
+                            f"{rate_limit_waits} wait(s). This usually means the account's "
+                            "per-minute token budget is exhausted (Groq free tier is heavily "
+                            "rate-limited). Please wait a minute and retry the upload."
+                        ) from e
+                    sleep_s = min(_retry_after_seconds(e, backoff_seconds * attempt), 60.0)
+                    logger.warning(
+                        "Groq rate-limited (429) model='%s' — sleeping %.0fs before retry "
+                        "(wait %d/%d): %s",
+                        model, sleep_s, rate_limit_waits, max_rate_limit_waits, _error_detail(e),
+                    )
+                    if level == len(ladder) - 1 and attempt == attempts:
+                        break
+                    time.sleep(sleep_s)
+                    continue
+                # Other transient provider errors (5xx, 408/409) and network
+                # blips — these are worth retrying on the same rung.
+                last_error = e
+                logger.warning(
+                    "Groq transient error for model='%s', retrying (attempt %d/%d): %s",
+                    model, attempt, attempts, _error_detail(e),
+                )
                 if level == len(ladder) - 1 and attempt == attempts:
                     break  # last rung exhausted — no point sleeping first
                 time.sleep(backoff_seconds * attempt)
             except ValueError as e:
-                # Empty or non-parseable that we raised above already handled; but also catch direct raise
+                # Defensive net: any ValueError we raised ourselves above is
+                # already handled; this catches direct raises from callbacks.
                 last_error = e
+                if "empty response" in str(e):
+                    logger.warning(
+                        "_completion_resilient: model='%s' empty response on attempt %d", model, attempt
+                    )
                 if level == len(ladder) - 1 and attempt == attempts:
                     break
-                # Already logged for parse case; log empty case here
-                if "empty response" in str(e):
-                    logger.warning("_completion_resilient: model='%s' empty response on attempt %d", model, attempt)
                 time.sleep(backoff_seconds * attempt)
                 continue
 
     # All ladder rungs exhausted — try repair strategies before giving up
-    if last_error is not None and ("could not be parsed" in str(last_error) or "empty response" in str(last_error)):
+    if last_error is not None and (
+        "could not be parsed" in str(last_error)
+        or "empty response" in str(last_error)
+        or _is_json_validation_failure(last_error)
+    ):
         # Strategy 1: If this was a vision call (user_content contains image), retry once with a very explicit repair prompt
         # that includes the original image and tells the model its previous output was invalid.
         is_vision_call = _is_vision_content(user_content)
@@ -931,9 +1064,9 @@ def extract_text_from_pdf(pdf_path: str) -> str:
 def pdf_pages_to_images(pdf_path: str, dpi: int = 200) -> List[Image.Image]:
     """Render each page of a scanned/image-only PDF into a PIL image."""
     images = []
-    doc = fitz.open(pdf_path)
+    doc = pymupdf.open(pdf_path)
     zoom = dpi / 72
-    matrix = fitz.Matrix(zoom, zoom)
+    matrix = pymupdf.Matrix(zoom, zoom)
     for page in doc:
         pix = page.get_pixmap(matrix=matrix)
         img = Image.open(io.BytesIO(pix.tobytes("png")))

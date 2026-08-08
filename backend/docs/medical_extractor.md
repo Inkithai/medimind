@@ -54,13 +54,12 @@ export GROQ_API_KEY=gsk_...
 
 Both do not attach `_source` — caller does.
 
-**Structured-output resilience** — Groq validates model output server-side in json_object and strict json_schema modes and discards any generation that isn't valid JSON, rejecting the request with `400 json_validate_failed` (often with an empty `failed_generation`, i.e. the model hiccuped and produced nothing). All structured calls (`extract_from_image`, `extract_from_text`, `cross_check_prescriptions`) go through `_completion_resilient()`, which:
+**Structured-output resilience** — Groq validates model output server-side in json_object and strict json_schema modes and discards any generation that isn't valid JSON, rejecting the request with `400 json_validate_failed` (the body includes `failed_generation`, which is logged so a 400 is diagnosable instead of a mystery). All structured calls (`extract_from_image`, `extract_from_text`, `cross_check_prescriptions`) go through `_completion_resilient()`, which walks down `_format_ladder()` (`strict json_schema` on `openai/gpt-oss-*` → `json_object` + inlined schema → plain text with no `response_format` at all, where Groq does not validate and `_parse_json_object()` recovers JSON wrapped in markdown fences or surrounded by commentary) with these rules:
 
-1. Retries the primary response format (`strict json_schema` on `openai/gpt-oss-*`; `json_object` + inlined schema otherwise) up to 3× with backoff — most such failures are transient.
-2. Falls back down `_format_ladder()`: `json_object` mode (schema inlined in the prompt), then plain text with no `response_format` at all. Groq does not validate the last rung, so the raw content comes back and `_parse_json_object()` recovers JSON wrapped in markdown fences or surrounded by commentary.
-3. If every attempt fails, raises a plain-language `RuntimeError` ("repeatedly failed to return valid structured JSON ... retry the upload") instead of the raw provider error body.
-
-`_is_retryable_api_error()` also retries transient 408/409/429/5xx statuses and connection errors; auth (401) and model-not-found (404) failures propagate immediately.
+1. A response-format rung is retried only for genuinely transient errors (5xx, 408/409, network). A `400 json_validate_failed` or a client-side non-JSON parse failure (e.g. a `<think>`-only dump from the qwen vision model) means the SAME format will fail again, so the runner advances to the next looser rung immediately instead of burning doomed retries — previously one file could trigger several doomed json_object retries plus repair round-trips.
+2. Rate limits (429) are paced using Groq's `Retry-After` header (falling back to exponential backoff), capped by `GROQ_MAX_RATE_LIMIT_RETRIES` (default 5) so a hard-throttled account fails fast with an actionable message instead of stalling an upload for many minutes. The OpenAI SDK's own retry loop is disabled (`max_retries=0`) so SDK Retry-After sleeps don't stack on top of our ladder.
+3. Every provider error is logged with its full body via `_error_detail()` (status, code, message, response body) before retry or propagation, and non-retryable errors (401, 404 model_not_found, non-json_validate 400s) propagate immediately.
+4. If every rung fails, two last-resort repairs run (a vision repair retry with the original image, then a cheap text-model repair), and only then does it raise a plain-language `RuntimeError` ("repeatedly failed to return valid structured JSON ... retry the upload").
 
 - `_apply_confidence_ceiling(result, 0.85)` caps vision OCR results — handwritten read can never be 100% certain vs digital `text_layer`.
 

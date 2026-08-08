@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import { ErrorState } from "../components/ErrorState";
@@ -7,6 +7,7 @@ import { LabTrendsView } from "../components/LabTrendsView";
 import { LoadingState } from "../components/Spinner";
 import { RefreshIcon, UploadIcon } from "../components/icons";
 import { useAuth } from "../context/AuthContext";
+import { useStrictEffect } from "../hooks/useStrictEffect";
 import type { LabTrendsReport } from "../types/api";
 
 export function LabTrendsPage() {
@@ -30,7 +31,7 @@ export function LabTrendsPage() {
     }
   }, [credentials]);
 
-  useEffect(() => {
+  useStrictEffect(() => {
     void load();
   }, [load, reloadKey]);
 

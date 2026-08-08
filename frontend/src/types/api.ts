@@ -176,6 +176,18 @@ export interface ChatHistoryEntry {
   content: string;
 }
 
+// ---- Patient snapshot (api.py GET /api/v1/patient-snapshot) --------------
+// One request that returns everything the dashboard needs, instead of three
+// separate calls to /timeline + /cross-check + /lab-trends.
+
+export interface PatientSnapshot {
+  user_id: string;
+  patient_timeline: Timeline;
+  cross_check_report: CrossCheckReport;
+  lab_trends: LabTrendsReport;
+  updated_at: string | null;
+}
+
 // ---- Upload response (api.py) --------------------------------------------
 
 export interface UploadResponse {

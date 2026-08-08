@@ -4,6 +4,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -88,8 +89,16 @@ function persist(state: StoredSession) {
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<StoredSession>(() => loadStored());
-  const [initializing, setInitializing] = useState<boolean>(() => !loadStored().configured);
+  const [initializing, setInitializing] = useState<boolean>(() => !state.configured);
   const [initError, setInitError] = useState<string | null>(null);
+
+  // React 18 <StrictMode> (see main.tsx) mounts components twice in dev:
+  // effect → cleanup → effect on the SAME fiber. Without this guard, the
+  // auto-provisioning effect below would POST /anonymous/session twice on
+  // every fresh page load, creating two anon_* users (the "anonymous
+  // session created" log appearing twice at startup). Refs survive the
+  // StrictMode double-invoke, so the second run is skipped.
+  const provisioningStarted = useRef(false);
 
   const createAnonymous = useCallback(async (apiBase = "") => {
     const res = await api.createAnonymousSession(apiBase);
@@ -111,6 +120,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setInitializing(false);
       return;
     }
+    if (provisioningStarted.current) {
+      // StrictMode re-ran this effect; the first invocation is already
+      // provisioning — don't create a second anonymous session.
+      return;
+    }
+    provisioningStarted.current = true;
     let cancelled = false;
     (async () => {
       setInitializing(true);

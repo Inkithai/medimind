@@ -33,12 +33,15 @@ import os
 import re
 import json
 import hashlib
+import logging
 from typing import Any, Dict, List, Optional
 
 import chromadb
 from openai import OpenAI, OpenAIError
 
 from medical_extractor import client, MODEL, _completion_resilient
+
+logger = logging.getLogger("retrieval")
 
 EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL", "text-embedding-3-small")
 CHAT_MODEL = MODEL  # reuse the same chat model configured in medical_extractor.py
@@ -261,21 +264,33 @@ def _get_patient_collection(patient_key: str, create: bool):
         return None
 
 
-def index_patient_timeline(patient_key: str, timeline: Dict[str, Any]) -> None:
+def index_patient_timeline(patient_key: str, timeline: Dict[str, Any]) -> int:
     """
     Entry point for indexing: chunks a patient's timeline, embeds every
     chunk, and upserts them into that patient's local Chroma collection
     (persisted under ./chroma_db). Safe to call repeatedly on the same
     timeline — chunk IDs are deterministic, so re-indexing overwrites
     existing entries rather than duplicating them.
+
+    Returns the number of chunks indexed. Returns 0 — WITHOUT storing
+    anything — when the timeline has no retrievable content (no
+    medications, lab results, clinical notes, or allergies), in which
+    case callers must NOT report the patient as indexed: there is
+    literally nothing for Q&A to retrieve. (Previously this returned
+    None after printing "skipping indexing", which made upload callers
+    log "re-indexed for Q&A" and index=True — a misleading contradiction.)
     """
     if not patient_key or not patient_key.strip():
         raise ValueError("patient_key is required and cannot be empty.")
 
     chunks = build_chunks_from_timeline(patient_key, timeline)
     if not chunks:
-        print(f"  No indexable content found for patient '{patient_key}' — skipping indexing.")
-        return
+        logger.warning(
+            "No indexable content found for patient '%s' — skipping indexing "
+            "(nothing to retrieve for Q&A).",
+            patient_key,
+        )
+        return 0
 
     embeddings = embed_texts([c["text"] for c in chunks])
 
@@ -286,7 +301,11 @@ def index_patient_timeline(patient_key: str, timeline: Dict[str, Any]) -> None:
         documents=[c["text"] for c in chunks],
         metadatas=[c["metadata"] for c in chunks],
     )
-    print(f"  Indexed {len(chunks)} chunk(s) for patient '{patient_key}' into Chroma ({CHROMA_DIR}).")
+    logger.info(
+        "Indexed %d chunk(s) for patient '%s' into Chroma (%s).",
+        len(chunks), patient_key, CHROMA_DIR,
+    )
+    return len(chunks)
 
 
 # ---------------------------------------------------------------------------

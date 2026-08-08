@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import { Card, CardBody } from "../components/Card";
@@ -8,6 +8,7 @@ import { TimelineView } from "../components/TimelineView";
 import { DocumentViewer } from "../components/DocumentViewer";
 import { UploadIcon } from "../components/icons";
 import { useAuth } from "../context/AuthContext";
+import { useStrictEffect } from "../hooks/useStrictEffect";
 import type { Timeline, Visit } from "../types/api";
 
 export function HistoryPage() {
@@ -31,7 +32,7 @@ export function HistoryPage() {
     }
   }, [credentials]);
 
-  useEffect(() => {
+  useStrictEffect(() => {
     void load();
   }, [load]);
 
