@@ -12,21 +12,24 @@ Pipeline:
     question, retrieve the top_k most similar chunks, and ask a chat
     model to answer strictly from that retrieved context.
 
-Embedding provider: chat/extraction run on Groq, but Groq does not
-offer an embeddings API. So embeddings use, in order of preference:
+Embedding provider: chat/extraction run on the active LLM_PROVIDER (groq/gemini),
+but neither Groq nor Gemini offers an embeddings API. So embeddings use, in order of preference:
     1. OpenAI text-embedding-3-small, if OPENAI_API_KEY is set.
     2. Chroma's built-in local ONNX MiniLM model (all-MiniLM-L6-v2) —
        runs in-process, no API key or network calls (after a one-time
        weights download on first use).
 NOTE: the two backends produce different-dimensional vectors, so after
-switching backends delete ./chroma_db and re-index.
+switching backends delete ./chroma_db and re-index (or clear `chunks` table if VECTOR_STORE=supabase).
 
 Install:
     pip install chromadb --break-system-packages
 
 Env:
-    export GROQ_API_KEY="gsk_..."        (same key used by medical_extractor.py)
+    export LLM_PROVIDER=gemini           (or groq; same provider used by medical_extractor.py)
+    export GEMINI_API_KEY="AIza..."      (or GROQ_API_KEY="gsk_..." for groq)
     export OPENAI_API_KEY="sk-..."       (optional — see embedding provider above)
+    export VECTOR_STORE=chroma           (or supabase — no volume, uses Supabase `chunks` table)
+    export CHROMA_DIR=./chroma_db        (only for VECTOR_STORE=chroma)
 """
 
 import os
@@ -36,10 +39,10 @@ import hashlib
 import logging
 from typing import Any, Dict, List, Optional
 
-import chromadb
 from openai import OpenAI, OpenAIError
 
 from medical_extractor import client, MODEL, _completion_resilient
+import vector_store  # abstraction over Chroma (local) and Supabase (no volume)
 
 logger = logging.getLogger("retrieval")
 
@@ -48,6 +51,7 @@ CHAT_MODEL = MODEL  # reuse the same chat model configured in medical_extractor.
 
 CHROMA_DIR = os.environ.get("CHROMA_DIR", "./chroma_db")
 EMBEDDING_BATCH_SIZE = 100  # keep well under the API's per-request item limit
+# VECTOR_STORE is read inside vector_store.py; we keep CHROMA_DIR for backward compat
 
 # Groq has no embeddings endpoint. When an OpenAI key is available it
 # is used ONLY for embeddings (never for chat); otherwise fall back to
@@ -294,17 +298,25 @@ def index_patient_timeline(patient_key: str, timeline: Dict[str, Any]) -> int:
 
     embeddings = embed_texts([c["text"] for c in chunks])
 
-    collection = _get_patient_collection(patient_key, create=True)
-    collection.upsert(
-        ids=[c["id"] for c in chunks],
-        embeddings=embeddings,
-        documents=[c["text"] for c in chunks],
-        metadatas=[c["metadata"] for c in chunks],
-    )
-    logger.info(
-        "Indexed %d chunk(s) for patient '%s' into Chroma (%s).",
-        len(chunks), patient_key, CHROMA_DIR,
-    )
+    if vector_store.get_store_name() == "supabase":
+        vector_store.upsert(
+            patient_key,
+            ids=[c["id"] for c in chunks],
+            embeddings=embeddings,
+            documents=[c["text"] for c in chunks],
+            metadatas=[c["metadata"] for c in chunks],
+        )
+        logger.info("Indexed %d chunk(s) for patient '%s' into supabase (supabase).", len(chunks), patient_key)
+    else:
+        # Chroma path (kept for backward compat with tests that mock _get_patient_collection)
+        collection = _get_patient_collection(patient_key, create=True)
+        collection.upsert(
+            ids=[c["id"] for c in chunks],
+            embeddings=embeddings,
+            documents=[c["text"] for c in chunks],
+            metadatas=[c["metadata"] for c in chunks],
+        )
+        logger.info("Indexed %d chunk(s) for patient '%s' into Chroma (%s).", len(chunks), patient_key, CHROMA_DIR)
     return len(chunks)
 
 
@@ -424,18 +436,23 @@ def answer_question(
         retrieval_query if retrieval_query and retrieval_query.strip() else question
     )
 
-    collection = _get_patient_collection(patient_key, create=False)
-    if collection is None or collection.count() == 0:
-        return dict(_NO_INFO_ANSWER)
-
-    query_embedding = embed_texts([effective_retrieval_query])[0]
-
-    results = collection.query(
-        query_embeddings=[query_embedding],
-        n_results=min(top_k, collection.count()),
-    )
-    docs = (results.get("documents") or [[]])[0]
-    metadatas = (results.get("metadatas") or [[]])[0]
+    # Use vector_store abstraction when supabase, else Chroma directly (for test mocks)
+    if vector_store.get_store_name() == "supabase":
+        if vector_store.count(patient_key) == 0:
+            return dict(_NO_INFO_ANSWER)
+        query_embedding = embed_texts([effective_retrieval_query])[0]
+        _, docs, metadatas = vector_store.query(patient_key, query_embedding, top_k)
+    else:
+        collection = _get_patient_collection(patient_key, create=False)
+        if collection is None or collection.count() == 0:
+            return dict(_NO_INFO_ANSWER)
+        query_embedding = embed_texts([effective_retrieval_query])[0]
+        results = collection.query(
+            query_embeddings=[query_embedding],
+            n_results=min(top_k, collection.count()),
+        )
+        docs = (results.get("documents") or [[]])[0]
+        metadatas = (results.get("metadatas") or [[]])[0]
 
     if not docs:
         return dict(_NO_INFO_ANSWER)

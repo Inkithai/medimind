@@ -1,8 +1,8 @@
 # MediMind — Retrieval & Q&A Layer
 
-Phase 1 (single-shot) + Phase 2 (conversations) over structured timelines. Imports `client` + `MODEL` from `medical_extractor.py` — chat runs on Groq shared client. Never re-reads raw PDFs/images; works purely on `build_patient_timeline()` output.
+Phase 1 (single-shot) + Phase 2 (conversations) over structured timelines. Imports `client` + `MODEL` from `medical_extractor.py` — chat runs on the active `LLM_PROVIDER` (Groq or Gemini) shared client. Never re-reads raw PDFs/images; works purely on `build_patient_timeline()` output.
 
-**Embeddings:** Groq has no embeddings API. Chain:
+**Embeddings:** Groq/Gemini have no embeddings API. Chain:
 1. OpenAI `text-embedding-3-small` when `OPENAI_API_KEY` set (OpenAI client used only for embeddings).
 2. Fallback: Chroma local ONNX `all-MiniLM-L6-v2` — no key, runs in-process, one-time weight download.
 

@@ -10,6 +10,17 @@ import type {
   UploadResponse,
 } from "../types/api";
 
+export interface Job {
+  job_id: string;
+  user_id: string;
+  status: "pending" | "processing" | "completed" | "failed";
+  progress?: { step: string; message: string; file_names?: string[] };
+  result?: UploadResponse;
+  error?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 // MediMind anonymous workspace: the backend issues a signed JWT for a
 // random anon_* user_id via POST /api/v1/anonymous/session. The frontend
 // stores {userId, token, apiBase} in localStorage (medimind.session.v1)
@@ -176,6 +187,45 @@ export const api = {
       method: "POST",
       body: form,
     });
+  },
+
+  // Async upload — returns 202 + job polling (avoids free-tier 429 timeouts)
+  // Use when USE_BACKGROUND_JOBS=true or for large scans
+  uploadDocumentsAsync(credentials: Credentials, files: File[]): Promise<{ job_id: string; status: string }> {
+    const form = new FormData();
+    for (const file of files) form.append("files", file);
+    // Prefer header and query param both trigger background on server
+    return request<{ job_id: string; status: string }>(credentials, "/api/v1/documents?async=true", {
+      method: "POST",
+      headers: { Prefer: "respond-async" },
+      body: form,
+    });
+  },
+
+  getJob(credentials: Credentials, jobId: string): Promise<Job> {
+    return request<Job>(credentials, `/api/v1/jobs/${encodeURIComponent(jobId)}`);
+  },
+
+  listJobs(credentials: Credentials): Promise<{ jobs: Job[] }> {
+    return request<{ jobs: Job[] }>(credentials, "/api/v1/jobs");
+  },
+
+  // Helper: poll job until completed/failed (used by UploadPage for real progress)
+  async pollJobUntilDone(
+    credentials: Credentials,
+    jobId: string,
+    onProgress?: (job: Job) => void,
+    intervalMs = 1500,
+    timeoutMs = 120000
+  ): Promise<Job> {
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      const job = await api.getJob(credentials, jobId);
+      if (onProgress) onProgress(job);
+      if (job.status === "completed" || job.status === "failed") return job;
+      await new Promise((r) => setTimeout(r, intervalMs));
+    }
+    throw new ApiError(408, "Upload timed out — still processing, check back shortly");
   },
 
   // One request returns timeline + cross-check + lab trends together (the

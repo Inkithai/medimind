@@ -25,12 +25,14 @@ Install (in addition to Phase 1/2 dependencies):
     pip install fastapi uvicorn[standard] python-multipart supabase cloudinary pyjwt
 
 Env:
-    GROQ_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
+    LLM_PROVIDER + provider key (GROQ_API_KEY or GEMINI_API_KEY / GOOGLE_API_KEY),
+    SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
     CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET,
     JWT_SECRET
-    (optional: OPENAI_API_KEY — used only for embeddings, since Groq has no
+    (optional: OPENAI_API_KEY — used only for embeddings, since Groq/Gemini have no
     embeddings API; without it, embeddings run locally via Chroma's ONNX
     MiniLM model)
+    (optional: VECTOR_STORE=chroma|supabase, USE_BACKGROUND_JOBS=true for async uploads)
 """
 
 import logging
@@ -41,13 +43,14 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, Dict, List, Optional, Tuple
 
-from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import BackgroundTasks, Depends, FastAPI, File, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 import conversation
 import db
+import jobs
 import storage
 from auth import get_current_user, issue_anonymous_token
 from document_filter import NonMedicalDocumentError, assert_medical_document
@@ -86,11 +89,19 @@ app = FastAPI(title="MediMind API", version="1.0.0", lifespan=lifespan)
 # which trigger a CORS preflight when the frontend is served from a different
 # origin than the API. Allow cross-origin requests from the browser app;
 # restrict via CORS_ORIGINS (comma-separated list of origins) when deployed.
-_default_origins = os.environ.get("CORS_ORIGINS", "*")
+# NOTE: allow_credentials=True is invalid with allow_origins=["*"] (browsers
+# reject it). When CORS_ORIGINS is "*" we allow all origins without credentials.
+_cors_origins_raw = os.environ.get("CORS_ORIGINS", "*").strip()
+if _cors_origins_raw == "*":
+    _cors_allow_origins = ["*"]
+    _cors_allow_credentials = False
+else:
+    _cors_allow_origins = [o.strip() for o in _cors_origins_raw.split(",") if o.strip()]
+    _cors_allow_credentials = True
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[o.strip() for o in _default_origins.split(",") if o.strip()],
-    allow_credentials=True,
+    allow_origins=_cors_allow_origins,
+    allow_credentials=_cors_allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -126,211 +137,132 @@ class MessageRequest(BaseModel):
 # Documents / timeline / cross-check / lab trends
 # ---------------------------------------------------------------------------
 
-@app.post("/api/v1/documents", status_code=201)
-async def upload_documents(
-    files: List[UploadFile] = File(...),
-    user_id: str = Depends(get_current_user),
-) -> Dict[str, Any]:
-    """
-    Uploads one or more documents (PDF/image) for the authenticated user.
-    Extracts each, merges the results with any documents previously
-    uploaded by this user, rebuilds the timeline, re-runs cross-checking
-    and lab trend tracking, and re-indexes for Q&A.
-    """
-    logger.info("upload_documents: user=%s received %d file(s)", user_id, len(files))
-    if not files:
-        raise HTTPException(400, "No files were uploaded.")
 
-    # Pass 1: extract + validate every file/page first. Nothing is uploaded
-    # to Cloudinary or written to Supabase until the whole batch passes, so a
-    # bad file later in the batch never leaves an orphaned upload behind
-    # for a good file earlier in it.
+def _should_use_background(request: Request, prefer_header: Optional[str] = None) -> bool:
+    """Client can force async via ?async=true or Prefer: respond-async, or server via USE_BACKGROUND_JOBS."""
+    if os.environ.get("USE_BACKGROUND_JOBS", "").lower() in ("true", "1", "yes"):
+        return True
+    if prefer_header and "respond-async" in prefer_header.lower():
+        return True
+    try:
+        if request.query_params.get("async") == "true":
+            return True
+    except Exception:
+        pass
+    return False
+
+
+async def _execute_upload_pipeline(
+    user_id: str,
+    files_data: List[Tuple[str, bytes]],
+    job_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Core upload pipeline shared by sync and background paths."""
+    def _progress(step: str, message: str):
+        if job_id:
+            jobs.update_job(job_id, progress={"step": step, "message": message})
+    _progress("reading", f"Processing {len(files_data)} file(s)")
     per_file_pages: List[Tuple[Path, str, List[Dict[str, Any]]]] = []
     new_docs: List[Dict[str, Any]] = []
-
-    with TemporaryDirectory() as tmp_dir:
-        for file_index, upload in enumerate(files, start=1):
-            # Never trust the client-provided filename for an on-disk path:
-            # it may contain path separators / '..' segments (path
-            # traversal), and two uploads may share a name (the second
-            # would overwrite the first's temp file before Cloudinary
-            # archival). Write under a unique, sanitized name; keep the
-            # basename for display/labeling only.
-            original_name = Path(upload.filename or "").name or f"upload_{file_index}"
+    from tempfile import TemporaryDirectory as _TD
+    with _TD() as tmp_dir:
+        for file_index, (original_name, content) in enumerate(files_data, start=1):
             suffix = Path(original_name).suffix.lower()
             if suffix not in SUPPORTED_EXTENSIONS:
-                logger.warning(
-                    "upload_documents: user=%s rejected '%s' (unsupported type '%s')",
-                    user_id, original_name, suffix or "(none)",
-                )
-                raise HTTPException(
-                    400,
-                    f"Unsupported file type '{suffix or '(no extension)'}' for "
-                    f"'{original_name}'. Supported: {', '.join(SUPPORTED_EXTENSIONS)}",
-                )
+                logger.warning("upload: user=%s rejected '%s' (unsupported type '%s')", user_id, original_name, suffix or "(none)")
+                raise HTTPException(400, f"Unsupported file type '{suffix or '(no extension)'}' for '{original_name}'. Supported: {', '.join(SUPPORTED_EXTENSIONS)}")
             safe_stem = re.sub(r"[^A-Za-z0-9._-]+", "_", Path(original_name).stem) or "upload"
             tmp_path = Path(tmp_dir) / f"{file_index:03d}_{safe_stem}{suffix}"
-            content = await upload.read()
             tmp_path.write_bytes(content)
-            logger.info(
-                "upload_documents: user=%s processing '%s' (%d bytes)",
-                user_id, original_name, len(content),
-            )
+            logger.info("upload: user=%s processing '%s' (%d bytes)", user_id, original_name, len(content))
+            _progress("extracting", f"Extracting {original_name} ({file_index}/{len(files_data)})")
             try:
                 result = process_document(str(tmp_path))
             except NonMedicalDocumentError as e:
-                logger.warning(
-                    "upload_documents: user=%s rejected '%s': %s",
-                    user_id, original_name, e.reason,
-                )
+                logger.warning("upload: user=%s rejected '%s': %s", user_id, original_name, e.reason)
                 raise HTTPException(422, str(e))
             except RuntimeError as e:
-                # ML pipeline failure — model repeatedly failed to return valid JSON, rate-limit exhaustion, etc.
-                # Surface as 502 so frontend shows "Something went wrong while processing" with retry, and logs include full trace.
-                logger.error(
-                    "upload_documents: user=%s processing failed for '%s': %s",
-                    user_id, original_name, e, exc_info=True,
-                )
+                logger.error("upload: user=%s processing failed for '%s': %s", user_id, original_name, e, exc_info=True)
                 raise HTTPException(502, f"Processing failed for '{original_name}': {e}. Please retry — this is usually transient. If it keeps happening, try a clearer photo or higher-resolution scan.")
             except ValueError as e:
-                # Fallback for JSON-parse ValueError that escaped the resilient runner (very rare now)
                 msg = str(e)
                 if "could not be parsed as JSON" in msg or "model returned" in msg:
-                    logger.error(
-                        "upload_documents: user=%s extraction parse failed for '%s': %s",
-                        user_id, original_name, e, exc_info=True,
-                    )
+                    logger.error("upload: user=%s extraction parse failed for '%s': %s", user_id, original_name, e, exc_info=True)
                     raise HTTPException(502, f"Extraction failed for '{original_name}': {e}. The AI had trouble reading this file — please retry or try a clearer image.")
-                logger.error(
-                    "upload_documents: user=%s extraction failed for '%s': %s",
-                    user_id, original_name, e, exc_info=True,
-                )
+                logger.error("upload: user=%s extraction failed for '%s': %s", user_id, original_name, e, exc_info=True)
                 raise HTTPException(422, f"Extraction failed for '{original_name}': {e}")
             except Exception as e:
-                logger.error(
-                    "upload_documents: user=%s extraction failed for '%s': %s",
-                    user_id, original_name, e, exc_info=True,
-                )
-                # Heuristic: JSON / model errors are 502 (transient), everything else 422
+                logger.error("upload: user=%s extraction failed for '%s': %s", user_id, original_name, e, exc_info=True)
                 msg = str(e).lower()
                 if "could not be parsed" in msg or "model output" in msg or "json_validate_failed" in msg or "model" in msg and "repeatedly failed" in msg:
                     raise HTTPException(502, f"Processing failed for '{original_name}': {e}. Please retry.")
                 raise HTTPException(422, f"Extraction failed for '{original_name}': {e}")
-
             if isinstance(result, dict) and result.get("multi_page"):
-                logger.info(
-                    "upload_documents: user=%s '%s' extracted as %d page(s)",
-                    user_id, original_name, len(result["pages"]),
-                )
+                logger.info("upload: user=%s '%s' extracted as %d page(s)", user_id, original_name, len(result["pages"]))
                 pages = result["pages"]
             else:
                 pages = [result]
-
-            # Drop demo/placeholder pages and reject non-medical files here,
-            # right after extraction and before any expensive downstream
-            # work (Cloudinary upload, timeline rebuild, cross-check LLM
-            # call, re-indexing) — no extra model call, reuses the
-            # document_type/medications/lab_results/etc. already produced
-            # by process_document().
             kept_pages: List[Dict[str, Any]] = []
             for page_num, page in enumerate(pages, start=1):
                 label = original_name if len(pages) == 1 else f"{original_name} (page {page_num})"
                 if _is_demo_document(page):
-                    logger.warning(
-                        "upload_documents: user=%s skipped demo/placeholder page '%s'", user_id, label,
-                    )
+                    logger.warning("upload: user=%s skipped demo/placeholder page '%s'", user_id, label)
                     continue
                 try:
                     assert_medical_document(page, label)
                 except NonMedicalDocumentError as e:
-                    logger.warning(
-                        "upload_documents: user=%s rejected '%s': %s", user_id, label, e.reason,
-                    )
+                    logger.warning("upload: user=%s rejected '%s': %s", user_id, label, e.reason)
                     raise HTTPException(422, str(e))
+                if isinstance(page.get("_source"), dict):
+                    page["_source"]["file"] = original_name
                 kept_pages.append(page)
-
             if kept_pages:
                 per_file_pages.append((tmp_path, original_name, kept_pages))
-
         if not per_file_pages:
-            raise HTTPException(
-                422,
-                "No medical content found in the uploaded file(s) (all pages were "
-                "demo/placeholder documents).",
-            )
-
-        # Pass 2: everything validated — archive each original file to
-        # Cloudinary once, and attach the resulting URL to every page that
-        # came from it.
+            raise HTTPException(422, "No medical content found in the uploaded file(s) (all pages were demo/placeholder documents).")
+        _progress("upload", "Uploading to Cloudinary")
         for tmp_path, filename, kept_pages in per_file_pages:
             upload_info = storage.upload_patient_document(user_id, str(tmp_path), filename)
             for page in kept_pages:
                 page["document_url"] = upload_info["document_url"]
                 page["cloudinary_public_id"] = upload_info["cloudinary_public_id"]
                 new_docs.append(page)
-
+    _progress("organizing", "Building timeline")
     existing_docs = db.load_documents(user_id)
     all_docs = existing_docs + new_docs
-    logger.info(
-        "upload_documents: user=%s merged documents: +%d new, %d total",
-        user_id, len(new_docs), len(all_docs),
-    )
-
+    logger.info("upload: user=%s merged documents: +%d new, %d total", user_id, len(new_docs), len(all_docs))
     try:
         timeline = build_patient_timeline(all_docs)
+        _progress("safety", "Cross-checking prescriptions")
         cross_check = cross_check_prescriptions(timeline)
     except NonMedicalDocumentError as e:
         raise HTTPException(422, str(e))
     except RuntimeError as e:
-        logger.error("upload_documents: user=%s cross-check failed: %s", user_id, e, exc_info=True)
+        logger.error("upload: user=%s cross-check failed: %s", user_id, e, exc_info=True)
         raise HTTPException(502, f"Cross-check failed: {e}. Please retry.")
     except Exception as e:
-        logger.error("upload_documents: user=%s cross-check failed: %s", user_id, e, exc_info=True)
+        logger.error("upload: user=%s cross-check failed: %s", user_id, e, exc_info=True)
         raise HTTPException(502, f"Cross-check failed: {e}")
     issue_count = sum(len(v) for v in cross_check.values() if isinstance(v, list))
-    logger.info(
-        "upload_documents: user=%s timeline rebuilt, cross-check found %d issue(s)",
-        user_id, issue_count,
-    )
-
+    logger.info("upload: user=%s timeline rebuilt, cross-check found %d issue(s)", user_id, issue_count)
     lab_trends = track_lab_trends(timeline)
-    logger.info(
-        "upload_documents: user=%s lab trend tracking found %d trend(s), %d test(s) with insufficient data",
-        user_id, len(lab_trends["trends"]), len(lab_trends["insufficient_data"]),
-    )
-
+    logger.info("upload: user=%s lab trends: %d trends, %d insufficient", user_id, len(lab_trends["trends"]), len(lab_trends["insufficient_data"]))
+    _progress("indexing", "Indexing for Q&A")
     indexed, index_error = True, None
     try:
         chunks_indexed = index_patient_timeline(user_id, timeline)
         if chunks_indexed == 0:
-            # Extraction succeeded but the timeline holds nothing retrievable
-            # (no medications/labs/clinical notes/allergies). Don't claim the
-            # patient is indexed — Q&A would silently return "no information".
             indexed = False
-            index_error = (
-                "Extraction succeeded but no medications, lab results, clinical "
-                "notes, or allergies were found to index — Q&A has no documents "
-                "to search yet."
-            )
-            logger.warning("upload_documents: user=%s %s", user_id, index_error)
+            index_error = "Extraction succeeded but no medications, lab results, clinical notes, or allergies were found to index — Q&A has no documents to search yet."
+            logger.warning("upload: user=%s %s", user_id, index_error)
         else:
-            logger.info(
-                "upload_documents: user=%s re-indexed for Q&A (%d chunk(s))",
-                user_id, chunks_indexed,
-            )
+            logger.info("upload: user=%s re-indexed for Q&A (%d chunk(s))", user_id, chunks_indexed)
     except Exception as e:
         indexed, index_error = False, str(e)
-        logger.error(
-            "upload_documents: user=%s indexing failed: %s", user_id, e, exc_info=True,
-        )
-
+        logger.error("upload: user=%s indexing failed: %s", user_id, e, exc_info=True)
     db.insert_documents(user_id, new_docs)
     db.save_patient_snapshot(user_id, timeline, cross_check, lab_trends=lab_trends)
-    logger.info(
-        "upload_documents: user=%s request complete: documents_added=%d documents_total=%d indexed=%s",
-        user_id, len(new_docs), len(all_docs), indexed,
-    )
-
+    logger.info("upload: user=%s complete: +%d new, %d total, indexed=%s", user_id, len(new_docs), len(all_docs), indexed)
     response = {
         "user_id": user_id,
         "documents_added": len(new_docs),
@@ -342,7 +274,89 @@ async def upload_documents(
     }
     if not indexed:
         response["index_error"] = index_error
+    _progress("ready", "Complete")
     return response
+
+
+@app.post("/api/v1/documents", status_code=201)
+async def upload_documents(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    files: List[UploadFile] = File(...),
+    user_id: str = Depends(get_current_user),
+    prefer: Optional[str] = Header(None, alias="Prefer"),
+) -> Dict[str, Any]:
+    """
+    Uploads one or more documents (PDF/image) for the authenticated user.
+    Supports both sync (201) and async (202) modes:
+      - Sync (default): processes immediately and returns UploadResponse
+      - Async: when USE_BACKGROUND_JOBS=true or ?async=true or Prefer: respond-async,
+        returns 202 {job_id, status} and processes in background. Poll GET /jobs/{id}.
+    """
+    logger.info("upload_documents: user=%s received %d file(s)", user_id, len(files))
+    if not files:
+        raise HTTPException(400, "No files were uploaded.")
+
+    # Read files upfront (needed for background after request ends)
+    files_data: List[Tuple[str, bytes]] = []
+    for upload in files:
+        original_name = Path(upload.filename or "").name or "upload"
+        # Validate extension early
+        suffix = Path(original_name).suffix.lower()
+        if suffix not in SUPPORTED_EXTENSIONS:
+            logger.warning("upload_documents: user=%s rejected '%s' (unsupported type '%s')", user_id, original_name, suffix or "(none)")
+            raise HTTPException(400, f"Unsupported file type '{suffix or '(no extension)'}' for '{original_name}'. Supported: {', '.join(SUPPORTED_EXTENSIONS)}")
+        content = await upload.read()
+        files_data.append((original_name, content))
+
+    # Decide sync vs async
+    use_background = _should_use_background(request, prefer)
+    if use_background:
+        # Validate all files are medical-like before queuing? We do full validation in background
+        # Create job and return 202
+        job = jobs.create_job(user_id, [name for name, _ in files_data])
+        job_id = job["job_id"]
+
+        async def _run_job():
+            try:
+                jobs.update_job(job_id, status="processing", progress={"step": "extracting", "message": "Starting extraction"})
+                result = await _execute_upload_pipeline(user_id, files_data, job_id=job_id)
+                jobs.update_job(job_id, status="completed", progress={"step": "ready", "message": "Complete"}, result=result)
+            except HTTPException as e:
+                # Preserve the HTTP status as error for polling
+                err_msg = e.detail if isinstance(e.detail, str) else str(e.detail)
+                jobs.update_job(job_id, status="failed", error=err_msg, progress={"step": "failed", "message": err_msg})
+                logger.error("Background job %s failed (HTTP %s): %s", job_id, e.status_code, err_msg)
+            except Exception as e:
+                logger.error("Background job %s failed: %s", job_id, e, exc_info=True)
+                jobs.update_job(job_id, status="failed", error=str(e), progress={"step": "failed", "message": str(e)})
+
+        background_tasks.add_task(_run_job)
+        # Return 202 immediately
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=202, content={"job_id": job_id, "status": "processing", "message": "Upload queued — poll GET /api/v1/jobs/{job_id}"})
+
+    # Sync path (default, used by tests)
+    return await _execute_upload_pipeline(user_id, files_data)
+
+
+# --- Background Jobs polling ---
+@app.get("/api/v1/jobs")
+async def list_jobs(user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
+    """List recent jobs for the authenticated user (most recent first)."""
+    vals = jobs.list_jobs(user_id, limit=20)
+    return {"jobs": vals}
+
+
+@app.get("/api/v1/jobs/{job_id}")
+async def get_job(job_id: str, user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
+    """Poll a background job. Returns 404 if not found or not owned."""
+    job = jobs.get_job(job_id, user_id)
+    if not job:
+        raise HTTPException(404, f"Job '{job_id}' not found.")
+    return job
+
+
 
 
 @app.get("/api/v1/timeline")

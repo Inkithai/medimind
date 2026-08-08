@@ -2,20 +2,27 @@
 Medical Document Extraction Pipeline
 =====================================
 Handles PDF (text-based or scanned) and image uploads (prescriptions, lab
-reports, discharge summaries), extracts structured data using Groq-hosted
-models (text: GPT-OSS 120B; vision: Qwen3.6 27B), and returns clean
-JSON ready for timeline building, RAG indexing, and cross-checking.
+reports, discharge summaries), extracts structured data using OpenAI-
+compatible LLM providers and returns clean JSON ready for timeline
+building, RAG indexing, and cross-checking.
 
-Groq is accessed through its OpenAI-compatible endpoint
-(https://api.groq.com/openai/v1) via the standard OpenAI SDK — only the
-base URL, API key, and model names differ. Groq's free tier needs no
-credit card (rate-limited; create a key at https://console.groq.com/keys).
+Provider is selected via LLM_PROVIDER (default: groq). All providers use
+the standard OpenAI SDK — only base URL, API key, and model names differ.
+
+  groq (default):  GROQ_API_KEY (gsk_...), https://api.groq.com/openai/v1
+                   text openai/gpt-oss-120b, vision qwen/qwen3.6-27b — free, no card
+  gemini (free):   GEMINI_API_KEY (or GOOGLE_API_KEY), https://generativelanguage.googleapis.com/v1beta/openai/
+                   text/vision gemini-2.0-flash — 15 RPM / 1M tokens/day free, 2M context, excellent vision
+
+Generic OpenAI-compatible providers (cerebras, openrouter, openai, custom)
+work via LLM_API_KEY + LLM_BASE_URL + LLM_MODEL env vars.
 
 Install:
     pip install openai pdfplumber pymupdf pillow --break-system-packages
 
-Env:
-    export GROQ_API_KEY="gsk_..."   (create one at https://console.groq.com/keys)
+Env (pick one provider):
+    export GROQ_API_KEY="gsk_..."        (https://console.groq.com/keys)        # LLM_PROVIDER=groq
+    export GEMINI_API_KEY="AIza..."      (https://aistudio.google.com/app/apikey) # LLM_PROVIDER=gemini
 """
 
 import os
@@ -46,52 +53,147 @@ load_dotenv()
 
 logger = logging.getLogger("medical_extractor")
 
-# Groq — Groq's API is OpenAI-compatible, so we reuse the OpenAI SDK
-# pointed at https://api.groq.com/openai/v1. Free key (no credit card):
-# https://console.groq.com/keys
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
-if not GROQ_API_KEY or GROQ_API_KEY.strip() in ("", "your-groq-api-key"):
+# ---------------------------------------------------------------------------
+# LLM provider layer — OpenAI-compatible via LLM_PROVIDER
+# ---------------------------------------------------------------------------
+# LLM_PROVIDER selects the backend (default "groq" for backward compat).
+# All providers use the OpenAI SDK; only base_url / api_key / model names
+# differ. Free-tier ranking (Aug 2026): Gemini ~15 RPM / 1M tokens/day
+# (no card, beats Groq's 6K TPM for vision-heavy workloads) > Cerebras
+# 1M tokens/day (no vision, 8K context) > OpenRouter 50 req/day free.
+LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "groq").strip().lower() or "groq"
+
+_PROVIDER_DEFAULTS = {
+    "groq": {
+        "api_key_env": "GROQ_API_KEY",
+        "api_key_alts": (),
+        "base_url_default": "https://api.groq.com/openai/v1",
+        "base_url_env": "GROQ_BASE_URL",
+        "model_default": "openai/gpt-oss-120b",
+        "model_env": "GROQ_MODEL",
+        "vision_default": "qwen/qwen3.6-27b",
+        "vision_env": "GROQ_VISION_MODEL",
+        "fallback_default": "openai/gpt-oss-20b",
+        "fallback_env": "GROQ_FALLBACK_MODEL",
+        "key_url": "https://console.groq.com/keys",
+        "docs_url": "https://console.groq.com/docs/deprecations",
+    },
+    "gemini": {
+        "api_key_env": "GEMINI_API_KEY",
+        "api_key_alts": ("GOOGLE_API_KEY",),
+        "base_url_default": "https://generativelanguage.googleapis.com/v1beta/openai/",
+        "base_url_env": "GEMINI_BASE_URL",
+        "model_default": "gemini-2.0-flash",
+        "model_env": "GEMINI_MODEL",
+        "vision_default": "gemini-2.0-flash",
+        "vision_env": "GEMINI_VISION_MODEL",
+        "fallback_default": "gemini-2.0-flash-lite",
+        "fallback_env": "GEMINI_FALLBACK_MODEL",
+        "key_url": "https://aistudio.google.com/app/apikey",
+        "docs_url": "https://ai.google.dev/gemini-api/docs/rate-limits",
+    },
+}
+
+
+def _resolve_provider_config(provider: str) -> Dict[str, Any]:
+    cfg = _PROVIDER_DEFAULTS.get(provider)
+    if cfg is not None:
+        return dict(cfg)
+    # Generic OpenAI-compatible (cerebras, openrouter, openai, custom) via LLM_* env vars
+    return {
+        "api_key_env": "LLM_API_KEY",
+        "api_key_alts": ("OPENAI_API_KEY",),
+        "base_url_default": os.environ.get("LLM_BASE_URL", "https://api.openai.com/v1"),
+        "base_url_env": "LLM_BASE_URL",
+        "model_default": os.environ.get("LLM_MODEL", "gpt-4o-mini"),
+        "model_env": "LLM_MODEL",
+        "vision_default": os.environ.get("LLM_VISION_MODEL", os.environ.get("LLM_MODEL", "gpt-4o-mini")),
+        "vision_env": "LLM_VISION_MODEL",
+        "fallback_default": os.environ.get("LLM_FALLBACK_MODEL", ""),
+        "fallback_env": "LLM_FALLBACK_MODEL",
+        "key_url": "https://platform.openai.com/api-keys",
+        "docs_url": "",
+    }
+
+
+_PROVIDER_CFG = _resolve_provider_config(LLM_PROVIDER)
+
+
+def _resolve_api_key(cfg: Dict[str, Any]) -> Optional[str]:
+    for env in (cfg["api_key_env"],) + tuple(cfg.get("api_key_alts", ())):
+        val = os.environ.get(env)
+        if not val or not val.strip():
+            continue
+        stripped = val.strip()
+        if stripped in ("your-groq-api-key", "your-gemini-api-key", "your-api-key", "your-openai-api-key") or stripped.startswith("your-"):
+            continue
+        return stripped
+    # Fallback to generic LLM_API_KEY for known providers too
+    if cfg["api_key_env"] != "LLM_API_KEY":
+        val = os.environ.get("LLM_API_KEY")
+        if val and val.strip() and not val.strip().startswith("your-"):
+            return val.strip()
+    return None
+
+
+_PROVIDER_API_KEY = _resolve_api_key(_PROVIDER_CFG)
+if not _PROVIDER_API_KEY:
+    _env = _PROVIDER_CFG["api_key_env"]
+    _alts = ", ".join(_PROVIDER_CFG.get("api_key_alts", ()))
+    _alts_msg = f" or {_alts}" if _alts else ""
+    _url = _PROVIDER_CFG["key_url"]
     raise RuntimeError(
-        "GROQ_API_KEY is not set or is still the placeholder — copy .env.example to .env and add your "
-        "actual Groq API key (create a free one at https://console.groq.com/keys)."
+        f"{_env} is not set for LLM_PROVIDER='{LLM_PROVIDER}' (still placeholder or missing) — "
+        f"copy .env.example to .env and add your API key{_alts_msg} (create a free one at {_url}). "
+        f"Or set LLM_PROVIDER=groq|gemini and the matching key env var. "
+        f"For generic providers set LLM_API_KEY + LLM_BASE_URL + LLM_MODEL."
     )
 
+# Keep legacy GROQ_API_KEY name for backward compat (tests / external imports)
+_raw_groq = os.environ.get("GROQ_API_KEY", "")
+if _raw_groq.strip() in ("", "your-groq-api-key") or _raw_groq.strip().startswith("your-"):
+    _raw_groq = ""
+GROQ_API_KEY = _raw_groq or (_PROVIDER_API_KEY if LLM_PROVIDER == "groq" else "")
+# Also expose provider-resolved key under a generic name
+LLM_API_KEY = _PROVIDER_API_KEY
+
+_PROVIDER_BASE_URL = os.environ.get(_PROVIDER_CFG["base_url_env"], _PROVIDER_CFG["base_url_default"])
+# LLM_BASE_URL overrides any provider when explicitly set (custom endpoint)
+if os.environ.get("LLM_BASE_URL"):
+    _PROVIDER_BASE_URL = os.environ["LLM_BASE_URL"]
+
 client = OpenAI(
-    api_key=GROQ_API_KEY,
-    base_url=os.environ.get("GROQ_BASE_URL", "https://api.groq.com/openai/v1"),
+    api_key=_PROVIDER_API_KEY,
+    base_url=_PROVIDER_BASE_URL,
     # Retries are handled inside _completion_resilient() so one SDK call is
     # exactly one HTTP request. With the SDK's own retry loop enabled (the
-    # default max_retries=2), a rate-limited call used to stack Groq's
-    # Retry-After waits (28s, 37s, 45s ...) on top of our ladder retries,
-    # turning a single upload into a multi-minute stall. Now 429s surface
-    # immediately and _completion_resilient() paces them deliberately.
+    # default max_retries=2), a rate-limited call used to stack Retry-After
+    # waits (28s, 37s, 45s ...) on top of our ladder retries, turning a
+    # single upload into a multi-minute stall. Now 429s surface immediately
+    # and _completion_resilient() paces them deliberately.
     max_retries=0,
 )
 
+# Model defaults — provider-specific, overridable via env vars. LLM_* generic
+# vars take precedence so a single .env swap can retarget any provider.
+MODEL = os.environ.get("LLM_MODEL") or os.environ.get(_PROVIDER_CFG["model_env"], _PROVIDER_CFG["model_default"])
+VISION_MODEL = os.environ.get("LLM_VISION_MODEL") or os.environ.get(_PROVIDER_CFG["vision_env"], _PROVIDER_CFG["vision_default"])
+FALLBACK_MODEL = os.environ.get("LLM_FALLBACK_MODEL") or os.environ.get(_PROVIDER_CFG["fallback_env"], _PROVIDER_CFG["fallback_default"]) or ""
+if not VISION_MODEL:
+    VISION_MODEL = MODEL  # providers without a distinct vision model (e.g. Cerebras) reuse text model
+
 # Groq retires hosted models on a schedule — keep an eye on
-# https://console.groq.com/docs/deprecations and override the models below
+# https://console.groq.com/docs/deprecations and override the models above
 # via env vars rather than editing code.
 #   * meta-llama/llama-4-scout-17b-16e-instruct shut down 2026-07-17 (old
 #     default MODEL — requests to it now 404 with model_not_found).
 #   * llama-3.1-8b-instant / llama-3.3-70b-versatile shut down 2026-08-16.
-# Per Groq's migration guidance:
-#   - MODEL (text-layer extraction, cross-checking, chat) defaults to
-#     openai/gpt-oss-120b, a production model with strict json_schema support.
-#   - VISION_MODEL (scanned PDFs, photos of documents) needs a multimodal
-#     model: qwen/qwen3.6-27b is currently Groq's only vision chat model.
-#     NOTE: it does NOT support strict json_schema — _format_ladder() drops
-#     to JSON-object mode with the schema inlined in the prompt for models
-#     outside _STRICT_SCHEMA_MODELS, and _completion_resilient() falls back
-#     further (plain text + client-side JSON parsing) if Groq rejects a
-#     generation server-side.
-MODEL = os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b")
-VISION_MODEL = os.environ.get("GROQ_VISION_MODEL", "qwen/qwen3.6-27b")
-FALLBACK_MODEL = os.environ.get("GROQ_FALLBACK_MODEL", "openai/gpt-oss-20b")        # cheap/fast text model for high-volume / less critical docs
+# For Gemini, vision is multimodal — same model handles text + images.
 
-# Groq's constrained-decoding strict json_schema mode is only available on
-# these models (https://console.groq.com/docs/structured-outputs). Every
-# other model — including the current vision model — gets JSON Object Mode
-# instead (valid JSON guaranteed; schema adherence via the inlined prompt).
+# Constrained-decoding strict json_schema is only available on Groq's
+# gpt-oss family (https://console.groq.com/docs/structured-outputs). Every
+# other model — including qwen vision and all Gemini models — gets JSON
+# Object Mode instead (valid JSON guaranteed; schema adherence via inlined prompt).
 _STRICT_SCHEMA_MODELS = frozenset({
     "openai/gpt-oss-20b",
     "openai/gpt-oss-120b",
@@ -100,25 +202,27 @@ _STRICT_SCHEMA_MODELS = frozenset({
 
 
 def _chat_completion(**kwargs) -> Any:
-    """client.chat.completions.create() with a Groq-churn-aware error.
+    """client.chat.completions.create() with a provider-churn-aware error.
 
     A request against a retired model ID comes back as a 404
-    'model_not_found' (the Novice-unfriendly raw error that prompted this
-    wrapper). Translate that into an actionable fix hint instead of a bare
-    stack trace.
+    'model_not_found'. Translate that into an actionable fix hint instead
+    of a bare stack trace. Provider-aware so messages stay correct when
+    LLM_PROVIDER=gemini (or generic).
     """
     try:
         return client.chat.completions.create(**kwargs)
     except NotFoundError as e:
         model = kwargs.get("model")
+        _model_env = _PROVIDER_CFG.get("model_env", "LLM_MODEL")
+        _vision_env = _PROVIDER_CFG.get("vision_env", "LLM_VISION_MODEL")
+        _docs = _PROVIDER_CFG.get("docs_url") or "provider docs"
         raise RuntimeError(
-            f"Groq rejected model '{model}' (404 model_not_found) — it has most "
-            "likely been decommissioned; Groq retires hosted models regularly. "
-            "Check https://console.groq.com/docs/deprecations for the "
-            "recommended replacement, then set GROQ_MODEL (text jobs) and/or "
-            "GROQ_VISION_MODEL (image/scanned-PDF jobs) in .env — no code "
+            f"Provider '{LLM_PROVIDER}' rejected model '{model}' (404 model_not_found) — it has most "
+            "likely been decommissioned or is not available on this provider. "
+            f"Check {_docs} for the recommended replacement, then set {_model_env} (text jobs) and/or "
+            f"{_vision_env} (image/scanned-PDF jobs) in .env — no code "
             f"change needed. Current defaults: text='{MODEL}', "
-            f"vision='{VISION_MODEL}'."
+            f"vision='{VISION_MODEL}'. Active provider: '{LLM_PROVIDER}' base_url='{_PROVIDER_BASE_URL}'."
         ) from e
 
 
@@ -267,32 +371,48 @@ def _is_vision_content(user_content: Any) -> bool:
 
 
 def _completion_token_budget(user_content: Any) -> int:
-    """Choose a completion budget that fits Groq's common 8K TPM tier.
+    """Choose a completion budget that fits the active provider's limits.
 
-    Vision requests consume substantially more input tokens than text calls.
-    Reserving 4096 output tokens made even a 94 KB image request total about
-    8900 tokens and Groq rejected it before inference. Keep the legacy global
-    setting for text, but cap vision to 2048 by default. A dedicated setting
-    can tune vision independently for accounts with different limits.
+    Groq's common 8K TPM tier needs a tight vision budget (2048) or even a
+    94 KB image + 4096 max_tokens exceeds TPM (reported as 413). Gemini's
+    free tier is 1M tokens/day with 2M context, so the cap is unnecessary
+    there — but we keep the same default for safety. Provider-specific
+    env vars (GEMINI_MAX_TOKENS, GROQ_MAX_TOKENS, LLM_MAX_TOKENS) override.
+
+    Vision requests consume substantially more input tokens than text calls,
+    so vision defaults are capped lower on constrained providers.
     """
-    try:
-        global_budget = int(os.environ.get("GROQ_MAX_TOKENS", "4096"))
-    except ValueError:
-        global_budget = 4096
-    global_budget = max(256, global_budget)
+    def _int_env(names: List[str], default: int) -> int:
+        for n in names:
+            v = os.environ.get(n)
+            if v is not None:
+                try:
+                    return max(256, int(v))
+                except ValueError:
+                    logger.warning("Ignoring invalid %s=%r; using %d", n, v, default)
+                    return default
+        return default
+
+    global_budget = _int_env(
+        [f"{LLM_PROVIDER.upper()}_MAX_TOKENS", "LLM_MAX_TOKENS", "GROQ_MAX_TOKENS", "GEMINI_MAX_TOKENS"],
+        4096,
+    )
 
     if not _is_vision_content(user_content):
         return global_budget
 
-    configured = os.environ.get("GROQ_VISION_MAX_TOKENS")
-    if configured is not None:
-        try:
-            return max(256, int(configured))
-        except ValueError:
-            logger.warning(
-                "Ignoring invalid GROQ_VISION_MAX_TOKENS=%r; using 2048",
-                configured,
-            )
+    # Vision-specific override if set
+    for n in [f"{LLM_PROVIDER.upper()}_VISION_MAX_TOKENS", "LLM_VISION_MAX_TOKENS", "GROQ_VISION_MAX_TOKENS", "GEMINI_VISION_MAX_TOKENS"]:
+        v = os.environ.get(n)
+        if v is not None:
+            try:
+                return max(256, int(v))
+            except ValueError:
+                logger.warning("Ignoring invalid %s=%r; using 2048", n, v)
+                return 2048
+    # Default vision cap: Groq 8K TPM tier needs 2048, Gemini can handle more
+    if LLM_PROVIDER == "gemini":
+        return min(global_budget, 4096)
     return min(global_budget, 2048)
 
 
@@ -392,8 +512,17 @@ def _completion_resilient(
     last_error: Optional[Exception] = None
     total_attempts = 0
     rate_limit_waits = 0
+    # Provider-aware rate-limit cap: check {PROVIDER}_MAX_RATE_LIMIT_RETRIES, LLM_*, then legacy GROQ_*
+    _rate_limit_cap_env = None
+    for _env in [f"{LLM_PROVIDER.upper()}_MAX_RATE_LIMIT_RETRIES", "LLM_MAX_RATE_LIMIT_RETRIES", "GROQ_MAX_RATE_LIMIT_RETRIES", "GEMINI_MAX_RATE_LIMIT_RETRIES"]:
+        if os.environ.get(_env) is not None:
+            _rate_limit_cap_env = _env
+            break
     try:
-        max_rate_limit_waits = int(os.environ.get("GROQ_MAX_RATE_LIMIT_RETRIES", "5"))
+        if _rate_limit_cap_env:
+            max_rate_limit_waits = int(os.environ.get(_rate_limit_cap_env, "5"))
+        else:
+            max_rate_limit_waits = int(os.environ.get("GROQ_MAX_RATE_LIMIT_RETRIES", "5"))
     except ValueError:
         max_rate_limit_waits = 5
     last_raw_snippet: str = ""
@@ -451,7 +580,7 @@ def _completion_resilient(
             except APIError as e:
                 if not _is_retryable_api_error(e):
                     logger.error(
-                        "Groq request failed for model='%s' (non-retryable, not retrying): %s",
+                        f"Provider '{LLM_PROVIDER}' request failed for model='%s' (non-retryable, not retrying): %s",
                         model, _error_detail(e),
                     )
                     raise
@@ -463,7 +592,7 @@ def _completion_resilient(
                     # looser rung so we get the raw text and parse it ourselves.
                     last_error = e
                     logger.warning(
-                        "Groq rejected model='%s' generation server-side (JSON validation) — "
+                        f"Provider '{LLM_PROVIDER}' rejected model='%s' generation server-side (JSON validation) — "
                         "advancing to a looser output mode: %s",
                         model, _error_detail(e),
                     )
@@ -476,7 +605,7 @@ def _completion_resilient(
                     reduced_budget = max(256, max_tokens // 2)
                     if reduced_budget < max_tokens:
                         logger.warning(
-                            "Groq token budget rejected model='%s' request; "
+                            f"Provider '{LLM_PROVIDER}' token budget rejected model='%s' request; "
                             "reducing max_tokens from %d to %d: %s",
                             model, max_tokens, reduced_budget, _error_detail(e),
                         )
@@ -490,14 +619,14 @@ def _completion_resilient(
                     last_error = e
                     if rate_limit_waits > max_rate_limit_waits:
                         raise RuntimeError(
-                            f"Groq kept returning 429 (rate limit) for model '{model}' after "
+                            f"Provider '{LLM_PROVIDER}' kept returning 429 (rate limit) for model '{model}' after "
                             f"{rate_limit_waits} wait(s). This usually means the account's "
                             "per-minute token budget is exhausted (Groq free tier is heavily "
                             "rate-limited). Please wait a minute and retry the upload."
                         ) from e
                     sleep_s = min(_retry_after_seconds(e, backoff_seconds * attempt), 60.0)
                     logger.warning(
-                        "Groq rate-limited (429) model='%s' — sleeping %.0fs before retry "
+                        f"Provider '{LLM_PROVIDER}' rate-limited (429) model='%s' — sleeping %.0fs before retry "
                         "(wait %d/%d): %s",
                         model, sleep_s, rate_limit_waits, max_rate_limit_waits, _error_detail(e),
                     )
@@ -509,7 +638,7 @@ def _completion_resilient(
                 # blips — these are worth retrying on the same rung.
                 last_error = e
                 logger.warning(
-                    "Groq transient error for model='%s', retrying (attempt %d/%d): %s",
+                    f"Provider '{LLM_PROVIDER}' transient error for model='%s', retrying (attempt %d/%d): %s",
                     model, attempt, attempts, _error_detail(e),
                 )
                 if level == len(ladder) - 1 and attempt == attempts:
