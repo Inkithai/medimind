@@ -197,6 +197,11 @@ _OPENROUTER_FALLBACK_ENABLED = False
 _OPENROUTER_API_KEY = ""
 _OPENROUTER_MODEL = ""
 _OPENROUTER_VISION_MODEL = ""
+# OpenRouter's router is preferable to a hard-coded free model: it selects a
+# currently available model with the capabilities required by the request.
+# This also keeps a stale user-configured model from making the whole upload
+# fail when OpenRouter retires or temporarily removes a model variant.
+_OPENROUTER_AUTO_MODEL = "openrouter/free"
 
 
 def _ensure_openrouter_fallback_client() -> Optional[OpenAI]:
@@ -441,6 +446,28 @@ def _chat_completion(**kwargs) -> Any:
     try:
         return active_client.chat.completions.create(**kwargs)
     except NotFoundError as e:
+        # OpenRouter model slugs are not permanent. A configured :free model
+        # can disappear (or be unavailable at a particular provider) while
+        # OpenRouter's dynamic router remains available. Retry the request once
+        # through that router before surfacing the model error. This is
+        # especially important for vision uploads: the router filters for
+        # models that support image input instead of guessing a text-only model.
+        requested_model = str(kwargs.get("model") or "unknown")
+        if _openrouter_fallback_is_active() and requested_model != _OPENROUTER_AUTO_MODEL:
+            retry_kwargs = dict(kwargs)
+            retry_kwargs["model"] = _OPENROUTER_AUTO_MODEL
+            try:
+                logger.warning(
+                    "OpenRouter rejected configured fallback model '%s'; retrying through '%s'.",
+                    requested_model,
+                    _OPENROUTER_AUTO_MODEL,
+                )
+                return active_client.chat.completions.create(**retry_kwargs)
+            except NotFoundError as router_error:
+                # Fall through and report the router rejection with the normal
+                # actionable provider error below.
+                kwargs = retry_kwargs
+                e = router_error
         model = str(kwargs.get("model") or "unknown")
         model_env = _PROVIDER_CFG.get("model_env", "LLM_MODEL")
         vision_env = _PROVIDER_CFG.get("vision_env", "LLM_VISION_MODEL")
