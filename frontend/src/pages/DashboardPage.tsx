@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import { ErrorState } from "../components/ErrorState";
@@ -13,6 +13,7 @@ import {
   ChatIcon,
 } from "../components/icons";
 import { useAuth } from "../context/AuthContext";
+import { useStrictEffect } from "../hooks/useStrictEffect";
 import type { CrossCheckReport, LabTrendsReport, Timeline } from "../types/api";
 import { formatDate, documentTypeLabel, relativeTime } from "../utils/format";
 
@@ -33,12 +34,16 @@ export function DashboardPage() {
     setLoading(true);
     setError(null);
     try {
-      const [timeline, crossCheck, labTrends] = await Promise.all([
-        api.getTimeline(credentials),
-        api.getCrossCheck(credentials),
-        api.getLabTrends(credentials),
-      ]);
-      setRecord({ timeline, crossCheck, labTrends });
+      // Single snapshot request instead of three parallel calls to
+      // /timeline + /cross-check + /lab-trends (they all live in one
+      // patient_snapshots row anyway — one round-trip, one failure mode,
+      // and no repeated 404s while the record is still being built).
+      const snapshot = await api.getPatientSnapshot(credentials);
+      setRecord({
+        timeline: snapshot.patient_timeline,
+        crossCheck: snapshot.cross_check_report,
+        labTrends: snapshot.lab_trends,
+      });
     } catch (err) {
       setRecord(null);
       setError(err);
@@ -47,7 +52,9 @@ export function DashboardPage() {
     }
   }, [credentials]);
 
-  useEffect(() => {
+  // StrictMode-safe: runs once per mount even in React 18 dev StrictMode
+  // (which would otherwise fire load() twice → duplicate GETs + Supabase queries).
+  useStrictEffect(() => {
     void load();
   }, [load, reloadKey]);
 

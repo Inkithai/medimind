@@ -63,7 +63,7 @@ IDs deterministic: `sha256(f"{patient_key}|{source_file}|{chunk_type}|{index}")`
 - `_sanitize_collection_name(patient_key)` → `[a-z0-9._-]+`, 3-63 chars, start/end alphanumeric, stable for anon ids like `anon_ab12cd...` → `anon_ab12cd...`.
 - `_get_chroma_client()` → `PersistentClient(path=CHROMA_DIR)` fresh per call (fine for CLI; for server consider caching).
 - `_get_patient_collection(key, create)` — `create=True` → `get_or_create_collection` (indexing); `False` → `get_collection` returns None on miss (querying).
-- `index_patient_timeline(patient_key, timeline)` — validates key, chunks, embeds, upserts. No-op logging if zero chunks.
+- `index_patient_timeline(patient_key, timeline)` — validates key, chunks, embeds, upserts. Returns the number of chunks indexed, or **0 (without storing anything)** when the timeline has no retrievable content — callers must treat 0 as "not indexed" (Q&A has nothing to search), never as success.
 
 ### Q&A entry
 

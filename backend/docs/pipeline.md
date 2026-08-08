@@ -98,8 +98,9 @@ Deterministic, no LLM:
 - Lifespan startup → `db.ensure_indexes()` (no-op for Supabase but kept).
 - CORS `*` by default, overridable via `CORS_ORIGINS`.
 - `POST /anonymous/session` public → issues JWT server-side.
-- `POST /documents` — validates extensions, extracts all first (no Cloudinary write until all pass to avoid orphans), filters demo + non-medical, archives to Cloudinary once per file, merges with Supabase existing docs, builds timeline, cross-check, trends, re-indexes, saves snapshot.
-- `GET /timeline, /cross-check, /lab-trends` — 404 if no snapshot.
+- `POST /documents` — validates extensions, extracts all first (no Cloudinary write until all pass to avoid orphans), filters demo + non-medical, archives to Cloudinary once per file, merges with Supabase existing docs, builds timeline, cross-check, trends, re-indexes, saves snapshot. `indexed` is false (with `index_error`) if indexing produced 0 retrievable chunks — the log line "No indexable content ... skipping indexing" is no longer followed by a misleading `indexed=True`.
+- `GET /timeline, /cross-check, /lab-trends` — individual slices, 404 if no snapshot (kept for per-page use + backward compat).
+- `GET /patient-snapshot` — the whole record (`patient_timeline`, `cross_check_report`, `lab_trends`, `updated_at`) in ONE request so the dashboard never fans out three calls; 404 if no snapshot (frontend treats that as first-run empty state). `lab_trends` recomputed on the fly for pre-trends snapshots.
 - `POST /qa` and `POST /sessions/{id}/messages` — 400 empty, 502 LLM/embedding failure.
 
 ### 8. CLI wiring (medical_extractor __main__)

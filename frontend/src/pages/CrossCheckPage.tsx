@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import { CrossCheckView } from "../components/CrossCheckView";
@@ -7,6 +7,7 @@ import { Card, CardBody } from "../components/Card";
 import { LoadingState } from "../components/Spinner";
 import { RefreshIcon, UploadIcon } from "../components/icons";
 import { useAuth } from "../context/AuthContext";
+import { useStrictEffect } from "../hooks/useStrictEffect";
 import type { CrossCheckReport } from "../types/api";
 
 export function CrossCheckPage() {
@@ -30,7 +31,7 @@ export function CrossCheckPage() {
     }
   }, [credentials]);
 
-  useEffect(() => {
+  useStrictEffect(() => {
     void load();
   }, [load, reloadKey]);
 

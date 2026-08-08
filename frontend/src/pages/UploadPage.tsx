@@ -9,6 +9,7 @@ import { Spinner } from "../components/Spinner";
 import { TimelineView } from "../components/TimelineView";
 import { FileIcon, UploadIcon } from "../components/icons";
 import { useAuth } from "../context/AuthContext";
+import { useStrictEffect } from "../hooks/useStrictEffect";
 import type { Timeline, UploadResponse } from "../types/api";
 import { classNames, documentTypeLabel, fileSizeLabel, relativeTime } from "../utils/format";
 
@@ -45,7 +46,7 @@ export function UploadPage() {
   // Recent uploads + health summary fill the page's right column / bottom.
   const [timeline, setTimeline] = useState<Timeline | null>(null);
 
-  useEffect(() => {
+  useStrictEffect(() => {
     api
       .getTimeline(credentials)
       .then(setTimeline)

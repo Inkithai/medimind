@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import { Card, CardBody } from "../components/Card";
@@ -7,6 +7,7 @@ import { LoadingState } from "../components/Spinner";
 import { StatusBadge } from "../components/StatusBadge";
 import { PillIcon, UploadIcon } from "../components/icons";
 import { useAuth } from "../context/AuthContext";
+import { useStrictEffect } from "../hooks/useStrictEffect";
 import type { Timeline } from "../types/api";
 import { formatDate } from "../utils/format";
 
@@ -31,7 +32,7 @@ export function MedicinesPage() {
     }
   }, [credentials]);
 
-  useEffect(() => {
+  useStrictEffect(() => {
     void load();
   }, [load]);
 
