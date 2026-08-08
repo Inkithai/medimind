@@ -28,7 +28,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from openai import OpenAIError
 
-from medical_extractor import client, MODEL
+from medical_extractor import client, MODEL, _chat_completion
 import retrieval
 
 # Cheap/fast model for query rewriting and summarization — these are short,
@@ -195,7 +195,7 @@ def rewrite_query_with_context(question: str, history: List[Dict[str, str]]) -> 
     })
 
     try:
-        response = client.chat.completions.create(model=REWRITE_MODEL, messages=messages)
+        response = _chat_completion(model=REWRITE_MODEL, messages=messages)
         rewritten = (response.choices[0].message.content or "").strip()
         return rewritten if rewritten else question
     except OpenAIError as e:
@@ -245,7 +245,7 @@ def summarize_old_turns(turns: List[Dict[str, str]]) -> str:
     ]
 
     try:
-        response = client.chat.completions.create(model=REWRITE_MODEL, messages=messages)
+        response = _chat_completion(model=REWRITE_MODEL, messages=messages)
         return (response.choices[0].message.content or "").strip()
     except OpenAIError as e:
         print(f"  Conversation summarization failed, using raw fallback: {e}")

@@ -39,6 +39,8 @@ Env:
 import asyncio
 import logging
 import os
+from dotenv import load_dotenv
+load_dotenv(override=True)
 import re
 import uuid
 from concurrent.futures import ThreadPoolExecutor

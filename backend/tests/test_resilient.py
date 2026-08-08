@@ -490,6 +490,112 @@ def test_parse_think_wrapped_json():
     assert obj["document_type"] == "prescription"
 
 
+def test_openrouter_fallback_auto_enabled_when_key_and_model_set():
+    """Setting OpenRouter API key and model automatically enables fallback."""
+    with mock.patch.dict(os.environ, {
+        "OPENROUTER_API_KEY": "sk-or-test-key",
+        "OPENROUTER_FALLBACK_MODEL": "google/gemma-3-27b-it:free",
+    }, clear=False):
+        me.openrouter_fallback_client = None
+        me._openrouter_fallback_active = False
+        client = me._ensure_openrouter_fallback_client()
+        assert client is not None
+        assert me._OPENROUTER_FALLBACK_ENABLED is True
+        assert me._OPENROUTER_API_KEY == "sk-or-test-key"
+        assert me._OPENROUTER_MODEL == "google/gemma-3-27b-it:free"
+        me.openrouter_fallback_client = None
+        me._openrouter_fallback_active = False
+
+
+def test_openrouter_fallback_explicit_disabled():
+    """OPENROUTER_FALLBACK_ENABLED=false prevents enabling even if credentials exist."""
+    with mock.patch.dict(os.environ, {
+        "OPENROUTER_FALLBACK_ENABLED": "false",
+        "OPENROUTER_API_KEY": "sk-or-test-key",
+        "OPENROUTER_FALLBACK_MODEL": "google/gemma-3-27b-it:free",
+    }, clear=False):
+        me.openrouter_fallback_client = None
+        me._openrouter_fallback_active = False
+        client = me._ensure_openrouter_fallback_client()
+        assert client is None
+        me.openrouter_fallback_client = None
+        me._openrouter_fallback_active = False
+
+
+def test_openrouter_fallback_alias_env_vars():
+    """Alias env vars (OPENROUTER_KEY, OPENROUTER_MODEL) configure OpenRouter fallback."""
+    with mock.patch.dict(os.environ, {
+        "OPENROUTER_KEY": "sk-or-alias-key",
+        "OPENROUTER_MODEL": "google/gemma-3-27b-it:free",
+    }, clear=False):
+        me.openrouter_fallback_client = None
+        me._openrouter_fallback_active = False
+        client = me._ensure_openrouter_fallback_client()
+        assert client is not None
+        assert me._OPENROUTER_API_KEY == "sk-or-alias-key"
+        assert me._OPENROUTER_MODEL == "google/gemma-3-27b-it:free"
+        me.openrouter_fallback_client = None
+        me._openrouter_fallback_active = False
+
+
+def test_hard_quota_switches_to_openrouter_fallback():
+    """When primary provider fails with hard quota, new requests switch to OpenRouter fallback."""
+    with mock.patch.dict(os.environ, {
+        "OPENROUTER_API_KEY": "sk-or-test-key",
+        "OPENROUTER_FALLBACK_MODEL": "google/gemma-3-27b-it:free",
+    }, clear=False):
+        me.openrouter_fallback_client = None
+        me._openrouter_fallback_active = False
+
+        primary_calls = []
+        fallback_calls = []
+
+        def fake_primary_create(**kwargs):
+            primary_calls.append(kwargs)
+            raise _api_error(
+                429,
+                {
+                    "error": {
+                        "message": "Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20",
+                        "status": "RESOURCE_EXHAUSTED",
+                        "details": [
+                            {
+                                "@type": "type.googleapis.com/google.rpc.QuotaFailure",
+                                "violations": [{"quotaId": "GenerateRequestsPerDayPerProjectPerModel-FreeTier"}],
+                            }
+                        ],
+                    }
+                },
+            )
+
+        def fake_fallback_create(**kwargs):
+            fallback_calls.append(kwargs)
+            return _resp(VALID_JSON)
+
+        fallback_client = me._ensure_openrouter_fallback_client()
+        assert fallback_client is not None
+
+        with mock.patch.object(me.client.chat.completions, "create", side_effect=fake_primary_create), \
+             mock.patch.object(fallback_client.chat.completions, "create", side_effect=fake_fallback_create), \
+             mock.patch.object(me, "time") as fake_time:
+            fake_time.sleep = lambda seconds: None
+            res = me._completion_resilient(
+                model="gemini-3.6-flash",
+                system_prompt="sys",
+                user_content="text-only",
+                strict_format=me.EXTRACTION_RESPONSE_FORMAT,
+            )
+
+        assert VALID_JSON in res
+        assert len(primary_calls) == 1, primary_calls
+        assert len(fallback_calls) == 1, fallback_calls
+        assert fallback_calls[0]["model"] == "google/gemma-3-27b-it:free"
+        assert me._openrouter_fallback_is_active() is True
+
+        me.openrouter_fallback_client = None
+        me._openrouter_fallback_active = False
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:

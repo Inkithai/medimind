@@ -41,7 +41,7 @@ from typing import Any, Dict, List, Optional
 
 from openai import OpenAI, OpenAIError
 
-from medical_extractor import client, MODEL, _completion_resilient
+from medical_extractor import client, MODEL, _completion_resilient, _chat_completion
 import vector_store  # abstraction over Chroma (local) and Supabase (no volume)
 
 logger = logging.getLogger("retrieval")
@@ -488,7 +488,7 @@ def answer_question(
         messages.extend(chat_history)
         messages.append({"role": "user", "content": user_content})
         try:
-            response = client.chat.completions.create(
+            response = _chat_completion(
                 model=CHAT_MODEL,
                 messages=messages,
                 response_format=ANSWER_RESPONSE_FORMAT,
