@@ -181,6 +181,59 @@ client = OpenAI(
     max_retries=0,
 )
 
+# Optional failover for a *hard* primary-provider quota outage. It is off by
+# default because medical documents are sensitive and enabling it sends the
+# same request to OpenRouter, a separate service. Set the explicit opt-in plus
+# an OpenRouter key and models to enable it.
+def _configured_secret(name: str) -> str:
+    value = os.environ.get(name, "").strip()
+    return "" if not value or value.startswith("your-") else value
+
+_OPENROUTER_FALLBACK_ENABLED = os.environ.get("OPENROUTER_FALLBACK_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"}
+_OPENROUTER_API_KEY = _configured_secret("OPENROUTER_API_KEY")
+_OPENROUTER_MODEL = os.environ.get("OPENROUTER_FALLBACK_MODEL", "").strip()
+_OPENROUTER_VISION_MODEL = os.environ.get("OPENROUTER_FALLBACK_VISION_MODEL", "").strip() or _OPENROUTER_MODEL
+_openrouter_fallback_lock = threading.Lock()
+_openrouter_fallback_active = False
+
+if _OPENROUTER_FALLBACK_ENABLED and (not _OPENROUTER_API_KEY or not _OPENROUTER_MODEL):
+    raise RuntimeError(
+        "OPENROUTER_FALLBACK_ENABLED requires OPENROUTER_API_KEY and "
+        "OPENROUTER_FALLBACK_MODEL. Set OPENROUTER_FALLBACK_VISION_MODEL too "
+        "when the text fallback model cannot read images."
+    )
+
+openrouter_fallback_client = (
+    OpenAI(
+        api_key=_OPENROUTER_API_KEY,
+        base_url=os.environ.get("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
+        max_retries=0,
+    )
+    if _OPENROUTER_FALLBACK_ENABLED
+    else None
+)
+
+
+def _activate_openrouter_fallback() -> bool:
+    """Trip the process-wide circuit breaker after a hard primary quota error."""
+    global _openrouter_fallback_active
+    if not openrouter_fallback_client:
+        return False
+    with _openrouter_fallback_lock:
+        newly_activated = not _openrouter_fallback_active
+        _openrouter_fallback_active = True
+    if newly_activated:
+        logger.warning(
+            "Primary provider '%s' has no usable quota; switching new LLM calls to configured OpenRouter fallback.",
+            LLM_PROVIDER,
+        )
+    return True
+
+
+def _openrouter_fallback_is_active() -> bool:
+    return _openrouter_fallback_active and openrouter_fallback_client is not None
+
+
 # Model defaults — provider-specific, overridable via env vars. LLM_* generic
 # vars take precedence so a single .env swap can retarget any provider.
 MODEL = os.environ.get("LLM_MODEL") or os.environ.get(_PROVIDER_CFG["model_env"], _PROVIDER_CFG["model_default"])
@@ -292,8 +345,19 @@ def _chat_completion(**kwargs) -> Any:
     # the safety/cross-check call from hitting a 429 after file extractions
     # have already consumed the free-tier budget.
     _call_pacer.acquire()
+    active_client = openrouter_fallback_client if _openrouter_fallback_is_active() else client
+    if _openrouter_fallback_is_active():
+        # The caller still supplies its primary model name. Translate only at
+        # the transport boundary so extraction/cross-check code remains
+        # provider-agnostic. Image calls use the separately configured vision model.
+        kwargs = dict(kwargs)
+        kwargs["model"] = (
+            _OPENROUTER_VISION_MODEL
+            if kwargs.get("model") == VISION_MODEL
+            else _OPENROUTER_MODEL
+        )
     try:
-        return client.chat.completions.create(**kwargs)
+        return active_client.chat.completions.create(**kwargs)
     except NotFoundError as e:
         model = str(kwargs.get("model") or "unknown")
         model_env = _PROVIDER_CFG.get("model_env", "LLM_MODEL")
@@ -1114,10 +1178,21 @@ def _completion_resilient(
                         hard_quota = _is_hard_quota_error(e)
                         retired_model = _is_retired_provider_model(model)
                         if hard_quota or retired_model:
+                            # A configured OpenRouter fallback is deliberately
+                            # used only for unrecoverable quota/model failures,
+                            # never routine short-lived 429s. Re-run this exact
+                            # ladder rung through the fallback client.
+                            if not _openrouter_fallback_is_active() and _activate_openrouter_fallback():
+                                logger.warning(
+                                    "Retrying model='%s' through OpenRouter fallback after primary hard quota failure.",
+                                    model,
+                                )
+                                continue
                             logger.error(
                                 "Provider '%s' has no usable quota for model='%s' "
                                 "(hard_quota=%s retired=%s); not retrying: %s",
-                                LLM_PROVIDER, model, hard_quota, retired_model, _error_detail(e),
+                                "openrouter" if _openrouter_fallback_is_active() else LLM_PROVIDER,
+                                model, hard_quota, retired_model, _error_detail(e),
                             )
                             raise ProviderRateLimitError(
                                 provider=LLM_PROVIDER,
