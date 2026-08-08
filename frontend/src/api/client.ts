@@ -10,11 +10,43 @@ import type {
   UploadResponse,
 } from "../types/api";
 
+export type JobFileStatus = "queued" | "processing" | "completed" | "failed";
+
+export interface JobFileProgress {
+  id: string;
+  index: number;
+  name: string;
+  status: JobFileStatus;
+  step: "upload" | "reading" | "extracting" | "saving" | "ready" | "failed" | string;
+  message: string;
+  error?: string | null;
+  error_code?: string | null;
+  retryable?: boolean | null;
+  retry_after_seconds?: number | null;
+  updated_at?: string;
+}
+
+export interface JobProgress {
+  step: string;
+  message: string;
+  file_names?: string[];
+  total_files?: number;
+  processed_files?: number;
+  successful_files?: number;
+  failed_files?: number;
+  worker_limit?: number;
+  files?: JobFileProgress[];
+  error_code?: string;
+  retryable?: boolean;
+  retry_after_seconds?: number | null;
+  http_status?: number;
+}
+
 export interface Job {
   job_id: string;
   user_id: string;
   status: "pending" | "processing" | "completed" | "failed";
-  progress?: { step: string; message: string; file_names?: string[] };
+  progress?: JobProgress;
   result?: UploadResponse;
   error?: string | null;
   created_at: string;
@@ -40,12 +72,23 @@ export interface AnonymousSession {
 export class ApiError extends Error {
   status: number;
   detail: unknown;
+  code?: string;
+  retryable?: boolean;
+  retryAfterSeconds?: number | null;
 
-  constructor(status: number, message: string, detail?: unknown) {
+  constructor(
+    status: number,
+    message: string,
+    detail?: unknown,
+    metadata?: { code?: string; retryable?: boolean; retryAfterSeconds?: number | null }
+  ) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.detail = detail;
+    this.code = metadata?.code;
+    this.retryable = metadata?.retryable;
+    this.retryAfterSeconds = metadata?.retryAfterSeconds;
   }
 }
 
@@ -59,6 +102,21 @@ interface RequestOptions {
   method?: string;
   body?: BodyInit | null;
   headers?: Record<string, string>;
+}
+
+function apiErrorMetadata(data: unknown) {
+  if (typeof data !== "object" || data === null) return undefined;
+  const payload = data as {
+    code?: unknown;
+    retryable?: unknown;
+    retry_after_seconds?: unknown;
+  };
+  return {
+    code: typeof payload.code === "string" ? payload.code : undefined,
+    retryable: typeof payload.retryable === "boolean" ? payload.retryable : undefined,
+    retryAfterSeconds:
+      typeof payload.retry_after_seconds === "number" ? payload.retry_after_seconds : undefined,
+  };
 }
 
 async function publicRequest<T>(
@@ -102,7 +160,7 @@ async function publicRequest<T>(
         : null) ||
       (typeof data === "string" ? data : null) ||
       `Request failed with status ${response.status}`;
-    throw new ApiError(response.status, message, data);
+    throw new ApiError(response.status, message, data, apiErrorMetadata(data));
   }
 
   return data as T;
@@ -155,7 +213,7 @@ async function request<T>(
         : null) ||
       (typeof data === "string" ? data : null) ||
       `Request failed with status ${response.status}`;
-    throw new ApiError(response.status, message, data);
+    throw new ApiError(response.status, message, data, apiErrorMetadata(data));
   }
 
   return data as T;
@@ -191,11 +249,14 @@ export const api = {
 
   // Async upload — returns 202 + job polling (avoids free-tier 429 timeouts)
   // Use when USE_BACKGROUND_JOBS=true or for large scans
-  uploadDocumentsAsync(credentials: Credentials, files: File[]): Promise<{ job_id: string; status: string }> {
+  uploadDocumentsAsync(
+    credentials: Credentials,
+    files: File[]
+  ): Promise<{ job_id: string; status: string; file_count?: number; worker_limit?: number }> {
     const form = new FormData();
     for (const file of files) form.append("files", file);
     // Prefer header and query param both trigger background on server
-    return request<{ job_id: string; status: string }>(credentials, "/api/v1/documents?async=true", {
+    return request<{ job_id: string; status: string; file_count?: number; worker_limit?: number }>(credentials, "/api/v1/documents?async=true", {
       method: "POST",
       headers: { Prefer: "respond-async" },
       body: form,
@@ -216,7 +277,7 @@ export const api = {
     jobId: string,
     onProgress?: (job: Job) => void,
     intervalMs = 1500,
-    timeoutMs = 120000
+    timeoutMs = 10 * 60 * 1000
   ): Promise<Job> {
     const start = Date.now();
     while (Date.now() - start < timeoutMs) {
@@ -225,7 +286,12 @@ export const api = {
       if (job.status === "completed" || job.status === "failed") return job;
       await new Promise((r) => setTimeout(r, intervalMs));
     }
-    throw new ApiError(408, "Upload timed out — still processing, check back shortly");
+    throw new ApiError(
+      408,
+      "The browser stopped waiting, but the server may still be processing this upload. Do not upload the same files again yet; check back shortly.",
+      undefined,
+      { code: "job_poll_timeout", retryable: false }
+    );
   },
 
   // One request returns timeline + cross-check + lab trends together (the

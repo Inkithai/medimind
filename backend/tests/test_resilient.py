@@ -375,6 +375,71 @@ def test_429_uses_retry_after_then_succeeds():
     assert VALID_JSON in raw
 
 
+def test_gemini_retry_info_body_is_honored_without_header():
+    """Gemini puts retryDelay in google.rpc.RetryInfo instead of a header."""
+    error = _api_error(
+        429,
+        {
+            "error": {
+                "message": "Please retry in 14.339129092s.",
+                "details": [
+                    {"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": "14s"}
+                ],
+            }
+        },
+    )
+    assert me._retry_after_seconds(error, 1.0) == 14.0
+
+
+def test_hard_daily_quota_fails_after_one_request():
+    """Daily/limit=0 quota is not a transient minute throttle."""
+    calls = []
+    sleeps = []
+
+    def fake_create(**kwargs):
+        calls.append(kwargs)
+        raise _api_error(
+            429,
+            {
+                "error": {
+                    "message": "Quota exceeded, limit: 0. Please retry in 42s.",
+                    "details": [
+                        {
+                            "@type": "type.googleapis.com/google.rpc.QuotaFailure",
+                            "violations": [{"quotaId": "GenerateRequestsPerDayPerProjectPerModel-FreeTier"}],
+                        }
+                    ],
+                }
+            },
+        )
+
+    with mock.patch.object(me.client.chat.completions, "create", fake_create), \
+         mock.patch.object(me, "time") as fake_time:
+        fake_time.sleep = lambda seconds: sleeps.append(seconds)
+        try:
+            me._completion_resilient(
+                model="openai/gpt-oss-120b",
+                system_prompt="sys",
+                user_content="text-only",
+                strict_format=me.EXTRACTION_RESPONSE_FORMAT,
+            )
+        except me.ProviderRateLimitError as error:
+            assert error.hard_quota is True
+            assert error.code == "provider_quota_exhausted"
+        else:
+            raise AssertionError("expected hard quota failure")
+
+    assert len(calls) == 1, calls
+    assert sleeps == [], sleeps
+
+
+def test_gemini_default_does_not_use_shutdown_2_0_model():
+    config = me._PROVIDER_DEFAULTS["gemini"]
+    assert config["model_default"] == "gemini-3.6-flash"
+    assert config["vision_default"] == "gemini-3.6-flash"
+    assert config["fallback_default"] == "gemini-3.5-flash-lite"
+
+
 def test_non_retryable_400_raises():
     """A 400 that is NOT json_validate_failed is permanent — must raise."""
     def fake_create(**kwargs):

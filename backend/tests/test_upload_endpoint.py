@@ -205,6 +205,86 @@ def test_all_files_transient_failure_is_502():
         app.dependency_overrides.clear()
 
 
+def test_async_job_exposes_independent_file_progress():
+    """A parent job keeps one terminal row per input file and does not lose
+    those rows when the parent advances to ready."""
+    from document_filter import NonMedicalDocumentError
+
+    app, patchers = _make_client(index_chunks=2)
+    try:
+        api.process_document.side_effect = [
+            dict(EXTRACTED_DOC),
+            NonMedicalDocumentError("notes.jpg", "no clinical content"),
+        ]
+        with TestClient(app) as client:
+            queued = client.post(
+                "/api/v1/documents?async=true",
+                headers={"Prefer": "respond-async"},
+                files=[
+                    ("files", ("rx.pdf", b"fake-pdf", "application/pdf")),
+                    ("files", ("notes.jpg", b"fake-jpg", "image/jpeg")),
+                ],
+            )
+            assert queued.status_code == 202, queued.text
+            job = client.get(f"/api/v1/jobs/{queued.json()['job_id']}")
+
+        assert job.status_code == 200, job.text
+        body = job.json()
+        assert body["status"] == "completed"
+        progress = body["progress"]
+        assert progress["step"] == "ready"
+        assert progress["total_files"] == 2
+        assert progress["processed_files"] == 2
+        assert progress["successful_files"] == 1
+        assert progress["failed_files"] == 1
+        by_name = {item["name"]: item for item in progress["files"]}
+        assert by_name["rx.pdf"]["status"] == "completed"
+        assert by_name["rx.pdf"]["step"] == "ready"
+        assert by_name["notes.jpg"]["status"] == "failed"
+        assert by_name["notes.jpg"]["error_code"] == "not_medical"
+        assert "medical" in by_name["notes.jpg"]["error"].lower()
+    finally:
+        for patcher in patchers:
+            patcher.stop()
+        app.dependency_overrides.clear()
+
+
+def test_hard_provider_quota_stops_queued_files_after_first_call():
+    """A terminal provider quota opens the batch circuit breaker rather than
+    sending every queued file into the same doomed request/retry ladder."""
+    from medical_extractor import ProviderRateLimitError
+
+    app, patchers = _make_client(index_chunks=2)
+    try:
+        api.process_document.side_effect = ProviderRateLimitError(
+            provider="gemini",
+            model="gemini-3.6-flash",
+            hard_quota=True,
+        )
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/v1/documents",
+                files=[
+                    ("files", ("a.jpg", b"a", "image/jpeg")),
+                    ("files", ("b.jpg", b"b", "image/jpeg")),
+                    ("files", ("c.jpg", b"c", "image/jpeg")),
+                ],
+            )
+        assert response.status_code == 502, response.text
+        assert api.process_document.call_count == 1
+        payload = response.json()
+        detail = payload["detail"]
+        assert payload["code"] == "provider_quota_exhausted"
+        assert payload["retryable"] is False
+        assert "no usable quota" in detail
+        assert "structured JSON" not in detail
+        assert "gemini-3.6-flash" not in detail
+    finally:
+        for patcher in patchers:
+            patcher.stop()
+        app.dependency_overrides.clear()
+
+
 def test_all_files_non_medical_still_422():
     """Every file genuinely non-medical -> 422 with the per-file reason,
     same contract as before per-file resilience."""

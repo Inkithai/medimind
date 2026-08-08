@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { api, ApiError } from "../api/client";
+import {
+  api,
+  ApiError,
+  type JobFileProgress,
+  type JobProgress,
+} from "../api/client";
 import { Alert } from "../components/Alert";
 import { ErrorState } from "../components/ErrorState";
 import { HealthSummaryCard } from "../components/HealthSummaryCard";
@@ -31,6 +36,80 @@ interface PendingFile {
   id: string; // dedup key: name-size-lastModified (no random)
 }
 
+function initialFileProgress(files: PendingFile[]): JobFileProgress[] {
+  return files.map((pendingFile, index) => ({
+    id: `file-${index + 1}`,
+    index: index + 1,
+    name: pendingFile.file.name,
+    status: "queued",
+    step: "upload",
+    message: "Uploaded and waiting for a processing slot",
+  }));
+}
+
+function filesAfterResult(files: PendingFile[], response: UploadResponse): PendingFile[] {
+  const retryableFailures = (response.failed_files || []).filter(
+    (failure) => failure.retryable !== false && failure.kind !== "not_medical"
+  );
+  if (retryableFailures.length === 0) return [];
+
+  const failedIndices = new Set(
+    retryableFailures
+      .map((failure) => failure.file_index)
+      .filter((index): index is number => typeof index === "number")
+  );
+  if (failedIndices.size > 0) {
+    return files.filter((_, index) => failedIndices.has(index + 1));
+  }
+
+  // Compatibility with an older backend that returned only filenames.
+  const failedNames = new Set(retryableFailures.map((failure) => failure.file));
+  return files.filter((pendingFile) => failedNames.has(pendingFile.file.name));
+}
+
+function completedFallbackProgress(
+  initialFiles: JobFileProgress[],
+  response: UploadResponse
+): JobProgress {
+  const failuresByIndex = new Map(
+    (response.failed_files || [])
+      .filter((failure) => typeof failure.file_index === "number")
+      .map((failure) => [failure.file_index as number, failure])
+  );
+  const failuresByName = new Map((response.failed_files || []).map((failure) => [failure.file, failure]));
+  const files = initialFiles.map((file) => {
+    const failure = failuresByIndex.get(file.index) || failuresByName.get(file.name);
+    if (!failure) {
+      return {
+        ...file,
+        status: "completed" as const,
+        step: "ready",
+        message: "Details extracted and saved",
+      };
+    }
+    return {
+      ...file,
+      status: "failed" as const,
+      step: "failed",
+      message: failure.error,
+      error: failure.error,
+      error_code: failure.code,
+      retryable: failure.retryable,
+      retry_after_seconds: failure.retry_after_seconds,
+    };
+  });
+  const successful = files.filter((file) => file.status === "completed").length;
+  return {
+    step: "ready",
+    message: "Your health record is up to date",
+    total_files: files.length,
+    processed_files: files.length,
+    successful_files: successful,
+    failed_files: files.length - successful,
+    files,
+  };
+}
+
 export function UploadPage() {
   const { credentials } = useAuth();
   const navigate = useNavigate();
@@ -42,6 +121,7 @@ export function UploadPage() {
   const [result, setResult] = useState<UploadResponse | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [processingStep, setProcessingStep] = useState<ProcessingStepId>("upload");
+  const [jobProgress, setJobProgress] = useState<JobProgress | null>(null);
 
   // Recent uploads + health summary fill the page's right column / bottom.
   const [timeline, setTimeline] = useState<Timeline | null>(null);
@@ -68,6 +148,9 @@ export function UploadPage() {
   }, [previewUrls]);
 
   const addFiles = useCallback((fileList: FileList | File[]) => {
+    setError(null);
+    setResult(null);
+    setJobProgress(null);
     const incoming = Array.from(fileList).map((file) => ({
       file,
       id: `${file.name}-${file.size}-${file.lastModified}`,
@@ -83,9 +166,10 @@ export function UploadPage() {
     (e: React.DragEvent) => {
       e.preventDefault();
       setDragging(false);
+      if (phase === "uploading") return;
       if (e.dataTransfer.files?.length) addFiles(e.dataTransfer.files);
     },
-    [addFiles]
+    [addFiles, phase]
   );
 
   const validate = (): Error | null => {
@@ -108,84 +192,104 @@ export function UploadPage() {
       setError(problem);
       return;
     }
+
+    const filesForRun = [...pending];
+    const initialFiles = initialFileProgress(filesForRun);
     setError(null);
     setResult(null);
     setPhase("uploading");
     setProcessingStep("upload");
+    setJobProgress({
+      step: "upload",
+      message: "Sending files securely",
+      total_files: initialFiles.length,
+      processed_files: 0,
+      successful_files: 0,
+      failed_files: 0,
+      files: initialFiles,
+    });
 
-    // Map job progress step -> ProcessingStepId (real progress from server)
-    const toStep = (s: string): ProcessingStepId => {
-      if (s === "reading" || s === "upload") return "reading";
-      if (s === "extracting") return "extracting";
-      if (s === "organizing") return "organizing";
-      if (s === "safety") return "safety";
-      if (s === "indexing") return "indexing";
-      if (s === "ready" || s === "completed") return "ready";
+    const toStep = (step: string): ProcessingStepId => {
+      if (step === "failed") return "failed";
+      if (step === "reading") return "reading";
+      if (step === "extracting" || step === "upload") return "extracting";
+      if (step === "organizing") return "organizing";
+      if (step === "safety") return "safety";
+      if (step === "indexing") return "indexing";
+      if (step === "ready" || step === "completed") return "ready";
       return "upload";
     };
 
-    // Try async (202 + poll) first — avoids free-tier 429 timeouts and shows real progress.
-    // Falls back to sync if server doesn't support jobs (old deployment).
     try {
-      // Heuristic: use async for >1 file or any file >2MB (likely scan) or if USE_BACKGROUND_JOBS set
-      const shouldUseAsync = pending.length > 1 || pending.some((p) => p.file.size > 2 * 1024 * 1024);
-      if (shouldUseAsync) {
-        try {
-          const { job_id } = await api.uploadDocumentsAsync(
-            credentials,
-            pending.map((p) => p.file)
-          );
-          // Poll until done, updating step from server progress
-          const final = await api.pollJobUntilDone(credentials, job_id, (job) => {
-            if (job.progress?.step) setProcessingStep(toStep(job.progress.step));
-          });
-          if (final.status === "failed") {
-            // The job ran and REPORTED failure — this is terminal. The old
-            // code let this fall through to the sync fallback below, which
-            // silently re-uploaded every file and paid the provider cost
-            // twice for the same rejection (seen as two full processing
-            // runs in the server logs).
-            const jobError = new Error(final.error || "Processing failed") as Error & {
-              __jobTerminal?: boolean;
-            };
-            jobError.__jobTerminal = true;
-            throw jobError;
-          }
-          const res = final.result as UploadResponse;
-          if (!res) throw new Error("Job completed but no result");
-          setResult(res);
-          setPending([]);
-          setProcessingStep("ready");
-          return;
-        } catch (e: any) {
-          // Sync fallback ONLY when the async path itself couldn't be used:
-          // old server without jobs (404/405) or a network-level failure
-          // (ApiError status 0). Any real HTTP rejection, timeout, or job
-          // failure is rethrown — a sync retry would fail identically and
-          // double the upload cost.
-          if (e?.__jobTerminal) {
-            throw e;
-          }
-          if (e?.message?.includes("timed out")) {
-            throw e;
-          }
-          if (e instanceof ApiError && e.status >= 400 && e.status !== 404 && e.status !== 405) {
-            throw e;
-          }
-          // else: 404/405 (jobs unsupported) or network error — try sync below
+      // Every upload uses the parent job endpoint. It is the only path that
+      // can report independent per-file phases and it avoids tying a browser
+      // request to several minutes of OCR/model work.
+      try {
+        const queued = await api.uploadDocumentsAsync(
+          credentials,
+          filesForRun.map((pendingFile) => pendingFile.file)
+        );
+        if (!queued.job_id) {
+          throw new ApiError(500, "The server did not return a processing job.");
         }
+        if (queued.worker_limit) {
+          setJobProgress((current) =>
+            current ? { ...current, worker_limit: queued.worker_limit } : current
+          );
+        }
+
+        const final = await api.pollJobUntilDone(credentials, queued.job_id, (job) => {
+          if (job.progress) {
+            setJobProgress(job.progress);
+            setProcessingStep(toStep(job.progress.step));
+          }
+        });
+
+        if (final.status === "failed") {
+          const progress = final.progress;
+          throw new ApiError(
+            progress?.http_status || 502,
+            final.error || progress?.message || "Document processing could not finish.",
+            final,
+            {
+              code: progress?.error_code,
+              retryable: progress?.retryable,
+              retryAfterSeconds: progress?.retry_after_seconds,
+            }
+          );
+        }
+
+        const response = final.result as UploadResponse | undefined;
+        if (!response) {
+          throw new ApiError(500, "Processing finished, but the server returned no result.");
+        }
+        setResult(response);
+        setPending(filesAfterResult(filesForRun, response));
+        setProcessingStep("ready");
+        if (final.progress) setJobProgress(final.progress);
+        return;
+      } catch (asyncError) {
+        // Only an explicitly old server without job routes may use the legacy
+        // synchronous endpoint. Never fall back after a network ambiguity or
+        // a terminal job failure: that would upload and charge every file a
+        // second time.
+        const jobsUnsupported =
+          asyncError instanceof ApiError &&
+          (asyncError.status === 404 || asyncError.status === 405);
+        if (!jobsUnsupported) throw asyncError;
       }
-      // Sync fallback (used by tests and small uploads)
-      const res = await api.uploadDocuments(
+
+      const response = await api.uploadDocuments(
         credentials,
-        pending.map((p) => p.file)
+        filesForRun.map((pendingFile) => pendingFile.file)
       );
-      setResult(res);
-      setPending([]);
+      setResult(response);
+      setPending(filesAfterResult(filesForRun, response));
+      setJobProgress(completedFallbackProgress(initialFiles, response));
       setProcessingStep("ready");
-    } catch (err) {
-      setError(err);
-      setProcessingStep("reading");
+    } catch (uploadError) {
+      setError(uploadError);
+      setProcessingStep("failed");
     } finally {
       setPhase("idle");
     }
@@ -193,6 +297,12 @@ export function UploadPage() {
 
   const uploadFailed = phase === "idle" && error !== null;
   const busy = phase === "uploading";
+  const retryBlocked =
+    uploadFailed &&
+    typeof error === "object" &&
+    error !== null &&
+    "retryable" in error &&
+    (error as { retryable?: boolean }).retryable === false;
   const recent = timeline ? [...timeline.visits].slice(-5).reverse() : [];
 
   return (
@@ -225,7 +335,11 @@ export function UploadPage() {
             </div>
             <p className="mt-4 text-lg font-semibold text-slate-800">Drag files here</p>
             <p className="secondary-text mt-1">or</p>
-            <button onClick={() => inputRef.current?.click()} className="btn-primary mt-3">
+            <button
+              onClick={() => inputRef.current?.click()}
+              disabled={busy}
+              className="btn-primary mt-3"
+            >
               Browse Files
             </button>
             <p className="secondary-text mt-4">
@@ -247,6 +361,7 @@ export function UploadPage() {
               multiple
               accept={ACCEPTED.join(",")}
               className="hidden"
+              disabled={busy}
               onChange={(e) => {
                 if (e.target.files) addFiles(e.target.files);
                 e.target.value = "";
@@ -295,8 +410,14 @@ export function UploadPage() {
                           </a>
                         )}
                         <button
-                          onClick={() => setPending((prev) => prev.filter((x) => x.id !== p.id))}
-                          className="flex min-h-[44px] items-center rounded-lg px-3 text-sm font-medium text-slate-400 hover:bg-red-50 hover:text-red-600"
+                          onClick={() => {
+                            setPending((prev) => prev.filter((x) => x.id !== p.id));
+                            setError(null);
+                            setResult(null);
+                            setJobProgress(null);
+                          }}
+                          disabled={busy}
+                          className="flex min-h-[44px] items-center rounded-lg px-3 text-sm font-medium text-slate-400 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40"
                         >
                           Remove
                         </button>
@@ -306,11 +427,26 @@ export function UploadPage() {
                 })}
               </ul>
               <div className="flex items-center justify-end gap-3 border-t border-slate-100 px-5 py-4">
-                <button onClick={() => setPending([])} className="btn-ghost">
+                <button
+                  onClick={() => {
+                    setPending([]);
+                    setError(null);
+                    setResult(null);
+                    setJobProgress(null);
+                  }}
+                  disabled={busy}
+                  className="btn-ghost"
+                >
                   Clear all
                 </button>
-                <button onClick={handleUpload} disabled={busy} className="btn-primary">
-                  {busy ? (
+                <button
+                  onClick={handleUpload}
+                  disabled={busy || retryBlocked}
+                  className="btn-primary"
+                >
+                  {retryBlocked ? (
+                    "Try again later"
+                  ) : busy ? (
                     <>
                       <Spinner className="h-5 w-5" />
                       Processing…
@@ -348,17 +484,30 @@ export function UploadPage() {
 
         {/* Right column: live status while processing, success + next steps after */}
         <div className="space-y-4">
-          {(busy || result) && (
-            <ProcessingStatus current={busy ? processingStep : "ready"} error={null} />
+          {(busy || result || uploadFailed) && (
+            <ProcessingStatus
+              current={busy ? processingStep : uploadFailed ? "failed" : "ready"}
+              files={jobProgress?.files || []}
+              workerLimit={jobProgress?.worker_limit}
+              error={null}
+            />
           )}
 
           {result && (
             <>
-              <Alert variant="success" title="All done — your record is up to date">
+              <Alert
+                variant={result.failed_files?.length ? "warning" : "success"}
+                title={
+                  result.failed_files?.length
+                    ? "Finished — some files need your attention"
+                    : "All done — your record is up to date"
+                }
+              >
                 <p className="text-sm">
-                  Added <strong>{result.documents_added}</strong>{" "}
-                  {result.documents_added === 1 ? "document" : "documents"}. Your record now holds{" "}
-                  <strong>{result.documents_total}</strong> in total.
+                  Added <strong>{result.files_added ?? result.documents_added}</strong>{" "}
+                  {(result.files_added ?? result.documents_added) === 1 ? "file" : "files"}. Your record now
+                  contains <strong>{result.documents_total}</strong>{" "}
+                  {result.documents_total === 1 ? "document page" : "document pages"} in total.
                 </p>
                 {!result.indexed && result.index_error && (
                   <p className="mt-2 rounded-lg bg-red-100/60 px-3 py-2 text-sm text-red-800">
@@ -376,10 +525,7 @@ export function UploadPage() {
                     <ul className="mt-1 list-disc space-y-1 pl-5">
                       {result.failed_files.map((f, i) => (
                         <li key={`${f.file}-${i}`}>
-                          <strong>{f.file}</strong>
-                          {f.kind === "not_medical"
-                            ? " — doesn't look like a medical document."
-                            : " — processing failed; try uploading just this file again."}
+                          <strong>{f.file}</strong> — {f.error}
                         </li>
                       ))}
                     </ul>

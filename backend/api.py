@@ -32,13 +32,16 @@ Env:
     (optional: OPENAI_API_KEY — used only for embeddings, since Groq/Gemini have no
     embeddings API; without it, embeddings run locally via Chroma's ONNX
     MiniLM model)
-    (optional: VECTOR_STORE=chroma|supabase, USE_BACKGROUND_JOBS=true for async uploads)
+    (optional: VECTOR_STORE=chroma|supabase, USE_BACKGROUND_JOBS=true,
+     UPLOAD_FILE_CONCURRENCY=1 for async per-file worker load control)
 """
 
+import asyncio
 import logging
 import os
 import re
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, Dict, List, Optional, Tuple
@@ -56,6 +59,7 @@ from auth import get_current_user, issue_anonymous_token
 from document_filter import NonMedicalDocumentError, assert_medical_document
 from lab_trends import track_lab_trends
 from medical_extractor import (
+    ProviderRateLimitError,
     _is_demo_document,
     build_patient_timeline,
     cross_check_prescriptions,
@@ -68,11 +72,55 @@ logger = logging.getLogger("api")
 
 SUPPORTED_EXTENSIONS = (".pdf", ".png", ".jpg", ".jpeg", ".webp")
 
+
+def _upload_worker_count() -> int:
+    """Global extraction concurrency, bounded to protect provider quotas.
+
+    One shared executor load-balances documents across all upload jobs. The
+    conservative default of one avoids multiplying free-tier LLM calls; a
+    paid deployment can raise UPLOAD_FILE_CONCURRENCY without changing the
+    API or UI. Individual files still have independent queued/active states.
+    """
+    try:
+        return max(1, min(8, int(os.environ.get("UPLOAD_FILE_CONCURRENCY", "1"))))
+    except ValueError:
+        return 1
+
+
+UPLOAD_FILE_CONCURRENCY = _upload_worker_count()
+_DOCUMENT_EXECUTOR = ThreadPoolExecutor(
+    max_workers=UPLOAD_FILE_CONCURRENCY,
+    thread_name_prefix="medimind-document",
+)
+
+
+class UploadPipelineError(HTTPException):
+    """HTTP failure carrying metadata used by async job polling clients."""
+
+    def __init__(
+        self,
+        status_code: int,
+        detail: str,
+        *,
+        code: str,
+        retryable: bool,
+        retry_after_seconds: Optional[float] = None,
+    ) -> None:
+        headers = None
+        if retry_after_seconds:
+            headers = {"Retry-After": str(max(1, round(retry_after_seconds)))}
+        super().__init__(status_code=status_code, detail=detail, headers=headers)
+        self.code = code
+        self.retryable = retryable
+        self.retry_after_seconds = retry_after_seconds
+
+
 from contextlib import asynccontextmanager
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    logger.info("Document worker pool ready: concurrency=%d", UPLOAD_FILE_CONCURRENCY)
     # Startup: ensure tables exist (Supabase schema is created via SQL editor,
     # so this is a no-op but kept for compatibility)
     try:
@@ -105,6 +153,28 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(UploadPipelineError)
+async def upload_pipeline_error_handler(request: Request, exc: UploadPipelineError):
+    """Keep upload failures concise while preserving retry metadata."""
+    logger.warning(
+        "upload pipeline error for %s %s: code=%s retryable=%s",
+        request.method,
+        request.url.path,
+        exc.code,
+        exc.retryable,
+    )
+    return JSONResponse(
+        status_code=exc.status_code,
+        headers=exc.headers,
+        content={
+            "detail": str(exc.detail),
+            "code": exc.code,
+            "retryable": exc.retryable,
+            "retry_after_seconds": exc.retry_after_seconds,
+        },
+    )
 
 
 @app.exception_handler(db.SchemaNotInitializedError)
@@ -152,173 +222,554 @@ def _should_use_background(request: Request, prefer_header: Optional[str] = None
     return False
 
 
+def _classify_processing_error(error: Exception, file_name: str, file_index: int) -> Dict[str, Any]:
+    """Translate internal/provider exceptions into a concise public file error."""
+    base: Dict[str, Any] = {
+        "file": file_name,
+        "file_id": f"file-{file_index}",
+        "file_index": file_index,
+    }
+    if isinstance(error, ProviderRateLimitError):
+        if error.retired_model:
+            return {
+                **base,
+                "error": "The server's document-reading model is no longer available. This file was not processed.",
+                "kind": "transient",
+                "code": error.code,
+                "retryable": False,
+                "retry_after_seconds": error.retry_after_seconds,
+            }
+        if error.hard_quota:
+            return {
+                **base,
+                "error": "The document-reading service has no available quota right now. This is not a problem with your file.",
+                "kind": "transient",
+                "code": error.code,
+                "retryable": False,
+                "retry_after_seconds": error.retry_after_seconds,
+            }
+        wait = (
+            f" Try again in about {max(1, round(error.retry_after_seconds))} seconds."
+            if error.retry_after_seconds
+            else " Please wait a minute before retrying."
+        )
+        return {
+            **base,
+            "error": "The document-reading service is temporarily busy." + wait,
+            "kind": "transient",
+            "code": error.code,
+            "retryable": True,
+            "retry_after_seconds": error.retry_after_seconds,
+        }
+
+    text = str(error).lower()
+    if "429" in text or "rate-limit" in text or "rate limit" in text or "quota" in text:
+        hard = any(marker in text for marker in ("limit: 0", "per day", "daily quota", "quota exhausted"))
+        return {
+            **base,
+            "error": (
+                "The document-reading service has no available quota right now. This is not a problem with your file."
+                if hard
+                else "The document-reading service is temporarily busy. Please wait a minute before retrying."
+            ),
+            "kind": "transient",
+            "code": "provider_quota_exhausted" if hard else "provider_rate_limited",
+            "retryable": not hard,
+            "retry_after_seconds": None,
+        }
+
+    if isinstance(error, ValueError):
+        if "could not be parsed as json" in text or "model returned" in text:
+            return {
+                **base,
+                "error": "We couldn't reliably read this file. Try a clearer, upright image or a higher-resolution scan.",
+                "kind": "invalid",
+                "code": "unreadable_document",
+                "retryable": True,
+                "retry_after_seconds": None,
+            }
+        return {
+            **base,
+            "error": "This file could not be opened or read. Check the file and try again.",
+            "kind": "invalid",
+            "code": "invalid_document",
+            "retryable": False,
+            "retry_after_seconds": None,
+        }
+
+    return {
+        **base,
+        "error": "Document processing was interrupted. Please try this file again.",
+        "kind": "transient",
+        "code": "processing_interrupted",
+        "retryable": True,
+        "retry_after_seconds": None,
+    }
+
+
+def _blocked_file_error(capacity_error: Dict[str, Any], file_name: str, file_index: int) -> Dict[str, Any]:
+    retryable = bool(capacity_error.get("retryable", True))
+    return {
+        "file": file_name,
+        "file_id": f"file-{file_index}",
+        "file_index": file_index,
+        "error": (
+            "Not started because the document-reading service has no available quota right now."
+            if not retryable
+            else "Not started because the document-reading service is temporarily busy."
+        ),
+        "kind": capacity_error.get("kind", "transient"),
+        "code": capacity_error.get("code", "provider_rate_limited"),
+        "retryable": retryable,
+        "retry_after_seconds": capacity_error.get("retry_after_seconds"),
+    }
+
+
+def _raise_no_usable_files(file_errors: List[Dict[str, Any]], total_files: int) -> None:
+    """Fail a zero-success batch once, without concatenating provider traces."""
+    codes = {item.get("code") for item in file_errors}
+    retry_after = max(
+        (float(item["retry_after_seconds"]) for item in file_errors if item.get("retry_after_seconds")),
+        default=None,
+    )
+    if "provider_model_unavailable" in codes:
+        raise UploadPipelineError(
+            502,
+            "Document reading is unavailable because the server is configured with an AI model that has been retired. No files were added. Please contact support.",
+            code="provider_model_unavailable",
+            retryable=False,
+        )
+    if "provider_quota_exhausted" in codes:
+        raise UploadPipelineError(
+            502,
+            "Document reading is temporarily unavailable because the AI service has no usable quota. No files were added, and this is not a problem with your documents. Please try again later or contact support.",
+            code="provider_quota_exhausted",
+            retryable=False,
+            retry_after_seconds=retry_after,
+        )
+    if "provider_rate_limited" in codes:
+        wait = f" in about {max(1, round(retry_after))} seconds" if retry_after else " in a minute"
+        raise UploadPipelineError(
+            502,
+            f"The document-reading service reached a temporary rate-limit, so no files were added. Please try again{wait}.",
+            code="provider_rate_limited",
+            retryable=True,
+            retry_after_seconds=retry_after,
+        )
+
+    kinds = {item.get("kind") for item in file_errors}
+    if kinds and kinds <= {"not_medical", "invalid", "unsupported"}:
+        names = ", ".join(str(item.get("file", "file")) for item in file_errors[:5])
+        if len(file_errors) > 5:
+            names += f", and {len(file_errors) - 5} more"
+        raise UploadPipelineError(
+            422,
+            f"We couldn't find readable medical information in any of the {total_files} file(s): {names}. Review each file's status below.",
+            code="no_medical_content",
+            retryable=False,
+        )
+    raise UploadPipelineError(
+        502,
+        f"We couldn't process any of the {total_files} file(s) because document processing was interrupted. No files were added; please try again.",
+        code="processing_interrupted",
+        retryable=True,
+    )
+
+
 async def _execute_upload_pipeline(
     user_id: str,
     files_data: List[Tuple[str, bytes]],
     job_id: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Core upload pipeline shared by sync and background paths."""
-    def _progress(step: str, message: str):
+    """Process child documents independently, then finalize one patient record.
+
+    Extraction work is submitted to a shared bounded executor. Thus separate
+    files can be queued/reading/extracting at different times without allowing
+    one batch (or several users) to overwhelm the upstream model provider.
+    """
+
+    def _progress(step: str, message: str, **metadata: Any) -> None:
         if job_id:
-            jobs.update_job(job_id, progress={"step": step, "message": message})
-    _progress("reading", f"Processing {len(files_data)} file(s)")
-    per_file_pages: List[Tuple[Path, str, List[Dict[str, Any]]]] = []
+            jobs.update_job(job_id, progress={"step": step, "message": message, **metadata})
+
+    def _file_progress(
+        file_index: int,
+        *,
+        status: Optional[str] = None,
+        step: Optional[str] = None,
+        message: Optional[str] = None,
+        error_info: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        if not job_id:
+            return
+        jobs.update_file_progress(
+            job_id,
+            file_index,
+            status=status,
+            step=step,
+            message=message,
+            error=error_info.get("error") if error_info else None,
+            error_code=error_info.get("code") if error_info else None,
+            retryable=error_info.get("retryable") if error_info else None,
+            retry_after_seconds=error_info.get("retry_after_seconds") if error_info else None,
+        )
+
+    total_files = len(files_data)
+    _progress(
+        "reading",
+        f"Preparing {total_files} file(s) for independent processing",
+        worker_limit=UPLOAD_FILE_CONCURRENCY,
+    )
     new_docs: List[Dict[str, Any]] = []
-    # Per-file failures are collected instead of aborting the whole batch: a
-    # single unreadable/non-medical file must not discard the successful
-    # extractions around it (previously one rejected file failed the entire
-    # upload and the client re-processed every file from scratch — paying
-    # the provider's rate-limit cost all over again). The request only
-    # fails outright when NOTHING could be kept.
-    file_errors: List[Dict[str, str]] = []
-    from tempfile import TemporaryDirectory as _TD
-    with _TD() as tmp_dir:
+    file_errors: List[Dict[str, Any]] = []
+    successfully_saved_files = 0
+
+    with TemporaryDirectory() as tmp_dir:
+        work_items: List[Tuple[int, str, Path]] = []
         for file_index, (original_name, content) in enumerate(files_data, start=1):
             suffix = Path(original_name).suffix.lower()
             if suffix not in SUPPORTED_EXTENSIONS:
-                # Unreachable in practice (upload_documents validates
-                # extensions up front) — recorded, not raised, for parity.
-                logger.warning("upload: user=%s rejected '%s' (unsupported type '%s')", user_id, original_name, suffix or "(none)")
-                file_errors.append({
+                info = {
                     "file": original_name,
-                    "error": f"Unsupported file type '{suffix or '(no extension)'}' for '{original_name}'. Supported: {', '.join(SUPPORTED_EXTENSIONS)}",
+                    "file_id": f"file-{file_index}",
+                    "file_index": file_index,
+                    "error": f"This file type ({suffix or 'no extension'}) is not supported.",
                     "kind": "unsupported",
-                })
+                    "code": "unsupported_file_type",
+                    "retryable": False,
+                    "retry_after_seconds": None,
+                }
+                file_errors.append(info)
+                _file_progress(file_index, status="failed", step="failed", message=info["error"], error_info=info)
                 continue
             safe_stem = re.sub(r"[^A-Za-z0-9._-]+", "_", Path(original_name).stem) or "upload"
             tmp_path = Path(tmp_dir) / f"{file_index:03d}_{safe_stem}{suffix}"
             tmp_path.write_bytes(content)
-            logger.info("upload: user=%s processing '%s' (%d bytes)", user_id, original_name, len(content))
-            _progress("extracting", f"Extracting {original_name} ({file_index}/{len(files_data)})")
-            try:
-                result = process_document(str(tmp_path))
-            except NonMedicalDocumentError as e:
-                logger.warning("upload: user=%s rejected '%s': %s", user_id, original_name, e.reason)
-                file_errors.append({"file": original_name, "error": str(e), "kind": "not_medical"})
-                continue
-            except RuntimeError as e:
-                logger.error("upload: user=%s processing failed for '%s': %s", user_id, original_name, e, exc_info=True)
-                file_errors.append({
-                    "file": original_name,
-                    "error": f"Processing failed for '{original_name}': {e}. Please retry — this is usually transient. If it keeps happening, try a clearer photo or higher-resolution scan.",
-                    "kind": "transient",
-                })
-                continue
-            except ValueError as e:
-                msg = str(e)
-                if "could not be parsed as JSON" in msg or "model returned" in msg:
-                    logger.error("upload: user=%s extraction parse failed for '%s': %s", user_id, original_name, e, exc_info=True)
-                    file_errors.append({
-                        "file": original_name,
-                        "error": f"Extraction failed for '{original_name}': {e}. The AI had trouble reading this file — please retry or try a clearer image.",
-                        "kind": "transient",
-                    })
-                else:
-                    logger.error("upload: user=%s extraction failed for '%s': %s", user_id, original_name, e, exc_info=True)
-                    file_errors.append({"file": original_name, "error": f"Extraction failed for '{original_name}': {e}", "kind": "invalid"})
-                continue
-            except Exception as e:
-                logger.error("upload: user=%s extraction failed for '%s': %s", user_id, original_name, e, exc_info=True)
-                file_errors.append({"file": original_name, "error": f"Processing failed for '{original_name}': {e}. Please retry.", "kind": "transient"})
-                continue
-            if isinstance(result, dict) and result.get("multi_page"):
-                logger.info("upload: user=%s '%s' extracted as %d page(s)", user_id, original_name, len(result["pages"]))
-                pages = result["pages"]
-            else:
-                pages = [result]
-            kept_pages: List[Dict[str, Any]] = []
-            rejected_reason: Optional[str] = None
-            for page_num, page in enumerate(pages, start=1):
-                label = original_name if len(pages) == 1 else f"{original_name} (page {page_num})"
-                if _is_demo_document(page):
-                    logger.warning("upload: user=%s skipped demo/placeholder page '%s'", user_id, label)
-                    continue
+            work_items.append((file_index, original_name, tmp_path))
+
+        # Results are keyed by input index so concurrent workers never reorder
+        # the response or mismatch duplicate-looking filenames.
+        extracted: Dict[int, Tuple[Path, str, List[Dict[str, Any]]]] = {}
+        extraction_errors: Dict[int, Dict[str, Any]] = {}
+        queue: asyncio.Queue[Optional[Tuple[int, str, Path]]] = asyncio.Queue()
+        for item in work_items:
+            queue.put_nowait(item)
+
+        # Set after a terminal provider-capacity failure. Workers check it
+        # before taking the next queued file, preventing N identical retries.
+        capacity_failure: Optional[Dict[str, Any]] = None
+        loop = asyncio.get_running_loop()
+
+        async def _worker() -> None:
+            nonlocal capacity_failure
+            while True:
+                item = await queue.get()
+                if item is None:
+                    queue.task_done()
+                    return
+                file_index, original_name, tmp_path = item
                 try:
-                    assert_medical_document(page, label)
-                except NonMedicalDocumentError as e:
-                    rejected_reason = str(e)
-                    break
-                if isinstance(page.get("_source"), dict):
-                    page["_source"]["file"] = original_name
-                kept_pages.append(page)
-            if rejected_reason is not None:
-                logger.warning("upload: user=%s rejected '%s': %s", user_id, original_name, rejected_reason)
-                file_errors.append({"file": original_name, "error": rejected_reason, "kind": "not_medical"})
+                    if capacity_failure is not None:
+                        info = _blocked_file_error(capacity_failure, original_name, file_index)
+                        extraction_errors[file_index] = info
+                        _file_progress(file_index, status="failed", step="failed", message=info["error"], error_info=info)
+                        continue
+
+                    def report_file_step(step: str, message: str) -> None:
+                        _file_progress(file_index, status="processing", step=step, message=message)
+
+                    def run_document() -> Dict[str, Any]:
+                        # This wrapper starts only when the shared executor has
+                        # a real slot. Until then the file truthfully remains
+                        # "queued" instead of claiming to be read while it is
+                        # sitting behind another upload job.
+                        logger.info(
+                            "upload: user=%s processing '%s' (%d/%d)",
+                            user_id,
+                            original_name,
+                            file_index,
+                            total_files,
+                        )
+                        _file_progress(
+                            file_index,
+                            status="processing",
+                            step="reading",
+                            message="Opening and checking the document",
+                        )
+                        return process_document(
+                            str(tmp_path),
+                            progress_callback=report_file_step,
+                        )
+
+                    try:
+                        result = await loop.run_in_executor(_DOCUMENT_EXECUTOR, run_document)
+                    except NonMedicalDocumentError as exc:
+                        info = {
+                            "file": original_name,
+                            "file_id": f"file-{file_index}",
+                            "file_index": file_index,
+                            "error": "This doesn't appear to contain medical information we can add.",
+                            "kind": "not_medical",
+                            "code": "not_medical",
+                            "retryable": False,
+                            "retry_after_seconds": None,
+                        }
+                        logger.warning("upload: user=%s rejected '%s': %s", user_id, original_name, exc.reason)
+                        extraction_errors[file_index] = info
+                        _file_progress(file_index, status="failed", step="failed", message=info["error"], error_info=info)
+                        continue
+                    except ProviderRateLimitError as exc:
+                        # Expected capacity failures are already fully logged at
+                        # the provider boundary. Avoid repeating a multi-page
+                        # SDK traceback for every uploaded document.
+                        logger.warning(
+                            "upload: document provider unavailable for '%s' (code=%s, retry_after=%s)",
+                            original_name,
+                            exc.code,
+                            exc.retry_after_seconds,
+                        )
+                        info = _classify_processing_error(exc, original_name, file_index)
+                        extraction_errors[file_index] = info
+                        _file_progress(file_index, status="failed", step="failed", message=info["error"], error_info=info)
+                        capacity_failure = info
+                        continue
+                    except Exception as exc:
+                        logger.error("upload: user=%s processing failed for '%s': %s", user_id, original_name, exc, exc_info=True)
+                        info = _classify_processing_error(exc, original_name, file_index)
+                        extraction_errors[file_index] = info
+                        _file_progress(file_index, status="failed", step="failed", message=info["error"], error_info=info)
+                        if info.get("code") in {
+                            "provider_rate_limited",
+                            "provider_quota_exhausted",
+                            "provider_model_unavailable",
+                        }:
+                            capacity_failure = info
+                        continue
+
+                    if not isinstance(result, dict):
+                        raise ValueError("model returned an invalid extraction structure")
+                    pages = result["pages"] if result.get("multi_page") else [result]
+                    kept_pages: List[Dict[str, Any]] = []
+                    rejected = False
+                    for page_num, page in enumerate(pages, start=1):
+                        label = original_name if len(pages) == 1 else f"{original_name} (page {page_num})"
+                        if _is_demo_document(page):
+                            logger.warning("upload: user=%s skipped demo/placeholder page '%s'", user_id, label)
+                            continue
+                        try:
+                            assert_medical_document(page, label)
+                        except NonMedicalDocumentError as exc:
+                            logger.warning("upload: user=%s rejected '%s': %s", user_id, original_name, exc.reason)
+                            rejected = True
+                            break
+                        if isinstance(page.get("_source"), dict):
+                            page["_source"]["file"] = original_name
+                        kept_pages.append(page)
+
+                    if rejected or not kept_pages:
+                        info = {
+                            "file": original_name,
+                            "file_id": f"file-{file_index}",
+                            "file_index": file_index,
+                            "error": "This doesn't appear to contain medical information we can add.",
+                            "kind": "not_medical",
+                            "code": "not_medical",
+                            "retryable": False,
+                            "retry_after_seconds": None,
+                        }
+                        extraction_errors[file_index] = info
+                        _file_progress(file_index, status="failed", step="failed", message=info["error"], error_info=info)
+                        continue
+
+                    extracted[file_index] = (tmp_path, original_name, kept_pages)
+                    _file_progress(
+                        file_index,
+                        status="processing",
+                        step="saving",
+                        message="Medical details found; waiting to save securely",
+                    )
+                except Exception as exc:
+                    # Do not let one malformed extraction result terminate a
+                    # worker and leave queue.join() waiting forever.
+                    logger.error(
+                        "upload: unexpected per-file failure for '%s': %s",
+                        original_name,
+                        exc,
+                        exc_info=True,
+                    )
+                    info = _classify_processing_error(exc, original_name, file_index)
+                    extraction_errors[file_index] = info
+                    _file_progress(
+                        file_index,
+                        status="failed",
+                        step="failed",
+                        message=info["error"],
+                        error_info=info,
+                    )
+                finally:
+                    queue.task_done()
+
+        worker_count = min(UPLOAD_FILE_CONCURRENCY, len(work_items))
+        if worker_count:
+            _progress(
+                "extracting",
+                f"Processing files independently ({worker_count} at a time)",
+                worker_limit=UPLOAD_FILE_CONCURRENCY,
+            )
+        workers = [asyncio.create_task(_worker()) for _ in range(worker_count)]
+        for _ in workers:
+            queue.put_nowait(None)
+        if workers:
+            await queue.join()
+            await asyncio.gather(*workers)
+
+        file_errors.extend(extraction_errors[index] for index in sorted(extraction_errors))
+
+        # Cloud storage is per-file too: one storage failure should not discard
+        # documents that were extracted and saved successfully.
+        for file_index in sorted(extracted):
+            tmp_path, filename, kept_pages = extracted[file_index]
+            _file_progress(file_index, status="processing", step="saving", message="Saving securely")
+            try:
+                upload_info = await asyncio.to_thread(
+                    storage.upload_patient_document,
+                    user_id,
+                    str(tmp_path),
+                    filename,
+                )
+            except Exception as exc:
+                logger.error("upload: user=%s secure save failed for '%s': %s", user_id, filename, exc, exc_info=True)
+                info = {
+                    "file": filename,
+                    "file_id": f"file-{file_index}",
+                    "file_index": file_index,
+                    "error": "We read this file but couldn't save it securely. Please retry it.",
+                    "kind": "transient",
+                    "code": "storage_unavailable",
+                    "retryable": True,
+                    "retry_after_seconds": None,
+                }
+                file_errors.append(info)
+                _file_progress(file_index, status="failed", step="failed", message=info["error"], error_info=info)
                 continue
-            if kept_pages:
-                per_file_pages.append((tmp_path, original_name, kept_pages))
-        if not per_file_pages:
-            if file_errors:
-                # Nothing was kept — fail with the per-file reasons verbatim.
-                # Pure content problems (non-medical/invalid) keep the old 422;
-                # any transient (provider) failure yields a retryable 502.
-                kinds = {e["kind"] for e in file_errors}
-                detail = " | ".join(e["error"] for e in file_errors)[:2000]
-                if "transient" in kinds:
-                    raise HTTPException(502, detail)
-                raise HTTPException(422, detail)
-            raise HTTPException(422, "No medical content found in the uploaded file(s) (all pages were demo/placeholder documents).")
-        _progress("upload", "Uploading to Cloudinary")
-        for tmp_path, filename, kept_pages in per_file_pages:
-            upload_info = storage.upload_patient_document(user_id, str(tmp_path), filename)
+
             for page in kept_pages:
                 page["document_url"] = upload_info["document_url"]
                 page["cloudinary_public_id"] = upload_info["cloudinary_public_id"]
                 new_docs.append(page)
-    _progress("organizing", "Building timeline")
+            successfully_saved_files += 1
+            _file_progress(
+                file_index,
+                status="completed",
+                step="ready",
+                message="Details extracted and saved",
+            )
+
+    if not new_docs:
+        _raise_no_usable_files(file_errors, total_files)
+
+    _progress("organizing", "Updating your medical history")
     existing_docs = db.load_documents(user_id)
     all_docs = existing_docs + new_docs
     logger.info("upload: user=%s merged documents: +%d new, %d total", user_id, len(new_docs), len(all_docs))
     try:
         timeline = build_patient_timeline(all_docs)
-        _progress("safety", "Cross-checking prescriptions")
-        cross_check = cross_check_prescriptions(timeline)
-    except NonMedicalDocumentError as e:
-        raise HTTPException(422, str(e))
-    except RuntimeError as e:
-        logger.error("upload: user=%s cross-check failed: %s", user_id, e, exc_info=True)
-        raise HTTPException(502, f"Cross-check failed: {e}. Please retry.")
-    except Exception as e:
-        logger.error("upload: user=%s cross-check failed: %s", user_id, e, exc_info=True)
-        raise HTTPException(502, f"Cross-check failed: {e}")
-    issue_count = sum(len(v) for v in cross_check.values() if isinstance(v, list))
+        _progress("safety", "Checking medicines and allergies")
+        # Safety is another provider call, so it shares the same bounded pool
+        # as extraction instead of bypassing load control or blocking polling.
+        cross_check = await asyncio.get_running_loop().run_in_executor(
+            _DOCUMENT_EXECUTOR,
+            cross_check_prescriptions,
+            timeline,
+        )
+    except NonMedicalDocumentError as exc:
+        raise UploadPipelineError(422, str(exc), code="not_medical", retryable=False) from exc
+    except ProviderRateLimitError as exc:
+        if exc.retired_model:
+            message = "The files were read, but the safety check uses a retired AI model. Please contact support; the record was not updated."
+        elif exc.hard_quota:
+            message = "The files were read, but the AI service has no quota available for the safety check. Please try again later; the record was not updated."
+        else:
+            message = "The files were read, but the safety service is temporarily busy. Please retry the upload later."
+        raise UploadPipelineError(
+            502,
+            message,
+            code=exc.code,
+            retryable=not (exc.hard_quota or exc.retired_model),
+            retry_after_seconds=exc.retry_after_seconds,
+        ) from exc
+    except RuntimeError as exc:
+        logger.error("upload: user=%s cross-check failed: %s", user_id, exc, exc_info=True)
+        raise UploadPipelineError(
+            502,
+            "The files were read, but the safety check was interrupted. The record was not updated; please retry.",
+            code="safety_check_failed",
+            retryable=True,
+        ) from exc
+    except Exception as exc:
+        logger.error("upload: user=%s cross-check failed: %s", user_id, exc, exc_info=True)
+        raise UploadPipelineError(
+            502,
+            "The files were read, but the safety check could not finish. The record was not updated; please retry.",
+            code="safety_check_failed",
+            retryable=True,
+        ) from exc
+
+    issue_count = sum(len(value) for value in cross_check.values() if isinstance(value, list))
     logger.info("upload: user=%s timeline rebuilt, cross-check found %d issue(s)", user_id, issue_count)
     lab_trends = track_lab_trends(timeline)
-    logger.info("upload: user=%s lab trends: %d trends, %d insufficient", user_id, len(lab_trends["trends"]), len(lab_trends["insufficient_data"]))
-    _progress("indexing", "Indexing for Q&A")
+    logger.info(
+        "upload: user=%s lab trends: %d trends, %d insufficient",
+        user_id,
+        len(lab_trends["trends"]),
+        len(lab_trends["insufficient_data"]),
+    )
+
+    _progress("indexing", "Making your record searchable")
     indexed, index_error = True, None
     try:
-        chunks_indexed = index_patient_timeline(user_id, timeline)
+        chunks_indexed = await asyncio.to_thread(index_patient_timeline, user_id, timeline)
         if chunks_indexed == 0:
             indexed = False
             index_error = "Extraction succeeded but no medications, lab results, clinical notes, or allergies were found to index — Q&A has no documents to search yet."
             logger.warning("upload: user=%s %s", user_id, index_error)
         else:
             logger.info("upload: user=%s re-indexed for Q&A (%d chunk(s))", user_id, chunks_indexed)
-    except Exception as e:
-        indexed, index_error = False, str(e)
-        logger.error("upload: user=%s indexing failed: %s", user_id, e, exc_info=True)
+    except Exception as exc:
+        indexed, index_error = False, str(exc)
+        logger.error("upload: user=%s indexing failed: %s", user_id, exc, exc_info=True)
+
     db.insert_documents(user_id, new_docs)
     db.save_patient_snapshot(user_id, timeline, cross_check, lab_trends=lab_trends)
-    logger.info("upload: user=%s complete: +%d new, %d total, indexed=%s, failed=%d", user_id, len(new_docs), len(all_docs), indexed, len(file_errors))
-    response = {
+    logger.info(
+        "upload: user=%s complete: +%d new pages, %d saved files, %d total pages, indexed=%s, failed=%d",
+        user_id,
+        len(new_docs),
+        successfully_saved_files,
+        len(all_docs),
+        indexed,
+        len(file_errors),
+    )
+    response: Dict[str, Any] = {
         "user_id": user_id,
         "documents_added": len(new_docs),
         "documents_total": len(all_docs),
+        "files_received": total_files,
+        "files_added": successfully_saved_files,
         "timeline": timeline,
         "cross_check_report": cross_check,
         "lab_trends": lab_trends,
         "indexed": indexed,
-        # Files that could not be processed (bad photo, provider hiccup,
-        # non-medical content). The rest of the batch is already merged into
-        # the timeline above — the client can offer a targeted retry for
-        # just these instead of re-uploading everything.
-        "failed_files": file_errors,
+        "failed_files": sorted(file_errors, key=lambda item: item.get("file_index", 0)),
     }
     if not indexed:
         response["index_error"] = index_error
-    done_msg = "Complete" if not file_errors else f"Complete — {len(file_errors)} of {len(files_data)} file(s) failed"
-    _progress("ready", done_msg)
+    done_message = (
+        "Your health record is up to date"
+        if not file_errors
+        else f"Finished — {successfully_saved_files} of {total_files} file(s) added"
+    )
+    _progress("ready", done_message)
     return response
 
 
@@ -363,22 +814,66 @@ async def upload_documents(
 
         async def _run_job():
             try:
-                jobs.update_job(job_id, status="processing", progress={"step": "extracting", "message": "Starting extraction"})
+                jobs.update_job(
+                    job_id,
+                    status="processing",
+                    progress={"step": "upload", "message": "Files received; assigning processing slots"},
+                )
                 result = await _execute_upload_pipeline(user_id, files_data, job_id=job_id)
-                jobs.update_job(job_id, status="completed", progress={"step": "ready", "message": "Complete"}, result=result)
-            except HTTPException as e:
-                # Preserve the HTTP status as error for polling
-                err_msg = e.detail if isinstance(e.detail, str) else str(e.detail)
-                jobs.update_job(job_id, status="failed", error=err_msg, progress={"step": "failed", "message": err_msg})
-                logger.error("Background job %s failed (HTTP %s): %s", job_id, e.status_code, err_msg)
-            except Exception as e:
-                logger.error("Background job %s failed: %s", job_id, e, exc_info=True)
-                jobs.update_job(job_id, status="failed", error=str(e), progress={"step": "failed", "message": str(e)})
+                jobs.update_job(
+                    job_id,
+                    status="completed",
+                    progress={"step": "ready", "message": "Your health record is up to date"},
+                    result=result,
+                )
+            except HTTPException as exc:
+                # Keep public text concise and expose structured retry metadata
+                # through progress. Per-file rows are preserved by update_job's
+                # merge semantics.
+                public_message = exc.detail if isinstance(exc.detail, str) else "Document processing could not finish."
+                jobs.update_job(
+                    job_id,
+                    status="failed",
+                    error=public_message,
+                    progress={
+                        "step": "failed",
+                        "message": public_message,
+                        "error_code": getattr(exc, "code", "upload_failed"),
+                        "retryable": getattr(exc, "retryable", exc.status_code >= 500),
+                        "retry_after_seconds": getattr(exc, "retry_after_seconds", None),
+                        "http_status": exc.status_code,
+                    },
+                )
+                logger.error("Background job %s failed (HTTP %s): %s", job_id, exc.status_code, public_message)
+            except Exception as exc:
+                logger.error("Background job %s failed: %s", job_id, exc, exc_info=True)
+                public_message = "Document processing stopped unexpectedly. No record was updated; please try again."
+                jobs.update_job(
+                    job_id,
+                    status="failed",
+                    error=public_message,
+                    progress={
+                        "step": "failed",
+                        "message": public_message,
+                        "error_code": "upload_failed",
+                        "retryable": True,
+                        "http_status": 500,
+                    },
+                )
 
         background_tasks.add_task(_run_job)
         # Return 202 immediately
         from fastapi.responses import JSONResponse
-        return JSONResponse(status_code=202, content={"job_id": job_id, "status": "processing", "message": "Upload queued — poll GET /api/v1/jobs/{job_id}"})
+        return JSONResponse(
+            status_code=202,
+            content={
+                "job_id": job_id,
+                "status": "pending",
+                "message": f"Upload queued — poll GET /api/v1/jobs/{job_id}",
+                "file_count": len(files_data),
+                "worker_limit": UPLOAD_FILE_CONCURRENCY,
+            },
+        )
 
     # Sync path (default, used by tests)
     return await _execute_upload_pipeline(user_id, files_data)
