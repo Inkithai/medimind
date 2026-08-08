@@ -1,3 +1,14 @@
+# MediMind — Python dependencies for deployment
+# ──────────────────────────────────────────────
+# chromadb is used for TWO things:
+#   1. Local vector storage  → NOT needed when VECTOR_STORE=supabase
+#   2. Local ONNX embeddings → NEEDED when OPENAI_API_KEY is not set
+#
+# Since we use Supabase for storage but rely on chromadb's built-in
+# ONNX MiniLM model for generating embeddings (free, no API key needed),
+# chromadb must be installed. If you set OPENAI_API_KEY for embeddings
+# instead, you can remove chromadb to save ~200MB install size + ~50MB RAM.
+
 openai
 pdfplumber
 pymupdf

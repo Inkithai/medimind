@@ -1,0 +1,31 @@
+# Keep Docker build context small — exclude everything the backend doesn't need
+.git/
+.gitignore
+.env
+
+# Frontend (deployed separately to Vercel)
+frontend/
+
+# Documentation and guides
+DEPLOYMENT_GUIDE.md
+README.md
+*.docx
+
+# Local data (never ship patient data in images)
+chroma_db/
+patient_report_*.json
+patient_docs_*.json
+backend/.env
+backend/.env.clean
+
+# Tests (not needed in production image)
+backend/tests/
+
+# Python cache
+__pycache__/
+*.pyc
+.venv/
+
+# IDE
+.vscode/
+.idea/
