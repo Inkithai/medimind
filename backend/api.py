@@ -554,8 +554,19 @@ async def _execute_upload_pipeline(
                     for page_num, page in enumerate(pages, start=1):
                         label = original_name if len(pages) == 1 else f"{original_name} (page {page_num})"
                         if _is_demo_document(page):
-                            logger.warning("upload: user=%s skipped demo/placeholder page '%s'", user_id, label)
-                            continue
+                            # During explicit user uploads, demo/placeholder
+                            # documents are NOT silently rejected — the user
+                            # chose to upload these files.  Log an info note
+                            # but still run the medical-content assertion so
+                            # genuinely empty pages are caught.  The
+                            # _is_demo_document gate is reserved for batch/
+                            # folder processing (group_documents_by_patient)
+                            # where a folder might accidentally mix in sample
+                            # documents alongside real patient data.
+                            logger.info(
+                                "upload: user=%s demo/placeholder content detected in '%s' — processing anyway",
+                                user_id, label,
+                            )
                         try:
                             assert_medical_document(page, label)
                         except NonMedicalDocumentError as exc:

@@ -31,6 +31,8 @@ import re
 import json
 import time
 import base64
+import threading
+from collections import deque
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple, Callable
 
@@ -206,6 +208,78 @@ _STRICT_SCHEMA_MODELS = frozenset({
 })
 
 
+# ---------------------------------------------------------------------------
+# Call-rate pacer — prevent 429s by spacing LLM requests to stay under the
+# provider's per-minute quota.  Free-tier Gemini allows 5 RPM; Groq allows
+# more but still benefits from pacing when multiple files are uploaded.
+# Configurable via LLM_MAX_RPM (0 disables pacing).
+# ---------------------------------------------------------------------------
+
+class _CallPacer:
+    """Thread-safe sliding-window rate limiter for LLM API calls.
+
+    Tracks the timestamps of recent calls in a deque.  Before each call,
+    ``acquire()`` blocks until there is room in the window — i.e. the
+    oldest tracked call has aged past the 60-second window.  With
+    max_rpm=5 and 7 calls needed (6 extractions + 1 safety check), pacing
+    prevents the safety check from hitting a 429 after exhausting the
+    per-minute quota on extraction alone.
+    """
+
+    def __init__(self, max_rpm: int, window_seconds: float = 60.0) -> None:
+        self._max_rpm = max_rpm
+        self._window = window_seconds
+        self._lock = threading.Lock()
+        self._timestamps: deque = deque()
+
+    @property
+    def enabled(self) -> bool:
+        return self._max_rpm > 0
+
+    def acquire(self) -> None:
+        """Block until a call slot is available within the rate window."""
+        if not self.enabled:
+            return
+        while True:
+            with self._lock:
+                now = time.monotonic()
+                # Evict timestamps older than the window
+                while self._timestamps and (now - self._timestamps[0]) >= self._window:
+                    self._timestamps.popleft()
+                if len(self._timestamps) < self._max_rpm:
+                    self._timestamps.append(now)
+                    return
+                # Need to wait for the oldest call to age out of the window
+                wait_until = self._timestamps[0] + self._window
+                sleep_s = wait_until - now
+            if sleep_s > 0:
+                logger.info(
+                    "CallPacer: rate-limit pacing — sleeping %.1fs to stay within %d RPM",
+                    sleep_s,
+                    self._max_rpm,
+                )
+                time.sleep(sleep_s)
+
+
+def _pacer_max_rpm() -> int:
+    """Resolve the pacing cap: LLM_MAX_RPM > provider default > disabled."""
+    explicit = os.environ.get("LLM_MAX_RPM")
+    if explicit is not None:
+        try:
+            return max(0, int(explicit))
+        except ValueError:
+            pass
+    # Sensible provider defaults for free-tier quotas
+    _provider_defaults = {
+        "gemini": 4,   # Gemini free tier is 5 RPM; use 4 for safety margin
+        "groq": 0,     # Groq free tier is generous (30 RPM); no pacing needed
+    }
+    return _provider_defaults.get(LLM_PROVIDER, 0)
+
+
+_call_pacer = _CallPacer(_pacer_max_rpm())
+
+
 def _chat_completion(**kwargs) -> Any:
     """client.chat.completions.create() with a provider-churn-aware error.
 
@@ -214,6 +288,10 @@ def _chat_completion(**kwargs) -> Any:
     of a bare stack trace. Provider-aware so messages stay correct when
     LLM_PROVIDER=gemini (or generic).
     """
+    # Pace calls to stay within the provider's per-minute quota — prevents
+    # the safety/cross-check call from hitting a 429 after file extractions
+    # have already consumed the free-tier budget.
+    _call_pacer.acquire()
     try:
         return client.chat.completions.create(**kwargs)
     except NotFoundError as e:
