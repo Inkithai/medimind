@@ -397,6 +397,57 @@ _NO_INFO_ANSWER = {
     "recommend_professional_consult": False,
 }
 
+# Patient HAS persisted documents, but none of them contain anything the
+# Q&A indexer can retrieve (no medications, lab results, clinical notes,
+# or allergies). Different from _NO_INFO_ANSWER, which means "no records
+# were ever uploaded" — returning the wrong one of the two is what made
+# users with uploaded documents see a false "no indexed records" message.
+_NO_INDEXABLE_CONTENT_ANSWER = {
+    "answer": (
+        "I don't have enough information — your records were found, but they "
+        "contain no medications, lab results, clinical notes, or allergies for "
+        "Q&A to search."
+    ),
+    "confidence": 0.0,
+    "sources": [],
+    "recommend_professional_consult": False,
+}
+
+
+def _persisted_documents(patient_key: str) -> Optional[List[Dict[str, Any]]]:
+    """Returns the patient's extracted documents from the persistent DB, or
+    None if they can't be confirmed (unconfigured Supabase, offline test
+    environment, missing `documents` table, ...). Callers treat None as
+    'no documents to work from' and keep the legacy graceful behavior."""
+    try:
+        import db  # lazy: retrieval.py must stay importable without Supabase
+        return db.load_documents(patient_key) or []
+    except Exception:
+        return None
+
+
+def _reindex_from_persisted_documents(patient_key: str) -> Optional[int]:
+    """Self-healing re-index: rebuilds the patient's vector index from the
+    documents already persisted in Supabase (documents + patient_snapshots
+    survive deploys/restarts, while a local Chroma store or a freshly
+    migrated `chunks` table may not).
+
+    Returns:
+        int  — number of chunks indexed (0 = documents exist but contain no
+               indexable content)
+        None — the patient has no persisted documents (nothing to re-index)
+
+    Raises RuntimeError (embedding/store failure) — callers surface that as
+    an actionable error rather than masking it as "no records".
+    """
+    docs = _persisted_documents(patient_key)
+    if not docs:
+        return None
+
+    from medical_extractor import build_patient_timeline
+    timeline = build_patient_timeline(docs)
+    return index_patient_timeline(patient_key, timeline)
+
 
 def answer_question(
     patient_key: str,
@@ -430,9 +481,17 @@ def answer_question(
          "recommend_professional_consult": bool}
 
     Raises ValueError for a missing patient_key/question, RuntimeError if
-    the embedding or chat call fails. Returns a graceful "no information"
-    answer (no API calls) if the patient has never been indexed or their
-    collection is empty.
+    the embedding or chat call fails (including VectorStoreSchemaError when
+    VECTOR_STORE=supabase but the `chunks` table has not been migrated).
+
+    Empty-index self-healing: if the patient's vector index is empty but
+    persisted documents exist (e.g. a local Chroma store wiped by a redeploy
+    without a volume, or a `chunks` table created after the last upload),
+    the index is rebuilt from those saved documents before answering — so Q&A
+    keeps working instead of falsely reporting "no indexed records". Only a
+    patient with NO documents at all gets that graceful no-records message;
+    a patient whose documents contain nothing retrievable gets an explicit
+    "no indexable content" answer instead.
     """
     if not patient_key or not patient_key.strip():
         raise ValueError("patient_key is required and cannot be empty.")
@@ -446,13 +505,29 @@ def answer_question(
     # Use vector_store abstraction when supabase, else Chroma directly (for test mocks)
     if vector_store.get_store_name() == "supabase":
         if vector_store.count(patient_key) == 0:
-            return dict(_NO_INFO_ANSWER)
+            # Empty index + persisted documents => the index is stale/missing
+            # (ephemeral Chroma dir wiped by a redeploy, chunks table freshly
+            # created, background job crashed before indexing). Rebuild it from
+            # the patient's saved records so the question can still be answered.
+            reindexed = _reindex_from_persisted_documents(patient_key)
+            if reindexed is None:
+                return dict(_NO_INFO_ANSWER)
+            if reindexed == 0:
+                return dict(_NO_INDEXABLE_CONTENT_ANSWER)
         query_embedding = embed_texts([effective_retrieval_query])[0]
         _, docs, metadatas = vector_store.query(patient_key, query_embedding, top_k)
     else:
         collection = _get_patient_collection(patient_key, create=False)
         if collection is None or collection.count() == 0:
-            return dict(_NO_INFO_ANSWER)
+            reindexed = _reindex_from_persisted_documents(patient_key)
+            if reindexed is None:
+                return dict(_NO_INFO_ANSWER)
+            if reindexed == 0:
+                return dict(_NO_INDEXABLE_CONTENT_ANSWER)
+            # Re-fetch now that the re-index has populated the store.
+            collection = _get_patient_collection(patient_key, create=False)
+            if collection is None or collection.count() == 0:
+                return dict(_NO_INFO_ANSWER)
         query_embedding = embed_texts([effective_retrieval_query])[0]
         results = collection.query(
             query_embeddings=[query_embedding],
@@ -462,6 +537,11 @@ def answer_question(
         metadatas = (results.get("metadatas") or [[]])[0]
 
     if not docs:
+        # Normally unreachable after the re-index step above; keep a
+        # graceful fallback that does not lie: distinguish "no records were
+        # ever uploaded" from "records exist but nothing was retrieved".
+        if _persisted_documents(patient_key):
+            return dict(_NO_INDEXABLE_CONTENT_ANSWER)
         return dict(_NO_INFO_ANSWER)
 
     context_blocks = [
