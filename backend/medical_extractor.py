@@ -539,6 +539,26 @@ def _contains_reasoning_dump(text: str) -> bool:
     )
 
 
+def _failed_generation_shows_thinking(exc: Exception) -> bool:
+    """True only when a 400 json_validate_failed carries positive evidence
+    that the (probed) model STILL emitted chain-of-thought: the discarded
+    `failed_generation` itself contains think tags. An empty or absent
+    failed_generation is ambiguous — it must NOT be used to cross a probe
+    off, because the empty-generation failure also happens for reasons
+    unrelated to reasoning (and the probe may be working perfectly)."""
+    body = getattr(exc, "body", None)
+    failed_generation = ""
+    if isinstance(body, dict):
+        error = body.get("error")
+        if isinstance(error, dict):
+            gen = error.get("failed_generation")
+            if isinstance(gen, str):
+                failed_generation = gen
+        elif isinstance(body.get("failed_generation"), str):
+            failed_generation = body["failed_generation"]
+    return bool(failed_generation) and _contains_reasoning_dump(failed_generation)
+
+
 def _is_unsupported_param_error(exc: Exception, extra_body: Optional[Dict[str, Any]]) -> bool:
     """True if the provider 400-rejected the request because a probe switch
     is not supported for this model (e.g. 'Unknown field
@@ -548,7 +568,9 @@ def _is_unsupported_param_error(exc: Exception, extra_body: Optional[Dict[str, A
     plain request still propagates as a permanent error."""
     if extra_body is None:
         return False
-    if getattr(exc, "status_code", None) != 400:
+    # Groq rejects unknown JSON fields with 400; OpenAI-compatible validators
+    # (pydantic-style request-body validation) use 422 for the same thing.
+    if getattr(exc, "status_code", None) not in (400, 422):
         return False
     if _is_json_validation_failure(exc):
         return False
@@ -564,6 +586,7 @@ def _is_unsupported_param_error(exc: Exception, extra_body: Optional[Dict[str, A
         "unknown field", "unrecognized request argument", "unsupported parameter",
         "unsupported param", "unknown parameter", "unknown argument",
         "extraneous field", "not supported", "invalid parameter",
+        "extra inputs are not permitted", "additional properties", "unexpected keyword",
     )
     if any(m in text for m in markers):
         return True
@@ -804,19 +827,23 @@ def _completion_resilient(
                         )
                     return raw
                 except APIError as e:
-                    _note_status(e)
                     if _is_unsupported_param_error(e, probe_extra):
                         # Provider/model doesn't recognize this suppression
                         # switch — cross it off permanently and move to the
-                        # next probe instead of erroring the upload.
+                        # next probe instead of erroring the upload. (Not
+                        # counted in status_counts: this 400 is our own
+                        # probe artifact, not provider trouble worth
+                        # surfacing in the root-cause hint.)
                         suppress_state["dead"].add(probe_idx)
                         last_error = e
                         logger.warning(
                             "_completion_resilient: provider '%s' does not accept suppression probe '%s' "
-                            "for model='%s' (400) — crossing the probe off: %s",
-                            LLM_PROVIDER, probe_label, model, _error_detail(e),
+                            "for model='%s' (HTTP %s) — crossing the probe off: %s",
+                            LLM_PROVIDER, probe_label, model,
+                            getattr(e, "status_code", "?"), _error_detail(e),
                         )
                         break
+                    _note_status(e)
                     if not _is_retryable_api_error(e):
                         logger.error(
                             f"Provider '{LLM_PROVIDER}' request failed for model='%s' (non-retryable, not retrying): %s",
@@ -830,11 +857,18 @@ def _completion_resilient(
                         # SAME request will fail again — try the next
                         # suppression probe / looser output mode.
                         last_error = e
-                        if probe_idx is not None:
-                            # Even with the probe attached the server-side
-                            # generation was unusable — this switch doesn't fix
-                            # this model; don't try it again for other formats.
+                        if probe_idx is not None and _failed_generation_shows_thinking(e):
+                            # Positive evidence thinking survived the probe —
+                            # the provider ignored it; never try it again.
+                            # (An empty/ambiguous failed_generation does NOT
+                            # cross the probe off: suppression may have worked
+                            # and the answer JSON failed for another reason.)
                             suppress_state["dead"].add(probe_idx)
+                            logger.warning(
+                                "_completion_resilient: model='%s' discarded generation still contains "
+                                "<think> despite suppression probe '%s' — crossing the probe off",
+                                model, probe_label,
+                            )
                         logger.warning(
                             f"Provider '{LLM_PROVIDER}' rejected model='%s' generation server-side (JSON validation) — "
                             "advancing to the next rung (%s): %s",
