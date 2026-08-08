@@ -190,6 +190,12 @@ export interface PatientSnapshot {
 
 // ---- Upload response (api.py) --------------------------------------------
 
+export interface FailedFile {
+  file: string;
+  error: string;
+  kind?: "not_medical" | "transient" | "invalid" | "unsupported";
+}
+
 export interface UploadResponse {
   user_id: string;
   documents_added: number;
@@ -199,6 +205,8 @@ export interface UploadResponse {
   lab_trends: LabTrendsReport;
   indexed: boolean;
   index_error?: string;
+  // Files that failed while the rest of the batch succeeded (partial upload).
+  failed_files?: FailedFile[];
 }
 
 // ---- Sessions ------------------------------------------------------------

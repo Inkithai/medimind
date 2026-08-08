@@ -361,6 +361,25 @@ export function UploadPage() {
                     It will retry on your next upload.
                   </p>
                 )}
+                {result.failed_files && result.failed_files.length > 0 && (
+                  <div className="mt-2 rounded-lg bg-amber-100/70 px-3 py-2 text-sm text-amber-900">
+                    <p className="font-medium">
+                      {result.failed_files.length === 1
+                        ? "1 file couldn't be processed (the rest went through fine):"
+                        : `${result.failed_files.length} files couldn't be processed (the rest went through fine):`}
+                    </p>
+                    <ul className="mt-1 list-disc space-y-1 pl-5">
+                      {result.failed_files.map((f) => (
+                        <li key={f.file}>
+                          <strong>{f.file}</strong>
+                          {f.kind === "not_medical"
+                            ? " — doesn't look like a medical document."
+                            : " — processing failed; try uploading just this file again."}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
               </Alert>
 
               <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">

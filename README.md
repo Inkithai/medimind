@@ -204,7 +204,7 @@ X-User-Id: <user_id>
 `POST /api/v1/anonymous/session` → `201 {user_id, token, session_id}`
 
 #### Documents
-`POST /api/v1/documents` — multipart `files` field. Merges with prior uploads. Validates non-medical via `document_filter.py` (422 if `other` with no clinical content). Fixes `_source.file` to original filename (not temp path). Returns timeline + cross-check + lab_trends + indexed flag. If `indexed:false` includes `index_error`.
+`POST /api/v1/documents` — multipart `files` field. Merges with prior uploads. Validates non-medical via `document_filter.py` (422 if `other` with no clinical content). Fixes `_source.file` to original filename (not temp path). Returns timeline + cross-check + lab_trends + indexed flag. If `indexed:false` includes `index_error`. Failures are per-file: one unreadable/non-medical file no longer fails the whole batch — kept files are merged normally and response includes `failed_files: [{file, error, kind}]` (`not_medical`/`transient`/`invalid`/`unsupported`). The request only fails outright when nothing was kept: 422 for pure content problems, 502 if any failure was a transient provider error (retry).
 
 `GET /api/v1/timeline`, `/cross-check`, `/lab-trends` — 404 if no snapshot yet. Lab trends recomputed on-the-fly for old snapshots lacking field.
 

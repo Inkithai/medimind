@@ -14,7 +14,8 @@ export LLM_PROVIDER=gemini  # or groq
 - Calls LLM via OpenAI SDK (provider selected by `LLM_PROVIDER`). Groq: `https://api.groq.com/openai/v1` (`GROQ_BASE_URL`), Gemini: `https://generativelanguage.googleapis.com/v1beta/openai/` (`GEMINI_BASE_URL`), generic `LLM_BASE_URL` for Cerebras/OpenRouter.
 - Raises at import if provider key missing (`GROQ_API_KEY` for groq, `GEMINI_API_KEY`/`GOOGLE_API_KEY` for gemini, `LLM_API_KEY` for generic) — fail fast.
 - `MODEL` default `openai/gpt-oss-120b` (groq) or `gemini-2.0-flash` (gemini). Overridable via `GROQ_MODEL` / `GEMINI_MODEL` / `LLM_MODEL`.
-- `VISION_MODEL` default `qwen/qwen3.6-27b` (groq) or `gemini-2.0-flash` multimodal (gemini). Overridable via `GROQ_VISION_MODEL` / `GEMINI_VISION_MODEL` / `LLM_VISION_MODEL`. `FALLBACK_MODEL` optional.
+- `VISION_MODEL` default `qwen/qwen3.6-27b` (groq) or `gemini-2.0-flash` multimodal (gemini). Overridable via `GROQ_VISION_MODEL` / `GEMINI_VISION_MODEL` / `LLM_VISION_MODEL`.
+- Reasoning models (the qwen vision default) emit `<think>` chain-of-thought that breaks Groq's server-side JSON validation (`400 json_validate_failed`) and eats the TPM-capped vision token budget. `_completion_resilient()` therefore probes reasoning-suppression switches (`chat_template_kwargs.enable_thinking=false`, `reasoning_format=hidden`) per output-mode rung and caches per model what works (probe 400s and provably-ignored probes are crossed off permanently). Tune with `GROQ_DISABLE_REASONING` / `LLM_DISABLE_REASONING` (true = probe every non-strict model, false = never probe).
 - Groq retires models on a schedule (Llama 4 Scout shut down 2026-07-17; Llama 3.1 8B / 3.3 70B shut down 2026-08-16) — a retired model ID 404s with `model_not_found`. `_chat_completion()` re-raises that as a provider-aware error pointing at `docs_url` and the env vars above.
 
 ### 1. Schema — strict structured output

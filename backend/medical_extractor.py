@@ -416,6 +416,164 @@ def _completion_token_budget(user_content: Any) -> int:
     return min(global_budget, 2048)
 
 
+# ---------------------------------------------------------------------------
+# Reasoning-model suppression — keep chain-of-thought OFF the wire
+# ---------------------------------------------------------------------------
+# Qwen3-family / QwQ / DeepSeek-derived reasoning models "think" before they
+# answer. On Groq that breaks structured extraction two ways (both visible in
+# production logs):
+#   * json_object mode: the generation is not pure JSON (or comes back EMPTY
+#     because the real output went to the reasoning channel), so Groq's
+#     server-side validator rejects the whole request with 400
+#     'json_validate_failed' and 'failed_generation': ''.
+#   * plain-text mode: the <think> trace consumes the whole (TPM-capped)
+#     completion budget and is truncated before any JSON appears — output
+#     observed cut off mid-think at '...The schema allows "prescrip'.
+# The fix is to tell the provider not to think on these calls. There is no
+# universal switch: Qwen3 honors the chat-template kwarg
+# enable_thinking=false, Groq's reasoning API additionally offers
+# reasoning_format="hidden", and a given (provider, model) pair may reject
+# one with a 400 while silently ignoring the other. So instead of guessing,
+# _completion_resilient PROBES the switches below per output-mode rung and
+# caches the outcome per model (process-wide): a switch that 400s ("unknown
+# parameter") or provably leaves thinking enabled is crossed off forever,
+# and the first switch that yields clean JSON becomes the default for every
+# later call with that model. Happy-path cost: zero extra requests once a
+# working switch is known (probe order is best-first).
+#
+# Override the applicability heuristic with GROQ_DISABLE_REASONING /
+# LLM_DISABLE_REASONING:  true/1/yes = probe for every non-strict model,
+# false/0/no = never probe. Non-Groq providers only probe on explicit
+# opt-in (LLM_DISABLE_REASONING=true) — unknown params may 400 elsewhere.
+
+_REASONING_SUPPRESS_PROBES: List[Dict[str, Any]] = [
+    # Qwen3 chat template: decisive — the model never generates a think
+    # block at all, so the completion budget goes to the actual answer.
+    {"chat_template_kwargs": {"enable_thinking": False}},
+    # Groq reasoning API: hide the reasoning trace from the response so
+    # server-side JSON validation sees clean output.
+    {"reasoning_format": "hidden"},
+]
+
+_REASONING_SUPPRESS_LABELS = [
+    "chat_template_kwargs.enable_thinking=false",
+    "reasoning_format=hidden",
+]
+
+# Process-wide per-model probe results: model -> {"dead": set[int], "good": Optional[int]}
+_SUPPRESS_STATE: Dict[str, Dict[str, Any]] = {}
+
+# Model-name fragments that mark a reasoning/thinking model family.
+_REASONING_MODEL_HINTS = ("qwen", "qwq", "deepseek", "-r1", "think", "reasoning")
+
+
+def _env_flag(*names: str) -> Optional[bool]:
+    """First set env var among `names` parsed as a boolean, else None."""
+    for n in names:
+        v = os.environ.get(n)
+        if v is not None:
+            return v.strip().lower() in ("1", "true", "yes", "on")
+    return None
+
+
+def _suppression_applies(model: str) -> bool:
+    """Should this model's requests probe reasoning-suppression switches?
+
+    Strict-schema models (Groq gpt-oss family) are excluded: constrained
+    decoding already guarantees clean JSON for them, and Groq handles their
+    reasoning channel natively.
+    """
+    if model in _STRICT_SCHEMA_MODELS:
+        return False
+    forced = _env_flag("GROQ_DISABLE_REASONING", "LLM_DISABLE_REASONING")
+    if LLM_PROVIDER != "groq":
+        # Other providers may reject unknown params with a 400 before our
+        # ladder can react — only probe on explicit opt-in.
+        return forced is True
+    if forced is not None:
+        return forced
+    hint = model.lower()
+    return any(h in hint for h in _REASONING_MODEL_HINTS)
+
+
+def _suppress_state(model: str) -> Dict[str, Any]:
+    return _SUPPRESS_STATE.setdefault(model, {"dead": set(), "good": None})
+
+
+def _suppression_candidates(model: str) -> List[Tuple[Optional[int], Optional[Dict[str, Any]]]]:
+    """Ordered (probe_index, extra_body) pairs to try per output-mode rung.
+
+    Best-known-working probe first, then untried probes, and always the bare
+    request (None, None) last so a model immune to every switch still gets
+    the pre-suppression behavior. Probes already proven dead/ineffective for
+    this model are skipped entirely.
+    """
+    if not _suppression_applies(model):
+        return [(None, None)]
+    st = _suppress_state(model)
+    order: List[int] = []
+    good = st.get("good")
+    if good is not None and good not in st["dead"]:
+        order.append(good)
+    order.extend(i for i in range(len(_REASONING_SUPPRESS_PROBES)) if i not in order and i not in st["dead"])
+    return [(i, _REASONING_SUPPRESS_PROBES[i]) for i in order] + [(None, None)]
+
+
+def _best_suppression_extra_body(model: str) -> Optional[Dict[str, Any]]:
+    """The proven (or most promising) suppression extra_body for one-off
+    calls outside the ladder (e.g. the vision repair retry), or None."""
+    for probe_idx, extra in _suppression_candidates(model):
+        if probe_idx is not None:
+            return extra
+    return None
+
+
+def _contains_reasoning_dump(text: str) -> bool:
+    """True if the output visibly contains chain-of-thought tags — i.e. the
+    active suppression switch (if any) provably did not suppress thinking."""
+    head = text[:4000].lower()
+    return any(
+        marker in head
+        for marker in ("<think", "<reasoning", "<thought", "<analysis",
+                       "&lt;think", "&lt;reasoning")
+    )
+
+
+def _is_unsupported_param_error(exc: Exception, extra_body: Optional[Dict[str, Any]]) -> bool:
+    """True if the provider 400-rejected the request because a probe switch
+    is not supported for this model (e.g. 'Unknown field
+    \"chat_template_kwargs\"' / 'Unrecognized request argument:
+    reasoning_format'). Only consulted when a suppression probe was actually
+    attached to the request, so a generic unsupported-parameter 400 on a
+    plain request still propagates as a permanent error."""
+    if extra_body is None:
+        return False
+    if getattr(exc, "status_code", None) != 400:
+        return False
+    if _is_json_validation_failure(exc):
+        return False
+    parts = [str(exc), str(getattr(exc, "message", "") or "")]
+    body = getattr(exc, "body", None)
+    if body is not None:
+        try:
+            parts.append(json.dumps(body))
+        except (TypeError, ValueError):
+            parts.append(str(body))
+    text = " ".join(parts).lower()
+    markers = (
+        "unknown field", "unrecognized request argument", "unsupported parameter",
+        "unsupported param", "unknown parameter", "unknown argument",
+        "extraneous field", "not supported", "invalid parameter",
+    )
+    if any(m in text for m in markers):
+        return True
+    # Message that names the probe's own top-level key in an error context.
+    return any(
+        key.lower() in text and ("invalid" in text or "unsupported" in text or "unknown" in text)
+        for key in extra_body
+    )
+
+
 def _format_ladder(
     model: str, strict_format: Dict[str, Any]
 ) -> List[Tuple[Optional[Dict[str, Any]], str]]:
@@ -472,28 +630,42 @@ def _completion_resilient(
     """Runs a chat completion against `model`, recovering from Groq's
     server-side JSON validation rejections and from client-side non-JSON outputs.
 
-    Recovery ladder:
-      1. The primary response format (strict json_schema, or json_object
-         mode for models without strict support), tried up to
-         `primary_attempts` times. A rung is only re-tried for genuinely
-         transient errors (5xx/network/rate limit); empty or invalid
-         generations advance to the next rung instead (see below).
-      2. Looser rungs from _format_ladder() (json_object mode, then plain
-         text with the schema still inlined in the prompt), up to
-         `fallback_attempts` times each. In plain-text mode Groq does not
-         validate anything, so the raw content comes back to us and is
-         parsed client-side (see _parse_json_object) — recovering
-         generations Groq would otherwise have discarded, e.g. JSON wrapped
-         in markdown fences or preceded by commentary.
+    Recovery ladder, from most to least server-side enforcement:
+      1. Output-mode rungs from _format_ladder() (strict json_schema for
+         gpt-oss models; json_object then plain text otherwise), each tried
+         up to `primary_attempts` / `fallback_attempts` times.
+      2. Each output mode is first attempted WITH reasoning-suppression
+         probes (_suppression_candidates) when the model looks like a
+         thinker: a reasoning model's <think> preamble is what most often
+         breaks server-side JSON validation AND eats the (TPM-capped)
+         completion budget, so suppressing thinking is tried before giving
+         up on the mode. Probe results are cached per model process-wide —
+         a probe the API 400-rejects or that provably leaves thinking on is
+         never retried, and the first probe that yields clean JSON becomes
+         this model's default. Non-thinking models see exactly one
+         candidate (the bare request), so their behavior is unchanged.
+      3. In plain-text mode Groq does not validate anything, so the raw
+         content comes back to us and is parsed client-side (see
+         _parse_json_object) — recovering generations Groq would otherwise
+         have discarded, e.g. JSON wrapped in markdown fences or preceded
+         by commentary.
+      4. With every rung exhausted, ONE vision repair retry (actual image
+         + explicit JSON-only instruction) is attempted. There is
+         deliberately NO text-model repair fallback anymore: the fallback
+         model cannot see the image, so fed only the error snippet it
+         fabricated a minimal all-empty JSON — structurally valid but
+         clinically meaningless — which the medical-document filter then
+         rejected with a misleading "'x.jpg' does not appear to be a
+         medical document" 422 for what was really a transient provider
+         failure (rate limits / model hiccup). An honest RuntimeError ->
+         HTTP 502 ("please retry") replaces that.
 
     Additionally validates that the returned content is actually parseable
     as JSON (via _parse_json_object). If the model returns a non-JSON
     reasoning dump (e.g. "<think> The user wants..." without any JSON), or
     Groq discards a generation server-side (400 'json_validate_failed'),
-    the SAME response format is unlikely to succeed on retry, so the
-    runner advances to the next looser rung immediately instead of burning
-    attempts — previously a <think>-emitting vision model could consume
-    several doomed json_object retries plus a repair round-trip per file.
+    the SAME request is unlikely to succeed on retry, so the runner
+    advances to the next rung immediately instead of burning attempts.
     Rate limits (429) are paced using Groq's Retry-After header (falling
     back to exponential backoff), with a cap on consecutive waits so a
     hard-throttled account fails fast with an actionable message rather
@@ -501,9 +673,10 @@ def _completion_resilient(
 
     Returns the raw assistant message content (callers parse it with
     _parse_json_object). Raises RuntimeError with a plain-language
-    explanation if every attempt fails.
+    explanation (including the real underlying cause — e.g. repeated 429s)
+    if every attempt fails.
     """
-    ladder = _format_ladder(model, strict_format)
+    formats = _format_ladder(model, strict_format)
     # Tune attempts: vision models (non-strict) tend to fail json_object consistently with <think>,
     # so waste fewer retries there and give more retries to plain-text where we control parsing.
     if model not in _STRICT_SCHEMA_MODELS:
@@ -527,146 +700,226 @@ def _completion_resilient(
         max_rate_limit_waits = 5
     last_raw_snippet: str = ""
     max_tokens = _completion_token_budget(user_content)
+    suppress_state = _suppress_state(model) if _suppression_applies(model) else None
+    # Provider-error trail for the final RuntimeError's root-cause hint:
+    # (status, code) -> times seen across every rung and repair attempt.
+    status_counts: Dict[Tuple[Any, Any], int] = {}
 
-    for level, (response_format, prompt_suffix) in enumerate(ladder):
-        attempts = primary_attempts if level == 0 else fallback_attempts
-        messages = [
-            {"role": "system", "content": system_prompt + prompt_suffix},
-            {"role": "user", "content": user_content},
-        ]
-        for attempt in range(1, attempts + 1):
-            total_attempts += 1
-            try:
-                request_kwargs: Dict[str, Any] = {
-                    "model": model,
-                    "messages": messages,
-                    "temperature": 0,
-                    "top_p": 1,
-                }
-                # OpenAI SDK accepts max_tokens for Groq compatibility. Vision
-                # uses a lower budget because image tokens count toward TPM.
-                request_kwargs["max_tokens"] = max_tokens
-                if response_format is not None:
-                    # response_format=None means plain-text mode — omit the kwarg entirely
-                    request_kwargs["response_format"] = response_format
-                response = _chat_completion(**request_kwargs)
-                raw = response.choices[0].message.content or ""
-                if not raw or not raw.strip():
-                    last_error = ValueError("model returned an empty response — no JSON to parse")
-                    logger.warning(
-                        "_completion_resilient: model='%s' level=%d attempt=%d returned an EMPTY "
-                        "response — advancing to the next output mode",
-                        model, level, attempt,
-                    )
-                    # An empty generation is a model-side hiccup; retrying the
-                    # exact same request usually repeats it, so move to a looser
-                    # rung (plain text lets US parse whatever comes back).
-                    break
-                # Validate parseability before returning: if raw contains no parseable JSON
-                # (e.g. a <think>-only reasoning dump), the same response format will likely
-                # fail again — advance to the looser rung instead of burning retries.
+    def _note_status(exc: Exception) -> None:
+        key = (getattr(exc, "status_code", None), getattr(exc, "code", None) or None)
+        if key[0] is not None:
+            status_counts[key] = status_counts.get(key, 0) + 1
+
+    # Walk rungs as: output format (server-enforced -> looser) ×
+    # reasoning-suppression probe (best -> bare). Suppression probes only
+    # cost extra requests on the FAILURE path — the happy path returns on
+    # the first rung — and for a reasoning model they convert a guaranteed
+    # fail (400 json_validate_failed / truncated <think>) into a one-call
+    # success. Once a probe is proven to work it is tried first for every
+    # later format and later call with this model (_suppress_state cache).
+    level = 0
+    rung_index = 0
+    while level < len(formats):
+        response_format, prompt_suffix = formats[level]
+        candidates = _suppression_candidates(model)  # recomputed per format: probes crossed off earlier are skipped
+        ci = 0
+        while ci < len(candidates):
+            probe_idx, probe_extra = candidates[ci]
+            probe_label = (
+                _REASONING_SUPPRESS_LABELS[probe_idx] if probe_idx is not None else "no suppression"
+            )
+            is_last_rung = (level == len(formats) - 1) and (ci == len(candidates) - 1)
+            attempts = primary_attempts if rung_index == 0 else fallback_attempts
+            messages = [
+                {"role": "system", "content": system_prompt + prompt_suffix},
+                {"role": "user", "content": user_content},
+            ]
+            for attempt in range(1, attempts + 1):
+                total_attempts += 1
                 try:
-                    _parse_json_object(raw)
-                except ValueError as parse_err:
-                    last_error = parse_err
-                    last_raw_snippet = raw[:500]
-                    logger.warning(
-                        "_completion_resilient: model='%s' level=%d attempt=%d returned non-JSON "
-                        "(snippet %r) — advancing to the next output mode: %s",
-                        model, level, attempt, raw[:250].replace(chr(10), " "), parse_err,
-                    )
-                    break
-                return raw
-            except APIError as e:
-                if not _is_retryable_api_error(e):
-                    logger.error(
-                        f"Provider '{LLM_PROVIDER}' request failed for model='%s' (non-retryable, not retrying): %s",
-                        model, _error_detail(e),
-                    )
-                    raise
-                if _is_json_validation_failure(e):
-                    # Groq validated the generation server-side and discarded
-                    # it (typically because a reasoning model emitted a
-                    # <think> preamble, or produced nothing). Re-issuing the
-                    # SAME response_format will fail again — jump to the next,
-                    # looser rung so we get the raw text and parse it ourselves.
-                    last_error = e
-                    logger.warning(
-                        f"Provider '{LLM_PROVIDER}' rejected model='%s' generation server-side (JSON validation) — "
-                        "advancing to a looser output mode: %s",
-                        model, _error_detail(e),
-                    )
-                    break
-                if _is_token_budget_error(e):
-                    # A provider-side 413 here is not an oversized upload. It
-                    # means prompt/image tokens + max_tokens exceed TPM. Retry
-                    # with less output headroom instead of returning a 422.
-                    last_error = e
-                    reduced_budget = max(256, max_tokens // 2)
-                    if reduced_budget < max_tokens:
+                    request_kwargs: Dict[str, Any] = {
+                        "model": model,
+                        "messages": messages,
+                        "temperature": 0,
+                        "top_p": 1,
+                    }
+                    # OpenAI SDK accepts max_tokens for Groq compatibility. Vision
+                    # uses a lower budget because image tokens count toward TPM.
+                    request_kwargs["max_tokens"] = max_tokens
+                    if response_format is not None:
+                        # response_format=None means plain-text mode — omit the kwarg entirely
+                        request_kwargs["response_format"] = response_format
+                    if probe_extra is not None:
+                        # Sent via the OpenAI SDK's extra_body passthrough — the
+                        # provider either honors it, rejects it with a 400 we
+                        # detect below, or silently ignores it (detected via
+                        # _contains_reasoning_dump on the response).
+                        request_kwargs["extra_body"] = probe_extra
+                    response = _chat_completion(**request_kwargs)
+                    raw = response.choices[0].message.content or ""
+                    if not raw or not raw.strip():
+                        last_error = ValueError("model returned an empty response — no JSON to parse")
                         logger.warning(
-                            f"Provider '{LLM_PROVIDER}' token budget rejected model='%s' request; "
-                            "reducing max_tokens from %d to %d: %s",
-                            model, max_tokens, reduced_budget, _error_detail(e),
+                            "_completion_resilient: model='%s' level=%d attempt=%d (%s) returned an EMPTY "
+                            "response — advancing to the next rung",
+                            model, level, attempt, probe_label,
                         )
-                        max_tokens = reduced_budget
-                    if level == len(ladder) - 1 and attempt == attempts:
+                        # An empty generation is a model-side hiccup; retrying the
+                        # exact same request usually repeats it, so move on to the
+                        # next probe/output mode instead of burning attempts.
+                        break
+                    # Validate parseability before returning: if raw contains no parseable JSON
+                    # (e.g. a <think>-only reasoning dump), the same response format will likely
+                    # fail again — advance to the next rung instead of burning retries.
+                    try:
+                        _parse_json_object(raw)
+                    except ValueError as parse_err:
+                        last_error = parse_err
+                        last_raw_snippet = raw[:500]
+                        if probe_idx is not None and _contains_reasoning_dump(raw):
+                            # The switch provably left thinking on (provider
+                            # silently ignored it) — cross it off for good so
+                            # no later format or later call wastes a request on it.
+                            suppress_state["dead"].add(probe_idx)
+                            logger.warning(
+                                "_completion_resilient: model='%s' suppression probe '%s' did not stop "
+                                "the model emitting <think> — crossing the probe off",
+                                model, probe_label,
+                            )
+                        else:
+                            logger.warning(
+                                "_completion_resilient: model='%s' level=%d attempt=%d (%s) returned non-JSON "
+                                "(snippet %r) — advancing to the next rung: %s",
+                                model, level, attempt, probe_label,
+                                raw[:250].replace(chr(10), " "), parse_err,
+                            )
+                        break
+                    if probe_idx is not None and suppress_state is not None:
+                        # Probe proven to work — lead with it from now on.
+                        suppress_state["good"] = probe_idx
+                        logger.info(
+                            "_completion_resilient: model='%s' clean JSON with suppression probe '%s' — "
+                            "using it as the default for this model",
+                            model, probe_label,
+                        )
+                    return raw
+                except APIError as e:
+                    _note_status(e)
+                    if _is_unsupported_param_error(e, probe_extra):
+                        # Provider/model doesn't recognize this suppression
+                        # switch — cross it off permanently and move to the
+                        # next probe instead of erroring the upload.
+                        suppress_state["dead"].add(probe_idx)
+                        last_error = e
+                        logger.warning(
+                            "_completion_resilient: provider '%s' does not accept suppression probe '%s' "
+                            "for model='%s' (400) — crossing the probe off: %s",
+                            LLM_PROVIDER, probe_label, model, _error_detail(e),
+                        )
+                        break
+                    if not _is_retryable_api_error(e):
+                        logger.error(
+                            f"Provider '{LLM_PROVIDER}' request failed for model='%s' (non-retryable, not retrying): %s",
+                            model, _error_detail(e),
+                        )
+                        raise
+                    if _is_json_validation_failure(e):
+                        # Groq validated the generation server-side and discarded
+                        # it (typically because a reasoning model emitted a
+                        # <think> preamble, or produced nothing). Re-issuing the
+                        # SAME request will fail again — try the next
+                        # suppression probe / looser output mode.
+                        last_error = e
+                        if probe_idx is not None:
+                            # Even with the probe attached the server-side
+                            # generation was unusable — this switch doesn't fix
+                            # this model; don't try it again for other formats.
+                            suppress_state["dead"].add(probe_idx)
+                        logger.warning(
+                            f"Provider '{LLM_PROVIDER}' rejected model='%s' generation server-side (JSON validation) — "
+                            "advancing to the next rung (%s): %s",
+                            model, probe_label, _error_detail(e),
+                        )
+                        break
+                    if _is_token_budget_error(e):
+                        # A provider-side 413 here is not an oversized upload. It
+                        # means prompt/image tokens + max_tokens exceed TPM. Retry
+                        # with less output headroom instead of returning a 422.
+                        last_error = e
+                        reduced_budget = max(256, max_tokens // 2)
+                        if reduced_budget < max_tokens:
+                            logger.warning(
+                                f"Provider '{LLM_PROVIDER}' token budget rejected model='%s' request; "
+                                "reducing max_tokens from %d to %d: %s",
+                                model, max_tokens, reduced_budget, _error_detail(e),
+                            )
+                            max_tokens = reduced_budget
+                        if is_last_rung and attempt == attempts:
+                            break
+                        time.sleep(backoff_seconds * attempt)
+                        continue
+                    if getattr(e, "status_code", None) == 429:
+                        rate_limit_waits += 1
+                        last_error = e
+                        if rate_limit_waits > max_rate_limit_waits:
+                            raise RuntimeError(
+                                f"Provider '{LLM_PROVIDER}' kept returning 429 (rate limit) for model '{model}' after "
+                                f"{rate_limit_waits} wait(s). This usually means the account's "
+                                "per-minute token budget is exhausted (Groq free tier is heavily "
+                                "rate-limited). Please wait a minute and retry the upload."
+                            ) from e
+                        sleep_s = min(_retry_after_seconds(e, backoff_seconds * attempt), 60.0)
+                        logger.warning(
+                            f"Provider '{LLM_PROVIDER}' rate-limited (429) model='%s' — sleeping %.0fs before retry "
+                            "(wait %d/%d): %s",
+                            model, sleep_s, rate_limit_waits, max_rate_limit_waits, _error_detail(e),
+                        )
+                        if is_last_rung and attempt == attempts:
+                            break
+                        time.sleep(sleep_s)
+                        continue
+                    # Other transient provider errors (5xx, 408/409) and network
+                    # blips — these are worth retrying on the same rung.
+                    last_error = e
+                    logger.warning(
+                        f"Provider '{LLM_PROVIDER}' transient error for model='%s', retrying (attempt %d/%d): %s",
+                        model, attempt, attempts, _error_detail(e),
+                    )
+                    if is_last_rung and attempt == attempts:
+                        break  # last rung exhausted — no point sleeping first
+                    time.sleep(backoff_seconds * attempt)
+                except ValueError as e:
+                    # Defensive net: any ValueError we raised ourselves above is
+                    # already handled; this catches direct raises from callbacks.
+                    last_error = e
+                    if "empty response" in str(e):
+                        logger.warning(
+                            "_completion_resilient: model='%s' empty response on attempt %d", model, attempt
+                        )
+                    if is_last_rung and attempt == attempts:
                         break
                     time.sleep(backoff_seconds * attempt)
                     continue
-                if getattr(e, "status_code", None) == 429:
-                    rate_limit_waits += 1
-                    last_error = e
-                    if rate_limit_waits > max_rate_limit_waits:
-                        raise RuntimeError(
-                            f"Provider '{LLM_PROVIDER}' kept returning 429 (rate limit) for model '{model}' after "
-                            f"{rate_limit_waits} wait(s). This usually means the account's "
-                            "per-minute token budget is exhausted (Groq free tier is heavily "
-                            "rate-limited). Please wait a minute and retry the upload."
-                        ) from e
-                    sleep_s = min(_retry_after_seconds(e, backoff_seconds * attempt), 60.0)
-                    logger.warning(
-                        f"Provider '{LLM_PROVIDER}' rate-limited (429) model='%s' — sleeping %.0fs before retry "
-                        "(wait %d/%d): %s",
-                        model, sleep_s, rate_limit_waits, max_rate_limit_waits, _error_detail(e),
-                    )
-                    if level == len(ladder) - 1 and attempt == attempts:
-                        break
-                    time.sleep(sleep_s)
-                    continue
-                # Other transient provider errors (5xx, 408/409) and network
-                # blips — these are worth retrying on the same rung.
-                last_error = e
-                logger.warning(
-                    f"Provider '{LLM_PROVIDER}' transient error for model='%s', retrying (attempt %d/%d): %s",
-                    model, attempt, attempts, _error_detail(e),
-                )
-                if level == len(ladder) - 1 and attempt == attempts:
-                    break  # last rung exhausted — no point sleeping first
-                time.sleep(backoff_seconds * attempt)
-            except ValueError as e:
-                # Defensive net: any ValueError we raised ourselves above is
-                # already handled; this catches direct raises from callbacks.
-                last_error = e
-                if "empty response" in str(e):
-                    logger.warning(
-                        "_completion_resilient: model='%s' empty response on attempt %d", model, attempt
-                    )
-                if level == len(ladder) - 1 and attempt == attempts:
-                    break
-                time.sleep(backoff_seconds * attempt)
-                continue
+            rung_index += 1
+            ci += 1
+        level += 1
 
-    # All ladder rungs exhausted — try repair strategies before giving up
+    # All ladder rungs exhausted — one last vision repair retry with the
+    # ACTUAL image and an explicit JSON-only instruction. This is the only
+    # honest repair available for image inputs: a text-only fallback model
+    # fed just the error snippet cannot recover document content, so the
+    # old "text-model repair" strategy was removed — it fabricated a minimal
+    # all-empty JSON (document_type 'other', confidence 0.0) that the
+    # medical-document filter then rejected with a misleading "not a medical
+    # document" 422, hiding what was really a transient provider failure
+    # (rate limits / model hiccup). An honest RuntimeError -> HTTP 502
+    # "please retry" replaces that dead end.
     if last_error is not None and (
         "could not be parsed" in str(last_error)
         or "empty response" in str(last_error)
         or _is_json_validation_failure(last_error)
     ):
-        # Strategy 1: If this was a vision call (user_content contains image), retry once with a very explicit repair prompt
-        # that includes the original image and tells the model its previous output was invalid.
-        is_vision_call = _is_vision_content(user_content)
-        if is_vision_call:
+        if _is_vision_content(user_content):
             try:
                 logger.info("Attempting vision repair retry with explicit JSON-only instruction for model=%s", model)
                 repair_system_vision = (
@@ -695,6 +948,9 @@ def _completion_resilient(
                     "max_tokens": max_tokens,
                     # No response_format — use plain text so we can parse ourselves even if model adds stray text
                 }
+                best_extra = _best_suppression_extra_body(model)
+                if best_extra is not None:
+                    repair_kwargs["extra_body"] = best_extra
                 resp = _chat_completion(**repair_kwargs)
                 raw_repair_vision = resp.choices[0].message.content or ""
                 if raw_repair_vision and raw_repair_vision.strip():
@@ -708,49 +964,42 @@ def _completion_resilient(
                         last_raw_snippet = raw_repair_vision[:500]
             except Exception as repair_e:
                 logger.warning("Vision repair attempt failed: %s", repair_e)
-        # Strategy 2: Fallback to text model stub (no image) so upload does not completely fail
-        if model != FALLBACK_MODEL and FALLBACK_MODEL:
-            try:
-                logger.info("Attempting fallback text-model repair via %s for final JSON recovery", FALLBACK_MODEL)
-                repair_system = (
-                    "You are a medical document extraction fallback. The primary vision model failed to produce valid JSON. "
-                    "You will be given the error snippet and must output a minimal valid JSON object conforming to the required schema. "
-                    "If you cannot infer fields, use null/empty arrays with low confidence and note the failure in illegible_or_low_confidence_fields. "
-                    "Output ONLY JSON, starting with '{' ."
-                )
-                repair_user = (
-                    f"Primary model '{model}' failed after {total_attempts} attempts. Last error: {last_error}. "
-                    f"Last raw snippet: {last_raw_snippet[:800]!r}. "
-                    f"Schema: {json.dumps(strict_format['json_schema']['schema'], indent=2)}. "
-                    "Produce a valid JSON object now."
-                )
-                strict_kwargs: Dict[str, Any] = {
-                    "model": FALLBACK_MODEL,
-                    "messages": [{"role": "system", "content": repair_system}, {"role": "user", "content": repair_user}],
-                    "response_format": strict_format,
-                    "temperature": 0,
-                    "max_tokens": 2000,
-                }
-                resp = _chat_completion(**strict_kwargs)
-                raw_repair = resp.choices[0].message.content or ""
-                if raw_repair and raw_repair.strip():
-                    try:
-                        _parse_json_object(raw_repair)
-                        logger.info("Fallback repair succeeded via %s", FALLBACK_MODEL)
-                        return raw_repair
-                    except ValueError:
-                        logger.warning("Fallback repair also not parseable, discarding")
-            except Exception as repair_e:
-                logger.warning("Fallback repair failed: %s", repair_e)
+                _note_status(repair_e)
+
+    # Surface the REAL cause so the API's 502 "please retry" message tells the
+    # truth — e.g. repeated rate-limiting on a saturated token budget, or a
+    # model that keeps emitting reasoning instead of JSON — summarized from
+    # every provider rejection seen along the way (not just the last error,
+    # which often hides the earlier, more informative ones).
+    cause_bits: List[str] = []
+    total_429s = sum(count for (status, _code), count in status_counts.items() if status == 429)
+    if total_429s:
+        cause_bits.append(
+            f"the provider rate-limited (HTTP 429) {total_429s} attempt(s), which usually means "
+            "the account's per-minute token budget is saturated — wait a minute and retry, or upload fewer files at once"
+        )
+    provider_summary = ", ".join(
+        f"HTTP {status}{f' ({code})' if code else ''} ×{count}"
+        for (status, code), count in sorted(status_counts.items(), key=lambda kv: -kv[1])
+        if status != 429
+    )
+    if provider_summary:
+        cause_bits.append(f"provider rejections along the way: {provider_summary}")
+    if last_error is not None and "could not be parsed" in str(last_error):
+        cause_bits.append(
+            "the model kept emitting reasoning/non-JSON instead of the required JSON across all output modes"
+        )
+    cause = (" Root cause hint: " + "; ".join(cause_bits) + ".") if cause_bits else ""
 
     raise RuntimeError(
         f"Model '{model}' repeatedly failed to return valid structured JSON "
-        f"({total_attempts} attempt(s) across {len(ladder)} fallback "
-        "level(s), including retries with a looser output format). This is "
-        "usually a transient hiccup on the model provider's side — please "
-        "retry the upload. If the same file keeps failing, it may be too "
-        "blurry, rotated, or mostly handwritten; try a clearer photo or a "
-        f"higher-resolution scan. Last snippet: {last_raw_snippet[:250]!r}"
+        f"({total_attempts} attempt(s) across {rung_index} output-mode/suppression "
+        "combination(s), including retries with looser output formats and "
+        "reasoning suppression)." + cause + " This is usually a transient "
+        "hiccup on the model provider's side — please retry the upload. If "
+        "the same file keeps failing, it may be too blurry, rotated, or "
+        "mostly handwritten; try a clearer photo or a higher-resolution "
+        f"scan. Last snippet: {last_raw_snippet[:250]!r}"
     ) from last_error
 
 

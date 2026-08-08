@@ -134,6 +134,102 @@ def test_index_exception_reports_indexed_false():
         app.dependency_overrides.clear()
 
 
+NON_MEDICAL_DOC = {
+    "document_type": "other",
+    "medications": [],
+    "lab_results": [],
+    "allergies_noted": [],
+    "clinical_notes": None,
+    "overall_confidence": 0.0,
+}
+
+
+def test_partial_batch_keeps_good_files_and_reports_failures():
+    """One bad file must NOT kill the whole batch: the good file is merged,
+    the request stays 201, and every failed file shows up in failed_files
+    with its kind (not_medical / transient)."""
+    from document_filter import NonMedicalDocumentError
+
+    app, patchers = _make_client(index_chunks=2)
+    try:
+        api.process_document.side_effect = [
+            dict(EXTRACTED_DOC),                                # good
+            dict(NON_MEDICAL_DOC),                              # extraction ok but not medical
+            NonMedicalDocumentError("cv.pdf", "raw text analysis indicates a CV"),
+            RuntimeError("provider kept rate-limiting (HTTP 429)"),
+        ]
+        with TestClient(app) as client:
+            resp = client.post(
+                "/api/v1/documents",
+                files=[
+                    ("files", ("rx.pdf", b"fake-pdf", "application/pdf")),
+                    ("files", ("receipt.jpg", b"fake-jpg", "image/jpeg")),
+                    ("files", ("cv.pdf", b"fake-cv", "application/pdf")),
+                    ("files", ("lab.jpg", b"fake-lab", "image/jpeg")),
+                ],
+            )
+        assert resp.status_code == 201, resp.text
+        body = resp.json()
+        assert body["documents_added"] == 1
+        failed = body["failed_files"]
+    finally:
+        for p in patchers:
+            p.stop()
+        app.dependency_overrides.clear()
+    by_file = {f["file"]: f for f in failed}
+    assert set(by_file) == {"receipt.jpg", "cv.pdf", "lab.jpg"}, by_file
+    assert by_file["receipt.jpg"]["kind"] == "not_medical"
+    assert by_file["cv.pdf"]["kind"] == "not_medical"
+    assert by_file["lab.jpg"]["kind"] == "transient"
+
+
+def test_all_files_transient_failure_is_502():
+    """Provider-side failure on every file -> retryable 502 (not a
+    misleading 'not a medical document' 422)."""
+    app, patchers = _make_client(index_chunks=2)
+    try:
+        api.process_document.side_effect = RuntimeError(
+            "Model 'qwen/x' repeatedly failed to return valid structured JSON. "
+            "Root cause hint: the provider rate-limited (HTTP 429) 5 attempt(s)"
+        )
+        with TestClient(app) as client:
+            resp = client.post(
+                "/api/v1/documents",
+                files=[("files", ("a.jpg", b"a", "image/jpeg")), ("files", ("b.jpg", b"b", "image/jpeg"))],
+            )
+        assert resp.status_code == 502, resp.text
+        assert "rate-limit" in resp.json()["detail"]
+    finally:
+        for p in patchers:
+            p.stop()
+        app.dependency_overrides.clear()
+
+
+def test_all_files_non_medical_still_422():
+    """Every file genuinely non-medical -> 422 with the per-file reason,
+    same contract as before per-file resilience."""
+    from document_filter import NonMedicalDocumentError
+
+    app, patchers = _make_client(index_chunks=2)
+    try:
+        api.process_document.side_effect = [
+            NonMedicalDocumentError("boarding.jpg", "classified as 'other' with no medications, lab results, or allergies found"),
+            dict(NON_MEDICAL_DOC),
+        ]
+        with TestClient(app) as client:
+            resp = client.post(
+                "/api/v1/documents",
+                files=[("files", ("boarding.jpg", b"a", "image/jpeg")), ("files", ("zoom.png", b"b", "image/png"))],
+            )
+        assert resp.status_code == 422, resp.text
+        detail = resp.json()["detail"]
+        assert "boarding.jpg" in detail and "zoom.png" in detail
+    finally:
+        for p in patchers:
+            p.stop()
+        app.dependency_overrides.clear()
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:
