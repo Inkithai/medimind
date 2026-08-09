@@ -38,6 +38,26 @@ logger = logging.getLogger("vector_store")
 VECTOR_STORE = os.environ.get("VECTOR_STORE", "chroma").strip().lower() or "chroma"
 CHROMA_DIR = os.environ.get("CHROMA_DIR", "./chroma_db")
 
+
+class VectorStoreSchemaError(RuntimeError):
+    """Raised when the vector store's backing table is missing.
+
+    Previously `_supabase_count`/`_supabase_query` swallowed a missing
+    `chunks` table (PGRST205) and returned 0 / [] — which made /api/v1/qa
+    answer "no indexed records were found for this patient yet" with HTTP
+    200 even though documents existed and the real problem was a migration
+    that never ran. Raising keeps that misconfiguration visible and
+    actionable instead of silently lying to the user.
+    """
+
+
+_VECTOR_STORE_SCHEMA_MSG = (
+    "The Supabase `chunks` table does not exist (PGRST205). Run "
+    "backend/supabase_schema.sql ONCE in the Supabase SQL editor "
+    "(Supabase Dashboard -> SQL Editor), then re-upload — or simply ask "
+    "again, because Q&A re-indexes automatically from your saved records."
+)
+
 # --- Chroma backend (lazy import) ---
 
 _chroma_client = None
@@ -161,10 +181,13 @@ def _supabase_query(patient_key: str, query_embedding: List[float], n_results: i
     try:
         res = client.table("chunks").select("id, text, metadata, embedding").eq("patient_key", patient_key).execute()
     except Exception as e:
-        # Table may not exist yet (old deployment before migration). Fall back to empty.
+        # A missing table is a deployment error (supabase_schema.sql not
+        # run / run before the `chunks` table was added) — surface it
+        # instead of silently returning [] which would make Q&A claim the
+        # patient has "no indexed records" with HTTP 200.
         if "chunks" in str(e).lower() or "PGRST205" in str(e):
-            logger.warning("Supabase chunks table missing (run supabase_schema.sql migration): %s", e)
-            return [], [], []
+            logger.error("Supabase chunks table missing: %s", e)
+            raise VectorStoreSchemaError(_VECTOR_STORE_SCHEMA_MSG) from e
         raise
     rows = res.data or []
     if not rows:
@@ -196,8 +219,12 @@ def _supabase_count(patient_key: str) -> int:
             return res.count
         return len(res.data or [])
     except Exception as e:
+        # A missing table is a deployment error, not "zero chunks" — see
+        # _supabase_query for why returning 0 here would produce a
+        # misleading "no indexed records" Q&A answer.
         if "chunks" in str(e).lower() or "PGRST205" in str(e):
-            return 0
+            logger.error("Supabase chunks table missing: %s", e)
+            raise VectorStoreSchemaError(_VECTOR_STORE_SCHEMA_MSG) from e
         raise
 
 def _supabase_delete(patient_key: str):

@@ -212,6 +212,8 @@ X-User-Id: <user_id>
 #### Single-shot Q&A
 `POST /api/v1/qa {question, chat_history?, top_k}` → `{answer, confidence, sources[], recommend_professional_consult}`
 
+Q&A self-heals: if the patient's vector index is empty but their documents are saved in the DB (e.g. a local `chroma_db` wiped by a redeploy with no volume, or a Supabase `chunks` table migrated after the last upload), the index is rebuilt from those saved documents on the next question, so it answers normally instead of reporting "no indexed records". If `VECTOR_STORE=supabase` and the `chunks` table is missing entirely, Q&A returns 502 with instructions to run `supabase_schema.sql` rather than a misleading empty answer.
+
 #### Conversations
 `POST /api/v1/sessions` → `{user_id, session_id}`  
 `POST /api/v1/sessions/{id}/messages {question, top_k}` → same as Q&A + `rewritten_query`  

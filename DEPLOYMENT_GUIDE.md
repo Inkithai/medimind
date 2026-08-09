@@ -248,6 +248,13 @@ SnapDeploy dashboard env vars  →  injected into container  →  os.environ.get
 ### "No timeline found" (404)
 - This is normal before first upload — the page handles it gracefully
 
+### Q&A always says "no indexed records were found for this patient yet"
+- This message used to appear even when documents were uploaded. It means the **vector index** is empty for that patient while the documents themselves exist in Supabase Postgres. Two common causes:
+  1. `VECTOR_STORE` is unset (defaults to `chroma`), so the index lives in the container's local `./chroma_db` and is wiped on every redeploy/restart — there is no persistent volume on the free tier. Fix: set `VECTOR_STORE=supabase` and re-deploy.
+  2. `VECTOR_STORE=supabase` but the `chunks` table was never created (`supabase_schema.sql` not run, or run before the `chunks` table was added). Fix: run `supabase_schema.sql` once in the Supabase SQL editor.
+- Since the self-healing fix, Q&A rebuilds the index from the patient's saved documents on the next question, so no re-upload is needed — just ask again. If the `chunks` table itself is missing, Q&A now returns a 502 pointing at the migration instead of silently claiming there are no records.
+- Verify what's in the vector store: `VECTOR_STORE=supabase python backend/inspect_chroma.py "<user_id>"`
+
 ---
 
 ## Making Updates After Deployment
