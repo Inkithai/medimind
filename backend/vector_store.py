@@ -151,16 +151,21 @@ def _cosine(a: List[float], b: List[float]) -> float:
         return -1.0
     return dot / (na * nb)
 
-def _supabase_upsert(patient_key: str, ids: List[str], embeddings: List[List[float]], documents: List[str], metadatas: List[Dict[str, Any]]):
+def _supabase_upsert(patient_key: str, ids: List[str], embeddings: List[Any], documents: List[str], metadatas: List[Dict[str, Any]]):
     client = _supabase_client()
     # Upsert per chunk. Supabase doesn't have bulk upsert with jsonb vector easily,
     # so we do per-row upsert. Chunk counts are small (20-30), so fine.
     for i, cid in enumerate(ids):
+        emb = embeddings[i]
+        if hasattr(emb, "tolist"):
+            emb = emb.tolist()
+        elif not isinstance(emb, list):
+            emb = list(emb)
         row = {
             "id": cid,
             "patient_key": patient_key,
             "text": documents[i],
-            "embedding": embeddings[i],  # stored as jsonb array
+            "embedding": emb,  # stored as jsonb array
             "metadata": metadatas[i],
         }
         # postgrest upsert on conflict (id)
@@ -176,7 +181,11 @@ def _supabase_upsert(patient_key: str, ids: List[str], embeddings: List[List[flo
                 raise
     logger.info("Supabase upsert %d chunks for %s", len(ids), patient_key)
 
-def _supabase_query(patient_key: str, query_embedding: List[float], n_results: int) -> Tuple[List[str], List[str], List[Dict[str, Any]]]:
+def _supabase_query(patient_key: str, query_embedding: Any, n_results: int) -> Tuple[List[str], List[str], List[Dict[str, Any]]]:
+    if hasattr(query_embedding, "tolist"):
+        query_embedding = query_embedding.tolist()
+    elif not isinstance(query_embedding, list):
+        query_embedding = list(query_embedding)
     client = _supabase_client()
     try:
         res = client.table("chunks").select("id, text, metadata, embedding").eq("patient_key", patient_key).execute()

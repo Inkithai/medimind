@@ -207,6 +207,41 @@ def test_missing_supabase_chunks_table_raises_actionable_error():
         importlib.reload(vector_store)  # restore chroma default for other tests
 
 
+def test_supabase_upsert_handles_numpy_arrays():
+    """Ensure numpy ndarray embeddings do not cause TypeError when upserting to Supabase."""
+    os.environ["VECTOR_STORE"] = "supabase"
+    import importlib
+    importlib.reload(vector_store)
+    
+    import numpy as np
+    
+    class FakeSupabaseTable:
+        def __init__(self):
+            self.rows = {}
+        def upsert(self, row, on_conflict=None):
+            self.rows[row["id"]] = row
+            return self
+        def execute(self):
+            return types.SimpleNamespace(data=list(self.rows.values()), count=len(self.rows))
+
+    fake_table = FakeSupabaseTable()
+    
+    try:
+        with mock.patch("db._get_client", lambda: mock.Mock(table=lambda name: fake_table)):
+            emb_array = np.array([0.1, 0.2, 0.3])
+            vector_store.upsert(
+                patient_key="anon_np",
+                ids=["id1"],
+                embeddings=[emb_array],
+                documents=["some doc"],
+                metadatas=[{"source": "test"}]
+            )
+        assert fake_table.rows["id1"]["embedding"] == [0.1, 0.2, 0.3]
+    finally:
+        os.environ.pop("VECTOR_STORE", None)
+        importlib.reload(vector_store)
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:
