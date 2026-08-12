@@ -2225,16 +2225,98 @@ def _flatten_documents(raw_results: List[Dict[str, Any]]) -> List[Dict[str, Any]
     return flat
 
 
+# Placeholder/template markers, per script.
+#
+# Why this is not English-only: the extraction prompt's LANGUAGE AND UNIT
+# NORMALIZATION section normalizes medication `ingredients` to the English
+# INN, but `patient_name` and medication `name` are deliberately kept
+# exactly as printed, in the source language. So an English-only check
+# silently misses a demo/template page printed in Tamil or Sinhala — which
+# for a Sri Lanka deployment is the common case, not an exotic one. A
+# missed template page is ingested as real patient data and pollutes the
+# timeline, the safety cross-check and the lab trends.
+#
+# Two sets, because matching rules differ by script:
+#
+#   _DEMO_MARKERS_WORD — scripts that delimit words with whitespace. These
+#     are matched on word boundaries, so a legitimate name that merely
+#     *contains* the letters (e.g. Spanish surname "Muestras", or an English
+#     "Sampleton") is not falsely rejected. False-rejecting a real document
+#     is worse than admitting a demo one, so precision matters more here.
+#
+#   _DEMO_MARKERS_SUBSTRING — scripts with no whitespace word delimiters
+#     (Japanese), where \b cannot work because adjacent kana are all word
+#     characters. Substring matching is the only option; these strings are
+#     distinctive enough that the false-positive risk is acceptable.
+#
+# Matching is casefold()-based, not .upper(). .upper() is a no-op for
+# Tamil/Sinhala/Japanese/Arabic (they are caseless), so it only ever
+# normalized the Latin entries; casefold() is the correct Unicode-aware
+# operation and handles e.g. "ÉCHANTILLON"/"échantillon" uniformly.
+#
+# This list is a pragmatic net, not a guarantee — it cannot cover every
+# language. The structural `_source.method == "synthetic"` check below is
+# the reliable signal; these markers are the best-effort fallback for
+# vendor sample packs we did not generate ourselves.
+_DEMO_MARKERS_WORD = frozenset({
+    "demo", "sample", "dummy", "placeholder", "specimen",   # English
+    "test patient", "demo patient", "sample patient",        # English phrases
+    "மாதிரி", "டெமோ",                                        # Tamil (sample / demo)
+    "නියැදිය", "ආදර්ශ",                                       # Sinhala (sample / model-example)
+    "डेमो", "नमूना", "उदाहरण",                                 # Hindi (demo / sample / example)
+    "muestra", "ejemplo", "prueba",                          # Spanish
+    "exemple", "échantillon",                                # French
+    "تجريبي", "عينة", "نموذج",                                # Arabic (trial / sample / model)
+})
+
+_DEMO_MARKERS_SUBSTRING = frozenset({
+    "デモ", "サンプル",                                        # Japanese (demo / sample)
+})
+
+# Built once at import: alternation of word-boundary-anchored markers.
+# re.UNICODE \b is script-aware, so it works for Tamil/Sinhala/Hindi/Arabic
+# (all of which use spaces) as well as Latin.
+_DEMO_MARKER_RE = re.compile(
+    r"(?<!\w)(?:" + "|".join(re.escape(m) for m in sorted(_DEMO_MARKERS_WORD)) + r")(?!\w)",
+    re.UNICODE,
+)
+
+
+def _has_demo_marker(value: Any) -> bool:
+    """True if `value` contains a placeholder marker in any supported
+    script. Caseless via casefold(); word-anchored for space-delimited
+    scripts, substring for CJK."""
+    if not value or not isinstance(value, str):
+        return False
+    folded = value.casefold()
+    if _DEMO_MARKER_RE.search(folded):
+        return True
+    return any(marker in folded for marker in _DEMO_MARKERS_SUBSTRING)
+
+
 def _is_demo_document(d: Dict[str, Any]) -> bool:
     """Detect placeholder/template documents (e.g. sample datasets that
     include a 'DEMO PATIENT' / 'DEMO MEDICINE' mock page) so they don't get
-    silently treated as real patient data."""
-    name = (d.get("patient_name") or "").upper()
-    if "DEMO" in name or "SAMPLE" in name or "DUMMY" in name:
+    silently treated as real patient data.
+
+    Checks, in order of reliability:
+      1. `_source.method == "synthetic"` — documents produced by
+         generate_lab_test_data.py. Structural and exact, no guessing.
+      2. Placeholder markers in patient_name / medication names, across
+         every script in _DEMO_MARKERS_* (patient and medication names are
+         never translated during extraction, so English-only would miss
+         non-English template pages)."""
+    source = d.get("_source")
+    if isinstance(source, dict) and str(source.get("method") or "").strip().lower() == "synthetic":
         return True
+
+    if _has_demo_marker(d.get("patient_name")):
+        return True
+
     for med in d.get("medications", []):
-        med_name = (med.get("name") or "").upper()
-        if "DEMO" in med_name or "SAMPLE" in med_name:
+        if not isinstance(med, dict):
+            continue
+        if _has_demo_marker(med.get("name")):
             return True
     return False
 

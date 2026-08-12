@@ -196,9 +196,19 @@ def _explain(
     elif points[-1]["flag"] != "normal" and points[0]["flag"] != "normal":
         base += f" It was already outside the normal range at the earliest available test and has remained '{points[-1]['flag']}'."
     elif approaching:
+        # Use the same substring test as _approaching_boundary() above, NOT
+        # direction.startswith("increasing"). _direction() can return
+        # "fluctuating (net increasing)" for a noisy-but-climbing series —
+        # that string does not *start* with "increasing", so startswith()
+        # fell through to "lower" and told the patient a rising value was
+        # drifting toward the BOTTOM of its reference range. Medically
+        # inverted advice, emitted silently with HTTP 200, and only on the
+        # approaching_threshold early-warning path — i.e. exactly when the
+        # feature matters most. Noisy series are the common case in real
+        # lab data, so this fired often.
         base += (
             f" It's still within the normal range but has been trending toward the "
-            f"{'upper' if direction.startswith('increasing') else 'lower'} boundary — worth watching even "
+            f"{'upper' if 'increasing' in direction else 'lower'} boundary — worth watching even "
             "though it hasn't been flagged abnormal yet."
         )
     elif direction == "stable":
