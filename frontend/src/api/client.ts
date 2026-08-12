@@ -1,4 +1,6 @@
 import type {
+  CareRecommendationContext,
+  CareProviderSearchResponse,
   CrossCheckReport,
   HealthResponse,
   LabTrendsReport,
@@ -311,6 +313,21 @@ export const api = {
 
   getLabTrends(credentials: Credentials): Promise<LabTrendsReport> {
     return request<LabTrendsReport>(credentials, "/api/v1/lab-trends");
+  },
+
+  getCareRecommendationContext(credentials: Credentials): Promise<CareRecommendationContext> {
+    return request<CareRecommendationContext>(credentials, "/api/v1/care-recommendations");
+  },
+
+  searchCareProviders(
+    credentials: Credentials,
+    body: { flag_id: string; location: string; availability: "any" | "today" | "this_week" | "evenings" | "weekends" }
+  ): Promise<CareProviderSearchResponse> {
+    return request<CareProviderSearchResponse>(credentials, "/api/v1/care-recommendations/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
   },
 
   ask(credentials: Credentials, question: string, topK = 8): Promise<QAResponse> {
