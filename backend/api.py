@@ -59,7 +59,7 @@ import jobs
 import storage
 from auth import get_current_user, issue_anonymous_token
 from document_filter import NonMedicalDocumentError, assert_medical_document
-from lab_trends import track_lab_trends
+from lab_trends import resolve_lab_trends, track_lab_trends
 from medical_extractor import (
     ProviderRateLimitError,
     _is_demo_document,
@@ -936,14 +936,12 @@ async def get_lab_trends(user_id: str = Depends(get_current_user)) -> Dict[str, 
     """Returns the authenticated user's lab result trends (direction of
     drift per test, reference-range crossings, plain-language explanations)
     computed from the most recent upload/processing run. Recomputed on the
-    fly from the saved timeline for snapshots saved before this field
-    existed."""
+    fly from the saved timeline when the snapshot predates this field or
+    is missing `returned_to_normal` / still declines convertible units."""
     snapshot = db.load_patient_snapshot(user_id)
     if snapshot is None:
         raise HTTPException(404, "No timeline found for this user.")
-    if "lab_trends" in snapshot:
-        return snapshot["lab_trends"]
-    return track_lab_trends(snapshot["patient_timeline"])
+    return resolve_lab_trends(snapshot["patient_timeline"], snapshot.get("lab_trends"))
 
 
 @app.get("/api/v1/patient-snapshot")
@@ -955,7 +953,8 @@ async def get_patient_snapshot(user_id: str = Depends(get_current_user)) -> Dict
     been processed (frontend treats that as the first-run empty state).
 
     `lab_trends` is recomputed on the fly for snapshots saved before the
-    field existed, mirroring get_lab_trends()'s backward-compat behavior.
+    field existed (or before `returned_to_normal` / unit conversion),
+    mirroring get_lab_trends()'s backward-compat behavior.
     """
     snapshot = db.load_patient_snapshot(user_id)
     if snapshot is None:
@@ -965,11 +964,10 @@ async def get_patient_snapshot(user_id: str = Depends(get_current_user)) -> Dict
         "patient_timeline": snapshot["patient_timeline"],
         "cross_check_report": snapshot["cross_check_report"],
         "updated_at": snapshot.get("updated_at"),
+        "lab_trends": resolve_lab_trends(
+            snapshot["patient_timeline"], snapshot.get("lab_trends")
+        ),
     }
-    if "lab_trends" in snapshot:
-        result["lab_trends"] = snapshot["lab_trends"]
-    else:
-        result["lab_trends"] = track_lab_trends(snapshot["patient_timeline"])
     return result
 
 

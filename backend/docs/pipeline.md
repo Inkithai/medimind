@@ -73,9 +73,10 @@ Deterministic, no LLM:
 - Parse dates fuzzy, parse values numeric, parse ranges robust (`70-99 mg/dL`, `Reference: 0.74-1.35 mg/dL` handled, avoids `70-99` → `70,-99` bug).
 - Group by lowercase test name, keep first casing for display.
 - Require 2+ usable dated numeric points; else `insufficient_data` with reason.
-- Computes direction `increasing/decreasing/stable/fluctuating (net ...)`, flag sequence phrase, crossing point (first normal→abnormal), approaching threshold (within 15% of boundary width).
-- Template explanation: rise/fall + trail `value (date) → ...` + crossing/approaching wording. No LLM hallucination.
-- Confidence discounted for dropped entries or disagreeing units/ranges.
+- Computes direction `increasing/decreasing/stable/fluctuating (net ...)`, flag sequence phrase, crossing point (first normal→abnormal), `returned_to_normal` (so a recovery is not rendered as an ongoing alarm), approaching threshold (within 15% of boundary width). Relapse (`high → normal → high`) gets its own wording instead of falling through.
+- Compatible units are converted onto the latest reading's unit via a per-analyte molar-mass table (`mg/dL` ↔ `mmol/L`) or a same-family scale factor (`g/dL` ↔ `g/L`). Truly incomparable units are still declined as `insufficient_data`.
+- Template explanation: rise/fall + trail `value (date) → ...` + recovery / relapse / crossing / approaching wording. No LLM hallucination.
+- Confidence discounted for dropped entries, converted units, or disagreeing reference ranges.
 
 ### 5. Retrieval — retrieval.py
 

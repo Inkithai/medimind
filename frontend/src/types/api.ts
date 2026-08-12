@@ -125,6 +125,10 @@ export interface LabDataPoint {
   value: string;
   flag: "normal" | "high" | "low" | "unknown";
   source_file: string | null;
+  // Present when this reading was converted onto the trend's unit
+  // (e.g. 95 mg/dL stored here as ~5.27 after a mmol/L series).
+  original_value?: string;
+  original_unit?: string;
 }
 
 export interface LabTrend {
@@ -140,6 +144,9 @@ export interface LabTrend {
     | "fluctuating (net decreasing)";
   flag_sequence: string;
   crossed_into_abnormal_at: { date: string | null; flag: string } | null;
+  // Optional: older persisted snapshots omit this. The UI falls back to
+  // gating the crossing badge on the latest data-point flag.
+  returned_to_normal?: boolean;
   approaching_threshold: boolean;
   confidence: number;
   explanation: string;
