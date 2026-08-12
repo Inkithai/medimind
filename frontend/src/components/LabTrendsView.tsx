@@ -4,6 +4,7 @@ import { Alert } from "./Alert";
 import { Card, CardBody, CardHeader } from "./Card";
 import { EmptyState } from "./EmptyState";
 import { ChartIcon } from "./icons";
+import { trendAlertBadges } from "./labTrendBadges";
 import { StatusBadge } from "./StatusBadge";
 
 export function LabTrendsView({ report }: { report: LabTrendsReport }) {
@@ -60,8 +61,7 @@ export function LabTrendsView({ report }: { report: LabTrendsReport }) {
 }
 
 function TrendCard({ trend }: { trend: LabTrend }) {
-  const crossed = trend.crossed_into_abnormal_at;
-  const approaching = trend.approaching_threshold;
+  const alertBadges = trendAlertBadges(trend);
 
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-4">
@@ -70,12 +70,11 @@ function TrendCard({ trend }: { trend: LabTrend }) {
           <div className="flex flex-wrap items-center gap-2">
             <h4 className="text-base font-semibold text-slate-900">{trend.test_name}</h4>
             <StatusBadge tone={directionBadgeTone(trend.direction)}>{trend.direction}</StatusBadge>
-            {crossed && (
-              <StatusBadge tone="danger">
-                crossed to {crossed.flag} on {crossed.date || "unknown date"}
+            {alertBadges.map((badge) => (
+              <StatusBadge key={badge.label} tone={badge.tone}>
+                {badge.label}
               </StatusBadge>
-            )}
-            {approaching && !crossed && <StatusBadge tone="warning">approaching threshold</StatusBadge>}
+            ))}
           </div>
           <p className="mt-1 text-xs text-slate-500">
             {trend.unit && <span>unit: {trend.unit} · </span>}
@@ -106,7 +105,14 @@ function TrendCard({ trend }: { trend: LabTrend }) {
             {trend.data_points.map((p, i) => (
               <tr key={i}>
                 <td className="py-1 pr-4 text-slate-600">{p.date || "—"}</td>
-                <td className="py-1 pr-4 font-medium text-slate-700">{p.value}</td>
+                <td className="py-1 pr-4 font-medium text-slate-700">
+                  {p.value}
+                  {p.original_value && p.original_unit ? (
+                    <span className="ml-1 font-normal text-slate-400">
+                      (from {p.original_value} {p.original_unit})
+                    </span>
+                  ) : null}
+                </td>
                 <td className="py-1 pr-4">
                   <span className={classNames("inline-flex rounded-full px-2 py-0.5 ring-1 ring-inset", flagTone(p.flag))}>
                     {p.flag}
