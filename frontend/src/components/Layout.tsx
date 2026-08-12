@@ -28,6 +28,7 @@ const NAV: NavItem[] = [
   { to: "/labs", label: "Lab Results", icon: BeakerIcon, chip: "bg-violet-50 text-violet-600" },
   { to: "/history", label: "Timeline", icon: TimelineIcon, chip: "bg-sky-50 text-sky-600" },
   { to: "/safety", label: "Safety Alerts", icon: ShieldIcon, chip: "bg-amber-50 text-amber-600" },
+  { to: "/care", label: "Find Local Care", icon: ShieldIcon, chip: "bg-rose-50 text-rose-600" },
   { to: "/ask", label: "Ask AI", icon: ChatIcon, chip: "bg-brand-50 text-brand-600" },
   { to: "/settings", label: "Settings", icon: SettingsIcon, chip: "bg-slate-100 text-slate-500" },
 ];
