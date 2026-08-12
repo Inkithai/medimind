@@ -547,8 +547,12 @@ def build_presentation():
         "Our technology stack is built on modern, type-safe, high-performance tooling—from React and Vite on the frontend to FastAPI, Supabase, and local ONNX embeddings on the backend. As we look ahead, we are expanding MediMind into a universal health OS with HL7 FHIR hospital interoperability, wearable health sync, and secure clinician sharing portals. Thank you!"
     )
 
-    # Save to root directory
-    output_path = "PRESENTATION.pptx"
+    # Save alongside the other pitch/deploy documents in docs/, resolved
+    # relative to this script rather than the caller's working directory so
+    # the output lands in the same place no matter where it is invoked from.
+    output_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "docs")
+    os.makedirs(output_dir, exist_ok=True)
+    output_path = os.path.join(output_dir, "PRESENTATION.pptx")
     prs.save(output_path)
     print(f"Successfully generated {output_path}")
 
