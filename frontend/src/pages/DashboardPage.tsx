@@ -313,8 +313,7 @@ export function DashboardPage() {
               <h3 className="card-title">Find a clinic nearby</h3>
             </div>
             <p className="secondary-text mt-3">
-              We suggest a specialty from your records, then search real OpenStreetMap clinics near
-              your city.
+              We suggest a specialty from your records, then search real clinics near your city.
             </p>
             <Link to="/care" className="btn-secondary mt-4">
               <MapPinIcon className="h-5 w-5" /> Find care

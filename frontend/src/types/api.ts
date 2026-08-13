@@ -249,7 +249,7 @@ export interface HealthResponse {
   status: string;
 }
 
-// ---- Find care (OpenStreetMap directory) --------------------------------
+// ---- Find care (Geoapify primary, OpenStreetMap fallback) ---------------
 
 export type CareDay = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
 export type CareTimeOfDay = "any" | "morning" | "afternoon" | "evening";

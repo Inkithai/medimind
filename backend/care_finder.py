@@ -4,11 +4,13 @@ Find Care — specialty suggestion + clinic directory
 Turns a patient's extracted timeline into a suggested medical specialty,
 then searches real healthcare facilities near a city the user types.
 
-Stack (no paid maps key):
+Stack (no paid Google billing):
 
-  * Geocode  — OpenStreetMap Nominatim
-  * Directory — OpenStreetMap Overpass API (clinics, doctors, hospitals)
-  * Map tiles — Leaflet + OSM raster tiles (frontend)
+  1. Geoapify  — geocoding + Places  (if GEOAPIFY_API_KEY is set)
+  2. OpenStreetMap — Nominatim + Overpass  (automatic fallback, no key)
+
+Leaflet still draws the map with OSM tiles either way. The UI names the
+directory that actually produced the list — never "X failed, so Y".
 
 This is a public directory lookup, not a referral, booking system, or diagnosis.
 """
@@ -37,6 +39,13 @@ OSM_USER_AGENT = os.environ.get(
     "OSM_USER_AGENT",
     "MediMind/1.0 (healthcare record assistant; https://github.com/Inkithai/medimind)",
 )
+GEOAPIFY_GEOCODE_URL = os.environ.get(
+    "GEOAPIFY_GEOCODE_URL", "https://api.geoapify.com/v1/geocode/search"
+).rstrip("/")
+GEOAPIFY_PLACES_URL = os.environ.get(
+    "GEOAPIFY_PLACES_URL", "https://api.geoapify.com/v2/places"
+).rstrip("/")
+_PLACEHOLDER_KEY = re.compile(r"^(your[-_].+|change.?me|xxx+|placeholder.*|todo.*)$", re.I)
 
 DEFAULT_RADIUS_M = 8000
 MAX_RADIUS_M = 50000
@@ -54,19 +63,116 @@ TIME_WINDOWS = {
 }
 
 DISCLAIMER = (
-    "This is a public directory lookup from OpenStreetMap, not a medical "
-    "referral and not a diagnosis. Listings may be incomplete or out of date. "
-    "Always confirm details with the clinic and consult a licensed clinician "
-    "before acting on anything in your records."
+    "This is a public directory lookup, not a medical referral and not a "
+    "diagnosis. Listings may be incomplete or out of date. Always confirm "
+    "details with the clinic and consult a licensed clinician before acting "
+    "on anything in your records."
 )
 
-SOURCE = {
+SOURCE_GEOAPIFY = {
+    "name": "Geoapify",
+    "geocoder": "Geoapify Geocoding",
+    "directory": "Geoapify Places API",
+    "license": "Geoapify Terms",
+    "attribution": "© Geoapify",
+    "url": "https://www.geoapify.com/",
+}
+
+SOURCE_OSM = {
     "name": "OpenStreetMap",
     "geocoder": "Nominatim",
     "directory": "Overpass API",
     "license": "ODbL",
     "attribution": "© OpenStreetMap contributors",
     "url": "https://www.openstreetmap.org/copyright",
+}
+
+# Backward-compatible alias — injected OSM tests and older callers.
+SOURCE = SOURCE_OSM
+
+# Geoapify healthcare categories per specialty. Always include the parent
+# clinic + hospital so a sparse specialty still returns nearby care.
+GEOAPIFY_CATEGORIES: Dict[str, Tuple[str, ...]] = {
+    "general_practice": (
+        "healthcare.clinic_or_praxis.general",
+        "healthcare.clinic_or_praxis",
+        "healthcare.hospital",
+    ),
+    "endocrinology": (
+        "healthcare.clinic_or_praxis.endocrinology",
+        "healthcare.clinic_or_praxis",
+        "healthcare.hospital",
+    ),
+    "cardiology": (
+        "healthcare.clinic_or_praxis.cardiology",
+        "healthcare.clinic_or_praxis",
+        "healthcare.hospital",
+    ),
+    "pulmonology": (
+        "healthcare.clinic_or_praxis.pulmonology",
+        "healthcare.clinic_or_praxis",
+        "healthcare.hospital",
+    ),
+    "gastroenterology": (
+        "healthcare.clinic_or_praxis.gastroenterology",
+        "healthcare.clinic_or_praxis",
+        "healthcare.hospital",
+    ),
+    "nephrology": ("healthcare.clinic_or_praxis", "healthcare.hospital"),
+    "neurology": ("healthcare.clinic_or_praxis", "healthcare.hospital"),
+    "psychiatry": (
+        "healthcare.clinic_or_praxis.psychiatry",
+        "healthcare.clinic_or_praxis",
+        "healthcare.hospital",
+    ),
+    "dermatology": (
+        "healthcare.clinic_or_praxis.dermatology",
+        "healthcare.clinic_or_praxis",
+        "healthcare.hospital",
+    ),
+    "rheumatology": (
+        "healthcare.clinic_or_praxis.rheumatology",
+        "healthcare.clinic_or_praxis",
+        "healthcare.hospital",
+    ),
+    "orthopedics": (
+        "healthcare.clinic_or_praxis.orthopaedics",
+        "healthcare.clinic_or_praxis.trauma",
+        "healthcare.clinic_or_praxis",
+        "healthcare.hospital",
+    ),
+    "allergy_immunology": (
+        "healthcare.clinic_or_praxis.allergology",
+        "healthcare.clinic_or_praxis",
+        "healthcare.hospital",
+    ),
+    "ophthalmology": (
+        "healthcare.clinic_or_praxis.ophthalmology",
+        "healthcare.clinic_or_praxis",
+        "healthcare.hospital",
+    ),
+    "otolaryngology": (
+        "healthcare.clinic_or_praxis.otolaryngology",
+        "healthcare.clinic_or_praxis",
+        "healthcare.hospital",
+    ),
+    "urology": (
+        "healthcare.clinic_or_praxis.urology",
+        "healthcare.clinic_or_praxis",
+        "healthcare.hospital",
+    ),
+    "gynecology": (
+        "healthcare.clinic_or_praxis.gynaecology",
+        "healthcare.clinic_or_praxis",
+        "healthcare.hospital",
+    ),
+    "oncology": ("healthcare.hospital", "healthcare.clinic_or_praxis"),
+    "pediatrics": (
+        "healthcare.clinic_or_praxis.paediatrics",
+        "healthcare.clinic_or_praxis",
+        "healthcare.hospital",
+    ),
+    "infectious_disease": ("healthcare.hospital", "healthcare.clinic_or_praxis"),
 }
 
 
@@ -91,6 +197,18 @@ class CityNotFoundError(CareFinderError):
 class DirectoryUnavailableError(CareFinderError):
     def __init__(self, detail: str = "The map directory is temporarily unavailable.") -> None:
         super().__init__(detail, code="directory_unavailable", retryable=True)
+
+
+def geoapify_key() -> Optional[str]:
+    """Return a real Geoapify key, or None for missing / placeholder values."""
+    raw = (os.environ.get("GEOAPIFY_API_KEY") or "").strip()
+    if not raw or _PLACEHOLDER_KEY.match(raw) or raw.lower().startswith("your-"):
+        return None
+    return raw
+
+
+def geoapify_configured() -> bool:
+    return bool(geoapify_key())
 
 
 # ---------------------------------------------------------------------------
@@ -555,6 +673,263 @@ def fetch_osm_places(
     return elements
 
 
+def geocode_city_geoapify(city: str, http_json: Callable[..., Any] = _request_json) -> Dict[str, Any]:
+    """Resolve a city / neighbourhood / postcode via Geoapify Geocoding."""
+    query = (city or "").strip()
+    if len(query) < 2:
+        raise CityNotFoundError(query or "that place")
+    key = geoapify_key()
+    if not key:
+        raise DirectoryUnavailableError("Geoapify is not configured.")
+    url = (
+        GEOAPIFY_GEOCODE_URL
+        + "?"
+        + urllib.parse.urlencode({"text": query, "format": "json", "limit": 1, "apiKey": key})
+    )
+    try:
+        payload = http_json(url)
+    except DirectoryUnavailableError:
+        raise
+    except Exception as exc:
+        raise DirectoryUnavailableError() from exc
+    if not isinstance(payload, dict):
+        raise DirectoryUnavailableError("Geoapify returned an unreadable geocode response.")
+    results = payload.get("results")
+    if not isinstance(results, list) or not results:
+        features = payload.get("features")
+        if isinstance(features, list) and features:
+            props = (features[0] or {}).get("properties") or {}
+            results = [props]
+        else:
+            raise CityNotFoundError(query)
+    hit = results[0] if isinstance(results[0], dict) else {}
+    try:
+        lat = float(hit["lat"])
+        lon = float(hit["lon"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise CityNotFoundError(query) from exc
+    return {
+        "lat": lat,
+        "lon": lon,
+        "label": hit.get("formatted") or hit.get("city") or query,
+        "source": "Geoapify Geocoding",
+        "place_id": hit.get("place_id"),
+    }
+
+
+def fetch_geoapify_places(
+    lat: float,
+    lon: float,
+    radius_m: int,
+    *,
+    specialty_id: str = "general_practice",
+    http_json: Callable[..., Any] = _request_json,
+) -> List[Dict[str, Any]]:
+    """Query Geoapify Places for clinics / hospitals around a point.
+
+    Returns GeoJSON features (not OSM elements).
+    """
+    key = geoapify_key()
+    if not key:
+        raise DirectoryUnavailableError("Geoapify is not configured.")
+    categories = GEOAPIFY_CATEGORIES.get(specialty_id) or GEOAPIFY_CATEGORIES["general_practice"]
+    url = (
+        GEOAPIFY_PLACES_URL
+        + "?"
+        + urllib.parse.urlencode(
+            {
+                "categories": ",".join(categories),
+                "filter": f"circle:{lon},{lat},{radius_m}",
+                "bias": f"proximity:{lon},{lat}",
+                "limit": 40,
+                "apiKey": key,
+            }
+        )
+    )
+    try:
+        payload = http_json(url)
+    except DirectoryUnavailableError:
+        raise
+    except Exception as exc:
+        raise DirectoryUnavailableError() from exc
+    if not isinstance(payload, dict):
+        raise DirectoryUnavailableError("Geoapify returned an unreadable places response.")
+    features = payload.get("features")
+    if not isinstance(features, list):
+        raise DirectoryUnavailableError("The map directory returned no usable places.")
+    return features
+
+
+def _geoapify_categories_of(feature: Dict[str, Any]) -> List[str]:
+    props = feature.get("properties") if isinstance(feature.get("properties"), dict) else feature
+    raw = props.get("categories") or []
+    if isinstance(raw, str):
+        return [part.strip() for part in raw.split(",") if part.strip()]
+    if isinstance(raw, list):
+        return [str(item) for item in raw if item]
+    return []
+
+
+def _geoapify_place_type(categories: Sequence[str]) -> str:
+    joined = " ".join(categories).lower()
+    if "hospital" in joined:
+        return "hospital"
+    if "clinic" in joined or "praxis" in joined:
+        return "clinic"
+    if "dentist" in joined:
+        return "doctor"
+    return "healthcare"
+
+
+def _geoapify_match_kind(categories: Sequence[str], name: str, specialty_id: str) -> str:
+    tokens = _specialty_tokens(specialty_id)
+    hay = f"{' '.join(categories)} {name}".lower()
+    if specialty_id != "general_practice" and any(token and token in hay for token in tokens):
+        return "specialty"
+    place = _geoapify_place_type(categories)
+    if place == "hospital":
+        return "hospital"
+    if specialty_id == "general_practice" or place in {"clinic", "doctor"}:
+        return "general"
+    return "other"
+
+
+def _geoapify_contact(props: Dict[str, Any]) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+    raw = ((props.get("datasource") or {}).get("raw") or {}) if isinstance(props.get("datasource"), dict) else {}
+    contact = props.get("contact") if isinstance(props.get("contact"), dict) else {}
+    phone = (
+        props.get("phone")
+        or contact.get("phone")
+        or raw.get("phone")
+        or raw.get("contact:phone")
+    )
+    website = (
+        props.get("website")
+        or contact.get("website")
+        or raw.get("website")
+        or raw.get("contact:website")
+    )
+    hours = props.get("opening_hours") or raw.get("opening_hours")
+    return (
+        str(phone).strip() if phone else None,
+        str(website).strip() if website else None,
+        str(hours).strip() if hours else None,
+    )
+
+
+def _geoapify_address(props: Dict[str, Any]) -> Optional[str]:
+    formatted = props.get("formatted")
+    if formatted:
+        return str(formatted)
+    parts = [
+        props.get("housenumber"),
+        props.get("street"),
+        props.get("suburb") or props.get("district"),
+        props.get("city") or props.get("town"),
+        props.get("postcode"),
+    ]
+    line = ", ".join(str(p) for p in parts if p)
+    return line or None
+
+
+def _geoapify_coords(feature: Dict[str, Any]) -> Optional[Tuple[float, float]]:
+    props = feature.get("properties") if isinstance(feature.get("properties"), dict) else {}
+    try:
+        if "lat" in props and "lon" in props:
+            return float(props["lat"]), float(props["lon"])
+    except (TypeError, ValueError):
+        pass
+    geom = feature.get("geometry") if isinstance(feature.get("geometry"), dict) else {}
+    coords = geom.get("coordinates")
+    if isinstance(coords, (list, tuple)) and len(coords) >= 2:
+        try:
+            return float(coords[1]), float(coords[0])
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def _normalize_geoapify_place(
+    feature: Dict[str, Any],
+    *,
+    origin: Dict[str, Any],
+    specialty_id: str,
+    days: Sequence[str],
+    time_of_day: str,
+    radius_km: float,
+) -> Optional[Dict[str, Any]]:
+    props = feature.get("properties") if isinstance(feature.get("properties"), dict) else feature
+    if not isinstance(props, dict):
+        return None
+    coords = _geoapify_coords(feature if "geometry" in feature or "properties" in feature else {"properties": props})
+    if coords is None:
+        return None
+    lat, lon = coords
+    name = (props.get("name") or props.get("address_line1") or "").strip()
+    categories = _geoapify_categories_of(feature if "properties" in feature else {"properties": props})
+    place_type = _geoapify_place_type(categories)
+    if not name:
+        if place_type == "hospital":
+            name = "Hospital"
+        elif place_type == "clinic":
+            name = "Clinic"
+        else:
+            return None
+    phone, website, hours = _geoapify_contact(props)
+    address = _geoapify_address(props)
+    availability = availability_status(hours, days, time_of_day)
+    match_kind = _geoapify_match_kind(categories, name, specialty_id)
+    place_id = props.get("place_id") or ""
+    tags = {
+        "phone": phone,
+        "website": website,
+        "opening_hours": hours,
+        "addr:full": address,
+    }
+    distance_km = _haversine_km(origin["lat"], origin["lon"], lat, lon)
+    specialties = []
+    for cat in categories:
+        if "clinic_or_praxis." in cat:
+            specialties.append(cat.rsplit(".", 1)[-1].replace("_", " "))
+        elif cat.endswith(".hospital"):
+            specialties.append("hospital")
+    source_url = (
+        f"https://www.openstreetmap.org/?mlat={lat}&mlon={lon}#map=17/{lat}/{lon}"
+    )
+    raw = ((props.get("datasource") or {}).get("raw") or {}) if isinstance(props.get("datasource"), dict) else {}
+    osm_type = raw.get("osm_type") or raw.get("osm_kind")
+    osm_id = raw.get("osm_id")
+    if osm_type and osm_id:
+        source_url = f"https://www.openstreetmap.org/{osm_type}/{osm_id}"
+    return {
+        "id": f"geoapify/{place_id}" if place_id else f"geoapify/{name}",
+        "name": name,
+        "place_type": place_type,
+        "match_kind": match_kind,
+        "specialties": specialties,
+        "address": address,
+        "phone": phone,
+        "website": website,
+        "opening_hours": hours,
+        "availability": availability,
+        "lat": lat,
+        "lon": lon,
+        "distance_km": round(distance_km, 2),
+        "score": round(
+            _score_place(
+                match_kind=match_kind,
+                distance_km=distance_km,
+                radius_km=radius_km,
+                availability=availability,
+                tags=tags,
+            ),
+            1,
+        ),
+        "source": "Geoapify",
+        "source_url": source_url,
+    }
+
+
 def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     radius = 6371.0
     phi1, phi2 = math.radians(lat1), math.radians(lat2)
@@ -709,34 +1084,61 @@ def _normalize_place(
     }
 
 
-def search_care(
+def _pack_search(
     *,
     city: str,
-    specialty_id: Optional[str] = None,
-    days: Optional[Sequence[str]] = None,
-    time_of_day: str = "any",
-    radius_km: float = 8.0,
-    timeline: Optional[Dict[str, Any]] = None,
-    geocode: Optional[Callable[[str], Dict[str, Any]]] = None,
-    fetch_places: Optional[Callable[..., List[Dict[str, Any]]]] = None,
+    chosen_id: str,
+    chosen_label: str,
+    wanted_days: List[str],
+    tod: str,
+    radius_km_used: float,
+    location: Dict[str, Any],
+    suggestion: Dict[str, Any],
+    places: List[Dict[str, Any]],
+    source: Dict[str, Any],
 ) -> Dict[str, Any]:
-    """Geocode `city` with Nominatim and list nearby OSM healthcare POIs."""
-    suggestion = suggest_specialties(timeline)
-    chosen_id = (specialty_id or suggestion["suggested"]["id"] or "general_practice").strip()
-    if chosen_id not in SPECIALTIES:
-        chosen_id = "general_practice"
-    chosen_label = SPECIALTIES[chosen_id]["label"]
+    places = sorted(places, key=lambda item: (-item["score"], item["distance_km"], item["name"]))[:25]
+    zero_hint = None
+    if not places:
+        zero_hint = (
+            f"No clinics, doctors, or hospitals are listed within {radius_km_used:g} km of "
+            f"{location['label']}. Try a larger area, a nearby city, or a different spelling. "
+            f"Coverage is better in cities than in small towns."
+        )
+    return {
+        "query": {
+            "city": city.strip(),
+            "specialty_id": chosen_id,
+            "specialty_label": chosen_label,
+            "days": wanted_days,
+            "time_of_day": tod,
+            "radius_km": radius_km_used,
+        },
+        "location": location,
+        "suggestion": suggestion["suggested"],
+        "results": places,
+        "result_count": len(places),
+        "zero_results_hint": zero_hint,
+        "source": dict(source),
+        "disclaimer": DISCLAIMER,
+    }
 
-    wanted_days = [d for d in (days or DAYS[:5]) if d in DAY_INDEX]
-    if not wanted_days:
-        wanted_days = list(DAYS[:5])
-    tod = time_of_day if time_of_day in TIME_WINDOWS else "any"
-    radius_m = int(max(1000, min(MAX_RADIUS_M, (radius_km or 8) * 1000)))
-    radius_km_used = radius_m / 1000.0
 
-    location = (geocode or geocode_city)(city)
-    elements = (fetch_places or fetch_osm_places)(location["lat"], location["lon"], radius_m)
-
+def _search_osm(
+    *,
+    city: str,
+    chosen_id: str,
+    chosen_label: str,
+    wanted_days: List[str],
+    tod: str,
+    radius_m: int,
+    radius_km_used: float,
+    suggestion: Dict[str, Any],
+    geocode: Callable[[str], Dict[str, Any]],
+    fetch_places: Callable[..., List[Dict[str, Any]]],
+) -> Dict[str, Any]:
+    location = geocode(city)
+    elements = fetch_places(location["lat"], location["lon"], radius_m)
     seen = set()
     places: List[Dict[str, Any]] = []
     for element in elements:
@@ -754,29 +1156,133 @@ def search_care(
         )
         if place:
             places.append(place)
+    return _pack_search(
+        city=city,
+        chosen_id=chosen_id,
+        chosen_label=chosen_label,
+        wanted_days=wanted_days,
+        tod=tod,
+        radius_km_used=radius_km_used,
+        location=location,
+        suggestion=suggestion,
+        places=places,
+        source=SOURCE_OSM,
+    )
 
-    places = sorted(places, key=lambda item: (-item["score"], item["distance_km"], item["name"]))[:25]
-    zero_hint = None
-    if not places:
-        zero_hint = (
-            f"No clinics, doctors, or hospitals are listed on OpenStreetMap within "
-            f"{radius_km_used:g} km of {location['label']}. Try a larger area, a nearby "
-            f"city, or a different spelling. Coverage is better in cities than in small towns."
+
+def _search_geoapify(
+    *,
+    city: str,
+    chosen_id: str,
+    chosen_label: str,
+    wanted_days: List[str],
+    tod: str,
+    radius_m: int,
+    radius_km_used: float,
+    suggestion: Dict[str, Any],
+    geocode: Callable[[str], Dict[str, Any]] = geocode_city_geoapify,
+    fetch_places: Callable[..., List[Dict[str, Any]]] = fetch_geoapify_places,
+) -> Dict[str, Any]:
+    location = geocode(city)
+    features = fetch_places(
+        location["lat"],
+        location["lon"],
+        radius_m,
+        specialty_id=chosen_id,
+    )
+    places: List[Dict[str, Any]] = []
+    seen = set()
+    for feature in features:
+        props = feature.get("properties") if isinstance(feature, dict) else None
+        place_id = (props or {}).get("place_id") if isinstance(props, dict) else None
+        key = place_id or id(feature)
+        if key in seen:
+            continue
+        seen.add(key)
+        place = _normalize_geoapify_place(
+            feature if isinstance(feature, dict) else {},
+            origin=location,
+            specialty_id=chosen_id,
+            days=wanted_days,
+            time_of_day=tod,
+            radius_km=radius_km_used,
         )
-    return {
-        "query": {
-            "city": city.strip(),
-            "specialty_id": chosen_id,
-            "specialty_label": chosen_label,
-            "days": wanted_days,
-            "time_of_day": tod,
-            "radius_km": radius_km_used,
-        },
-        "location": location,
-        "suggestion": suggestion["suggested"],
-        "results": places,
-        "result_count": len(places),
-        "zero_results_hint": zero_hint,
-        "source": dict(SOURCE),
-        "disclaimer": DISCLAIMER,
-    }
+        if place:
+            places.append(place)
+    return _pack_search(
+        city=city,
+        chosen_id=chosen_id,
+        chosen_label=chosen_label,
+        wanted_days=wanted_days,
+        tod=tod,
+        radius_km_used=radius_km_used,
+        location=location,
+        suggestion=suggestion,
+        places=places,
+        source=SOURCE_GEOAPIFY,
+    )
+
+
+def search_care(
+    *,
+    city: str,
+    specialty_id: Optional[str] = None,
+    days: Optional[Sequence[str]] = None,
+    time_of_day: str = "any",
+    radius_km: float = 8.0,
+    timeline: Optional[Dict[str, Any]] = None,
+    geocode: Optional[Callable[[str], Dict[str, Any]]] = None,
+    fetch_places: Optional[Callable[..., List[Dict[str, Any]]]] = None,
+) -> Dict[str, Any]:
+    """Search nearby clinics. Geoapify first when keyed; OSM otherwise."""
+    suggestion = suggest_specialties(timeline)
+    chosen_id = (specialty_id or suggestion["suggested"]["id"] or "general_practice").strip()
+    if chosen_id not in SPECIALTIES:
+        chosen_id = "general_practice"
+    chosen_label = SPECIALTIES[chosen_id]["label"]
+
+    wanted_days = [d for d in (days or DAYS[:5]) if d in DAY_INDEX]
+    if not wanted_days:
+        wanted_days = list(DAYS[:5])
+    tod = time_of_day if time_of_day in TIME_WINDOWS else "any"
+    radius_m = int(max(1000, min(MAX_RADIUS_M, (radius_km or 8) * 1000)))
+    radius_km_used = radius_m / 1000.0
+
+    shared = dict(
+        city=city,
+        chosen_id=chosen_id,
+        chosen_label=chosen_label,
+        wanted_days=wanted_days,
+        tod=tod,
+        radius_m=radius_m,
+        radius_km_used=radius_km_used,
+        suggestion=suggestion,
+    )
+
+    # Tests (and callers) that inject OSM helpers stay on the OSM path.
+    injected = geocode is not None or fetch_places is not None
+    if injected:
+        return _search_osm(
+            **shared,
+            geocode=geocode or geocode_city,
+            fetch_places=fetch_places or fetch_osm_places,
+        )
+
+    if geoapify_configured():
+        try:
+            result = _search_geoapify(**shared)
+            if result["results"]:
+                return result
+            logger.info("Geoapify returned 0 clinics for %s; trying OpenStreetMap.", city)
+        except CityNotFoundError:
+            logger.info("Geoapify geocoding missed %r; trying Nominatim.", city)
+        except DirectoryUnavailableError as exc:
+            logger.warning("Geoapify unavailable (%s); trying OpenStreetMap.", exc)
+        except Exception as exc:
+            logger.warning("Geoapify failed (%s); trying OpenStreetMap.", exc)
+
+    return _search_osm(
+        **shared,
+        geocode=geocode_city,
+        fetch_places=fetch_osm_places,
+    )

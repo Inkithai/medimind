@@ -221,7 +221,7 @@ class MessageRequest(BaseModel):
 
 
 class CareSearchRequest(BaseModel):
-    """Find clinics/doctors near a city using OpenStreetMap."""
+    """Find clinics/doctors near a city (Geoapify, OSM fallback)."""
     city: str = Field(..., min_length=2, max_length=160)
     specialty: Optional[str] = None
     days: List[str] = Field(default_factory=lambda: ["mon", "tue", "wed", "thu", "fri"])
@@ -1111,9 +1111,10 @@ async def get_care_suggestion(user_id: str = Depends(get_current_user)) -> Dict[
 async def search_care(
     body: CareSearchRequest, user_id: str = Depends(get_current_user)
 ) -> Dict[str, Any]:
-    """Geocode the user's city via Nominatim and list nearby clinics,
-    doctors, and hospitals from OpenStreetMap. Ranked by specialty match,
-    opening hours vs the requested availability, and distance."""
+    """Geocode the user's city and list nearby clinics, doctors, and
+    hospitals. Geoapify is primary when GEOAPIFY_API_KEY is set;
+    OpenStreetMap (Nominatim + Overpass) is the automatic fallback.
+    Ranked by specialty match, opening hours, and distance."""
     return await asyncio.to_thread(
         care_finder.search_care,
         city=body.city,

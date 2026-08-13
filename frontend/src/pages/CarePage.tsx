@@ -124,9 +124,8 @@ export function CarePage() {
       <header>
         <h1 className="page-title">Find care nearby</h1>
         <p className="secondary-text mt-2 max-w-2xl">
-          We suggest a specialty from your records, then search real clinics on OpenStreetMap near
-          the city you type. The map is Leaflet with OSM tiles. This is a directory, not a booking
-          or a referral.
+          We suggest a specialty from your records, then search real clinics near the city you type.
+          The map is Leaflet. This is a directory, not a booking or a referral.
         </p>
       </header>
 
@@ -261,7 +260,7 @@ export function CarePage() {
         </CardBody>
       </Card>
 
-      {searching && <LoadingState label="Looking up clinics on OpenStreetMap" />}
+      {searching && <LoadingState label="Looking up nearby clinics" />}
       {!searching && searchError !== null && <ErrorState error={searchError} onRetry={() => void search()} />}
 
       {!searching && result && (
@@ -276,6 +275,8 @@ export function CarePage() {
                 ? "No mapped clinics in this area"
                 : `${result.result_count} place${result.result_count === 1 ? "" : "s"} near ${result.location.label}`}
               {" · "}
+              <span className="font-medium text-slate-700">Provider source: {result.source.name}</span>
+              {" · "}
               <a
                 href={result.source.url}
                 target="_blank"
@@ -284,7 +285,6 @@ export function CarePage() {
               >
                 {result.source.attribution}
               </a>
-              {" · "}Nominatim + Overpass
             </p>
             {result.result_count > 0 && (
               <div className="flex flex-wrap gap-2 text-xs">
@@ -334,7 +334,7 @@ export function CarePage() {
                   <p className="secondary-text mt-2">
                     Selected: <span className="font-medium text-slate-700">{selected.name}</span> ·{" "}
                     <a href={selected.source_url} target="_blank" rel="noreferrer" className="text-brand-600">
-                      View on OpenStreetMap
+                      View listing
                     </a>
                   </p>
                 )}
@@ -350,8 +350,8 @@ export function CarePage() {
             <UploadIcon className="h-8 w-8 text-slate-300" />
             <p className="text-sm font-medium text-slate-700">Enter a city to see real clinics on the map</p>
             <p className="secondary-text max-w-md">
-              Results come from OpenStreetMap (Nominatim + Overpass). Coverage is better in cities
-              than in small towns, and listings may be incomplete.
+              Listings come from Geoapify, with OpenStreetMap as a backup directory. Coverage is
+              better in cities than in small towns.
             </p>
           </CardBody>
         </Card>
@@ -456,7 +456,7 @@ function PlaceCard({
           className="text-slate-500 hover:text-slate-700"
           onClick={(e) => e.stopPropagation()}
         >
-          OSM source
+          Source
         </a>
       </div>
     </button>
