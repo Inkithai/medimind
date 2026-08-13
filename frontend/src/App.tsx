@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import { Layout } from "./components/Layout";
 import { useAuth } from "./context/AuthContext";
 import { CrossCheckPage } from "./pages/CrossCheckPage";
+import { CareRecommendationsPage } from "./pages/CareRecommendationsPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { LabTrendsPage } from "./pages/LabTrendsPage";
 import { LandingPage } from "./pages/LandingPage";
@@ -126,6 +127,14 @@ export default function App() {
           element={
             <RequireAuth>
               <LabTrendsPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/care"
+          element={
+            <RequireAuth>
+              <CareRecommendationsPage />
             </RequireAuth>
           }
         />

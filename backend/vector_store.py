@@ -85,6 +85,14 @@ def get_chroma_client():
     return _get_chroma_client()
 
 def _sanitize_collection_name(patient_key: str) -> str:
+    """Chroma collection names must be 3-63 chars, start/end alphanumeric,
+    and contain only [a-zA-Z0-9._-].
+
+    Truncate BEFORE the end-alphanumeric fixup — see the longer note on
+    retrieval._sanitize_collection_name(). Truncating last can leave a
+    trailing '_'/'.'/'-' on keys longer than 63 chars, which Chroma
+    rejects. These two implementations must stay identical so a write and
+    a subsequent read resolve to the same collection."""
     name = re.sub(r"[^a-z0-9._-]+", "_", patient_key.strip().lower()).strip("_.-")
     if not name:
         name = "patient"

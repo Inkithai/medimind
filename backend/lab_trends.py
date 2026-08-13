@@ -73,7 +73,6 @@ def _parse_value(value: Any) -> Optional[float]:
         return None
     if isinstance(value, (int, float)):
         return float(value)
-
     text = str(value).strip()
     if not text:
         return None
@@ -457,6 +456,14 @@ if __name__ == "__main__":
     # Regression check for the reference-range parsing bug (hyphen
     # mis-read as a negative sign): must render as "70-99", not "-99-70".
     assert "70-99 mg/dL" in by_name["Fasting Glucose"]["explanation"], by_name["Fasting Glucose"]["explanation"]
+
+    # Thousand-separated lab values (WBC, platelets) must not be truncated
+    # at the first comma: "12,500" used to parse as 12.
+    assert _parse_value("12,500") == 12500.0
+    assert _parse_value("1,234.5") == 1234.5
+    assert _parse_value("6.1") == 6.1
+    assert _parse_value("<5.7") == 5.7
+    assert _parse_value("1,5") == 1.5
 
     for t in result["trends"]:
         print(f"--- {t['test_name']} ---")
