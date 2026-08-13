@@ -176,6 +176,10 @@ import { LocationPicker, type ConfirmedLocation } from "./components/location";
 />;
 ```
 
+**"Use my current location" accuracy.** The picker calls `getAccuratePosition()` (`src/services/geolocation.ts`) rather than a bare `getCurrentPosition()`. It requests `enableHighAccuracy` with `maximumAge: 0`, then *watches* the position and keeps the most precise reading, resolving as soon as the fix is within 30 m (or returning the best reading at the 15 s deadline). This avoids locking onto the coarse Wi-Fi/IP estimate that arrives first, which is often off by hundreds of metres. Reverse geocoding only supplies the place *name*: the device's own latitude/longitude are preserved, so a nearby street or suburb centroid can never move the pin. The confirm step shows the GPS accuracy radius as a badge and a map circle, and prompts the user to drag the pin when the fix is coarser than 150 m. Run `npm run test:geolocation` for the 9 regression tests covering this.
+
+The location picker combines Photon/OpenStreetMap landmark search with Open-Meteo/GeoNames city prefix matching and Leaflet/OpenStreetMap tiles. Confirmed coordinates are sent to the authenticated backend, which normalizes every provider's response to `Facility[]`. By default the backend queries OpenStreetMap/Overpass, which needs no API key. Optionally set `CARE_PROVIDER=google` to prefer Google Places API (New) Nearby Search (city/area-only requests use Places Text Search), with OpenStreetMap as an automatic fallback. Configure `GOOGLE_MAPS_API_KEY` only on the backend—never as a `VITE_*` variable—and enable **Places API (New)** plus billing for the key's Google Cloud project.
+
 The location picker combines Photon/OpenStreetMap landmark search with Open-Meteo/GeoNames city prefix matching and Leaflet/OpenStreetMap tiles. Confirmed coordinates are sent to the authenticated backend, where `CARE_PROVIDER=google` uses Google Places API (New) Nearby Search and normalizes results to `Facility[]`; city/area-only legacy requests fall back to Places Text Search. Configure `GOOGLE_MAPS_API_KEY` only on the backend—never as a `VITE_*` variable. Enable **Places API (New)** and billing for the key's Google Cloud project.
 
 `vite.config.ts` proxy target overridable via `VITE_API_PROXY_TARGET`. For prod:
@@ -260,12 +264,16 @@ Frontend `UploadPage` always uses async jobs so even a small file has truthful p
 #### Care navigation
 `GET /api/v1/care/facilities?location=Jaffna&kind=hospital&radius_km=8` returns normalized public `Facility[]` listings. Map-confirmed clients should also send `latitude` and `longitude` to use distance-ranked Nearby Search. Supported kinds: `any`, `hospital`, `clinic`, `pharmacy`, `laboratory`, and `doctor`.
 
+It works with **no configuration and no API key**. Unset `CARE_PROVIDER` (or `CARE_PROVIDER=osm`) uses OpenStreetMap via the Overpass API — no key, no billing, no Google Cloud project:
+
 ```ini
+# Nothing required. Optionally, prefer Google and keep OSM as a safety net:
 CARE_PROVIDER=google
 GOOGLE_MAPS_API_KEY=AIza...  # Places API (New) enabled; billing attached
+CARE_FALLBACK=on             # default; set "off" to disable the OSM fallback
 ```
 
-The key stays server-side. A 503 logs the specific provider/configuration reason on the backend while returning a neutral directory error to the browser. Common Google 403 causes are an invalid or truncated key, Places API (New) not enabled, billing not attached, or key restrictions that reject requests from the backend.
+Keys stay server-side. With `CARE_PROVIDER=google`, a Google rejection (invalid/truncated key, Places API (New) not enabled, billing not attached, restrictive key rules) or an empty Google result set transparently falls back to OpenStreetMap, so the page keeps working; the specific provider reason is logged for operators only. A 503 now means every provider failed — typically blocked outbound network egress; point `OVERPASS_API_URL` at a reachable mirror if needed.
 
 #### Vector Store
 `VECTOR_STORE=chroma` (default, local `CHROMA_DIR`) or `supabase` (Supabase `chunks` table, no volume). `inspect_chroma.py` works with both (`VECTOR_STORE=supabase python inspect_chroma.py`). After switching backends, delete `chroma_db` or clear `chunks` table and re-upload.
@@ -290,6 +298,10 @@ VECTOR_STORE=supabase python backend/inspect_chroma.py "anon_ab12cd34ef56"
 
 ### What changed
 
+- **Sticky sidebar** — the desktop sidebar is now `lg:sticky lg:top-0 lg:h-screen lg:self-start` instead of a flex child stretched by its sibling, so it stays fixed in the viewport on long pages rather than scrolling away and growing to the content height.
+- **Accurate current location** — "Use my current location" now refines the GPS fix instead of accepting the first coarse estimate, never lets reverse geocoding move the confirmed coordinates, and surfaces the accuracy radius so the user can correct a poor fix.
+- **Find Care no longer needs an API key** — the directory defaults to a keyless OpenStreetMap/Overpass adapter, and `CARE_PROVIDER=google` now falls back to it whenever Google is unconfigured, rejects the call (e.g. `PERMISSION_DENIED` from a project without Places API (New)/billing), or returns nothing. This removes the "Nearby search didn't load" 503 that a missing/invalid Google key used to cause. Set `CARE_FALLBACK=off` to restore strict Google-only behaviour.
+- **Google care-directory adapter** — `CARE_PROVIDER=google` calls Places API (New) instead of returning a stubbed empty list. Coordinate searches use Nearby Search; legacy city/area searches use Text Search. Responses are normalized and API keys remain backend-only.
 - **Find care** — `/care` searches real clinics with **Geoapify first** (geocoding + Places, free key, no card) and **OpenStreetMap / Overpass as fallback**. Leaflet draws the map. The UI labels the provider source (`Geoapify` or `OpenStreetMap`) without saying a directory failed. Specialty is suggested from the record; results rank by specialty match, opening hours vs the requested window, and distance.
 - **Google care-directory adapter** — `CARE_PROVIDER=google` now calls Places API (New) instead of returning a stubbed empty list. Coordinate searches use Nearby Search; legacy city/area searches use Text Search. Responses are normalized and API keys remain backend-only.
 - **Current Gemini model** — the Gemini default is `gemini-3.6-flash` for text and vision, with `gemini-3.5-flash-lite` fallback. The retired `gemini-2.0-flash` default (shut down 2026-06-01) was the source of misleading HTTP 429 `limit: 0` failures.

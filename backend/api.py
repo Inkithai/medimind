@@ -34,8 +34,9 @@ Env:
     MiniLM model)
     (optional: VECTOR_STORE=chroma|supabase, USE_BACKGROUND_JOBS=true,
      UPLOAD_FILE_CONCURRENCY=1 for async per-file worker load control)
-    (optional care directory: CARE_PROVIDER=google,
-     GOOGLE_MAPS_API_KEY with Places API (New) enabled + billing)
+    (care directory needs no key: defaults to OpenStreetMap/Overpass.
+     Optional CARE_PROVIDER=google + GOOGLE_MAPS_API_KEY with Places API
+     (New) enabled + billing, which falls back to OpenStreetMap on failure)
 """
 
 import asyncio
@@ -150,12 +151,13 @@ from contextlib import asynccontextmanager
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Document worker pool ready: concurrency=%d", UPLOAD_FILE_CONCURRENCY)
-    if os.environ.get("CARE_PROVIDER", "").strip():
-        try:
-            care_provider = get_care_provider()
-            logger.info("Care directory configured: provider=%s", care_provider.name)
-        except CareConfigurationError as error:
-            logger.warning("Care directory is not configured: %s", error)
+    # The care directory always has a keyless OpenStreetMap default, so this
+    # only reports which adapter is active rather than gating the feature.
+    try:
+        care_provider = get_care_provider()
+        logger.info("Care directory ready: provider=%s", care_provider.name)
+    except CareConfigurationError as error:
+        logger.warning("Care directory is not configured: %s", error)
     # Startup: ensure tables exist (Supabase schema is created via SQL editor,
     # so this is a no-op but kept for compatibility)
     try:
@@ -1259,8 +1261,10 @@ async def care_facilities(
     """Directory search. Does not read timeline, safety, or labs.
 
     Map-confirmed clients send latitude/longitude and receive a normalized
-    Facility list from CARE_PROVIDER (Google Places API New). Legacy clients
-    that only send ``location`` keep the packed OSM/Mapbox payload.
+    Facility list. The directory needs no API key: it defaults to
+    OpenStreetMap/Overpass, and CARE_PROVIDER=google prefers Google Places
+    API (New) while falling back to OpenStreetMap on any rejection. Legacy
+    clients that only send ``location`` keep the packed OSM/Mapbox payload.
     """
     _ = user_id
     if (latitude is None) != (longitude is None):
@@ -1271,9 +1275,9 @@ async def care_facilities(
     if normalized_kind not in allowed_kinds and normalized_kind not in FACILITY_KINDS:
         raise HTTPException(400, "Unsupported facility type.")
 
-    # Prefer the map-based CARE_PROVIDER adapter when it is configured or
-    # when the client already confirmed a pin. Fall back to the legacy
-    # CareNavigationService so existing OSM/Mapbox clients keep working.
+    # get_care_provider() always resolves to a usable adapter now (keyless
+    # OpenStreetMap by default), so a missing/invalid Google key no longer
+    # turns a map-confirmed search into a 503.
     try:
         provider = get_care_provider()
     except CareConfigurationError as error:

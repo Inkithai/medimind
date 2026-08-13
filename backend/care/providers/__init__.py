@@ -10,6 +10,7 @@ from care.providers.base import (
 from care.providers.google import GoogleProvider
 from care.providers.mapbox import MapboxProvider
 from care.providers.osm import OsmProvider
+from care.providers.osm_directory import OpenStreetMapProvider
 
 __all__ = [
     "CareProvider",
@@ -18,6 +19,7 @@ __all__ = [
     "RoutingProvider",
     "ProviderNotConfiguredError",
     "OsmProvider",
+    "OpenStreetMapProvider",
     "MapboxProvider",
     "GoogleProvider",
 ]

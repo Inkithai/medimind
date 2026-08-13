@@ -9,7 +9,7 @@ this package and are never exposed to the browser.
 """
 
 from care.errors import CareConfigurationError, CareProviderError
-from care.factory import get_care_provider
+from care.factory import FallbackProvider, get_care_provider
 from care.models import Facility
 from care.service import CareNavigationError, CareNavigationService, get_care_service
 
@@ -19,6 +19,7 @@ __all__ = [
     "CareNavigationService",
     "CareProviderError",
     "Facility",
+    "FallbackProvider",
     "get_care_provider",
     "get_care_service",
 ]
