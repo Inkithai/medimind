@@ -1,6 +1,5 @@
 import type { QAResponse } from "../types/api";
 import { classNames, confidenceTone, formatConfidence, formatDate } from "../utils/format";
-import { Alert } from "./Alert";
 import { ConsiderProfessionalCare } from "./ConsiderProfessionalCare";
 
 export function QAResultCard({

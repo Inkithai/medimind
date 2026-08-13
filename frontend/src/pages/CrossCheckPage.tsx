@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
+import { ConsiderProfessionalCare } from "../components/ConsiderProfessionalCare";
 import { CrossCheckView } from "../components/CrossCheckView";
 import { ErrorState } from "../components/ErrorState";
 import { Card, CardBody } from "../components/Card";
@@ -70,6 +71,15 @@ export function CrossCheckPage() {
         </>
       )}
     </div>
+  );
+}
+
+function hasSafetyIssues(report: CrossCheckReport): boolean {
+  return (
+    report.potential_drug_interactions.length > 0 ||
+    report.duplicate_prescriptions.length > 0 ||
+    report.conflicting_dosage_instructions.length > 0 ||
+    report.allergy_conflicts.length > 0
   );
 }
 
