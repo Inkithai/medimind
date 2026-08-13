@@ -62,9 +62,17 @@ export function Layout() {
       </div>
 
       {/* Sidebar */}
+      {/* Mobile: an off-canvas drawer pinned to the viewport.
+          Desktop: sticky and exactly one viewport tall, so it stays in place
+          while the page scrolls instead of stretching to the content height.
+          `lg:bottom-auto` is required — a sticky box with both top and bottom
+          offsets is also pushed by the bottom edge. */}
       <aside
         className={classNames(
-          "fixed inset-y-0 left-0 z-30 w-72 transform border-r border-slate-200 bg-white transition-transform lg:static lg:translate-x-0",
+          "fixed bottom-0 left-0 top-0 z-30 w-72 transform border-r border-slate-200 bg-white transition-transform",
+          // `self-start` stops the flex row from stretching the sidebar to the
+          // full content height, which would defeat sticky positioning.
+          "lg:sticky lg:bottom-auto lg:top-0 lg:h-screen lg:shrink-0 lg:self-start lg:translate-x-0",
           sidebarOpen ? "translate-x-0" : "-translate-x-full"
         )}
         aria-label="Main navigation"

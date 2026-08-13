@@ -10,6 +10,8 @@
 - Care Navigation with search-as-you-type, current location, map confirmation, and nearby facility results — works with no API key or billing account
 - Facility category filters for hospitals, clinics, pharmacies, laboratories, and doctors
 - Public listing details including distance, address, rating, phone, website, opening hours, and map link when available
+- High-accuracy GPS capture that refines the fix before use, shows its margin of error, and asks for a pin correction when the reading is coarse
+- Sticky desktop sidebar that stays in view on long pages
 
 ## Hidden / Engineering Features
 
@@ -23,6 +25,9 @@
 - Every provider's response normalized to one stable `Facility[]` contract
 - Provider-neutral empty and failure responses; provider details and credentials stay in server logs
 - Regression tests for Google payloads, OpenStreetMap tags, normalization, distance ordering, mirror failover, provider fallback, empty results, and neutral API failures
+- Geolocation refinement via watchPosition with best-fix retention, early exit at 30 m, and best-effort return on timeout
+- Reverse geocoding used for naming only—device coordinates are never overwritten by a feature centroid
+- Regression tests for GPS refinement, cache avoidance, permission/timeout handling, and accuracy labelling
 - Regression tests for reference-range formatting + trend direction
 - Chroma collection sanitization; confidence-aware extraction
 - Early cost-protection gate (reject before downstream AI)
