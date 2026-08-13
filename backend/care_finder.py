@@ -1,16 +1,16 @@
 """
-Find Care — specialty suggestion + OpenStreetMap clinic directory
-================================================================
+Find Care — specialty suggestion + clinic directory
+===================================================
 Turns a patient's extracted timeline into a suggested medical specialty,
 then searches real healthcare facilities near a city the user types.
 
-No paid maps key. The directory is OpenStreetMap:
+Stack (no paid maps key):
 
-  * Nominatim geocodes the city/area  (no key; identify via User-Agent)
-  * Overpass lists clinics / doctors / hospitals around that point
-  * Leaflet + OSM tiles render the map in the browser
+  * Geocode  — OpenStreetMap Nominatim
+  * Directory — OpenStreetMap Overpass API (clinics, doctors, hospitals)
+  * Map tiles — Leaflet + OSM raster tiles (frontend)
 
-This is a directory lookup, not a referral, booking system, or diagnosis.
+This is a public directory lookup, not a referral, booking system, or diagnosis.
 """
 
 from __future__ import annotations
@@ -59,6 +59,15 @@ DISCLAIMER = (
     "Always confirm details with the clinic and consult a licensed clinician "
     "before acting on anything in your records."
 )
+
+SOURCE = {
+    "name": "OpenStreetMap",
+    "geocoder": "Nominatim",
+    "directory": "Overpass API",
+    "license": "ODbL",
+    "attribution": "© OpenStreetMap contributors",
+    "url": "https://www.openstreetmap.org/copyright",
+}
 
 
 class CareFinderError(RuntimeError):
@@ -456,7 +465,7 @@ def availability_status(
 
 
 # ---------------------------------------------------------------------------
-# HTTP + geocode + Overpass
+# HTTP + Nominatim + Overpass
 # ---------------------------------------------------------------------------
 
 def _request_json(
@@ -486,6 +495,7 @@ def _request_json(
 
 
 def geocode_city(city: str, http_json: Callable[..., Any] = _request_json) -> Dict[str, Any]:
+    """Resolve a city / neighbourhood / postcode via Nominatim."""
     query = (city or "").strip()
     if len(query) < 2:
         raise CityNotFoundError(query or "that place")
@@ -513,11 +523,13 @@ def geocode_city(city: str, http_json: Callable[..., Any] = _request_json) -> Di
 
 
 def _overpass_query(lat: float, lon: float, radius_m: int) -> str:
+    around = f"(around:{radius_m},{lat:.6f},{lon:.6f})"
     return (
         f"[out:json][timeout:{HTTP_TIMEOUT_SECONDS}];"
         "("
-        f'nwr["amenity"~"^(clinic|doctors|hospital)$"](around:{radius_m},{lat:.6f},{lon:.6f});'
-        f'nwr["healthcare"~"^(doctor|clinic|hospital|centre|center)$"](around:{radius_m},{lat:.6f},{lon:.6f});'
+        f'nwr["amenity"~"^(clinic|doctors|hospital)$"]{around};'
+        f'nwr["healthcare"~"^(doctor|clinic|hospital|centre|center)$"]{around};'
+        f'nwr["healthcare:speciality"]{around};'
         ");"
         "out center tags;"
     )
@@ -529,6 +541,7 @@ def fetch_osm_places(
     radius_m: int,
     http_json: Callable[..., Any] = _request_json,
 ) -> List[Dict[str, Any]]:
+    """Query Overpass for clinics, doctors, and hospitals around a point."""
     body = _overpass_query(lat, lon, radius_m).encode("utf-8")
     try:
         payload = http_json(OVERPASS_URL, data=body)
@@ -704,9 +717,10 @@ def search_care(
     time_of_day: str = "any",
     radius_km: float = 8.0,
     timeline: Optional[Dict[str, Any]] = None,
-    geocode: Callable[[str], Dict[str, Any]] = geocode_city,
-    fetch_places: Callable[[float, float, int], List[Dict[str, Any]]] = fetch_osm_places,
+    geocode: Optional[Callable[[str], Dict[str, Any]]] = None,
+    fetch_places: Optional[Callable[..., List[Dict[str, Any]]]] = None,
 ) -> Dict[str, Any]:
+    """Geocode `city` with Nominatim and list nearby OSM healthcare POIs."""
     suggestion = suggest_specialties(timeline)
     chosen_id = (specialty_id or suggestion["suggested"]["id"] or "general_practice").strip()
     if chosen_id not in SPECIALTIES:
@@ -720,8 +734,8 @@ def search_care(
     radius_m = int(max(1000, min(MAX_RADIUS_M, (radius_km or 8) * 1000)))
     radius_km_used = radius_m / 1000.0
 
-    location = geocode(city)
-    elements = fetch_places(location["lat"], location["lon"], radius_m)
+    location = (geocode or geocode_city)(city)
+    elements = (fetch_places or fetch_osm_places)(location["lat"], location["lon"], radius_m)
 
     seen = set()
     places: List[Dict[str, Any]] = []
@@ -741,16 +755,14 @@ def search_care(
         if place:
             places.append(place)
 
-    places.sort(key=lambda item: (-item["score"], item["distance_km"], item["name"]))
-    places = places[:25]
-
+    places = sorted(places, key=lambda item: (-item["score"], item["distance_km"], item["name"]))[:25]
     zero_hint = None
     if not places:
         zero_hint = (
-            f"No clinics, doctors, or hospitals are mapped within {radius_km_used:g} km of "
-            f"{location['label']}. Try a larger area, a nearby city, or a different spelling."
+            f"No clinics, doctors, or hospitals are listed on OpenStreetMap within "
+            f"{radius_km_used:g} km of {location['label']}. Try a larger area, a nearby "
+            f"city, or a different spelling. Coverage is better in cities than in small towns."
         )
-
     return {
         "query": {
             "city": city.strip(),
@@ -765,13 +777,6 @@ def search_care(
         "results": places,
         "result_count": len(places),
         "zero_results_hint": zero_hint,
-        "source": {
-            "name": "OpenStreetMap",
-            "geocoder": "Nominatim",
-            "directory": "Overpass API",
-            "license": "ODbL",
-            "attribution": "© OpenStreetMap contributors",
-            "url": "https://www.openstreetmap.org/copyright",
-        },
+        "source": dict(SOURCE),
         "disclaimer": DISCLAIMER,
     }

@@ -124,8 +124,9 @@ export function CarePage() {
       <header>
         <h1 className="page-title">Find care nearby</h1>
         <p className="secondary-text mt-2 max-w-2xl">
-          We suggest a specialty from your records, then search real clinics on OpenStreetMap near the
-          city you type. This is a public directory, not a booking or a referral.
+          We suggest a specialty from your records, then search real clinics on OpenStreetMap near
+          the city you type. The map is Leaflet with OSM tiles. This is a directory, not a booking
+          or a referral.
         </p>
       </header>
 
@@ -283,6 +284,7 @@ export function CarePage() {
               >
                 {result.source.attribution}
               </a>
+              {" · "}Nominatim + Overpass
             </p>
             {result.result_count > 0 && (
               <div className="flex flex-wrap gap-2 text-xs">
@@ -348,7 +350,8 @@ export function CarePage() {
             <UploadIcon className="h-8 w-8 text-slate-300" />
             <p className="text-sm font-medium text-slate-700">Enter a city to see real clinics on the map</p>
             <p className="secondary-text max-w-md">
-              Results come from OpenStreetMap volunteers. Coverage is better in cities than in small towns.
+              Results come from OpenStreetMap (Nominatim + Overpass). Coverage is better in cities
+              than in small towns, and listings may be incomplete.
             </p>
           </CardBody>
         </Card>

@@ -130,8 +130,12 @@ def test_search_ranks_specialty_match_above_generic_and_handles_zero():
     assert result["results"][0]["availability"] == "open"
     assert result["results"][0]["source"] == "OpenStreetMap"
     assert "openstreetmap.org/node/1" in result["results"][0]["source_url"]
-    assert "OpenStreetMap" in result["source"]["name"]
+    assert result["source"]["name"] == "OpenStreetMap"
+    assert result["source"]["geocoder"] == "Nominatim"
+    assert result["source"]["directory"] == "Overpass API"
+    assert "fallback_from" not in result["source"]
     assert "not a medical referral" in result["disclaimer"].lower()
+    assert "google" not in result["disclaimer"].lower()
 
     empty = cf.search_care(
         city="Kandy",
@@ -142,6 +146,30 @@ def test_search_ranks_specialty_match_above_generic_and_handles_zero():
     assert empty["results"] == []
     assert empty["zero_results_hint"]
     assert "km" in empty["zero_results_hint"]
+    assert empty["source"]["name"] == "OpenStreetMap"
+
+
+def test_unknown_specialty_falls_back_to_general_practice():
+    def fake_geocode(city):
+        return {"lat": 7.29, "lon": 80.63, "label": "Kandy", "source": "OpenStreetMap Nominatim"}
+
+    result = cf.search_care(
+        city="Kandy",
+        specialty_id="not_a_real_specialty",
+        geocode=fake_geocode,
+        fetch_places=lambda *a: [],
+    )
+    assert result["query"]["specialty_id"] == "general_practice"
+
+
+def test_stack_is_openstreetmap_only():
+    """Find Care must not depend on a Google Places key or cascade."""
+    assert not hasattr(cf, "google_places_key")
+    assert not hasattr(cf, "google_places_configured")
+    assert not hasattr(cf, "fetch_google_places")
+    assert not hasattr(cf, "SOURCE_GOOGLE")
+    assert cf.SOURCE["name"] == "OpenStreetMap"
+    assert "OpenStreetMap" in cf.DISCLAIMER
 
 
 if __name__ == "__main__":
