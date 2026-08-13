@@ -34,6 +34,8 @@ Env:
     MiniLM model)
     (optional: VECTOR_STORE=chroma|supabase, USE_BACKGROUND_JOBS=true,
      UPLOAD_FILE_CONCURRENCY=1 for async per-file worker load control)
+    (optional care directory: CARE_PROVIDER=google,
+     GOOGLE_MAPS_API_KEY with Places API (New) enabled + billing)
 """
 
 import asyncio
@@ -48,7 +50,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, Dict, List, Literal, Optional, Tuple
 
-from fastapi import BackgroundTasks, Depends, FastAPI, File, Header, HTTPException, Request, UploadFile
+from fastapi import BackgroundTasks, Depends, FastAPI, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
@@ -57,6 +59,7 @@ import conversation
 import db
 import jobs
 import storage
+from care import CareConfigurationError, CareProviderError, get_care_provider
 from care_recommendations import ProviderSearchError, recommendation_context, search_live_providers
 from auth import get_current_user, issue_anonymous_token
 from document_filter import NonMedicalDocumentError, assert_medical_document
@@ -147,6 +150,12 @@ from contextlib import asynccontextmanager
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Document worker pool ready: concurrency=%d", UPLOAD_FILE_CONCURRENCY)
+    if os.environ.get("CARE_PROVIDER", "").strip():
+        try:
+            care_provider = get_care_provider()
+            logger.info("Care directory configured: provider=%s", care_provider.name)
+        except CareConfigurationError as error:
+            logger.warning("Care directory is not configured: %s", error)
     # Startup: ensure tables exist (Supabase schema is created via SQL editor,
     # so this is a no-op but kept for compatibility)
     try:
@@ -1240,20 +1249,90 @@ async def care_navigation_error_handler(request: Request, exc: CareNavigationErr
 
 @app.get("/api/v1/care/facilities")
 async def care_facilities(
-    location: str,
-    kind: str = "any",
-    radius_km: float = 8.0,
+    location: str = Query(default="", max_length=200),
+    kind: str = Query(default="any", max_length=30),
+    radius_km: float = Query(default=8.0, ge=1.0, le=50.0),
+    latitude: Optional[float] = Query(default=None, ge=-90.0, le=90.0),
+    longitude: Optional[float] = Query(default=None, ge=-180.0, le=180.0),
     user_id: str = Depends(get_current_user),
-) -> Dict[str, Any]:
-    """Directory search. Does not read timeline, safety, or labs."""
+) -> Any:
+    """Directory search. Does not read timeline, safety, or labs.
+
+    Map-confirmed clients send latitude/longitude and receive a normalized
+    Facility list from CARE_PROVIDER (Google Places API New). Legacy clients
+    that only send ``location`` keep the packed OSM/Mapbox payload.
+    """
     _ = user_id
-    if kind not in FACILITY_KINDS:
-        kind = "any"
-    # Blocking upstream HTTP (Nominatim + Overpass) must not stall the event loop.
+    if (latitude is None) != (longitude is None):
+        raise HTTPException(400, "latitude and longitude must be provided together.")
+
+    normalized_kind = (kind or "any").strip().lower() or "any"
+    allowed_kinds = {"any", "hospital", "clinic", "pharmacy", "laboratory", "lab", "doctor"}
+    if normalized_kind not in allowed_kinds and normalized_kind not in FACILITY_KINDS:
+        raise HTTPException(400, "Unsupported facility type.")
+
+    # Prefer the map-based CARE_PROVIDER adapter when it is configured or
+    # when the client already confirmed a pin. Fall back to the legacy
+    # CareNavigationService so existing OSM/Mapbox clients keep working.
+    try:
+        provider = get_care_provider()
+    except CareConfigurationError as error:
+        if latitude is not None:
+            logger.error("care navigation configuration error: %s", error)
+            raise HTTPException(
+                503,
+                "The facility directory is temporarily unavailable. Please try again shortly.",
+            ) from error
+        provider = None
+
+    if provider is not None:
+        if not location.strip() and (latitude is None or longitude is None):
+            raise HTTPException(400, "Choose a city/area or provide latitude and longitude.")
+        try:
+            facilities = await asyncio.to_thread(
+                provider.search,
+                location,
+                normalized_kind,
+                radius_km,
+                latitude=latitude,
+                longitude=longitude,
+            )
+            logger.info(
+                "care navigation: provider=%s kind=%s coordinate_search=%s results=%d",
+                provider.name,
+                normalized_kind,
+                latitude is not None,
+                len(facilities),
+            )
+            return [facility.to_dict() for facility in facilities]
+        except ValueError as error:
+            raise HTTPException(400, str(error)) from error
+        except CareConfigurationError as error:
+            logger.error("care navigation configuration error: %s", error)
+            raise HTTPException(
+                503,
+                "The facility directory is temporarily unavailable. Please try again shortly.",
+            ) from error
+        except CareProviderError as error:
+            logger.warning("care navigation provider error: %s", error)
+            raise HTTPException(
+                503,
+                "The facility directory is temporarily unavailable. Please try again shortly.",
+            ) from error
+        except Exception as error:
+            logger.exception("unexpected care navigation failure: %s", error)
+            raise HTTPException(
+                503,
+                "The facility directory is temporarily unavailable. Please try again shortly.",
+            ) from error
+
+    if not location.strip():
+        raise HTTPException(400, "Choose a city/area or provide latitude and longitude.")
+    chosen = normalized_kind if normalized_kind in FACILITY_KINDS else "any"
     return await asyncio.to_thread(
         get_care_service().search_facilities,
         location=location,
-        kind=kind,
+        kind=chosen,
         radius_km=radius_km,
     )
 

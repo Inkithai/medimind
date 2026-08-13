@@ -83,6 +83,10 @@ VECTOR_STORE=supabase
 USE_BACKGROUND_JOBS=true
 UPLOAD_FILE_CONCURRENCY=1
 CORS_ORIGINS=https://your-project.vercel.app
+
+# ── Optional Find Care directory ─────────────────────
+CARE_PROVIDER=google
+GOOGLE_MAPS_API_KEY=AIza...your-server-key...
 ```
 
 #### How to generate JWT_SECRET:
@@ -198,6 +202,8 @@ Then **redeploy** the backend (SnapDeploy usually auto-redeploys on env var chan
 | `UPLOAD_FILE_CONCURRENCY` | ✅ | `1` | Max simultaneous LLM calls |
 | `CORS_ORIGINS` | ✅ | `https://xxx.vercel.app` | Your frontend URL |
 | `OPENAI_API_KEY` | ❌ | `sk-...` | Only for better embeddings (optional) |
+| `CARE_PROVIDER` | ❌ | `google` | Enables the optional Find Care directory |
+| `GOOGLE_MAPS_API_KEY` | ❌ | `AIza...` | Server-only key with Places API (New) enabled and billing attached |
 
 ### Frontend (Vercel)
 
@@ -244,6 +250,13 @@ SnapDeploy dashboard env vars  →  injected into container  →  os.environ.get
 - Verify `USE_BACKGROUND_JOBS=true`
 - Check Gemini API key is valid
 - Free tier SnapDeploy may have cold starts (~30s)
+
+### Find Care says "facility directory is temporarily unavailable" (503)
+- Confirm the variables are set on the **backend service**, not Vercel/frontend: `CARE_PROVIDER=google` and a complete `GOOGLE_MAPS_API_KEY=AIza...` value. `AI` by itself is not a valid key.
+- In the key's Google Cloud project, enable **Places API (New)** and attach an active billing account.
+- Use API restrictions that allow **Places API (New)**. Browser HTTP-referrer restrictions do not work for backend requests from Render/SnapDeploy; use an appropriate server-side restriction strategy.
+- Save the variables and redeploy/restart the backend. Startup should log `Care directory configured: provider=google`.
+- If Google rejects a call, backend logs now include the HTTP status and Google error status/message while the browser receives a neutral error with no key details.
 
 ### "No timeline found" (404)
 - This is normal before first upload — the page handles it gracefully
