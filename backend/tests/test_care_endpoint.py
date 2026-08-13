@@ -1,22 +1,27 @@
-"""HTTP tests for /api/v1/care/* with OSM calls mocked."""
+"""HTTP tests for /api/v1/care/* — decoupled facilities + legacy care_finder."""
 import os
 import sys
 from unittest import mock
 
+from fastapi.testclient import TestClient
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-os.environ["GROQ_API_KEY"] = "gsk_test_123"
-os.environ["SUPABASE_URL"] = "https://dummy.supabase.co"
-os.environ["SUPABASE_SERVICE_ROLE_KEY"] = "dummy"
-os.environ["JWT_SECRET"] = "dummy"
-
-from fastapi.testclient import TestClient  # noqa: E402
+os.environ.setdefault("GROQ_API_KEY", "gsk_test_123")
+os.environ.setdefault("SUPABASE_URL", "https://dummy.supabase.co")
+os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "dummy")
+os.environ.setdefault("JWT_SECRET", "test-secret-for-care-endpoints-ok")
 
 import api  # noqa: E402
 import care_finder  # noqa: E402
+from care.models import Facility, GeoPoint, pack_facilities  # noqa: E402
 
 
-def _client():
+def _auth():
+    user_id, token = api.issue_anonymous_token()
+    return {"Authorization": f"Bearer {token}", "X-User-Id": user_id}
+
+
+def _client_with_user():
     app = api.app
 
     async def override_user():
@@ -26,8 +31,40 @@ def _client():
     return app
 
 
+def test_facilities_uses_service_not_timeline():
+    packed = pack_facilities(
+        query="Kandy",
+        kind="hospital",
+        origin=GeoPoint(7.29, 80.63, "Kandy", "fake"),
+        facilities=[
+            Facility("1", "Hospital", "hospital", 7.3, 80.64, distance_km=1.2, provider="fake")
+        ],
+        provider="fake",
+    )
+    service = mock.Mock()
+    service.search_facilities.return_value = packed
+    with mock.patch.object(api, "get_care_service", return_value=service):
+        client = TestClient(api.app)
+        response = client.get(
+            "/api/v1/care/facilities",
+            params={"location": "Kandy", "kind": "hospital"},
+            headers=_auth(),
+        )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["result_count"] == 1
+    assert body["provider"] == "fake"
+    service.search_facilities.assert_called_once()
+
+
+def test_facilities_requires_auth():
+    client = TestClient(api.app)
+    response = client.get("/api/v1/care/facilities", params={"location": "Kandy"})
+    assert response.status_code in {401, 403}
+
+
 def test_suggestion_without_records_is_general_practice():
-    app = _client()
+    app = _client_with_user()
     try:
         with mock.patch.object(api.db, "load_patient_snapshot", return_value=None):
             with TestClient(app) as client:
@@ -42,7 +79,7 @@ def test_suggestion_without_records_is_general_practice():
 
 
 def test_search_returns_ranked_osm_results():
-    app = _client()
+    app = _client_with_user()
     payload = {
         "query": {
             "city": "Kandy",
@@ -102,7 +139,7 @@ def test_search_returns_ranked_osm_results():
 
 
 def test_unknown_city_is_422():
-    app = _client()
+    app = _client_with_user()
     try:
         with mock.patch.object(api.db, "load_patient_snapshot", return_value=None), \
              mock.patch.object(care_finder, "search_care", side_effect=care_finder.CityNotFoundError("Narnia")):
@@ -117,7 +154,7 @@ def test_unknown_city_is_422():
 
 
 def test_directory_outage_is_502_retryable():
-    app = _client()
+    app = _client_with_user()
     try:
         with mock.patch.object(api.db, "load_patient_snapshot", return_value=None), \
              mock.patch.object(care_finder, "search_care", side_effect=care_finder.DirectoryUnavailableError()):

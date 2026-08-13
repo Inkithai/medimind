@@ -292,6 +292,7 @@ def track_lab_trends(timeline: Dict[str, Any]) -> Dict[str, Any]:
             "direction": "increasing" | "decreasing" | "stable" | "fluctuating (net increasing/decreasing)",
             "flag_sequence": "normal → normal → high",
             "crossed_into_abnormal_at": {"date":..., "flag":...} | None,
+            "returned_to_normal": bool,  # crossed out, then latest reading is normal
             "approaching_threshold": bool,
             "confidence": float,   # lower if dates/values had to be dropped, or reference ranges disagreed
             "explanation": str,    # plain-language, template-generated from the numbers above
@@ -378,6 +379,7 @@ def track_lab_trends(timeline: Dict[str, Any]) -> Dict[str, Any]:
         direction = _direction([p["_value"] for p in usable], range_bounds)
         crossing = _crossing_point(usable)
         approaching = _approaching_boundary(usable[-1]["_value"], usable[-1]["flag"], range_bounds, direction)
+        recovered = _returned_to_normal(usable, crossing)
 
         # Confidence: average of the source extraction confidences, discounted
         # for dropped/unusable readings and for disagreeing units or reference
@@ -402,6 +404,7 @@ def track_lab_trends(timeline: Dict[str, Any]) -> Dict[str, Any]:
             "crossed_into_abnormal_at": (
                 {"date": crossing["date"], "flag": crossing["flag"]} if crossing else None
             ),
+            "returned_to_normal": recovered,
             "approaching_threshold": approaching,
             "confidence": round(min(base_confidence, 0.97), 2),
             "explanation": _explain(test_name, unit, usable, direction, range_bounds, crossing, approaching),

@@ -1,7 +1,9 @@
 import type {
+  CareFacilitiesResponse,
   CareRecommendationContext,
   CareProviderSearchResponse,
   CrossCheckReport,
+  FacilityKind,
   HealthResponse,
   LabTrendsReport,
   PatientSnapshot,
@@ -376,6 +378,20 @@ export const api = {
       `/api/v1/sessions/${encodeURIComponent(sessionId)}`,
       { method: "DELETE" }
     );
+  },
+
+  searchFacilities(
+    credentials: Credentials,
+    location: string,
+    kind: FacilityKind = "any",
+    radiusKm = 8
+  ): Promise<CareFacilitiesResponse> {
+    const params = new URLSearchParams({
+      location,
+      kind,
+      radius_km: String(radiusKm),
+    });
+    return request<CareFacilitiesResponse>(credentials, `/api/v1/care/facilities?${params}`);
   },
 
   getCareSuggestion(credentials: Credentials): Promise<CareSuggestion> {

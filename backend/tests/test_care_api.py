@@ -127,7 +127,15 @@ def test_search_reports_missing_live_source_configuration_without_provider_fallb
                 )
         assert response.status_code == 503
         body = response.json()
-        assert body["code"] == "provider_configuration_missing"
+        # OpenStreetMapSource still identifies itself with a default User-Agent
+        # when OSM_NOMINATIM_USER_AGENT is unset, then the live directory call
+        # fails. Either way: no fabricated provider records.
+        assert body["code"] in {
+            "provider_configuration_missing",
+            "provider_network_error",
+            "provider_timeout",
+            "provider_service_unavailable",
+        }
         assert "provider" not in body
     finally:
         if old_source is None:

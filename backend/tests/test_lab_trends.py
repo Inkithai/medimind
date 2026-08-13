@@ -265,6 +265,18 @@ class TestRecoveryWording:
         ))
         assert "stayed there since" in trend["explanation"]
 
+    def test_returned_to_normal_is_a_first_class_field(self):
+        recovered = _only_trend(_series(
+            "Glucose", [91, 130, 88], reference_range="70-99",
+            flags=["normal", "high", "normal"],
+        ))
+        still_high = _only_trend(_series(
+            "Glucose", [91, 103, 118], reference_range="70-99",
+            flags=["normal", "high", "high"],
+        ))
+        assert recovered["returned_to_normal"] is True
+        assert still_high["returned_to_normal"] is False
+
     def test_crossing_point_still_recorded_after_recovery(self):
         """The excursion happened; only the wording changes."""
         trend = _only_trend(_series(

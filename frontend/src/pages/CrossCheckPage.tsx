@@ -63,7 +63,12 @@ export function CrossCheckPage() {
         />
       )}
 
-      {!loading && report && <CrossCheckView report={report} />}
+      {!loading && report && (
+        <>
+          <CrossCheckView report={report} />
+          {hasSafetyIssues(report) && <ConsiderProfessionalCare />}
+        </>
+      )}
     </div>
   );
 }

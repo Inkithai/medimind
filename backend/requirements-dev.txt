@@ -1,15 +1,7 @@
 # MediMind — development / test dependencies
-# ──────────────────────────────────────────
 # Install on top of requirements.txt:
 #     pip install -r requirements.txt -r requirements-dev.txt
-#
-# Kept separate so the deployed image (Dockerfile / Procfile) doesn't ship
-# the test toolchain. Run the suite from the backend/ directory:
-#     GROQ_API_KEY=gsk_test_123 python -m pytest tests/ -q
-#
-# The GROQ_API_KEY value is only needed to satisfy the import-time key check
-# in medical_extractor.py; no test makes a network call.
 
-pytest
-httpx        # required by fastapi.testclient.TestClient
-numpy        # used by test_qa_self_healing.py's ndarray-embedding test
+pytest>=7.0
+httpx
+numpy

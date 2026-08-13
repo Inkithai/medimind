@@ -1,6 +1,7 @@
 import type { QAResponse } from "../types/api";
 import { classNames, confidenceTone, formatConfidence, formatDate } from "../utils/format";
 import { Alert } from "./Alert";
+import { ConsiderProfessionalCare } from "./ConsiderProfessionalCare";
 
 export function QAResultCard({
   result,
@@ -18,10 +19,7 @@ export function QAResultCard({
       }
     >
       {result.recommend_professional_consult && (
-        <Alert variant="warning" title="Consult a healthcare professional">
-          This answer touches on a risk, interaction, allergy, or dosage matter.
-          Review it with a doctor or pharmacist before acting on it.
-        </Alert>
+        <ConsiderProfessionalCare message="You may want to discuss this with a healthcare professional." />
       )}
 
       <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-800">

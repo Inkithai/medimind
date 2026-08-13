@@ -61,6 +61,26 @@ from care_recommendations import ProviderSearchError, recommendation_context, se
 from auth import get_current_user, issue_anonymous_token
 from document_filter import NonMedicalDocumentError, assert_medical_document
 from lab_trends import track_lab_trends
+
+
+def _lab_trends_need_recompute(report: Any) -> bool:
+    """True when a stored snapshot predates recovery / unit-mismatch fixes."""
+    if not isinstance(report, dict):
+        return True
+    trends = report.get("trends")
+    if not isinstance(trends, list):
+        return True
+    for trend in trends:
+        if not isinstance(trend, dict) or "returned_to_normal" not in trend:
+            return True
+    return False
+
+
+def _lab_trends_for_snapshot(snapshot: Dict[str, Any]) -> Dict[str, Any]:
+    stored = snapshot.get("lab_trends")
+    if stored is None or _lab_trends_need_recompute(stored):
+        return track_lab_trends(snapshot["patient_timeline"])
+    return stored
 from medical_extractor import (
     ProviderRateLimitError,
     _is_demo_document,
@@ -69,6 +89,8 @@ from medical_extractor import (
     process_document,
 )
 from retrieval import answer_question, index_patient_timeline
+from care.models import FACILITY_KINDS
+from care.service import CareNavigationError, get_care_service
 import care_finder
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -977,9 +999,7 @@ async def get_lab_trends(user_id: str = Depends(get_current_user)) -> Dict[str, 
     snapshot = db.load_patient_snapshot(user_id)
     if snapshot is None:
         raise HTTPException(404, "No timeline found for this user.")
-    if "lab_trends" in snapshot:
-        return snapshot["lab_trends"]
-    return track_lab_trends(snapshot["patient_timeline"])
+    return _lab_trends_for_snapshot(snapshot)
 
 
 @app.get("/api/v1/patient-snapshot")
@@ -1002,10 +1022,7 @@ async def get_patient_snapshot(user_id: str = Depends(get_current_user)) -> Dict
         "cross_check_report": snapshot["cross_check_report"],
         "updated_at": snapshot.get("updated_at"),
     }
-    if "lab_trends" in snapshot:
-        result["lab_trends"] = snapshot["lab_trends"]
-    else:
-        result["lab_trends"] = track_lab_trends(snapshot["patient_timeline"])
+    result["lab_trends"] = _lab_trends_for_snapshot(snapshot)
     return result
 
 
@@ -1206,6 +1223,58 @@ async def create_anonymous_session() -> Dict[str, str]:
 # ---------------------------------------------------------------------------
 # Health check
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Care Navigation (decoupled — does not read the patient record)
+# ---------------------------------------------------------------------------
+
+
+@app.exception_handler(CareNavigationError)
+async def care_navigation_error_handler(request: Request, exc: CareNavigationError):
+    logger.warning("care navigation %s %s: %s", request.method, request.url.path, exc)
+    return JSONResponse(
+        status_code=exc.http_status,
+        content={"detail": str(exc), "code": exc.code},
+    )
+
+
+@app.get("/api/v1/care/facilities")
+async def care_facilities(
+    location: str,
+    kind: str = "any",
+    radius_km: float = 8.0,
+    user_id: str = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """Directory search. Does not read timeline, safety, or labs."""
+    _ = user_id
+    if kind not in FACILITY_KINDS:
+        kind = "any"
+    return get_care_service().search_facilities(
+        location=location, kind=kind, radius_km=radius_km
+    )
+
+
+@app.get("/api/v1/care/geocode")
+async def care_geocode(q: str, user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
+    _ = user_id
+    point = get_care_service().geocode(q)
+    return {
+        "latitude": point.latitude,
+        "longitude": point.longitude,
+        "label": point.label,
+        "provider": point.provider,
+    }
+
+
+@app.get("/api/v1/care/routes")
+async def care_routes(
+    origin: str,
+    destination: str,
+    user_id: str = Depends(get_current_user),
+) -> Dict[str, Any]:
+    _ = user_id
+    return get_care_service().get_route(origin, destination)
+
 
 @app.get("/api/v1/health")
 async def health() -> Dict[str, str]:
