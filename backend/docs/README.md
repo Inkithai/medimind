@@ -15,6 +15,7 @@ There is **no** `/care`, `/find-care`, Geoapify, OSM, Leaflet, or consultation p
 | [03-retrieval-and-qa.md](03-retrieval-and-qa.md) | Explain — grounded Ask AI |
 | [04-lab-trends.md](04-lab-trends.md) | Detect — deterministic labs |
 | [05-api-storage-and-jobs.md](05-api-storage-and-jobs.md) | Protect — anonymous workspace isolation |
+| [06-care-navigation-extension.md](06-care-navigation-extension.md) | **Not on the main deck.** Optional future Connect layer: provider-agnostic facility search. Not in this tree. |
 
 Setup and deploy: repo-root [README.md](../../README.md), [DEPLOYMENT_GUIDE.md](../../DEPLOYMENT_GUIDE.md).
 
