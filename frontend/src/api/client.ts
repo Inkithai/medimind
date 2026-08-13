@@ -1,3 +1,4 @@
+import type { CareFacility, CareFacilityResponse, FacilityKind as DirectoryFacilityKind } from "../types/facility";
 import type {
   CareFacilitiesResponse,
   CareRecommendationContext,
@@ -110,6 +111,7 @@ interface RequestOptions {
   method?: string;
   body?: BodyInit | null;
   headers?: Record<string, string>;
+  signal?: AbortSignal;
 }
 
 function apiErrorMetadata(data: unknown) {
@@ -138,6 +140,7 @@ async function publicRequest<T>(
       method: options.method || "GET",
       headers: options.headers || {},
       body: options.body ?? undefined,
+      signal: options.signal,
     });
   } catch (err) {
     throw new ApiError(
@@ -174,6 +177,26 @@ async function publicRequest<T>(
   return data as T;
 }
 
+function normalizeCareFacility(facility: CareFacilityResponse): CareFacility {
+  return {
+    id: facility.id,
+    name: facility.name,
+    kind: facility.kind,
+    latitude: facility.latitude,
+    longitude: facility.longitude,
+    distanceKm: facility.distance_km,
+    address: facility.address || undefined,
+    rating: facility.rating ?? undefined,
+    userRatingCount: facility.user_rating_count ?? undefined,
+    phone: facility.phone || undefined,
+    website: facility.website || undefined,
+    mapsUrl: facility.maps_url || undefined,
+    openingHours: facility.opening_hours || undefined,
+    openNow: facility.open_now ?? undefined,
+    source: facility.source || "Public listing",
+  };
+}
+
 async function request<T>(
   credentials: Credentials,
   path: string,
@@ -191,6 +214,7 @@ async function request<T>(
       method: options.method || "GET",
       headers,
       body: options.body ?? undefined,
+      signal: options.signal,
     });
   } catch (err) {
     throw new ApiError(
@@ -334,6 +358,32 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
+  },
+
+  async getCareFacilities(
+    credentials: Credentials,
+    options: {
+      location: string;
+      kind?: "any" | DirectoryFacilityKind;
+      radiusKm?: number;
+      latitude?: number;
+      longitude?: number;
+      signal?: AbortSignal;
+    }
+  ): Promise<CareFacility[]> {
+    const params = new URLSearchParams({
+      location: options.location,
+      kind: options.kind || "any",
+      radius_km: String(options.radiusKm || 5),
+    });
+    if (options.latitude !== undefined) params.set("latitude", String(options.latitude));
+    if (options.longitude !== undefined) params.set("longitude", String(options.longitude));
+    const facilities = await request<CareFacilityResponse[]>(
+      credentials,
+      `/api/v1/care/facilities?${params.toString()}`,
+      { signal: options.signal }
+    );
+    return facilities.map(normalizeCareFacility);
   },
 
   ask(credentials: Credentials, question: string, topK = 8): Promise<QAResponse> {

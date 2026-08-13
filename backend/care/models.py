@@ -16,7 +16,7 @@ def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return 2 * radius * math.asin(math.sqrt(min(1.0, a)))
 
 
-FACILITY_KINDS = ("hospital", "clinic", "pharmacy", "laboratory", "any")
+FACILITY_KINDS = ("hospital", "clinic", "pharmacy", "laboratory", "doctor", "healthcare", "any")
 
 DISCLAIMER = (
     "This is a public directory lookup, not a medical referral and not a "
@@ -35,6 +35,8 @@ class GeoPoint:
 
 @dataclass
 class Facility:
+    """Provider-neutral public facility listing returned by every adapter."""
+
     id: str
     name: str
     kind: str
@@ -46,8 +48,15 @@ class Facility:
     distance_km: Optional[float] = None
     source_url: Optional[str] = None
     provider: str = ""
+    rating: Optional[float] = None
+    user_rating_count: Optional[int] = None
+    maps_url: Optional[str] = None
+    opening_hours: Optional[List[str]] = None
+    open_now: Optional[bool] = None
+    source: str = "public listings"
 
     def to_dict(self) -> Dict[str, Any]:
+        """JSON-ready dictionary while retaining explicit nulls as a stable API."""
         return asdict(self)
 
 

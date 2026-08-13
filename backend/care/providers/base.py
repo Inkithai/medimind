@@ -50,3 +50,21 @@ class RoutingProvider(Protocol):
 
     def route(self, origin: GeoPoint, destination: GeoPoint) -> RouteEstimate:
         ...
+
+
+class CareProvider(Protocol):
+    """Map-based directory search used by GET /api/v1/care/facilities."""
+
+    name: str
+
+    def search(
+        self,
+        location: str,
+        kind: str,
+        radius_km: float,
+        *,
+        latitude: Optional[float] = None,
+        longitude: Optional[float] = None,
+    ) -> List[Facility]:
+        """Return normalized public facility listings near a place or point."""
+        ...

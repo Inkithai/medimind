@@ -1,24 +1,61 @@
-"""HTTP tests for /api/v1/care/* — decoupled facilities + legacy care_finder."""
+"""HTTP tests for /api/v1/care/* — map-based Google path + legacy care_finder."""
+
 import os
 import sys
 from unittest import mock
 
-from fastapi.testclient import TestClient
-
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 os.environ.setdefault("GROQ_API_KEY", "gsk_test_123")
 os.environ.setdefault("SUPABASE_URL", "https://dummy.supabase.co")
 os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "dummy")
+os.environ.setdefault("CLOUDINARY_CLOUD_NAME", "dummy")
+os.environ.setdefault("CLOUDINARY_API_KEY", "dummy")
+os.environ.setdefault("CLOUDINARY_API_SECRET", "dummy")
 os.environ.setdefault("JWT_SECRET", "test-secret-for-care-endpoints-ok")
+
+from fastapi.testclient import TestClient  # noqa: E402
 
 import api  # noqa: E402
 import care_finder  # noqa: E402
+from care.errors import CareProviderError  # noqa: E402
 from care.models import Facility, GeoPoint, pack_facilities  # noqa: E402
+
+
+class FakeProvider:
+    name = "fake"
+
+    def __init__(self, error=None):
+        self.error = error
+        self.calls = []
+
+    def search(self, location, kind, radius_km, **coordinates):
+        self.calls.append((location, kind, radius_km, coordinates))
+        if self.error:
+            raise self.error
+        return [
+            Facility(
+                id="facility-1",
+                name="Jaffna Teaching Hospital",
+                kind="hospital",
+                latitude=9.668,
+                longitude=80.015,
+                source="Test public listing",
+            )
+        ]
 
 
 def _auth():
     user_id, token = api.issue_anonymous_token()
     return {"Authorization": f"Bearer {token}", "X-User-Id": user_id}
+
+
+def _client():
+    async def override_user():
+        return "anon_care_test"
+
+    api.app.dependency_overrides[api.get_current_user] = override_user
+    return TestClient(api.app)
 
 
 def _client_with_user():
@@ -43,13 +80,14 @@ def test_facilities_uses_service_not_timeline():
     )
     service = mock.Mock()
     service.search_facilities.return_value = packed
-    with mock.patch.object(api, "get_care_service", return_value=service):
-        client = TestClient(api.app)
-        response = client.get(
-            "/api/v1/care/facilities",
-            params={"location": "Kandy", "kind": "hospital"},
-            headers=_auth(),
-        )
+    with mock.patch.object(api, "get_care_provider", side_effect=api.CareConfigurationError("unset")):
+        with mock.patch.object(api, "get_care_service", return_value=service):
+            client = TestClient(api.app)
+            response = client.get(
+                "/api/v1/care/facilities",
+                params={"location": "Kandy", "kind": "hospital"},
+                headers=_auth(),
+            )
     assert response.status_code == 200
     body = response.json()
     assert body["result_count"] == 1
@@ -61,6 +99,47 @@ def test_facilities_requires_auth():
     client = TestClient(api.app)
     response = client.get("/api/v1/care/facilities", params={"location": "Kandy"})
     assert response.status_code in {401, 403}
+
+
+def test_endpoint_returns_normalized_facility_list_and_forwards_coordinates():
+    provider = FakeProvider()
+    try:
+        with mock.patch.object(api, "get_care_provider", return_value=provider):
+            with _client() as client:
+                response = client.get(
+                    "/api/v1/care/facilities",
+                    params={
+                        "location": "Jaffna",
+                        "kind": "hospital",
+                        "radius_km": 8,
+                        "latitude": 9.668,
+                        "longitude": 80.015,
+                    },
+                )
+        assert response.status_code == 200, response.text
+        assert response.json()[0]["name"] == "Jaffna Teaching Hospital"
+        assert provider.calls[0][1] == "hospital"
+        assert provider.calls[0][3] == {"latitude": 9.668, "longitude": 80.015}
+    finally:
+        api.app.dependency_overrides.clear()
+
+
+def test_provider_failure_is_neutral_and_does_not_expose_credentials():
+    provider = FakeProvider(CareProviderError("Google said key=secret-key is invalid"))
+    try:
+        with mock.patch.object(api, "get_care_provider", return_value=provider):
+            with _client() as client:
+                response = client.get(
+                    "/api/v1/care/facilities",
+                    params={"location": "Jaffna", "kind": "hospital", "radius_km": 8},
+                )
+        assert response.status_code == 503
+        assert response.json()["detail"] == (
+            "The facility directory is temporarily unavailable. Please try again shortly."
+        )
+        assert "secret-key" not in response.text
+    finally:
+        api.app.dependency_overrides.clear()
 
 
 def test_suggestion_without_records_is_general_practice():

@@ -1,4 +1,7 @@
+"""Care-directory provider adapters."""
+
 from care.providers.base import (
+    CareProvider,
     FacilitySearchProvider,
     GeocodingProvider,
     ProviderNotConfiguredError,
@@ -9,6 +12,7 @@ from care.providers.mapbox import MapboxProvider
 from care.providers.osm import OsmProvider
 
 __all__ = [
+    "CareProvider",
     "FacilitySearchProvider",
     "GeocodingProvider",
     "RoutingProvider",

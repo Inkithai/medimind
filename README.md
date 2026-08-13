@@ -55,6 +55,7 @@ Vision+text use the same Gemini model; Groq needs two. All three are OpenAI-comp
 | `api.py` | FastAPI wrapper — lifespan startup, CORS (fixed `*` + credentials handling), all `/api/v1/` routes, multipart upload handling (sync 201 or async 202 via `USE_BACKGROUND_JOBS`/`?async=true`), merges new docs with old, fixes `_source.file` to original filename |
 | `care_finder.py` | Find Care — specialty suggestion from the record; Geoapify geocode + Places primary, OpenStreetMap Nominatim + Overpass fallback; opening-hours match, ranking. Leaflet map |
 | `auth.py` | Validates `Authorization: Bearer <jwt>` + `X-User-Id`, plus issues anonymous JWTs via `issue_anonymous_token()` |
+| `care/` | Provider-neutral `Facility` model/factory plus the server-side Google Places API (New) adapter for Find Care |
 | `db.py` | Supabase Postgres persistence (documents append-only + patient snapshot upsert), chained `.order("uploaded_at").order("id")` |
 | `storage.py` | Uploads original file to Cloudinary `mediscan/<user_id>/...` |
 | `supabase_schema.sql` | One-time table creation with RLS enabled/no policies (only service_role key can access) |
@@ -150,7 +151,7 @@ Base URL `http://127.0.0.1:8000`, all routes under `/api/v1/`.
 - **Ask** `/ask` — single-shot RAG, configurable `top_k`, confidence, sources, `recommend_professional_consult`.
 - **Conversations** `/conversations` — multi-turn, query rewriting (`rewritten_query`), session resume by ID, 404 handling when in-memory session expired after restart.
 - **Find Local Care** `/care` — evidence-to-care pathway: clinical flags → specialty → live directory (**Geoapify** primary, **OpenStreetMap** fallback) → ranked provider cards → consultation pack.
-- **Clinic map** `/find-care` — city + specialty search on a **Leaflet** map. Same Geoapify / OSM directory stack.
+- **Find Care** `/find-care` — search-as-you-type or current location → map confirmation → provider-neutral hospitals, clinics, pharmacies, laboratories, and doctors within the selected radius.
 
 States distinguished: loading, empty 404 (no record), 401 auth, 422 validation/non-medical, 502 ML pipeline, network/CORS.
 
@@ -161,6 +162,21 @@ cd frontend
 npm install
 npm run dev       # http://localhost:5173, proxies /api → http://127.0.0.1:8000
 ```
+
+#### Find nearby care and reusable location picker
+
+Open `/find-care` to select an area and find hospitals, clinics, pharmacies, laboratories, and doctors within 5 km. The page uses the search → map → confirm `LocationPicker`, which is exported from `src/components/location` and emits a normalized `ConfirmedLocation` containing `latitude`, `longitude`, place labels, optional address details, and `confirmedAt`:
+
+```tsx
+import { LocationPicker, type ConfirmedLocation } from "./components/location";
+
+<LocationPicker
+  onConfirm={(location: ConfirmedLocation) => saveServiceLocation(location)}
+  countryCodes={["lk"]} // optional; omit for worldwide search
+/>;
+```
+
+The location picker combines Photon/OpenStreetMap landmark search with Open-Meteo/GeoNames city prefix matching and Leaflet/OpenStreetMap tiles. Confirmed coordinates are sent to the authenticated backend, where `CARE_PROVIDER=google` uses Google Places API (New) Nearby Search and normalizes results to `Facility[]`; city/area-only legacy requests fall back to Places Text Search. Configure `GOOGLE_MAPS_API_KEY` only on the backend—never as a `VITE_*` variable. Enable **Places API (New)** and billing for the key's Google Cloud project.
 
 `vite.config.ts` proxy target overridable via `VITE_API_PROXY_TARGET`. For prod:
 
@@ -241,6 +257,16 @@ Q&A self-heals: if the patient's vector index is empty but their documents are s
 
 Frontend `UploadPage` always uses async jobs so even a small file has truthful progress; it uses the legacy sync path only when a server explicitly returns 404/405 for job routes.
 
+#### Care navigation
+`GET /api/v1/care/facilities?location=Jaffna&kind=hospital&radius_km=8` returns normalized public `Facility[]` listings. Map-confirmed clients should also send `latitude` and `longitude` to use distance-ranked Nearby Search. Supported kinds: `any`, `hospital`, `clinic`, `pharmacy`, `laboratory`, and `doctor`.
+
+```ini
+CARE_PROVIDER=google
+GOOGLE_MAPS_API_KEY=AIza...  # Places API (New) enabled; billing attached
+```
+
+The key stays server-side. A 503 logs the specific provider/configuration reason on the backend while returning a neutral directory error to the browser. Common Google 403 causes are an invalid or truncated key, Places API (New) not enabled, billing not attached, or key restrictions that reject requests from the backend.
+
 #### Vector Store
 `VECTOR_STORE=chroma` (default, local `CHROMA_DIR`) or `supabase` (Supabase `chunks` table, no volume). `inspect_chroma.py` works with both (`VECTOR_STORE=supabase python inspect_chroma.py`). After switching backends, delete `chroma_db` or clear `chunks` table and re-upload.
 
@@ -265,6 +291,7 @@ VECTOR_STORE=supabase python backend/inspect_chroma.py "anon_ab12cd34ef56"
 ### What changed
 
 - **Find care** — `/care` searches real clinics with **Geoapify first** (geocoding + Places, free key, no card) and **OpenStreetMap / Overpass as fallback**. Leaflet draws the map. The UI labels the provider source (`Geoapify` or `OpenStreetMap`) without saying a directory failed. Specialty is suggested from the record; results rank by specialty match, opening hours vs the requested window, and distance.
+- **Google care-directory adapter** — `CARE_PROVIDER=google` now calls Places API (New) instead of returning a stubbed empty list. Coordinate searches use Nearby Search; legacy city/area searches use Text Search. Responses are normalized and API keys remain backend-only.
 - **Current Gemini model** — the Gemini default is `gemini-3.6-flash` for text and vision, with `gemini-3.5-flash-lite` fallback. The retired `gemini-2.0-flash` default (shut down 2026-06-01) was the source of misleading HTTP 429 `limit: 0` failures.
 - **Vector store abstraction** — `vector_store.py` with `VECTOR_STORE=chroma` (local `CHROMA_DIR`, needs volume) or `supabase` (Supabase `chunks` table, no volume, brute-force cosine). `retrieval.py` now delegates, `inspect_chroma.py` supports both, `supabase_schema.sql` adds `chunks` table. Recommended for Railway: `VECTOR_STORE=supabase`.
 - **Per-file jobs + load control** — one parent job exposes independent child states for every document, while a shared bounded executor (`UPLOAD_FILE_CONCURRENCY`) queues work safely across uploads. The UI shows per-file phases separately from batch finalization, and a terminal provider quota opens a circuit breaker so queued files are not sent into the same failure repeatedly.
