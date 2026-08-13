@@ -93,6 +93,67 @@ def test_provider_failure_is_neutral_and_does_not_expose_credentials():
         api.app.dependency_overrides.clear()
 
 
+def test_google_permission_denied_now_serves_openstreetmap_instead_of_503():
+    """Regression: the production PERMISSION_DENIED 403 must not become a 503.
+
+    The real deployment had CARE_PROVIDER=google with a key whose project
+    lacked Places API (New)/billing. The endpoint now transparently serves
+    keyless OpenStreetMap listings for that exact failure.
+    """
+    from care.factory import FallbackProvider  # noqa: E402
+
+    google = FakeProvider(
+        CareProviderError(
+            "Google Places API rejected the request (HTTP 403): "
+            "PERMISSION_DENIED: The caller does not have permission"
+        )
+    )
+    openstreetmap = FakeProvider()
+    openstreetmap.name = "openstreetmap"
+    provider = FallbackProvider(google, openstreetmap)
+
+    try:
+        with mock.patch.object(api, "get_care_provider", return_value=provider):
+            with _client() as client:
+                response = client.get(
+                    "/api/v1/care/facilities",
+                    params={
+                        "location": "Nelliyady, Jaffna District",
+                        "kind": "hospital",
+                        "radius_km": 5,
+                        "latitude": 9.80138,
+                        "longitude": 80.1945344,
+                    },
+                )
+        assert response.status_code == 200, response.text
+        assert response.json()[0]["name"] == "Jaffna Teaching Hospital"
+        assert google.calls and openstreetmap.calls
+    finally:
+        api.app.dependency_overrides.clear()
+
+
+def test_directory_works_with_no_provider_configuration_at_all():
+    """Find Care must not require CARE_PROVIDER or any API key to respond."""
+    import care.factory as factory  # noqa: E402
+
+    with mock.patch.dict(os.environ, {"CARE_PROVIDER": ""}, clear=False):
+        provider = factory.get_care_provider()
+    assert provider.name == "openstreetmap"
+
+    with mock.patch.object(provider, "search", return_value=[]):
+        try:
+            with mock.patch.object(api, "get_care_provider", return_value=provider):
+                with _client() as client:
+                    response = client.get(
+                        "/api/v1/care/facilities",
+                        params={"location": "Jaffna", "kind": "any", "radius_km": 5},
+                    )
+            assert response.status_code == 200, response.text
+            assert response.json() == []
+        finally:
+            api.app.dependency_overrides.clear()
+
+
 if __name__ == "__main__":
     tests = [value for name, value in sorted(globals().items()) if name.startswith("test_")]
     for test in tests:

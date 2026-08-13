@@ -173,7 +173,7 @@ import { LocationPicker, type ConfirmedLocation } from "./components/location";
 />;
 ```
 
-The location picker combines Photon/OpenStreetMap landmark search with Open-Meteo/GeoNames city prefix matching and Leaflet/OpenStreetMap tiles. Confirmed coordinates are sent to the authenticated backend, where `CARE_PROVIDER=google` uses Google Places API (New) Nearby Search and normalizes results to `Facility[]`; city/area-only legacy requests fall back to Places Text Search. Configure `GOOGLE_MAPS_API_KEY` only on the backend—never as a `VITE_*` variable. Enable **Places API (New)** and billing for the key's Google Cloud project.
+The location picker combines Photon/OpenStreetMap landmark search with Open-Meteo/GeoNames city prefix matching and Leaflet/OpenStreetMap tiles. Confirmed coordinates are sent to the authenticated backend, which normalizes every provider's response to `Facility[]`. By default the backend queries OpenStreetMap/Overpass, which needs no API key. Optionally set `CARE_PROVIDER=google` to prefer Google Places API (New) Nearby Search (city/area-only requests use Places Text Search), with OpenStreetMap as an automatic fallback. Configure `GOOGLE_MAPS_API_KEY` only on the backend—never as a `VITE_*` variable—and enable **Places API (New)** plus billing for the key's Google Cloud project.
 
 `vite.config.ts` proxy target overridable via `VITE_API_PROXY_TARGET`. For prod:
 
@@ -247,12 +247,16 @@ Frontend `UploadPage` always uses async jobs so even a small file has truthful p
 #### Care navigation
 `GET /api/v1/care/facilities?location=Jaffna&kind=hospital&radius_km=8` returns normalized public `Facility[]` listings. Map-confirmed clients should also send `latitude` and `longitude` to use distance-ranked Nearby Search. Supported kinds: `any`, `hospital`, `clinic`, `pharmacy`, `laboratory`, and `doctor`.
 
+It works with **no configuration and no API key**. Unset `CARE_PROVIDER` (or `CARE_PROVIDER=osm`) uses OpenStreetMap via the Overpass API — no key, no billing, no Google Cloud project:
+
 ```ini
+# Nothing required. Optionally, prefer Google and keep OSM as a safety net:
 CARE_PROVIDER=google
 GOOGLE_MAPS_API_KEY=AIza...  # Places API (New) enabled; billing attached
+CARE_FALLBACK=on             # default; set "off" to disable the OSM fallback
 ```
 
-The key stays server-side. A 503 logs the specific provider/configuration reason on the backend while returning a neutral directory error to the browser. Common Google 403 causes are an invalid or truncated key, Places API (New) not enabled, billing not attached, or key restrictions that reject requests from the backend.
+Keys stay server-side. With `CARE_PROVIDER=google`, a Google rejection (invalid/truncated key, Places API (New) not enabled, billing not attached, restrictive key rules) or an empty Google result set transparently falls back to OpenStreetMap, so the page keeps working; the specific provider reason is logged for operators only. A 503 now means every provider failed — typically blocked outbound network egress; point `OVERPASS_API_URL` at a reachable mirror if needed.
 
 #### Vector Store
 `VECTOR_STORE=chroma` (default, local `CHROMA_DIR`) or `supabase` (Supabase `chunks` table, no volume). `inspect_chroma.py` works with both (`VECTOR_STORE=supabase python inspect_chroma.py`). After switching backends, delete `chroma_db` or clear `chunks` table and re-upload.
@@ -272,7 +276,8 @@ VECTOR_STORE=supabase python backend/inspect_chroma.py "anon_ab12cd34ef56"
 
 ### What changed
 
-- **Google care-directory adapter** — `CARE_PROVIDER=google` now calls Places API (New) instead of returning a stubbed empty list. Coordinate searches use Nearby Search; legacy city/area searches use Text Search. Responses are normalized and API keys remain backend-only.
+- **Find Care no longer needs an API key** — the directory defaults to a keyless OpenStreetMap/Overpass adapter, and `CARE_PROVIDER=google` now falls back to it whenever Google is unconfigured, rejects the call (e.g. `PERMISSION_DENIED` from a project without Places API (New)/billing), or returns nothing. This removes the "Nearby search didn't load" 503 that a missing/invalid Google key used to cause. Set `CARE_FALLBACK=off` to restore strict Google-only behaviour.
+- **Google care-directory adapter** — `CARE_PROVIDER=google` calls Places API (New) instead of returning a stubbed empty list. Coordinate searches use Nearby Search; legacy city/area searches use Text Search. Responses are normalized and API keys remain backend-only.
 - **Current Gemini model** — the Gemini default is `gemini-3.6-flash` for text and vision, with `gemini-3.5-flash-lite` fallback. The retired `gemini-2.0-flash` default (shut down 2026-06-01) was the source of misleading HTTP 429 `limit: 0` failures.
 - **Vector store abstraction** — `vector_store.py` with `VECTOR_STORE=chroma` (local `CHROMA_DIR`, needs volume) or `supabase` (Supabase `chunks` table, no volume, brute-force cosine). `retrieval.py` now delegates, `inspect_chroma.py` supports both, `supabase_schema.sql` adds `chunks` table. Recommended for Railway: `VECTOR_STORE=supabase`.
 - **Per-file jobs + load control** — one parent job exposes independent child states for every document, while a shared bounded executor (`UPLOAD_FILE_CONCURRENCY`) queues work safely across uploads. The UI shows per-file phases separately from batch finalization, and a terminal provider quota opens a circuit breaker so queued files are not sent into the same failure repeatedly.

@@ -6,12 +6,13 @@ package and are never exposed to the browser.
 """
 
 from .errors import CareConfigurationError, CareProviderError
-from .factory import get_care_provider
+from .factory import FallbackProvider, get_care_provider
 from .models import Facility
 
 __all__ = [
     "CareConfigurationError",
     "CareProviderError",
+    "FallbackProvider",
     "Facility",
     "get_care_provider",
 ]

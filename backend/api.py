@@ -34,8 +34,9 @@ Env:
     MiniLM model)
     (optional: VECTOR_STORE=chroma|supabase, USE_BACKGROUND_JOBS=true,
      UPLOAD_FILE_CONCURRENCY=1 for async per-file worker load control)
-    (optional care directory: CARE_PROVIDER=google,
-     GOOGLE_MAPS_API_KEY with Places API (New) enabled + billing)
+    (care directory needs no key: defaults to OpenStreetMap/Overpass.
+     Optional CARE_PROVIDER=google + GOOGLE_MAPS_API_KEY with Places API
+     (New) enabled + billing, which falls back to OpenStreetMap on failure)
 """
 
 import asyncio
@@ -126,12 +127,13 @@ from contextlib import asynccontextmanager
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Document worker pool ready: concurrency=%d", UPLOAD_FILE_CONCURRENCY)
-    if os.environ.get("CARE_PROVIDER", "").strip():
-        try:
-            care_provider = get_care_provider()
-            logger.info("Care directory configured: provider=%s", care_provider.name)
-        except CareConfigurationError as error:
-            logger.warning("Care directory is not configured: %s", error)
+    # The care directory always has a keyless OpenStreetMap default, so this
+    # only reports which adapter is active rather than gating the feature.
+    try:
+        care_provider = get_care_provider()
+        logger.info("Care directory ready: provider=%s", care_provider.name)
+    except CareConfigurationError as error:
+        logger.warning("Care directory is not configured: %s", error)
     # Startup: ensure tables exist (Supabase schema is created via SQL editor,
     # so this is a no-op but kept for compatibility)
     try:
@@ -997,10 +999,11 @@ async def get_care_facilities(
 ) -> List[Dict[str, Any]]:
     """Return normalized public healthcare listings near an area or point.
 
-    The Google key stays server-side. Supplying coordinates uses Places API
-    (New) Nearby Search and gives distance ordering; legacy clients that send
-    only ``location=Jaffna`` use Places Text Search. Results are directory
-    listings, not clinical referrals or a claim that a facility is "best".
+    Provider credentials stay server-side. The default adapter is keyless
+    OpenStreetMap/Overpass; when ``CARE_PROVIDER=google`` is configured with a
+    valid key, Places API (New) is used first and OpenStreetMap covers any
+    rejection or empty result. Results are directory listings, not clinical
+    referrals or a claim that a facility is "best".
     """
     del user_id  # Authentication protects the optional directory from abuse.
     if not location.strip() and (latitude is None or longitude is None):

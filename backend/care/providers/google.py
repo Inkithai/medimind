@@ -8,9 +8,8 @@ Google key remains on the server and every response is normalized to
 import json
 import math
 import os
-import socket
 from typing import Any, Dict, List, Optional
-from urllib.error import HTTPError, URLError
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from care.errors import CareConfigurationError, CareProviderError
@@ -202,7 +201,10 @@ class GoogleProvider:
             raise CareProviderError(
                 f"Google Places API rejected the request (HTTP {error.code}): {detail}"
             ) from error
-        except (URLError, socket.timeout, TimeoutError) as error:
+        except OSError as error:
+            # URLError, socket/TLS/timeout failures all subclass OSError, so a
+            # transport problem stays a CareProviderError the caller can fall
+            # back from instead of an unexpected 500-class crash.
             raise CareProviderError(f"Google Places API could not be reached: {type(error).__name__}") from error
 
         try:
