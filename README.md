@@ -147,6 +147,7 @@ Base URL `http://127.0.0.1:8000`, all routes under `/api/v1/`.
 - **Safety** `/safety` — allergy conflicts (danger), interactions with severity, dosage conflicts, duplicates, overall recommendation.
 - **Ask** `/ask` — single-shot RAG, configurable `top_k`, confidence, sources, `recommend_professional_consult`.
 - **Conversations** `/conversations` — multi-turn, query rewriting (`rewritten_query`), session resume by ID, 404 handling when in-memory session expired after restart.
+- **Find care** `/care` — suggests a specialty from the record, asks city + availability, searches real clinics on **OpenStreetMap** (Nominatim + Overpass, no paid maps key), ranks/filters, shows phone/hours/OSM source, handles empty results and directory outages, and shows a medical disclaimer.
 
 States distinguished: loading, empty 404 (no record), 401 auth, 422 validation/non-medical, 502 ML pipeline, network/CORS.
 

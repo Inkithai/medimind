@@ -11,6 +11,7 @@ import {
   UploadIcon,
   FileIcon,
   ChatIcon,
+  MapPinIcon,
 } from "../components/icons";
 import { useAuth } from "../context/AuthContext";
 import { useStrictEffect } from "../hooks/useStrictEffect";
@@ -301,6 +302,22 @@ export function DashboardPage() {
               className="btn mt-4 bg-white text-brand-700 hover:bg-brand-50"
             >
               Ask AI 🤖
+            </Link>
+          </section>
+
+          <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+            <div className="flex items-center gap-3">
+              <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-rose-50 text-rose-600">
+                <MapPinIcon className="h-6 w-6" />
+              </div>
+              <h3 className="card-title">Find a clinic nearby</h3>
+            </div>
+            <p className="secondary-text mt-3">
+              We suggest a specialty from your records, then search real OpenStreetMap clinics near
+              your city.
+            </p>
+            <Link to="/care" className="btn-secondary mt-4">
+              <MapPinIcon className="h-5 w-5" /> Find care
             </Link>
           </section>
         </div>

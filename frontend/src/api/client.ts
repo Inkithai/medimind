@@ -8,6 +8,10 @@ import type {
   SessionInfo,
   Timeline,
   UploadResponse,
+  CareSuggestion,
+  CareSearchResponse,
+  CareDay,
+  CareTimeOfDay,
 } from "../types/api";
 
 export type JobFileStatus = "queued" | "processing" | "completed" | "failed";
@@ -355,5 +359,26 @@ export const api = {
       `/api/v1/sessions/${encodeURIComponent(sessionId)}`,
       { method: "DELETE" }
     );
+  },
+
+  getCareSuggestion(credentials: Credentials): Promise<CareSuggestion> {
+    return request<CareSuggestion>(credentials, "/api/v1/care/suggestion");
+  },
+
+  searchCare(
+    credentials: Credentials,
+    body: {
+      city: string;
+      specialty?: string;
+      days?: CareDay[];
+      time_of_day?: CareTimeOfDay;
+      radius_km?: number;
+    }
+  ): Promise<CareSearchResponse> {
+    return request<CareSearchResponse>(credentials, "/api/v1/care/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
   },
 };

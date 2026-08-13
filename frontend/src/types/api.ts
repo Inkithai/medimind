@@ -248,3 +248,67 @@ export interface SessionHistory {
 export interface HealthResponse {
   status: string;
 }
+
+// ---- Find care (OpenStreetMap directory) --------------------------------
+
+export type CareDay = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
+export type CareTimeOfDay = "any" | "morning" | "afternoon" | "evening";
+export type CareAvailability = "open" | "closed" | "unknown";
+export type CareMatchKind = "specialty" | "hospital" | "general" | "other";
+
+export interface CareSpecialtyOption {
+  id: string;
+  label: string;
+  reasons?: string[];
+}
+
+export interface CareSuggestion {
+  suggested: CareSpecialtyOption;
+  alternatives: CareSpecialtyOption[];
+  all: CareSpecialtyOption[];
+  has_records: boolean;
+}
+
+export interface CarePlace {
+  id: string;
+  name: string;
+  place_type: string;
+  match_kind: CareMatchKind;
+  specialties: string[];
+  address: string | null;
+  phone: string | null;
+  website: string | null;
+  opening_hours: string | null;
+  availability: CareAvailability;
+  lat: number;
+  lon: number;
+  distance_km: number;
+  score: number;
+  source: string;
+  source_url: string;
+}
+
+export interface CareSearchResponse {
+  query: {
+    city: string;
+    specialty_id: string;
+    specialty_label: string;
+    days: CareDay[];
+    time_of_day: CareTimeOfDay;
+    radius_km: number;
+  };
+  location: { lat: number; lon: number; label: string; source: string };
+  suggestion: CareSpecialtyOption;
+  results: CarePlace[];
+  result_count: number;
+  zero_results_hint: string | null;
+  source: {
+    name: string;
+    geocoder: string;
+    directory: string;
+    license: string;
+    attribution: string;
+    url: string;
+  };
+  disclaimer: string;
+}

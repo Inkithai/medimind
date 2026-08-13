@@ -12,6 +12,7 @@ import { UploadPage } from "./pages/UploadPage";
 import { DocumentsPage } from "./pages/DocumentsPage";
 import { MedicinesPage } from "./pages/MedicinesPage";
 import { HistoryPage } from "./pages/HistoryPage";
+import { CarePage } from "./pages/CarePage";
 import { Spinner } from "./components/Spinner";
 
 function RequireAuth({ children }: { children: JSX.Element }) {
@@ -157,6 +158,22 @@ export default function App() {
           element={
             <RequireAuth>
               <SessionPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/care"
+          element={
+            <RequireAuth>
+              <CarePage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/find-care"
+          element={
+            <RequireAuth>
+              <CarePage />
             </RequireAuth>
           }
         />

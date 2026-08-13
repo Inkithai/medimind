@@ -134,10 +134,7 @@ export function MedicinesPage() {
           <Section title="Current medicines">
             <div className="grid gap-3 sm:grid-cols-2">
               {sortedIngredients.map(([ingredient, entries]) => {
-                const mostRecent = entries.reduce((latest, cur) => {
-                  // crude date compare — backend timeline is already sorted but filter may reorder
-                  return cur.date && (!latest.date || cur.date > latest.date) ? cur : latest;
-                }, entries[0]);
+                const mostRecent = mostRecentOf(entries);
                 const historyCount = entries.length;
                 return (
                   <div key={ingredient} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
