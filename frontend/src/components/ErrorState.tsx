@@ -41,6 +41,12 @@ export function ErrorState({
   } else if (code === "provider_rate_limited") {
     variant = "warning";
     title = "The document reader is busy";
+  } else if (code === "city_not_found") {
+    variant = "warning";
+    title = "We couldn't find that place";
+  } else if (code === "directory_unavailable") {
+    variant = "warning";
+    title = "The clinic directory is temporarily unavailable";
   } else if (status === 401) {
     variant = "warning";
     title = "Your session has expired";

@@ -10,7 +10,7 @@ from care.errors import CareConfigurationError, CareProviderError  # noqa: E402
 from care.factory import FallbackProvider, get_care_provider  # noqa: E402
 from care.models import Facility  # noqa: E402
 from care.providers.google import GoogleProvider  # noqa: E402
-from care.providers.osm import OpenStreetMapProvider  # noqa: E402
+from care.providers.osm_directory import OpenStreetMapProvider  # noqa: E402
 
 
 FACILITY = Facility(id="a", name="A", kind="hospital", latitude=1.0, longitude=2.0)

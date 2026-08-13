@@ -17,7 +17,7 @@ from care.errors import CareConfigurationError, CareProviderError
 from care.models import Facility
 from care.providers.base import CareProvider
 from care.providers.google import GoogleProvider
-from care.providers.osm import OpenStreetMapProvider
+from care.providers.osm_directory import OpenStreetMapProvider
 
 logger = logging.getLogger("care")
 
