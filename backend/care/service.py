@@ -10,7 +10,7 @@ import os
 from typing import Any, Dict, List, Optional
 
 from care.models import FACILITY_KINDS, Facility, GeoPoint, haversine_km, pack_facilities
-from care.providers.base import ProviderNotConfiguredError
+from care.providers.base import ProviderNotConfiguredError, ProviderUnavailableError
 
 
 class CareNavigationError(RuntimeError):
@@ -36,7 +36,14 @@ class CareNavigationService:
                 code="location_required",
                 http_status=422,
             )
-        point = self.provider.geocode(text)
+        try:
+            point = self.provider.geocode(text)
+        except ProviderUnavailableError as exc:
+            raise CareNavigationError(
+                "Location lookup is temporarily unavailable. Please try again shortly.",
+                code="geocoder_unavailable",
+                http_status=503,
+            ) from exc
         if point is None:
             raise CareNavigationError(
                 f"We couldn't find “{text}”. Try a city name or postcode.",
@@ -55,7 +62,14 @@ class CareNavigationService:
         chosen = kind if kind in FACILITY_KINDS else "any"
         radius_m = int(max(1.0, min(50.0, radius_km)) * 1000)
         origin = self.geocode(location)
-        raw: List[Facility] = self.provider.search_nearby(origin, chosen, radius_m)
+        try:
+            raw: List[Facility] = self.provider.search_nearby(origin, chosen, radius_m)
+        except ProviderUnavailableError as exc:
+            raise CareNavigationError(
+                "The facility directory is temporarily unavailable. Please try again shortly.",
+                code="directory_unavailable",
+                http_status=503,
+            ) from exc
         facilities: List[Facility] = []
         for item in raw:
             item.distance_km = round(
@@ -83,7 +97,14 @@ class CareNavigationService:
     def get_route(self, origin_query: str, destination_query: str) -> Dict[str, Any]:
         origin = self.geocode(origin_query)
         destination = self.geocode(destination_query)
-        estimate = self.provider.route(origin, destination)
+        try:
+            estimate = self.provider.route(origin, destination)
+        except ProviderUnavailableError as exc:
+            raise CareNavigationError(
+                "Routing estimates are temporarily unavailable. Please try again shortly.",
+                code="router_unavailable",
+                http_status=503,
+            ) from exc
         payload = estimate.to_dict()
         payload["disclaimer"] = (
             "Distance is a directory estimate, not live traffic or appointment availability."

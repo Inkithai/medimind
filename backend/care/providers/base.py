@@ -15,6 +15,20 @@ class ProviderNotConfiguredError(RuntimeError):
         )
 
 
+class ProviderUnavailableError(RuntimeError):
+    """The upstream directory or geocoder failed (network, rate-limit, timeout).
+
+    Provider adapters raise this instead of a bare RuntimeError so the service
+    layer can translate it into a clean 503 response instead of an unhandled
+    500. ``retryable`` marks transient failures that are worth failing over or
+    retrying (429/5xx/timeouts), as opposed to permanent ones (bad request).
+    """
+
+    def __init__(self, message: str, *, retryable: bool = True) -> None:
+        super().__init__(message)
+        self.retryable = retryable
+
+
 class GeocodingProvider(Protocol):
     name: str
 
