@@ -60,13 +60,12 @@ Vision+text use the same Gemini model; Groq needs two. All three are OpenAI-comp
 | `inspect_chroma.py` | Read-only CLI to list collections / inspect chunks |
 | `requirements.txt` / `Procfile` | Railway Nixpacks deployment |
 
-Deep dives live in [`backend/docs/`](backend/docs/README.md):
+Deep dives live in [`backend/docs/`](backend/docs/README.md). The judge-facing map is three layers — pipeline, intelligence, isolation — in [01-end-to-end-pipeline.md](backend/docs/01-end-to-end-pipeline.md). Module notes:
 
-1. [End-to-end pipeline](backend/docs/01-end-to-end-pipeline.md)
-2. [Extraction engine](backend/docs/02-extraction-engine.md)
-3. [Retrieval & Q&A](backend/docs/03-retrieval-and-qa.md)
+2. [Extraction](backend/docs/02-extraction-engine.md)
+3. [Ask AI](backend/docs/03-retrieval-and-qa.md)
 4. [Lab trends](backend/docs/04-lab-trends.md)
-5. [API, storage & jobs](backend/docs/05-api-storage-and-jobs.md)
+5. [Trust / isolation](backend/docs/05-api-storage-and-jobs.md)
 
 ### Setup
 
@@ -259,7 +258,7 @@ VECTOR_STORE=supabase python backend/inspect_chroma.py "anon_ab12cd34ef56"
 - **`GROQ_API_KEY` placeholder handling** — legacy var now treats `your-groq-api-key` / `your-*` as missing, not valid.
 - **AuthContext** — `clearCredentials`/`createNewWorkspace` reset `provisioningStarted` so erasing workspace no longer stalls auto-provision after StrictMode guard.
 - **DocumentViewer** — PDF detection now strips query params (`split("?")[0]`) so Cloudinary `...pdf?dl=0` renders as iframe, not broken image.
-- **Docs** — `backend/docs/` renamed and rewritten for the current flow (`01-end-to-end-pipeline.md` … `05-api-storage-and-jobs.md`).
+- **Docs** — `backend/docs/` is the current architecture source of truth: three presentation layers (pipeline, intelligence, isolation). No `/care` on this branch.
 - Earlier: Supabase chained `.order("uploaded_at").order("id")`, lifespan, dateutil sorting, `_parse_range` robust to `70-99 mg/dL`, upload dedup fix, anonymous session flow.
 
 ### Limitations

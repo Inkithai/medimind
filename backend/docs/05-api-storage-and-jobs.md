@@ -1,107 +1,89 @@
-# API, storage, and jobs
+# Trust and isolation
 
-Thin HTTP wrapper. Clinical logic stays in `medical_extractor.py`, `lab_trends.py`, `retrieval.py`, `conversation.py`.
+One browser → one isolated patient workspace. No signup.
 
-Base path: `/api/v1/`. Interactive docs: `/docs`.
-
-## Auth
-
-| Route | Auth |
-|---|---|
-| `GET /health`, `GET /`, `POST /anonymous/session` | public |
-| everything else | `Authorization: Bearer <jwt>` **and** `X-User-Id` |
-
-`POST /anonymous/session` mints `{ user_id, token, session_id }` with `JWT_SECRET`. `user_id` looks like `anon_*`. The JWT claim may be under `user_id`, `userId`, `id`, `_id`, or `sub`, and **must match** the header.
-
-Frontend never asks for a password. Token lives in `localStorage.medimind.session.v1`. `AuthContext` resets its StrictMode provision guard when the workspace is erased so a new session can be created.
-
-## CORS
-
-`CORS_ORIGINS` (default `*`).
-
-`allow_origins=["*"]` **cannot** be paired with `allow_credentials=True` — browsers reject it. When origins is `*`, credentials are off. A concrete origin list turns credentials on.
-
-## Persistence
-
-| Store | Module | What |
-|---|---|---|
-| Supabase `documents` | `db.py` | append-only extracted pages, `user_id` + `uploaded_at` + `id` order |
-| Supabase `patient_snapshots` | `db.py` | latest `{ timeline, cross_check, lab_trends, updated_at }` |
-| Supabase `chunks` | `vector_store.py` | optional RAG store (`VECTOR_STORE=supabase`) |
-| Supabase `jobs` | `jobs.py` | optional if `USE_SUPABASE_JOBS=true` |
-| Cloudinary | `storage.py` | original file at `mediscan/<user_id>/…` |
-| Chroma `CHROMA_DIR` | `vector_store.py` | default RAG store |
-| process memory | `conversation.py`, `jobs.py` | sessions + jobs unless persisted |
-
-Run `backend/supabase_schema.sql` once. RLS is enabled with **no policies**. Only the service-role key (backend) can access the tables. Missing tables raise `SchemaNotInitializedError` → HTTP 503 with the SQL-editor hint.
-
-## Upload
-
-`POST /api/v1/documents` multipart field `files`.
-
-| Mode | How | Response |
-|---|---|---|
-| Sync | default (tests) | `201` full record |
-| Async | `USE_BACKGROUND_JOBS=true` or `?async=true` or `Prefer: respond-async` | `202 { job_id, status }` |
-
-Frontend always uses async. Poll `GET /jobs/{id}` (`progress.files[]` is per-file; `progress.step` is the batch finalizer). `GET /jobs` lists the last 20 for the user.
-
-Shared worker pool: `UPLOAD_FILE_CONCURRENCY` (default 1). One file’s `queued` state is truthful — it does not claim to be reading while it waits for a slot.
-
-Per-file outcomes do not fail the batch. `failed_files[]`:
-
-```jsonc
-{ "file", "file_id", "file_index", "error", "kind", "code", "retryable", "retry_after_seconds" }
+```text
+Anonymous session
+       │
+       ▼
+   anon_* user_id
+       │
+ ┌─────┼─────┬──────────┐
+ ↓     ↓     ↓          ↓
+DB   Files  Vectors   Sessions
+ │     │      │          │
+ └─────┴──────┴──────────┘
+          │
+          ▼
+   Isolated workspace
 ```
 
-`kind`: `not_medical` | `transient` | `invalid` | `unsupported` | `rate_limited` | `provider_unavailable`.
+Modules: `api.py`, `auth.py`, `db.py`, `storage.py`, `jobs.py`.
 
-The whole request fails only when nothing was kept: 422 for content, 502 for provider/storage.
+---
 
-`indexed: false` + `index_error` when the timeline has no retrievable chunks. `_source.file` is the original filename.
+## How isolation actually works
 
-## Read routes
+Do **not** say “RLS protects the data.”
 
-| Method | Path | 404 if |
-|---|---|---|
-| GET | `/patient-snapshot` | no snapshot (first-run empty state) |
-| GET | `/timeline` | no snapshot |
-| GET | `/cross-check` | no snapshot |
-| GET | `/lab-trends` | no snapshot; recomputes stale reports |
+```text
+Frontend
+   ↓
+JWT authentication
+   ↓
+user_id ↔ X-User-Id verification
+   ↓
+Backend authorization
+   ↓
+Service-role database access
+   ↓
+Every read and write filtered by that user_id
+```
 
-Stale = missing `lab_trends`, or any trend lacking `returned_to_normal`.
-
-## Q&A routes
-
-| Method | Path | Errors |
-|---|---|---|
-| POST | `/qa` | 400 empty, 502 embed/LLM/schema |
-| POST | `/sessions` | 201 |
-| POST | `/sessions/{id}/messages` | 404 unknown session, 400/502 as above |
-| GET | `/sessions/{id}` | 404 |
-| DELETE | `/sessions/{id}` | 204 / 404 |
-
-## Jobs (`jobs.py`)
-
-In-memory dict + optional Supabase `jobs` row. Each job has independent child file states. Expired jobs are cleaned on access. Restart drops in-memory jobs; Cloudinary / Supabase documents remain.
-
-## Errors the client is meant to understand
-
-| HTTP | When |
+| Store | Scope |
 |---|---|
-| 400 | empty question, unsupported extension (sync pre-check) |
-| 401 | bad/missing JWT or user-id mismatch |
-| 404 | no snapshot / unknown session / unknown job |
-| 422 | nothing kept was medical |
-| 502 | provider, embedding, safety, or storage interruption |
-| 503 | Supabase schema not initialized |
+| Postgres documents and snapshot | `user_id` |
+| Files | folder `/<user_id>/` |
+| Vectors | collection or `patient_key` = that user |
+| Chat sessions | `(user_id, session_id)` in process memory |
 
-Provider traces stay in server logs. Clients get a short sentence plus `code` / `retryable`.
+The public session route issues an `anon_*` user and a signed token. Every other route requires the bearer token **and** a matching `X-User-Id`.
 
-## Frontend mapping
+Supabase RLS is enabled with **no policies**. The backend uses the service-role key, which bypasses RLS. Isolation is therefore an **application** guarantee: scoped queries after auth. For production, add real RLS policies if the client key could ever reach these tables. It must not.
 
-Same capabilities, patient-facing paths:
+---
 
-`/dashboard` `/upload` `/documents` `/history` `/medicines` `/labs` `/safety` `/ask` `/conversations` `/settings`
+## What the workspace can do
 
-Legacy aliases still work: `/timeline`, `/cross-check`, `/lab-trends`, `/qa`, `/sessions`.
+| Action | Meaning |
+|---|---|
+| Start workspace | public; creates the anonymous user |
+| Upload | files become the patient record |
+| Dashboard | one snapshot: timeline + safety + labs |
+| Ask / chat | grounded over that snapshot’s index |
+| Reset workspace | new anonymous user in this browser |
+
+Uploads can finish per file. One bad page does not discard the rest. The request only fails outright when nothing usable was kept.
+
+Chat sessions live in memory for this process. Restarting the server drops conversations; the documents and snapshot remain.
+
+---
+
+## What this is not
+
+- Not a login product.
+- Not a multi-patient clinic chart.
+- Not a claim that the database engine enforces tenancy by itself.
+- Not a care-routing or map product on this branch.
+
+---
+
+## Engineering notes (not the main slide)
+
+Routes live under `/api/v1/`. Health and anonymous session are public.
+
+Uploads may return 202 and a job id; the UI polls per-file progress, then a batch finalization step (history → safety → search). A hard provider outage stops queued files from being sent into the same failure.
+
+`CORS_ORIGINS=*` cannot send credentials. A concrete origin list can.
+
+Missing schema → 503 with “run the SQL once.” Missing vector table → 502, not an empty-record lie.
