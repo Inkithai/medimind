@@ -57,6 +57,7 @@ Vision+text use the same Gemini model; Groq needs two. All three are OpenAI-comp
 | `db.py` | Supabase Postgres persistence (documents append-only + patient snapshot upsert), chained `.order("uploaded_at").order("id")` |
 | `storage.py` | Uploads original file to Cloudinary `mediscan/<user_id>/...` |
 | `supabase_schema.sql` | One-time table creation with RLS enabled/no policies (only service_role key can access) |
+| `care/` | Optional Care Navigation: provider-agnostic facility search. Does not read the patient record. |
 | `inspect_chroma.py` | Read-only CLI to list collections / inspect chunks |
 | `requirements.txt` / `Procfile` | Railway Nixpacks deployment |
 
