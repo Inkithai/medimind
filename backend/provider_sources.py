@@ -4,8 +4,9 @@ No provider records are stored in this repository. Each source class returns
 only records received from its external API during the current request.
 
 Supported sources:
-* Google Places API (recommended when GOOGLE_PLACES_API_KEY is configured)
+* Geoapify Geocoding + Places (default when GEOAPIFY_API_KEY is set)
 * OpenStreetMap data, geocoded with Nominatim and searched through Overpass
+* Google Places API (optional future source via PROVIDER_DIRECTORY_SOURCE)
 
 The backend, never the browser, owns API credentials and performs requests.
 """
@@ -408,9 +409,149 @@ out center tags;"""
         )
 
 
+_GEOAPIFY_CATEGORIES = {
+    "cardiology": "healthcare.clinic_or_praxis.cardiology,healthcare.clinic_or_praxis,healthcare.hospital",
+    "pulmonology": "healthcare.clinic_or_praxis.pulmonology,healthcare.clinic_or_praxis,healthcare.hospital",
+    "dermatology": "healthcare.clinic_or_praxis.dermatology,healthcare.clinic_or_praxis,healthcare.hospital",
+    "pharmacy": "healthcare.pharmacy",
+    "general_practice": "healthcare.clinic_or_praxis.general,healthcare.clinic_or_praxis,healthcare.hospital",
+}
+
+
+def _geoapify_key() -> Optional[str]:
+    raw = (os.environ.get("GEOAPIFY_API_KEY") or "").strip()
+    if not raw or raw.lower().startswith("your-"):
+        return None
+    return raw
+
+
+def _osm_user_agent() -> str:
+    return (
+        os.environ.get("OSM_NOMINATIM_USER_AGENT")
+        or os.environ.get("OSM_USER_AGENT")
+        or "MediMind/1.0 (healthcare record assistant; https://github.com/Inkithai/medimind)"
+    ).strip()
+
+
+class GeoapifyPlacesSource:
+    source_id = "geoapify"
+    source_label = "Geoapify"
+
+    def __init__(self, api_key: str):
+        if not api_key:
+            raise ProviderSearchError(
+                "provider_configuration_missing",
+                "Geoapify is selected but GEOAPIFY_API_KEY is not configured on the backend.",
+                retryable=False,
+                http_status=503,
+            )
+        self.api_key = api_key
+        self.geocode_url = os.environ.get("GEOAPIFY_GEOCODE_URL", "https://api.geoapify.com/v1/geocode/search")
+        self.places_url = os.environ.get("GEOAPIFY_PLACES_URL", "https://api.geoapify.com/v2/places")
+        try:
+            self.radius_meters = max(1000, min(50000, int(os.environ.get("OSM_PROVIDER_SEARCH_RADIUS_METERS", "20000"))))
+        except ValueError:
+            self.radius_meters = 20000
+
+    def _geocode(self, location: str) -> Optional[SearchOrigin]:
+        query = urlencode({"text": location, "format": "json", "limit": 1, "apiKey": self.api_key})
+        payload = _read_json(f"{self.geocode_url}?{query}")
+        if not isinstance(payload, dict):
+            raise ProviderSearchError(
+                "provider_invalid_response",
+                "Geoapify returned an unexpected location response.",
+                retryable=True,
+            )
+        results = payload.get("results")
+        if not isinstance(results, list) or not results:
+            return None
+        hit = results[0] if isinstance(results[0], dict) else {}
+        try:
+            return SearchOrigin(
+                label=str(hit.get("formatted") or hit.get("city") or location),
+                latitude=float(hit["lat"]),
+                longitude=float(hit["lon"]),
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ProviderSearchError(
+                "provider_invalid_response",
+                "Geoapify returned a location without usable coordinates.",
+                retryable=True,
+            ) from exc
+
+    def search(self, location: str, specialty: Dict[str, Any]) -> ProviderSourcePayload:
+        origin = self._geocode(location)
+        if origin is None:
+            return ProviderSourcePayload(
+                source_id=self.source_id,
+                source_label=self.source_label,
+                origin=None,
+                records=[],
+                no_results_message="Geoapify could not locate that city or area. Check the spelling and try again.",
+            )
+        specialty_id = str((specialty or {}).get("id") or "general_practice")
+        categories = _GEOAPIFY_CATEGORIES.get(specialty_id) or _GEOAPIFY_CATEGORIES["general_practice"]
+        query = urlencode(
+            {
+                "categories": categories,
+                "filter": f"circle:{origin.longitude},{origin.latitude},{self.radius_meters}",
+                "bias": f"proximity:{origin.longitude},{origin.latitude}",
+                "limit": 40,
+                "apiKey": self.api_key,
+            }
+        )
+        payload = _read_json(f"{self.places_url}?{query}")
+        if not isinstance(payload, dict) or not isinstance(payload.get("features"), list):
+            raise ProviderSearchError(
+                "provider_invalid_response",
+                "Geoapify returned provider data in an unsupported format.",
+                retryable=True,
+            )
+        records = [feature for feature in payload["features"] if isinstance(feature, dict)]
+        return ProviderSourcePayload(
+            source_id=self.source_id,
+            source_label=self.source_label,
+            origin=origin,
+            records=records,
+            no_results_message=(
+                "No nearby clinic, doctor, or hospital records were returned by Geoapify. "
+                "Try a broader area or a nearby city."
+                if not records
+                else None
+            ),
+        )
+
+
+class HybridDirectorySource:
+    """Geoapify first when keyed; OpenStreetMap otherwise. Never says a source failed."""
+
+    def search(self, location: str, specialty: Dict[str, Any]) -> ProviderSourcePayload:
+        key = _geoapify_key()
+        if key:
+            try:
+                payload = GeoapifyPlacesSource(key).search(location, specialty)
+                if payload.records:
+                    return payload
+            except ProviderSearchError:
+                pass
+        return OpenStreetMapSource(_osm_user_agent()).search(location, specialty)
+
+
 def get_provider_source() -> Any:
     """Create the configured live provider source; never substitute mock data."""
-    source = os.environ.get("PROVIDER_DIRECTORY_SOURCE", "openstreetmap").strip().lower()
+    source = os.environ.get("PROVIDER_DIRECTORY_SOURCE", "auto").strip().lower()
+    if source in {"", "auto", "hybrid"}:
+        return HybridDirectorySource()
+    if source in {"geoapify"}:
+        key = _geoapify_key()
+        if not key:
+            raise ProviderSearchError(
+                "provider_configuration_missing",
+                "Geoapify is selected but GEOAPIFY_API_KEY is not configured on the backend.",
+                retryable=False,
+                http_status=503,
+            )
+        return GeoapifyPlacesSource(key)
     if source in {"google", "google_places", "googleplaces"}:
         api_key = os.environ.get("GOOGLE_PLACES_API_KEY", "").strip()
         if not api_key or api_key.startswith("your-"):
@@ -422,10 +563,10 @@ def get_provider_source() -> Any:
             )
         return GooglePlacesSource(api_key)
     if source in {"openstreetmap", "osm"}:
-        return OpenStreetMapSource(os.environ.get("OSM_NOMINATIM_USER_AGENT", ""))
+        return OpenStreetMapSource(_osm_user_agent())
     raise ProviderSearchError(
         "provider_configuration_invalid",
-        "PROVIDER_DIRECTORY_SOURCE must be set to 'google_places' or 'openstreetmap'.",
+        "PROVIDER_DIRECTORY_SOURCE must be auto, geoapify, openstreetmap, or google_places.",
         retryable=False,
         http_status=503,
     )

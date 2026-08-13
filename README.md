@@ -53,6 +53,7 @@ Vision+text use the same Gemini model; Groq needs two. All three are OpenAI-comp
 | `jobs.py` | Thread-safe parent jobs with independent per-file progress (`queued → reading → extracting → saving → ready/failed`) and optional Supabase persistence |
 | `conversation.py` | In-memory conversation store, rewrites follow-ups like “was that safe?” into self-contained retrieval queries, summarizes older turns to keep context bounded |
 | `api.py` | FastAPI wrapper — lifespan startup, CORS (fixed `*` + credentials handling), all `/api/v1/` routes, multipart upload handling (sync 201 or async 202 via `USE_BACKGROUND_JOBS`/`?async=true`), merges new docs with old, fixes `_source.file` to original filename |
+| `care_finder.py` | Find Care — specialty suggestion from the record; Geoapify geocode + Places primary, OpenStreetMap Nominatim + Overpass fallback; opening-hours match, ranking. Leaflet map |
 | `auth.py` | Validates `Authorization: Bearer <jwt>` + `X-User-Id`, plus issues anonymous JWTs via `issue_anonymous_token()` |
 | `db.py` | Supabase Postgres persistence (documents append-only + patient snapshot upsert), chained `.order("uploaded_at").order("id")` |
 | `storage.py` | Uploads original file to Cloudinary `mediscan/<user_id>/...` |
@@ -147,6 +148,8 @@ Base URL `http://127.0.0.1:8000`, all routes under `/api/v1/`.
 - **Safety** `/safety` — allergy conflicts (danger), interactions with severity, dosage conflicts, duplicates, overall recommendation.
 - **Ask** `/ask` — single-shot RAG, configurable `top_k`, confidence, sources, `recommend_professional_consult`.
 - **Conversations** `/conversations` — multi-turn, query rewriting (`rewritten_query`), session resume by ID, 404 handling when in-memory session expired after restart.
+- **Find Local Care** `/care` — evidence-to-care pathway: clinical flags → specialty → live directory (**Geoapify** primary, **OpenStreetMap** fallback) → ranked provider cards → consultation pack.
+- **Clinic map** `/find-care` — city + specialty search on a **Leaflet** map. Same Geoapify / OSM directory stack.
 
 States distinguished: loading, empty 404 (no record), 401 auth, 422 validation/non-medical, 502 ML pipeline, network/CORS.
 
@@ -240,7 +243,12 @@ Frontend `UploadPage` always uses async jobs so even a small file has truthful p
 #### Vector Store
 `VECTOR_STORE=chroma` (default, local `CHROMA_DIR`) or `supabase` (Supabase `chunks` table, no volume). `inspect_chroma.py` works with both (`VECTOR_STORE=supabase python inspect_chroma.py`). After switching backends, delete `chroma_db` or clear `chunks` table and re-upload.
 
-Errors: 400 empty question, 401 auth, 404 unknown session/no record, 422 non-medical, 502 embedding/LLM failure (provider-aware: `Provider 'gemini' ...` / `Provider 'groq' ...`).
+#### Find care
+`GET /api/v1/care/suggestion` — specialty suggestion from the caller's saved records (general practice if none).  
+`GET /api/v1/care/specialties` — same payload (catalogue + suggestion).  
+`POST /api/v1/care/search {city, specialty?, days?, time_of_day?, radius_km?}` — **Geoapify** geocodes and lists nearby clinics/doctors/hospitals when `GEOAPIFY_API_KEY` is set; **OpenStreetMap** (Nominatim + Overpass) is the automatic fallback. Ranked by specialty match + opening hours + distance. The frontend map is **Leaflet**. Response `source.name` is `Geoapify` or `OpenStreetMap` — the UI never says a provider failed. 422 `city_not_found` if the city is unknown; 502 `directory_unavailable` (retryable) if both directories are down.
+
+Errors: 400 empty question, 401 auth, 404 unknown session/no record, 422 non-medical / unknown city, 502 embedding/LLM / directory failure (provider-aware: `Provider 'gemini' ...` / `Provider 'groq' ...`).
 
 ### Inspecting vector store
 
@@ -255,6 +263,7 @@ VECTOR_STORE=supabase python backend/inspect_chroma.py "anon_ab12cd34ef56"
 
 ### What changed
 
+- **Find care** — `/care` searches real clinics with **Geoapify first** (geocoding + Places, free key, no card) and **OpenStreetMap / Overpass as fallback**. Leaflet draws the map. The UI labels the provider source (`Geoapify` or `OpenStreetMap`) without saying a directory failed. Specialty is suggested from the record; results rank by specialty match, opening hours vs the requested window, and distance.
 - **Current Gemini model** — the Gemini default is `gemini-3.6-flash` for text and vision, with `gemini-3.5-flash-lite` fallback. The retired `gemini-2.0-flash` default (shut down 2026-06-01) was the source of misleading HTTP 429 `limit: 0` failures.
 - **Vector store abstraction** — `vector_store.py` with `VECTOR_STORE=chroma` (local `CHROMA_DIR`, needs volume) or `supabase` (Supabase `chunks` table, no volume, brute-force cosine). `retrieval.py` now delegates, `inspect_chroma.py` supports both, `supabase_schema.sql` adds `chunks` table. Recommended for Railway: `VECTOR_STORE=supabase`.
 - **Per-file jobs + load control** — one parent job exposes independent child states for every document, while a shared bounded executor (`UPLOAD_FILE_CONCURRENCY`) queues work safely across uploads. The UI shows per-file phases separately from batch finalization, and a terminal provider quota opens a circuit breaker so queued files are not sent into the same failure repeatedly.

@@ -1895,18 +1895,59 @@ def extract_text_from_pdf(pdf_path: str) -> str:
     return "\n\n".join(chunks)
 
 
-def pdf_pages_to_images(pdf_path: str, dpi: int = 200) -> List[Image.Image]:
-    """Render each page of a scanned/image-only PDF into a PIL image."""
+def pdf_pages_to_images(
+    pdf_path: str,
+    dpi: int = 200,
+    page_indices: Optional[List[int]] = None,
+) -> List[Image.Image]:
+    """Render PDF pages into PIL images.
+
+    ``page_indices`` (0-based) limits rendering to those pages so a hybrid
+    PDF does not rasterize digital text pages that will be extracted as
+    text. When omitted, every page is rendered (scanned-PDF path).
+    """
     images = []
     doc = pymupdf.open(pdf_path)
     zoom = dpi / 72
     matrix = pymupdf.Matrix(zoom, zoom)
-    for page in doc:
+    indices = list(page_indices) if page_indices is not None else list(range(len(doc)))
+    for i in indices:
+        page = doc[i]
         pix = page.get_pixmap(matrix=matrix)
         img = Image.open(io.BytesIO(pix.tobytes("png")))
         images.append(img)
     doc.close()
     return images
+
+
+# A page with fewer than this many extracted characters is treated as
+# scanned/image-only and sent through vision OCR. 40 is high enough that
+# a digital letterhead-only cover (hospital name + address) still counts
+# as text, but a junk OCR layer of a few random glyphs does not.
+PAGE_TEXT_MIN_CHARS = 40
+
+
+def _pdf_page_texts(pdf_path: str) -> List[str]:
+    """Return stripped text for every page, in order."""
+    texts: List[str] = []
+    with pdfplumber.open(pdf_path) as pdf:
+        for page in pdf.pages:
+            texts.append((page.extract_text() or "").strip())
+    return texts
+
+
+def classify_pdf_pages(
+    page_texts: List[str], min_chars: int = PAGE_TEXT_MIN_CHARS
+) -> Tuple[List[int], List[int]]:
+    """Split page indices into (has_usable_text, needs_vision)."""
+    text_idx: List[int] = []
+    image_idx: List[int] = []
+    for i, text in enumerate(page_texts):
+        if len((text or "").strip()) >= min_chars:
+            text_idx.append(i)
+        else:
+            image_idx.append(i)
+    return text_idx, image_idx
 
 
 def image_to_base64(img: Image.Image) -> str:
@@ -2009,8 +2050,13 @@ def looks_like_medical_text(text: str, filename: str) -> bool:
     text_lower = text.lower()
     fn_lower = filename.lower()
     
-    # 1. Filename-based non-medical indicators
-    has_cv_filename = any(p in fn_lower for p in ("cv", "resume", "portfolio"))
+    # 1. Filename-based non-medical indicators.
+    # Must be token-aware: a substring check for "cv" falsely flags
+    # cardiovascular_report.pdf, recovery.pdf, coverage.pdf, etc.
+    has_cv_filename = bool(re.search(
+        r"(?:^|[^a-z0-9])(cv|resume|curriculum|portfolio)(?:[^a-z0-9]|$)",
+        fn_lower,
+    ))
     
     # 2. Text-based non-medical indicators (e.g. CV / Resume keywords)
     cv_keywords = [
@@ -2131,7 +2177,14 @@ def process_document(
     # --- End diagnostics ---
 
     if suffix == ".pdf":
-        if pdf_has_text_layer(file_path):
+        # Classify EACH page. The old all-or-nothing check sampled only the
+        # first 3 pages: a digital coversheet in front of scanned labs made
+        # the whole file take the text-layer path, so every image page was
+        # silently dropped.
+        page_texts = _pdf_page_texts(file_path)
+        text_idx, image_idx = classify_pdf_pages(page_texts)
+
+        if text_idx and not image_idx:
             text = extract_text_from_pdf(file_path)
             # deterministic check on the text layer before calling the LLM
             assert_text_looks_medical(text, path.name)
@@ -2139,8 +2192,8 @@ def process_document(
             result = extract_from_text(text, model=model)
             result["_source"] = {"file": path.name, "method": "text_layer"}
             return result
-        else:
-            # Scanned PDF -> render pages -> vision extraction per page
+
+        if image_idx and not text_idx:
             pages = pdf_pages_to_images(file_path)
             page_results = []
             for i, img in enumerate(pages):
@@ -2159,12 +2212,50 @@ def process_document(
                 page_results.append(res)
             return {"multi_page": True, "pages": page_results}
 
+        # Hybrid: digital pages via text extraction, scanned pages via vision.
+        page_results = []
+        if text_idx:
+            combined = "\n\n".join(
+                f"--- Page {i + 1} ---\n{page_texts[i]}" for i in text_idx
+            )
+            assert_text_looks_medical(combined, path.name)
+            _emit_document_progress(
+                progress_callback,
+                "extracting",
+                f"Finding medical details in {len(text_idx)} text page(s)",
+            )
+            text_result = extract_from_text(combined, model=model)
+            text_result["_source"] = {"file": path.name, "method": "text_layer"}
+            page_results.append(text_result)
+        if image_idx:
+            images = pdf_pages_to_images(file_path, page_indices=image_idx)
+            for page_i, img in zip(image_idx, images):
+                _emit_document_progress(
+                    progress_callback,
+                    "extracting",
+                    f"Finding medical details on scanned page {page_i + 1} of {len(page_texts)}",
+                )
+                res = extract_from_image(img, model=vision_model)
+                res = _apply_confidence_ceiling(res, VISION_OCR_CONFIDENCE_CEILING)
+                res["_source"] = {
+                    "file": path.name,
+                    "method": "vision_ocr",
+                    "page": page_i + 1,
+                }
+                page_results.append(res)
+        if len(page_results) == 1:
+            return page_results[0]
+        return {"multi_page": True, "pages": page_results}
+
     else:  # image types
         img = Image.open(file_path)
         # Phone photos carry an EXIF orientation tag instead of rotated
         # pixels — apply it, or the vision model reads the document
         # sideways/upside-down and extraction silently degrades.
-        img = ImageOps.exif_transpose(img)
+        # Older Pillow builds returned None when no EXIF orientation was
+        # present; never pass that through to extract_from_image.
+        transposed = ImageOps.exif_transpose(img)
+        img = transposed if transposed is not None else img
         _emit_document_progress(progress_callback, "extracting", "Finding medical details in the image")
         result = extract_from_image(img, model=vision_model)
         result = _apply_confidence_ceiling(result, VISION_OCR_CONFIDENCE_CEILING)

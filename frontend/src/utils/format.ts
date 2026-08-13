@@ -85,8 +85,30 @@ export function classNames(...parts: Array<string | false | null | undefined>): 
   return parts.filter(Boolean).join(" ");
 }
 
+// Best-effort epoch ms for the mixed date strings the extractor produces
+// ("05 Jan 2026", "2024-03-15", ISO timestamps). null if unparseable.
+export function parseFlexibleDate(date: string | null | undefined): number | null {
+  if (!date) return null;
+  const trimmed = date.trim();
+  if (!trimmed) return null;
+  const ms = Date.parse(trimmed);
+  return Number.isNaN(ms) ? null : ms;
+}
+
+// Chronological compare. Dated values sort before undated ones; two
+// unparseable strings fall back to localeCompare so the order is stable.
+export function compareDates(a: string | null | undefined, b: string | null | undefined): number {
+  const ta = parseFlexibleDate(a);
+  const tb = parseFlexibleDate(b);
+  if (ta != null && tb != null) return ta - tb;
+  if (ta != null) return -1;
+  if (tb != null) return 1;
+  return (a || "").localeCompare(b || "");
+}
+
 // Relative recency for lists, e.g. "Yesterday", "3 days ago", "Last week".
-// Falls back to formatDate for anything older than a month or unparseable.
+// Falls back to formatDate for anything older than a month, in the future,
+// or unparseable. (Previously any future date rendered as "Today".)
 export function relativeTime(date: string | null | undefined): string {
   if (!date) return "—";
   const trimmed = date.trim();
@@ -94,7 +116,8 @@ export function relativeTime(date: string | null | undefined): string {
   const d = new Date(trimmed);
   if (Number.isNaN(d.getTime())) return trimmed;
   const days = Math.floor((Date.now() - d.getTime()) / 86_400_000);
-  if (days <= 0) return "Today";
+  if (days < 0) return formatDate(trimmed);
+  if (days === 0) return "Today";
   if (days === 1) return "Yesterday";
   if (days < 7) return `${days} days ago`;
   if (days < 14) return "Last week";

@@ -69,6 +69,7 @@ from medical_extractor import (
     process_document,
 )
 from retrieval import answer_question, index_patient_timeline
+import care_finder
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("api")
@@ -180,6 +181,20 @@ async def upload_pipeline_error_handler(request: Request, exc: UploadPipelineErr
     )
 
 
+@app.exception_handler(care_finder.CareFinderError)
+async def care_finder_error_handler(request: Request, exc: care_finder.CareFinderError):
+    status = 422 if exc.code == "city_not_found" else 502
+    logger.warning("care finder error for %s %s: %s", request.method, request.url.path, exc)
+    return JSONResponse(
+        status_code=status,
+        content={
+            "detail": str(exc),
+            "code": exc.code,
+            "retryable": exc.retryable,
+        },
+    )
+
+
 @app.exception_handler(db.SchemaNotInitializedError)
 async def schema_not_initialized_handler(request: Request, exc: db.SchemaNotInitializedError):
     """Supabase is reachable but the app's tables don't exist (setup SQL
@@ -204,6 +219,15 @@ class MessageRequest(BaseModel):
     """Body for posting a message into a conversation session (Phase 2)."""
     question: str
     top_k: int = Field(default=8, ge=1, le=50)
+
+
+class CareSearchRequest(BaseModel):
+    """Find clinics/doctors near a city (Geoapify, OSM fallback)."""
+    city: str = Field(..., min_length=2, max_length=160)
+    specialty: Optional[str] = None
+    days: List[str] = Field(default_factory=lambda: ["mon", "tue", "wed", "thu", "fri"])
+    time_of_day: str = Field(default="any")
+    radius_km: float = Field(default=8, ge=1, le=50)
 
 
 class CareProviderSearchRequest(BaseModel):
@@ -817,11 +841,15 @@ async def upload_documents(
     files_data: List[Tuple[str, bytes]] = []
     for upload in files:
         original_name = Path(upload.filename or "").name or "upload"
-        # Validate extension early
+        # Unsupported types are recorded per-file in the pipeline (failed_files)
+        # rather than aborting the whole batch — one .txt next to a valid
+        # prescription must not discard the prescription.
         suffix = Path(original_name).suffix.lower()
         if suffix not in SUPPORTED_EXTENSIONS:
-            logger.warning("upload_documents: user=%s rejected '%s' (unsupported type '%s')", user_id, original_name, suffix or "(none)")
-            raise HTTPException(400, f"Unsupported file type '{suffix or '(no extension)'}' for '{original_name}'. Supported: {', '.join(SUPPORTED_EXTENSIONS)}")
+            logger.warning(
+                "upload_documents: user=%s will skip '%s' (unsupported type '%s')",
+                user_id, original_name, suffix or "(none)",
+            )
         content = await upload.read()
         files_data.append((original_name, content))
 
@@ -1109,6 +1137,51 @@ async def delete_session(session_id: str, user_id: str = Depends(get_current_use
     """Ends a conversation session, freeing its in-memory turn history."""
     if not conversation.delete_session(user_id, session_id):
         raise HTTPException(404, f"Session '{session_id}' not found.")
+
+
+# ---------------------------------------------------------------------------
+# Find care (specialty suggestion + OpenStreetMap directory)
+# ---------------------------------------------------------------------------
+
+def _care_timeline(user_id: str) -> Optional[Dict[str, Any]]:
+    """Best-effort record load. Find-care still works without a snapshot."""
+    try:
+        snapshot = db.load_patient_snapshot(user_id)
+    except Exception as exc:
+        logger.warning("care finder: could not load snapshot for %s: %s", user_id, exc)
+        return None
+    return snapshot["patient_timeline"] if snapshot else None
+
+
+@app.get("/api/v1/care/specialties")
+async def list_care_specialties(user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
+    """Catalogue of specialties the UI can offer, plus a suggestion from
+    the caller's saved records when they have any."""
+    return care_finder.suggest_specialties(_care_timeline(user_id))
+
+
+@app.get("/api/v1/care/suggestion")
+async def get_care_suggestion(user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
+    return care_finder.suggest_specialties(_care_timeline(user_id))
+
+
+@app.post("/api/v1/care/search")
+async def search_care(
+    body: CareSearchRequest, user_id: str = Depends(get_current_user)
+) -> Dict[str, Any]:
+    """Geocode the user's city and list nearby clinics, doctors, and
+    hospitals. Geoapify is primary when GEOAPIFY_API_KEY is set;
+    OpenStreetMap (Nominatim + Overpass) is the automatic fallback.
+    Ranked by specialty match, opening hours, and distance."""
+    return await asyncio.to_thread(
+        care_finder.search_care,
+        city=body.city,
+        specialty_id=body.specialty,
+        days=body.days,
+        time_of_day=body.time_of_day,
+        radius_km=body.radius_km,
+        timeline=_care_timeline(user_id),
+    )
 
 
 # ---------------------------------------------------------------------------

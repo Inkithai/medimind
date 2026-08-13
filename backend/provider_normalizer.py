@@ -152,9 +152,58 @@ def _osm_record(record: Dict[str, Any], payload: ProviderSourcePayload) -> Optio
     }
 
 
+def _geoapify_record(record: Dict[str, Any], payload: ProviderSourcePayload) -> Optional[Dict[str, Any]]:
+    props = record.get("properties") if isinstance(record.get("properties"), dict) else record
+    name = _text(props.get("name")) or _text(props.get("address_line1"))
+    if not name:
+        return None
+    geometry = record.get("geometry") if isinstance(record.get("geometry"), dict) else {}
+    coords = geometry.get("coordinates") if isinstance(geometry.get("coordinates"), list) else []
+    latitude = _number(props.get("lat"))
+    longitude = _number(props.get("lon"))
+    if latitude is None and len(coords) >= 2:
+        longitude, latitude = _number(coords[0]), _number(coords[1])
+    raw = ((props.get("datasource") or {}).get("raw") or {}) if isinstance(props.get("datasource"), dict) else {}
+    contact = props.get("contact") if isinstance(props.get("contact"), dict) else {}
+    categories = props.get("categories") if isinstance(props.get("categories"), list) else []
+    specialties = [
+        str(cat).rsplit(".", 1)[-1].replace("_", " ")
+        for cat in categories
+        if isinstance(cat, str) and "clinic_or_praxis." in cat
+    ]
+    map_url = (
+        f"https://www.openstreetmap.org/?mlat={latitude}&mlon={longitude}#map=18/{latitude}/{longitude}"
+        if latitude is not None and longitude is not None
+        else None
+    )
+    return {
+        "source_provider_id": _text(props.get("place_id")),
+        "name": name,
+        "provider_type": "clinic" if any("clinic" in str(c) for c in categories) else ("hospital" if any("hospital" in str(c) for c in categories) else None),
+        "source_specialties": _unique_strings(specialties),
+        "address": _text(props.get("formatted")),
+        "latitude": latitude,
+        "longitude": longitude,
+        "distance_km": _distance(payload, latitude, longitude),
+        "rating": None,
+        "rating_count": None,
+        "phone": _text(props.get("phone")) or _text(contact.get("phone")) or _text(raw.get("phone")),
+        "opening_hours": [_text(raw.get("opening_hours"))] if _text(raw.get("opening_hours")) else [],
+        "open_now": None,
+        "map_url": map_url,
+        "website_url": _text(props.get("website")) or _text(raw.get("website")),
+        "source": payload.source_label,
+    }
+
+
 def normalize_provider_records(payload: ProviderSourcePayload) -> List[Dict[str, Any]]:
     """Normalize and de-duplicate source results without manufacturing fields."""
-    normalizer = _google_record if payload.source_id == "google_places" else _osm_record
+    if payload.source_id == "google_places":
+        normalizer = _google_record
+    elif payload.source_id == "geoapify":
+        normalizer = _geoapify_record
+    else:
+        normalizer = _osm_record
     normalized: List[Dict[str, Any]] = []
     seen: set[str] = set()
     for raw in payload.records:

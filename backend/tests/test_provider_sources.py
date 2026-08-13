@@ -83,6 +83,39 @@ def test_http_or_network_timeouts_remain_distinct_from_zero_results():
             assert exc.http_status == 504
 
 
+def test_auto_source_uses_geoapify_when_keyed_and_osm_otherwise():
+    os.environ.pop("PROVIDER_DIRECTORY_SOURCE", None)
+    os.environ["GEOAPIFY_API_KEY"] = "abc123realkey"
+    try:
+        source = sources.get_provider_source()
+        assert isinstance(source, sources.HybridDirectorySource)
+        with mock.patch.object(
+            sources,
+            "_read_json",
+            side_effect=[
+                {"results": [{"formatted": "Kandy", "lat": 7.29, "lon": 80.63}]},
+                {"features": [{"type": "Feature", "properties": {"name": "Clinic", "place_id": "x"}}]},
+            ],
+        ):
+            payload = source.search("Kandy", {"id": "cardiology", "provider_query": "cardiologist"})
+        assert payload.source_id == "geoapify"
+        assert payload.source_label == "Geoapify"
+        assert payload.records
+    finally:
+        os.environ.pop("GEOAPIFY_API_KEY", None)
+
+    os.environ.pop("GEOAPIFY_API_KEY", None)
+    source = sources.get_provider_source()
+    assert isinstance(source, sources.HybridDirectorySource)
+    with mock.patch.object(sources, "_respect_osm_request_spacing"), mock.patch.object(
+        sources,
+        "_read_json",
+        side_effect=[[{"display_name": "Kandy", "lat": "7.29", "lon": "80.63"}], {"elements": []}],
+    ):
+        payload = source.search("Kandy", {"id": "cardiology", "provider_query": "cardiologist"})
+    assert payload.source_id == "openstreetmap"
+
+
 def test_directory_match_description_never_claims_clinical_quality():
     description = ranking_method_description().lower()
     assert "directory match" in description
