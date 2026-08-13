@@ -41,7 +41,7 @@ from typing import Any, Dict, List, Optional
 
 from openai import OpenAI, OpenAIError
 
-from medical_extractor import client, MODEL, _completion_resilient, _chat_completion
+from medical_extractor import MODEL, _completion_resilient
 import vector_store  # abstraction over Chroma (local) and Supabase (no volume)
 
 logger = logging.getLogger("retrieval")
@@ -79,10 +79,16 @@ def _get_local_embedding_function():
 # 1. Chunking — turn a patient timeline into retrievable text chunks
 # ---------------------------------------------------------------------------
 
-def _chunk_id(patient_key: str, source_file: Optional[str], chunk_type: str, index: int) -> str:
-    """Stable, deterministic chunk ID so re-indexing the same documents
-    upserts in place instead of creating duplicates."""
-    raw = f"{patient_key}|{source_file or 'unknown'}|{chunk_type}|{index}"
+def _chunk_id(patient_key: str, source_file: Optional[str], chunk_type: str, payload: str) -> str:
+    """Stable, content-addressed chunk ID so re-indexing the same documents
+    upserts in place instead of creating duplicates.
+
+    IDs must NOT include the item's position in the timeline list. That list
+    is rebuilt and re-sorted on every upload, so an index-based id (``…|0``,
+    ``…|1``) shifts whenever an older document is added and leaves the
+    previous id behind as a stale duplicate the next Q&A still retrieves.
+    """
+    raw = f"{patient_key}|{source_file or 'unknown'}|{chunk_type}|{payload}"
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
@@ -150,10 +156,11 @@ def build_chunks_from_timeline(patient_key: str, timeline: Dict[str, Any]) -> Li
     """
     chunks: List[Dict[str, Any]] = []
 
-    for i, med in enumerate(timeline.get("medications_timeline", [])):
+    for med in timeline.get("medications_timeline", []):
+        text = _medication_chunk_text(med)
         chunks.append({
-            "id": _chunk_id(patient_key, med.get("source_file"), "medication", i),
-            "text": _medication_chunk_text(med),
+            "id": _chunk_id(patient_key, med.get("source_file"), "medication", text),
+            "text": text,
             "metadata": {
                 "patient_key": patient_key,
                 "date": med.get("date") or "",
@@ -162,10 +169,11 @@ def build_chunks_from_timeline(patient_key: str, timeline: Dict[str, Any]) -> Li
             },
         })
 
-    for i, lab in enumerate(timeline.get("lab_results_timeline", [])):
+    for lab in timeline.get("lab_results_timeline", []):
+        text = _lab_result_chunk_text(lab)
         chunks.append({
-            "id": _chunk_id(patient_key, lab.get("source_file"), "lab_result", i),
-            "text": _lab_result_chunk_text(lab),
+            "id": _chunk_id(patient_key, lab.get("source_file"), "lab_result", text),
+            "text": text,
             "metadata": {
                 "patient_key": patient_key,
                 "date": lab.get("date") or "",
@@ -174,13 +182,14 @@ def build_chunks_from_timeline(patient_key: str, timeline: Dict[str, Any]) -> Li
             },
         })
 
-    for i, visit in enumerate(timeline.get("visits", [])):
+    for visit in timeline.get("visits", []):
         if not visit.get("clinical_notes"):
             continue
         source_file = visit.get("_source", {}).get("file")
+        text = _clinical_note_chunk_text(visit)
         chunks.append({
-            "id": _chunk_id(patient_key, source_file, "clinical_note", i),
-            "text": _clinical_note_chunk_text(visit),
+            "id": _chunk_id(patient_key, source_file, "clinical_note", text),
+            "text": text,
             "metadata": {
                 "patient_key": patient_key,
                 "date": visit.get("date") or "",
@@ -191,9 +200,10 @@ def build_chunks_from_timeline(patient_key: str, timeline: Dict[str, Any]) -> Li
 
     allergies = timeline.get("known_allergies") or []
     if allergies:
+        text = _allergy_chunk_text(allergies)
         chunks.append({
-            "id": _chunk_id(patient_key, None, "allergy", 0),
-            "text": _allergy_chunk_text(allergies),
+            "id": _chunk_id(patient_key, None, "allergy", text),
+            "text": text,
             "metadata": {
                 "patient_key": patient_key,
                 "date": "",
@@ -551,38 +561,29 @@ def answer_question(
     ]
     context_str = "\n\n".join(context_blocks)
 
-    user_content = (
-        f"Retrieved patient records:\n\n{context_str}\n\nQuestion: {question}"
-    )
-    # Reuse the resilient completion runner so reasoning models'
-    # <think>...</think> blocks get stripped client-side and transient
-    # server-side JSON-validation rejections are retried, matching the
-    # behaviour of the extraction and cross-check paths.
+    # Fold prior turns into the single user message so follow-ups go through
+    # the same resilient ladder as first-shot Q&A. The previous split path
+    # called _chat_completion() directly, so a json_validate_failed / 429 on
+    # turn 2 crashed the conversation instead of retrying.
+    history_block = ""
     if chat_history:
-        # _completion_resilient takes a single user turn; if there's chat
-        # history we do one direct call with the strict response format and
-        # let any retryable error surface — history is only passed on
-        # follow-up turns in the same session and reasoning-tag leaks are
-        # still covered by the tolerant parse below.
-        messages = [{"role": "system", "content": QA_SYSTEM_PROMPT}]
-        messages.extend(chat_history)
-        messages.append({"role": "user", "content": user_content})
-        try:
-            response = _chat_completion(
-                model=CHAT_MODEL,
-                messages=messages,
-                response_format=ANSWER_RESPONSE_FORMAT,
-            )
-        except OpenAIError as e:
-            raise RuntimeError(f"Chat completion failed while answering question: {e}") from e
-        raw = response.choices[0].message.content or ""
-    else:
-        raw = _completion_resilient(
-            model=CHAT_MODEL,
-            system_prompt=QA_SYSTEM_PROMPT,
-            user_content=user_content,
-            strict_format=ANSWER_RESPONSE_FORMAT,
+        transcript = "\n".join(
+            f"{(turn.get('role') or 'user').upper()}: {turn.get('content') or ''}"
+            for turn in chat_history
         )
+        history_block = (
+            "Prior conversation (context only — not retrieved records):\n"
+            f"{transcript}\n\n"
+        )
+    user_content = (
+        f"{history_block}Retrieved patient records:\n\n{context_str}\n\nQuestion: {question}"
+    )
+    raw = _completion_resilient(
+        model=CHAT_MODEL,
+        system_prompt=QA_SYSTEM_PROMPT,
+        user_content=user_content,
+        strict_format=ANSWER_RESPONSE_FORMAT,
+    )
 
     # Tolerant parse: reuse the same think-stripping logic the extractor
     # uses, so a model that still emits <think> tags (e.g. under fallback

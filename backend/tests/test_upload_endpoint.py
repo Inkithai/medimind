@@ -285,6 +285,32 @@ def test_hard_provider_quota_stops_queued_files_after_first_call():
         app.dependency_overrides.clear()
 
 
+def test_unsupported_file_does_not_fail_whole_batch():
+    """A .txt sitting next to a valid prescription must not 400 the batch.
+    The good file is kept; the unsupported one is reported in failed_files."""
+    app, patchers = _make_client(index_chunks=2)
+    try:
+        with TestClient(app) as client:
+            resp = client.post(
+                "/api/v1/documents",
+                files=[
+                    ("files", ("rx.pdf", b"fake-pdf", "application/pdf")),
+                    ("files", ("notes.txt", b"hello", "text/plain")),
+                ],
+            )
+        assert resp.status_code == 201, resp.text
+        body = resp.json()
+        assert body["documents_added"] == 1
+        failed = {f["file"]: f for f in body["failed_files"]}
+        assert "notes.txt" in failed
+        assert failed["notes.txt"]["kind"] == "unsupported"
+        assert failed["notes.txt"]["code"] == "unsupported_file_type"
+    finally:
+        for p in patchers:
+            p.stop()
+        app.dependency_overrides.clear()
+
+
 def test_all_files_non_medical_still_422():
     """Every file genuinely non-medical -> 422 with the per-file reason,
     same contract as before per-file resilience."""

@@ -809,11 +809,15 @@ async def upload_documents(
     files_data: List[Tuple[str, bytes]] = []
     for upload in files:
         original_name = Path(upload.filename or "").name or "upload"
-        # Validate extension early
+        # Unsupported types are recorded per-file in the pipeline (failed_files)
+        # rather than aborting the whole batch — one .txt next to a valid
+        # prescription must not discard the prescription.
         suffix = Path(original_name).suffix.lower()
         if suffix not in SUPPORTED_EXTENSIONS:
-            logger.warning("upload_documents: user=%s rejected '%s' (unsupported type '%s')", user_id, original_name, suffix or "(none)")
-            raise HTTPException(400, f"Unsupported file type '{suffix or '(no extension)'}' for '{original_name}'. Supported: {', '.join(SUPPORTED_EXTENSIONS)}")
+            logger.warning(
+                "upload_documents: user=%s will skip '%s' (unsupported type '%s')",
+                user_id, original_name, suffix or "(none)",
+            )
         content = await upload.read()
         files_data.append((original_name, content))
 
