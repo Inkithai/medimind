@@ -1249,15 +1249,19 @@ async def care_facilities(
     _ = user_id
     if kind not in FACILITY_KINDS:
         kind = "any"
-    return get_care_service().search_facilities(
-        location=location, kind=kind, radius_km=radius_km
+    # Blocking upstream HTTP (Nominatim + Overpass) must not stall the event loop.
+    return await asyncio.to_thread(
+        get_care_service().search_facilities,
+        location=location,
+        kind=kind,
+        radius_km=radius_km,
     )
 
 
 @app.get("/api/v1/care/geocode")
 async def care_geocode(q: str, user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
     _ = user_id
-    point = get_care_service().geocode(q)
+    point = await asyncio.to_thread(get_care_service().geocode, q)
     return {
         "latitude": point.latitude,
         "longitude": point.longitude,
@@ -1273,7 +1277,7 @@ async def care_routes(
     user_id: str = Depends(get_current_user),
 ) -> Dict[str, Any]:
     _ = user_id
-    return get_care_service().get_route(origin, destination)
+    return await asyncio.to_thread(get_care_service().get_route, origin, destination)
 
 
 @app.get("/api/v1/health")
