@@ -66,13 +66,7 @@ export function CrossCheckPage() {
       {!loading && report && (
         <>
           <CrossCheckView report={report} />
-          <p className="text-sm text-slate-600">
-            This is not a diagnosis. If you want a public listing of nearby clinics,{" "}
-            <Link to="/find-care" className="font-medium text-brand-600 hover:text-brand-700">
-              find facilities
-            </Link>
-            — MediMind will not pick one for you.
-          </p>
+          {hasSafetyIssues(report) && <ConsiderProfessionalCare />}
         </>
       )}
     </div>
