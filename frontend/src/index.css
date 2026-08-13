@@ -51,6 +51,46 @@ body {
   outline-offset: 2px;
 }
 
+/* Leaflet uses a lightweight custom pin so no image assets need to be copied by Vite. */
+.location-map-pin-wrapper {
+  background: transparent;
+  border: 0;
+}
+
+.location-map-pin {
+  position: relative;
+  display: block;
+  width: 34px;
+  height: 34px;
+  transform: rotate(45deg);
+  border: 3px solid white;
+  border-radius: 50% 50% 50% 8px;
+  background: #0f766e;
+  box-shadow: 0 6px 14px rgb(15 23 42 / 28%);
+}
+
+.location-map-pin span {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  width: 12px;
+  height: 12px;
+  border-radius: 9999px;
+  background: white;
+}
+
+.leaflet-container {
+  font-family: inherit;
+}
+
+.leaflet-control-zoom a {
+  color: #334155;
+}
+
+.leaflet-control-attribution {
+  font-size: 10px;
+}
+
 /* Thin, unobtrusive scrollbars for data panels */
 .scroll-thin::-webkit-scrollbar {
   width: 8px;
