@@ -47,20 +47,22 @@ Vision+text use the same Gemini model; Groq needs two. All three are OpenAI-comp
 |---|---|
 | `medical_extractor.py` | `LLM_PROVIDER` layer, vision / text extraction, patient grouping, timeline creation, safety LLM call plus deterministic duplicate detection, local CLI persistence |
 | `document_filter.py` | Fast post-extraction filter for non-medical files (no extra LLM call, reuses `document_type` + clinical fields) |
-| `lab_trends.py` | Pure Python trend engine — parses dates/values, computes direction, detects range crossings, flags approaching thresholds |
+| `lab_trends.py` | Pure Python trend engine — direction, crossings, recovery (`returned_to_normal`), unit-clash decline, thousands-aware parse |
 | `retrieval.py` | Chunks timeline into Medication / Lab / ClinicalNote / Allergy texts, embeds (OpenAI `text-embedding-3-small` if set else local ONNX MiniLM), indexes via `vector_store` abstraction, single-shot Q&A |
 | `vector_store.py` | Abstraction over Chroma (`VECTOR_STORE=chroma`, local `CHROMA_DIR`) and Supabase `chunks` table (`VECTOR_STORE=supabase`, no volume, brute-force cosine) |
 | `jobs.py` | Thread-safe parent jobs with independent per-file progress (`queued → reading → extracting → saving → ready/failed`) and optional Supabase persistence |
 | `conversation.py` | In-memory conversation store, rewrites follow-ups like “was that safe?” into self-contained retrieval queries, summarizes older turns to keep context bounded |
 | `api.py` | FastAPI wrapper — lifespan startup, CORS (fixed `*` + credentials handling), all `/api/v1/` routes, multipart upload handling (sync 201 or async 202 via `USE_BACKGROUND_JOBS`/`?async=true`), merges new docs with old, fixes `_source.file` to original filename |
+| `care_finder.py` | Find Care — specialty suggestion from the record; Geoapify geocode + Places primary, OpenStreetMap Nominatim + Overpass fallback; opening-hours match, ranking. Leaflet map |
 | `auth.py` | Validates `Authorization: Bearer <jwt>` + `X-User-Id`, plus issues anonymous JWTs via `issue_anonymous_token()` |
 | `db.py` | Supabase Postgres persistence (documents append-only + patient snapshot upsert), chained `.order("uploaded_at").order("id")` |
 | `storage.py` | Uploads original file to Cloudinary `mediscan/<user_id>/...` |
 | `supabase_schema.sql` | One-time table creation with RLS enabled/no policies (only service_role key can access) |
+| `care/` | Optional Care Navigation: provider-agnostic facility search. Does not read the patient record. |
 | `inspect_chroma.py` | Read-only CLI to list collections / inspect chunks |
 | `requirements.txt` / `Procfile` | Railway Nixpacks deployment |
 
-Deep dives live in `backend/docs/`.
+Deep dives live in [`backend/docs/`](backend/docs/README.md). Freeze [01-end-to-end-pipeline.md](backend/docs/01-end-to-end-pipeline.md) for the deck: Understand → Detect → Explain → Protect. No `/care` on this branch.
 
 ### Setup
 
@@ -143,10 +145,12 @@ Base URL `http://127.0.0.1:8000`, all routes under `/api/v1/`.
 - **My Documents** `/documents` — list + `DocumentViewer` with Original (iframe/img via Cloudinary, `split("?")[0]` fixes PDF query-param urls) vs Structured tabs.
 - **My History** `/history` — year-grouped timeline (2026 → Jul 20 🧪 Blood Test etc.) + full `TimelineView`.
 - **My Medicines** `/medicines` — current per ingredient (most recent) + historical log table, filterable, source file traceable (now fixed to original filename, not temp sanitized path).
-- **Test Results / Lab Trends** `/labs` — per-test direction, flag sequence, crossing point, approaching-threshold badge, SVG sparkline with reference band (robust parsing for `70-99 mg/dL`).
+- **Test Results / Lab Trends** `/labs` — per-test direction, flag sequence, crossing / recovery badge (green when the latest reading is back to normal), approaching-threshold, SVG sparkline with reference band. Thousands-aware values; mixed units (`mg/dL` vs `mmol/L`) are declined rather than trended.
 - **Safety** `/safety` — allergy conflicts (danger), interactions with severity, dosage conflicts, duplicates, overall recommendation.
 - **Ask** `/ask` — single-shot RAG, configurable `top_k`, confidence, sources, `recommend_professional_consult`.
 - **Conversations** `/conversations` — multi-turn, query rewriting (`rewritten_query`), session resume by ID, 404 handling when in-memory session expired after restart.
+- **Find Local Care** `/care` — evidence-to-care pathway: clinical flags → specialty → live directory (**Geoapify** primary, **OpenStreetMap** fallback) → ranked provider cards → consultation pack.
+- **Clinic map** `/find-care` — city + specialty search on a **Leaflet** map. Same Geoapify / OSM directory stack.
 
 States distinguished: loading, empty 404 (no record), 401 auth, 422 validation/non-medical, 502 ML pipeline, network/CORS.
 
@@ -189,6 +193,16 @@ Open App → Create Anonymous Session (UUID) → Store in localStorage → Patie
 3. Set `USE_BACKGROUND_JOBS=true` and keep `UPLOAD_FILE_CONCURRENCY=1` for constrained quotas. Uploads return 202 immediately, while a shared bounded worker pool load-balances files and the frontend polls per-file progress.
 4. Deploy — `$PORT` assigned automatically.
 
+### Live local care recommendations (Round 2)
+
+`/care` activates only when the saved Round 1 snapshot contains an existing high-risk medication-safety signal or a low-confidence extraction/trend/safety result. The user selects the flagged evidence, enters a city/area and consultation preference, and the backend searches a **live provider directory**. Provider data is never seeded, mocked, hard-coded, or sent from the frontend.
+
+- `GET /api/v1/care-recommendations` returns the authenticated user’s qualifying flags and transparent specialty rationale. It does not call a directory.
+- `POST /api/v1/care-recommendations/search` accepts `{flag_id, location, availability}` and returns only source-provided provider fields, calculated distance, and explainable ranking.
+- Set `PROVIDER_DIRECTORY_SOURCE=google_places` + `GOOGLE_PLACES_API_KEY` for Google Places, or `PROVIDER_DIRECTORY_SOURCE=openstreetmap` + the required identifying `OSM_NOMINATIM_USER_AGENT` for the public Nominatim/Overpass alternative. Full source, ranking, and failure contract: [`backend/docs/care_recommendations.md`](backend/docs/care_recommendations.md).
+- Results visibly state `Live provider data — <source>`. A zero-result response is an empty list with a widening-search suggestion, never fabricated clinicians.
+- MediMind does not diagnose. This navigation aid helps find an appropriate professional to review existing potential issues or uncertain extractions.
+
 ### Auth contract
 
 - `GET /api/v1/health` + `POST /api/v1/anonymous/session` → public.
@@ -230,7 +244,12 @@ Frontend `UploadPage` always uses async jobs so even a small file has truthful p
 #### Vector Store
 `VECTOR_STORE=chroma` (default, local `CHROMA_DIR`) or `supabase` (Supabase `chunks` table, no volume). `inspect_chroma.py` works with both (`VECTOR_STORE=supabase python inspect_chroma.py`). After switching backends, delete `chroma_db` or clear `chunks` table and re-upload.
 
-Errors: 400 empty question, 401 auth, 404 unknown session/no record, 422 non-medical, 502 embedding/LLM failure (provider-aware: `Provider 'gemini' ...` / `Provider 'groq' ...`).
+#### Find care
+`GET /api/v1/care/suggestion` — specialty suggestion from the caller's saved records (general practice if none).  
+`GET /api/v1/care/specialties` — same payload (catalogue + suggestion).  
+`POST /api/v1/care/search {city, specialty?, days?, time_of_day?, radius_km?}` — **Geoapify** geocodes and lists nearby clinics/doctors/hospitals when `GEOAPIFY_API_KEY` is set; **OpenStreetMap** (Nominatim + Overpass) is the automatic fallback. Ranked by specialty match + opening hours + distance. The frontend map is **Leaflet**. Response `source.name` is `Geoapify` or `OpenStreetMap` — the UI never says a provider failed. 422 `city_not_found` if the city is unknown; 502 `directory_unavailable` (retryable) if both directories are down.
+
+Errors: 400 empty question, 401 auth, 404 unknown session/no record, 422 non-medical / unknown city, 502 embedding/LLM / directory failure (provider-aware: `Provider 'gemini' ...` / `Provider 'groq' ...`).
 
 ### Inspecting vector store
 
@@ -245,6 +264,7 @@ VECTOR_STORE=supabase python backend/inspect_chroma.py "anon_ab12cd34ef56"
 
 ### What changed
 
+- **Find care** — `/care` searches real clinics with **Geoapify first** (geocoding + Places, free key, no card) and **OpenStreetMap / Overpass as fallback**. Leaflet draws the map. The UI labels the provider source (`Geoapify` or `OpenStreetMap`) without saying a directory failed. Specialty is suggested from the record; results rank by specialty match, opening hours vs the requested window, and distance.
 - **Current Gemini model** — the Gemini default is `gemini-3.6-flash` for text and vision, with `gemini-3.5-flash-lite` fallback. The retired `gemini-2.0-flash` default (shut down 2026-06-01) was the source of misleading HTTP 429 `limit: 0` failures.
 - **Vector store abstraction** — `vector_store.py` with `VECTOR_STORE=chroma` (local `CHROMA_DIR`, needs volume) or `supabase` (Supabase `chunks` table, no volume, brute-force cosine). `retrieval.py` now delegates, `inspect_chroma.py` supports both, `supabase_schema.sql` adds `chunks` table. Recommended for Railway: `VECTOR_STORE=supabase`.
 - **Per-file jobs + load control** — one parent job exposes independent child states for every document, while a shared bounded executor (`UPLOAD_FILE_CONCURRENCY`) queues work safely across uploads. The UI shows per-file phases separately from batch finalization, and a terminal provider quota opens a circuit breaker so queued files are not sent into the same failure repeatedly.
@@ -253,7 +273,7 @@ VECTOR_STORE=supabase python backend/inspect_chroma.py "anon_ab12cd34ef56"
 - **`GROQ_API_KEY` placeholder handling** — legacy var now treats `your-groq-api-key` / `your-*` as missing, not valid.
 - **AuthContext** — `clearCredentials`/`createNewWorkspace` reset `provisioningStarted` so erasing workspace no longer stalls auto-provision after StrictMode guard.
 - **DocumentViewer** — PDF detection now strips query params (`split("?")[0]`) so Cloudinary `...pdf?dl=0` renders as iframe, not broken image.
-- **Docs** — `backend/docs/*.md` and `retrieval.py`/`conversation.py`/`api.py` docstrings now provider-aware.
+- **Docs** — `backend/docs/` is the current architecture source of truth: three presentation layers (pipeline, intelligence, isolation). No `/care` on this branch.
 - Earlier: Supabase chained `.order("uploaded_at").order("id")`, lifespan, dateutil sorting, `_parse_range` robust to `70-99 mg/dL`, upload dedup fix, anonymous session flow.
 
 ### Limitations

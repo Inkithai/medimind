@@ -118,14 +118,14 @@ export function DashboardPage() {
     record.timeline.visits.map((v) => (v.provider_or_doctor || "").trim().toLowerCase()).filter(Boolean)
   ).size;
 
-  const recentVisits = [...record.timeline.visits]
-    .sort((a, b) => (b.date || "").localeCompare(a.date || ""))
-    .slice(0, 5);
+  // visits are already chronological (oldest first) from the backend.
+  // Do not re-sort by raw string — "05 Jan 2026" vs "2024-03-15" is not
+  // lexicographic.
+  const recentVisits = [...record.timeline.visits].slice(-5).reverse();
 
-  const lastVisit = record.timeline.visits
+  const lastVisit = [...record.timeline.visits]
     .map((v) => v.date)
     .filter((d): d is string => Boolean(d))
-    .sort()
     .pop();
 
   return (

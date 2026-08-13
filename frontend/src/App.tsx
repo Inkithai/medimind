@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import { Layout } from "./components/Layout";
 import { useAuth } from "./context/AuthContext";
 import { CrossCheckPage } from "./pages/CrossCheckPage";
+import { CareRecommendationsPage } from "./pages/CareRecommendationsPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { LabTrendsPage } from "./pages/LabTrendsPage";
 import { LandingPage } from "./pages/LandingPage";
@@ -12,6 +13,7 @@ import { UploadPage } from "./pages/UploadPage";
 import { DocumentsPage } from "./pages/DocumentsPage";
 import { MedicinesPage } from "./pages/MedicinesPage";
 import { HistoryPage } from "./pages/HistoryPage";
+import { FindCarePage } from "./pages/FindCarePage";
 import { Spinner } from "./components/Spinner";
 
 function RequireAuth({ children }: { children: JSX.Element }) {
@@ -129,6 +131,14 @@ export default function App() {
           }
         />
         <Route
+          path="/care"
+          element={
+            <RequireAuth>
+              <CareRecommendationsPage />
+            </RequireAuth>
+          }
+        />
+        <Route
           path="/qa"
           element={
             <RequireAuth>
@@ -157,6 +167,14 @@ export default function App() {
           element={
             <RequireAuth>
               <SessionPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/find-care"
+          element={
+            <RequireAuth>
+              <FindCarePage />
             </RequireAuth>
           }
         />

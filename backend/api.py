@@ -46,7 +46,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Literal, Optional, Tuple
 
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -57,9 +57,30 @@ import conversation
 import db
 import jobs
 import storage
+from care_recommendations import ProviderSearchError, recommendation_context, search_live_providers
 from auth import get_current_user, issue_anonymous_token
 from document_filter import NonMedicalDocumentError, assert_medical_document
 from lab_trends import track_lab_trends
+
+
+def _lab_trends_need_recompute(report: Any) -> bool:
+    """True when a stored snapshot predates recovery / unit-mismatch fixes."""
+    if not isinstance(report, dict):
+        return True
+    trends = report.get("trends")
+    if not isinstance(trends, list):
+        return True
+    for trend in trends:
+        if not isinstance(trend, dict) or "returned_to_normal" not in trend:
+            return True
+    return False
+
+
+def _lab_trends_for_snapshot(snapshot: Dict[str, Any]) -> Dict[str, Any]:
+    stored = snapshot.get("lab_trends")
+    if stored is None or _lab_trends_need_recompute(stored):
+        return track_lab_trends(snapshot["patient_timeline"])
+    return stored
 from medical_extractor import (
     ProviderRateLimitError,
     _is_demo_document,
@@ -68,6 +89,9 @@ from medical_extractor import (
     process_document,
 )
 from retrieval import answer_question, index_patient_timeline
+from care.models import FACILITY_KINDS
+from care.service import CareNavigationError, get_care_service
+import care_finder
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("api")
@@ -179,6 +203,20 @@ async def upload_pipeline_error_handler(request: Request, exc: UploadPipelineErr
     )
 
 
+@app.exception_handler(care_finder.CareFinderError)
+async def care_finder_error_handler(request: Request, exc: care_finder.CareFinderError):
+    status = 422 if exc.code == "city_not_found" else 502
+    logger.warning("care finder error for %s %s: %s", request.method, request.url.path, exc)
+    return JSONResponse(
+        status_code=status,
+        content={
+            "detail": str(exc),
+            "code": exc.code,
+            "retryable": exc.retryable,
+        },
+    )
+
+
 @app.exception_handler(db.SchemaNotInitializedError)
 async def schema_not_initialized_handler(request: Request, exc: db.SchemaNotInitializedError):
     """Supabase is reachable but the app's tables don't exist (setup SQL
@@ -203,6 +241,22 @@ class MessageRequest(BaseModel):
     """Body for posting a message into a conversation session (Phase 2)."""
     question: str
     top_k: int = Field(default=8, ge=1, le=50)
+
+
+class CareSearchRequest(BaseModel):
+    """Find clinics/doctors near a city (Geoapify, OSM fallback)."""
+    city: str = Field(..., min_length=2, max_length=160)
+    specialty: Optional[str] = None
+    days: List[str] = Field(default_factory=lambda: ["mon", "tue", "wed", "thu", "fri"])
+    time_of_day: str = Field(default="any")
+    radius_km: float = Field(default=8, ge=1, le=50)
+
+
+class CareProviderSearchRequest(BaseModel):
+    """Authenticated runtime search for real local care-provider records."""
+    flag_id: str = Field(min_length=1, max_length=160)
+    location: str = Field(min_length=2, max_length=200)
+    availability: Literal["any", "today", "this_week", "evenings", "weekends"] = "any"
 
 
 # ---------------------------------------------------------------------------
@@ -809,11 +863,15 @@ async def upload_documents(
     files_data: List[Tuple[str, bytes]] = []
     for upload in files:
         original_name = Path(upload.filename or "").name or "upload"
-        # Validate extension early
+        # Unsupported types are recorded per-file in the pipeline (failed_files)
+        # rather than aborting the whole batch — one .txt next to a valid
+        # prescription must not discard the prescription.
         suffix = Path(original_name).suffix.lower()
         if suffix not in SUPPORTED_EXTENSIONS:
-            logger.warning("upload_documents: user=%s rejected '%s' (unsupported type '%s')", user_id, original_name, suffix or "(none)")
-            raise HTTPException(400, f"Unsupported file type '{suffix or '(no extension)'}' for '{original_name}'. Supported: {', '.join(SUPPORTED_EXTENSIONS)}")
+            logger.warning(
+                "upload_documents: user=%s will skip '%s' (unsupported type '%s')",
+                user_id, original_name, suffix or "(none)",
+            )
         content = await upload.read()
         files_data.append((original_name, content))
 
@@ -941,9 +999,7 @@ async def get_lab_trends(user_id: str = Depends(get_current_user)) -> Dict[str, 
     snapshot = db.load_patient_snapshot(user_id)
     if snapshot is None:
         raise HTTPException(404, "No timeline found for this user.")
-    if "lab_trends" in snapshot:
-        return snapshot["lab_trends"]
-    return track_lab_trends(snapshot["patient_timeline"])
+    return _lab_trends_for_snapshot(snapshot)
 
 
 @app.get("/api/v1/patient-snapshot")
@@ -966,11 +1022,58 @@ async def get_patient_snapshot(user_id: str = Depends(get_current_user)) -> Dict
         "cross_check_report": snapshot["cross_check_report"],
         "updated_at": snapshot.get("updated_at"),
     }
-    if "lab_trends" in snapshot:
-        result["lab_trends"] = snapshot["lab_trends"]
-    else:
-        result["lab_trends"] = track_lab_trends(snapshot["patient_timeline"])
+    result["lab_trends"] = _lab_trends_for_snapshot(snapshot)
     return result
+
+
+# ---------------------------------------------------------------------------
+# Live local-care recommendations (clinical flag -> specialty -> directory)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/v1/care-recommendations")
+async def get_care_recommendations(user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
+    """Return local-care search eligibility from current saved clinical flags.
+
+    This endpoint does not diagnose and does not query a provider directory.
+    It only exposes existing high-risk/low-confidence flags so the user can
+    select one before providing a city/area and availability preference.
+    """
+    snapshot = db.load_patient_snapshot(user_id)
+    if snapshot is None:
+        raise HTTPException(404, "No patient record found for this user. Upload and process medical documents first.")
+    return recommendation_context(snapshot)
+
+
+@app.post("/api/v1/care-recommendations/search")
+async def search_care_recommendations(
+    body: CareProviderSearchRequest,
+    user_id: str = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """Search the configured live provider source from the backend only.
+
+    Provider details are returned only when the selected source provides them
+    during this request. There are no seeded, cached fallback, or fabricated
+    provider records in this application.
+    """
+    snapshot = db.load_patient_snapshot(user_id)
+    if snapshot is None:
+        raise HTTPException(404, "No patient record found for this user. Upload and process medical documents first.")
+    try:
+        return await asyncio.to_thread(
+            search_live_providers,
+            snapshot,
+            flag_id=body.flag_id,
+            location=body.location.strip(),
+            availability=body.availability,
+        )
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except ProviderSearchError as exc:
+        return JSONResponse(
+            status_code=exc.http_status,
+            content={"detail": exc.detail, "code": exc.code, "retryable": exc.retryable},
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1054,6 +1157,51 @@ async def delete_session(session_id: str, user_id: str = Depends(get_current_use
 
 
 # ---------------------------------------------------------------------------
+# Find care (specialty suggestion + OpenStreetMap directory)
+# ---------------------------------------------------------------------------
+
+def _care_timeline(user_id: str) -> Optional[Dict[str, Any]]:
+    """Best-effort record load. Find-care still works without a snapshot."""
+    try:
+        snapshot = db.load_patient_snapshot(user_id)
+    except Exception as exc:
+        logger.warning("care finder: could not load snapshot for %s: %s", user_id, exc)
+        return None
+    return snapshot["patient_timeline"] if snapshot else None
+
+
+@app.get("/api/v1/care/specialties")
+async def list_care_specialties(user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
+    """Catalogue of specialties the UI can offer, plus a suggestion from
+    the caller's saved records when they have any."""
+    return care_finder.suggest_specialties(_care_timeline(user_id))
+
+
+@app.get("/api/v1/care/suggestion")
+async def get_care_suggestion(user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
+    return care_finder.suggest_specialties(_care_timeline(user_id))
+
+
+@app.post("/api/v1/care/search")
+async def search_care(
+    body: CareSearchRequest, user_id: str = Depends(get_current_user)
+) -> Dict[str, Any]:
+    """Geocode the user's city and list nearby clinics, doctors, and
+    hospitals. Geoapify is primary when GEOAPIFY_API_KEY is set;
+    OpenStreetMap (Nominatim + Overpass) is the automatic fallback.
+    Ranked by specialty match, opening hours, and distance."""
+    return await asyncio.to_thread(
+        care_finder.search_care,
+        city=body.city,
+        specialty_id=body.specialty,
+        days=body.days,
+        time_of_day=body.time_of_day,
+        radius_km=body.radius_km,
+        timeline=_care_timeline(user_id),
+    )
+
+
+# ---------------------------------------------------------------------------
 # Anonymous session — zero-login flow for MediMind frontend
 # ---------------------------------------------------------------------------
 
@@ -1075,6 +1223,58 @@ async def create_anonymous_session() -> Dict[str, str]:
 # ---------------------------------------------------------------------------
 # Health check
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Care Navigation (decoupled — does not read the patient record)
+# ---------------------------------------------------------------------------
+
+
+@app.exception_handler(CareNavigationError)
+async def care_navigation_error_handler(request: Request, exc: CareNavigationError):
+    logger.warning("care navigation %s %s: %s", request.method, request.url.path, exc)
+    return JSONResponse(
+        status_code=exc.http_status,
+        content={"detail": str(exc), "code": exc.code},
+    )
+
+
+@app.get("/api/v1/care/facilities")
+async def care_facilities(
+    location: str,
+    kind: str = "any",
+    radius_km: float = 8.0,
+    user_id: str = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """Directory search. Does not read timeline, safety, or labs."""
+    _ = user_id
+    if kind not in FACILITY_KINDS:
+        kind = "any"
+    return get_care_service().search_facilities(
+        location=location, kind=kind, radius_km=radius_km
+    )
+
+
+@app.get("/api/v1/care/geocode")
+async def care_geocode(q: str, user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
+    _ = user_id
+    point = get_care_service().geocode(q)
+    return {
+        "latitude": point.latitude,
+        "longitude": point.longitude,
+        "label": point.label,
+        "provider": point.provider,
+    }
+
+
+@app.get("/api/v1/care/routes")
+async def care_routes(
+    origin: str,
+    destination: str,
+    user_id: str = Depends(get_current_user),
+) -> Dict[str, Any]:
+    _ = user_id
+    return get_care_service().get_route(origin, destination)
+
 
 @app.get("/api/v1/health")
 async def health() -> Dict[str, str]:

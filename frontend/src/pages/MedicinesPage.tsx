@@ -9,7 +9,7 @@ import { PillIcon, UploadIcon } from "../components/icons";
 import { useAuth } from "../context/AuthContext";
 import { useStrictEffect } from "../hooks/useStrictEffect";
 import type { Timeline } from "../types/api";
-import { formatDate } from "../utils/format";
+import { compareDates, formatDate } from "../utils/format";
 
 export function MedicinesPage() {
   const { credentials } = useAuth();
@@ -72,10 +72,14 @@ export function MedicinesPage() {
     byIngredient.get(key)!.push(med);
   }
 
+  const mostRecentOf = (entries: (typeof filtered)[0][]) =>
+    entries.reduce(
+      (latest, cur) => (compareDates(cur.date, latest.date) > 0 ? cur : latest),
+      entries[0]
+    );
+
   const sortedIngredients = Array.from(byIngredient.entries()).sort((a, b) => {
-    const lastA = a[1].reduce((latest, cur) => (cur.date && (!latest.date || cur.date > latest.date) ? cur : latest), a[1][0]);
-    const lastB = b[1].reduce((latest, cur) => (cur.date && (!latest.date || cur.date > latest.date) ? cur : latest), b[1][0]);
-    return (lastB.date || "").localeCompare(lastA.date || "");
+    return compareDates(mostRecentOf(b[1]).date, mostRecentOf(a[1]).date);
   });
 
   return (
@@ -130,10 +134,7 @@ export function MedicinesPage() {
           <Section title="Current medicines">
             <div className="grid gap-3 sm:grid-cols-2">
               {sortedIngredients.map(([ingredient, entries]) => {
-                const mostRecent = entries.reduce((latest, cur) => {
-                  // crude date compare — backend timeline is already sorted but filter may reorder
-                  return cur.date && (!latest.date || cur.date > latest.date) ? cur : latest;
-                }, entries[0]);
+                const mostRecent = mostRecentOf(entries);
                 const historyCount = entries.length;
                 return (
                   <div key={ingredient} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -171,7 +172,7 @@ export function MedicinesPage() {
                         <ul className="mt-2 space-y-1">
                           {entries
                             .slice()
-                            .sort((a, b) => (a.date || "").localeCompare(b.date || ""))
+                            .sort((a, b) => compareDates(a.date, b.date))
                             .map((e, i) => (
                               <li key={i} className="flex items-center gap-2 text-xs text-slate-500">
                                 <span className="h-1 w-1 rounded-full bg-slate-400" />
@@ -201,7 +202,7 @@ export function MedicinesPage() {
                 <tbody className="divide-y divide-slate-100">
                   {filtered
                     .slice()
-                    .sort((a, b) => (a.date || "").localeCompare(b.date || ""))
+                    .sort((a, b) => compareDates(a.date, b.date))
                     .map((med, idx) => (
                       <tr key={idx}>
                         <td className="px-4 py-2 text-xs text-slate-500">{formatDate(med.date)}</td>
