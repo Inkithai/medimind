@@ -1,25 +1,21 @@
-# Backend docs — current source of truth
+# Backend docs — freeze this for the current branch
 
-This folder describes **this branch**. The product is:
+Competition story:
 
-```text
-Medical documents → extraction → validation → patient intelligence → grounded AI
-```
+> **Messy medical documents → structured longitudinal record → deterministic safety and trends → source-grounded AI.**
 
-There is **no** `/care`, `/find-care`, Geoapify, OSM, Leaflet, or consultation pack in this tree. Do not put those on the main architecture.
+Four claims: **Understand → Detect → Explain → Protect**
 
-Use **three layers**, not one giant diagram.
+There is **no** `/care`, `/find-care`, Geoapify, OSM, Leaflet, or consultation pack in this tree. Do not draw them.
 
-| Slide / doc | Layer | Question it answers |
-|---|---|---|
-| [01-end-to-end-pipeline.md](01-end-to-end-pipeline.md) | Presentation architecture | What is MediMind? |
-| [02-extraction-engine.md](02-extraction-engine.md) | Patient data pipeline | How does a file become a record? |
-| [03-retrieval-and-qa.md](03-retrieval-and-qa.md) | Patient intelligence | How does Ask AI stay grounded? |
-| [04-lab-trends.md](04-lab-trends.md) | Patient intelligence | How do labs move over time? |
-| [05-api-storage-and-jobs.md](05-api-storage-and-jobs.md) | Trust / isolation | How is one browser one patient? |
+| Doc | Slide / layer |
+|---|---|
+| [01-end-to-end-pipeline.md](01-end-to-end-pipeline.md) | The deck: three slides + four claims |
+| [02-extraction-engine.md](02-extraction-engine.md) | Understand — file → timeline |
+| [03-retrieval-and-qa.md](03-retrieval-and-qa.md) | Explain — grounded Ask AI |
+| [04-lab-trends.md](04-lab-trends.md) | Detect — deterministic labs |
+| [05-api-storage-and-jobs.md](05-api-storage-and-jobs.md) | Protect — anonymous workspace isolation |
 
-Narrative for judges:
+Setup and deploy: repo-root [README.md](../../README.md), [DEPLOYMENT_GUIDE.md](../../DEPLOYMENT_GUIDE.md).
 
-**Understand → Detect → Explain → Protect**
-
-Setup and deploy stay in the repo-root [README.md](../../README.md) and [DEPLOYMENT_GUIDE.md](../../DEPLOYMENT_GUIDE.md). Retry ladders, token budgets, and collection-name sanitization belong in engineering notes — not on the main slide.
+Model IDs, retry ladders, embeddings, and collection-name rules stay in **engineering notes** at the bottom of 02–05 — not on the main slides.

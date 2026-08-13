@@ -1,22 +1,28 @@
-# Patient intelligence — lab trends
+# ② Detect — lab trends
 
-How values move across visits. No language model. No diagnosis.
+**No language model. No diagnosis.**
+
+This is the decision worth putting on a slide.
 
 ```text
-Lab results on the timeline
-            │
-            ▼
-   Group by test name
-            │
-            ▼
-   Direction · crossing · recovery
-            │
-            ▼
-   Plain-language explanation
-   filled from the numbers only
+Raw lab values
+     ↓
+Deterministic computation
+     ↓
+Direction
+Crossing
+Recovery
+Threshold
+     ↓
+Explanation
+   (filled from the numbers only)
 ```
 
-Module: `lab_trends.py`. Shown on `/labs`.
+MediMind does **not** ask a model “what does this glucose trend mean?” It computes the trend, then writes a constrained sentence from those facts.
+
+| UI | Backend |
+|---|---|
+| `/labs` | `GET /api/v1/lab-trends` (dashboard uses the snapshot) |
 
 ---
 
@@ -26,11 +32,9 @@ For each test with at least two dated numeric points:
 
 - direction — rising, falling, stable, or fluctuating
 - flag sequence — e.g. normal → high → normal
-- whether it crossed out of range, and whether it later **returned to normal**
+- whether it crossed out of range
+- whether it later **returned to normal** (shown as recovery, not a red alarm)
 - whether a still-normal value is approaching a boundary
-- a short explanation that can only say what the numbers support
-
-A recovery is shown as a recovery (green “returned to normal”), not as an ongoing red alarm. The date of the excursion is still kept — it happened.
 
 The page always states this is not a diagnosis.
 
@@ -38,16 +42,15 @@ The page always states this is not a diagnosis.
 
 ## Honesty rules
 
-- If the series is noisy but climbing, the wording must say it is heading toward the **upper** bound — not the lower one.
-- If units disagree (`mg/dL` then `mmol/L`), no trend is computed. Subtracting them would invent a crash. A missing unit is not a conflict; `mg/dL` vs `mg/dl` is the same unit.
-- Grouped numbers such as `150,000` are the full magnitude, not `150`.
+- A noisy climb is heading toward the **upper** bound, not the lower one.
+- Mixed units (`mg/dL` then `mmol/L`) produce **no** trend. Subtracting them would invent a crash.
+- `150,000` is one hundred fifty thousand, not 150.
+- `mg/dL` and `mg/dl` are the same unit. A missing unit is unknown, not a conflict.
 
 ---
 
-## Engineering notes (not the main slide)
+## Engineering notes (appendix)
 
-Dates are parsed fuzzily. Ranges accept `70-99`, `70 to 99`, and values with thousands separators. A one-sided range (`<5`) disables boundary math instead of inventing a second side.
+Dates are parsed fuzzily. Ranges accept `70-99` and `70 to 99`. A one-sided range (`<5`) disables boundary math.
 
-`returned_to_normal` is stored on each trend. Older snapshots that lack the field are recomputed when the labs page or dashboard loads, so a recovered series does not stay a red badge.
-
-The sparkline uses the same number parsing as the engine.
+`returned_to_normal` is stored on each trend. Older snapshots that omit it are recomputed when labs or the dashboard load, so a recovery does not stay a red badge.

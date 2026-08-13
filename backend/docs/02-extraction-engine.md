@@ -1,6 +1,20 @@
-# Patient data pipeline
+# ① Understand — file to timeline
 
-How a file becomes a patient record.
+```text
+PDF / Image
+     ↓
+Extraction
+     ↓
+Validation
+     ↓
+Timeline
+```
+
+Upload creates or updates the patient record. Everything else is derived from that timeline.
+
+---
+
+## Data flow
 
 ```text
 Upload
@@ -10,7 +24,7 @@ PDF / Image
   │
   ├── Digital PDF → text layer
   │
-  └── Scanned / photo → vision OCR
+  └── Scanned / photo → vision extraction
               │
               ▼
         Medical extraction
@@ -27,69 +41,59 @@ PDF / Image
             trends
 ```
 
-Modules: `medical_extractor.py`, `document_filter.py`.
+Text vs vision is a capability split, not a vendor split:
+
+```text
+                 LLM provider layer
+                        │
+             ┌──────────┴──────────┐
+             ▼                     ▼
+        Text extraction        Vision extraction
+```
 
 ---
 
-## What extraction produces
+## What the timeline holds
 
-One structured page (or one page per scanned-PDF leaf):
+- visits (one extracted page each)
+- medications, with source file and date
+- lab results, with source file and date
+- known allergies
 
-- document type (prescription, lab report, discharge summary, other)
-- date, provider, patient name
-- medications with English generic ingredients and a normalized dose / frequency
-- lab results with value, unit, range, and flag
-- allergies and clinical notes
-- confidence on the document and on each item
-
-Printed wording is kept for audit. Ingredients are normalized to English generic names so two languages can still be compared.
-
-Vision reads are never scored as fully certain. A digital text layer can be.
+Printed wording is kept for audit. Active ingredients are normalized to English generic names so two languages can still be compared. Vision reads are never treated as fully certain.
 
 ---
 
 ## Validation
 
-After extraction, a cheap local filter decides whether the page is medical.
+A page is kept if it has structured medications, labs, or allergies — or a clinical document type with enough confidence.
 
-Kept if it has structured medications, labs, or allergies — or if it is labelled as a clinical type with enough confidence.
-
-A non-empty clinical note alone is not enough. A screenshot can produce a note with no clinical content.
-
-On HTTP upload, a page the user chose is not silently discarded as a “demo”. Folder / CLI grouping still drops template pages so a mixed sample folder cannot pollute a real timeline.
+A non-empty note alone is not enough. A screenshot can produce a note with no clinical content.
 
 ---
 
-## Timeline and safety
+## Detect (same record, next step)
 
-Documents for one workspace are merged into one chronological record:
+From the timeline, without diagnosing:
 
-- visits
-- medications timeline (date + source file)
-- lab results timeline
-- known allergies
+```text
+Timeline
+ ├── Medication safety
+ ├── Allergy conflicts
+ ├── Duplicate prescriptions
+ └── Lab trends
+```
 
-Safety review then looks for:
-
-- potential drug interactions
-- duplicate prescriptions (same ingredient and dose on two documents)
-- conflicting dosage instructions
-- allergy conflicts
-
-The written recommendation always defers to a clinician and states this is not a validated interaction database.
-
-Lab trends and search indexing are the other two branches of the same record. See [04-lab-trends.md](04-lab-trends.md) and [03-retrieval-and-qa.md](03-retrieval-and-qa.md).
+Safety always defers to a clinician and states this is not a validated interaction database.
 
 ---
 
-## Engineering notes (not the main slide)
+## Engineering notes (appendix)
 
-Provider is selected with `LLM_PROVIDER` (Groq, Gemini, or any OpenAI-compatible endpoint). Gemini 2.0 Flash is retired — do not configure it.
+Provider is configured with `LLM_PROVIDER` (Groq, Gemini, or any OpenAI-compatible endpoint). Optional OpenRouter fallback is only for a hard primary-quota failure. Gemini 2.0 Flash is retired — do not configure it.
 
-Structured calls walk a fallback ladder (strict schema where the provider supports it → JSON object → plain text) and strip reasoning tags before parse. Transient rate limits are paced; a hard quota or retired model fails immediately so a batch does not retry into a dead account.
+Structured output walks a fallback ladder and strips reasoning tags. Hard quota fails immediately so a batch does not retry into a dead account.
 
-Digital PDFs use the embedded text layer. Images and scanned pages go through vision. Phone photos have orientation applied before the model sees them.
+Phone photos have orientation applied. Images are sent as reasonably sized JPEGs. Template-page detection is multilingual and word-anchored (`Sampleton` is not a demo). On HTTP upload, a file the user chose is not silently dropped as a template.
 
-Template-page detection is multilingual and word-anchored so a real name such as Sampleton is not rejected.
-
-CLI: `python medical_extractor.py <files|folder> [--chat]`. The HTTP API persists to Supabase instead of local JSON reports.
+CLI: `python medical_extractor.py <files|folder> [--chat]`. The API persists to Supabase, not local JSON reports.

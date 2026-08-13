@@ -1,89 +1,88 @@
-# Trust and isolation
+# ④ Protect — anonymous workspace isolation
 
-One browser → one isolated patient workspace. No signup.
+Say: **one anonymous workspace → one isolated patient record.**
+
+Do not say “one browser isolates the patient.” The browser only stores credentials. The backend enforces the boundary.
 
 ```text
+Browser
+   ↓
 Anonymous session
-       │
-       ▼
-   anon_* user_id
-       │
- ┌─────┼─────┬──────────┐
- ↓     ↓     ↓          ↓
-DB   Files  Vectors   Sessions
- │     │      │          │
- └─────┴──────┴──────────┘
-          │
-          ▼
-   Isolated workspace
+   ↓
+anon_* user_id
+   ↓
+JWT + X-User-Id verification
+   ↓
+user_id-scoped backend operations
 ```
-
-Modules: `api.py`, `auth.py`, `db.py`, `storage.py`, `jobs.py`.
 
 ---
 
-## How isolation actually works
+## Isolation slide
 
 Do **not** say “RLS protects the data.”
 
 ```text
-Frontend
-   ↓
-JWT authentication
-   ↓
-user_id ↔ X-User-Id verification
-   ↓
-Backend authorization
-   ↓
-Service-role database access
-   ↓
-Every read and write filtered by that user_id
+                    Anonymous Session
+                           │
+                           ▼
+                       anon_* ID
+                           │
+                           ▼
+                     Signed JWT
+                           │
+                           ▼
+                 Backend authentication
+                           │
+                    ┌──────┴──────┐
+                    ▼             ▼
+              JWT user_id    Header user_id
+                    │             │
+                    └──────┬──────┘
+                           ▼
+                       Must match
+                           │
+                           ▼
+                  user_id-scoped queries
+                           │
+          ┌────────────────┼────────────────┐
+          ▼                ▼                ▼
+      Supabase         Cloudinary        Vectors
+      user_id          mediscan/         patient key
+                       <user_id>/
 ```
 
-| Store | Scope |
+RLS is enabled with **no policies**. The service-role key bypasses RLS. Isolation is the authenticated `user_id` after the JWT and header match. For production, add real RLS if a client key could ever reach these tables. It must not.
+
+---
+
+## UI vs API
+
+| UI | Backend |
 |---|---|
-| Postgres documents and snapshot | `user_id` |
-| Files | folder `/<user_id>/` |
-| Vectors | collection or `patient_key` = that user |
-| Chat sessions | `(user_id, session_id)` in process memory |
+| Start workspace | `POST /api/v1/anonymous/session` |
+| `/upload` | `POST /api/v1/documents` |
+| `/dashboard` | `GET /api/v1/patient-snapshot` |
+| `/labs` | `GET /api/v1/lab-trends` |
+| `/ask` | `POST /api/v1/qa` |
+| `/conversations` | `POST /api/v1/sessions` · `POST /api/v1/sessions/{id}/messages` |
 
-The public session route issues an `anon_*` user and a signed token. Every other route requires the bearer token **and** a matching `X-User-Id`.
-
-Supabase RLS is enabled with **no policies**. The backend uses the service-role key, which bypasses RLS. Isolation is therefore an **application** guarantee: scoped queries after auth. For production, add real RLS policies if the client key could ever reach these tables. It must not.
+Health and anonymous session are public. Everything else requires the bearer token and a matching `X-User-Id`.
 
 ---
 
 ## What the workspace can do
 
-| Action | Meaning |
-|---|---|
-| Start workspace | public; creates the anonymous user |
-| Upload | files become the patient record |
-| Dashboard | one snapshot: timeline + safety + labs |
-| Ask / chat | grounded over that snapshot’s index |
-| Reset workspace | new anonymous user in this browser |
+Upload builds the record. Dashboard reads one snapshot (timeline + safety + labs). Ask / chat read the index of that record. Reset issues a new anonymous user in this browser.
 
-Uploads can finish per file. One bad page does not discard the rest. The request only fails outright when nothing usable was kept.
-
-Chat sessions live in memory for this process. Restarting the server drops conversations; the documents and snapshot remain.
+One bad file does not discard the rest of an upload. Chat sessions live in process memory; documents and the snapshot survive a restart.
 
 ---
 
-## What this is not
+## Engineering notes (appendix)
 
-- Not a login product.
-- Not a multi-patient clinic chart.
-- Not a claim that the database engine enforces tenancy by itself.
-- Not a care-routing or map product on this branch.
+Uploads may return 202 and a job id. The UI polls per-file progress, then a batch finalization step. A hard provider outage stops queued files.
 
----
+`CORS_ORIGINS=*` cannot send credentials.
 
-## Engineering notes (not the main slide)
-
-Routes live under `/api/v1/`. Health and anonymous session are public.
-
-Uploads may return 202 and a job id; the UI polls per-file progress, then a batch finalization step (history → safety → search). A hard provider outage stops queued files from being sent into the same failure.
-
-`CORS_ORIGINS=*` cannot send credentials. A concrete origin list can.
-
-Missing schema → 503 with “run the SQL once.” Missing vector table → 502, not an empty-record lie.
+Missing schema → 503. Missing vector table → 502, not an empty-record lie.

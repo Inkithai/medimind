@@ -1,155 +1,217 @@
-# MediMind architecture (this branch)
+# MediMind architecture — freeze for this branch
 
-**Source of truth for slides.** This checkout has no care-navigation product.
+**Understand → Detect → Explain → Protect**
+
+Do not add `/care`, provider maps, or a consultation pack. They are not in this tree.
+
+---
+
+## The story judges should remember
+
+> Messy medical documents become a structured longitudinal record. Safety and lab trends are computed, not guessed. Questions are answered only from that record. One anonymous workspace is one isolated patient record.
+
+---
+
+## Four claims
+
+### ① Understand
+
+Turn messy medical documents into a structured longitudinal record.
 
 ```text
-Understand  →  Detect  →  Explain  →  Protect
+PDF / Image
+     ↓
+Extraction
+     ↓
+Validation
+     ↓
+Timeline
 ```
 
-Do not put `/care`, `/find-care`, Geoapify, OSM, Leaflet, or a consultation pack on this page.
+### ② Detect
+
+Find patterns and potential safety issues without diagnosing.
+
+```text
+Timeline
+ ├── Medication safety
+ ├── Allergy conflicts
+ ├── Duplicate prescriptions
+ └── Lab trends   (no language model)
+```
+
+### ③ Explain
+
+Answer from the patient’s own records, not generic medical knowledge.
+
+```text
+Patient record
+      ↓
+Retrieval
+      ↓
+Grounded answer
+      ↓
+Source + date
+```
+
+### ④ Protect
+
+Keep the anonymous patient’s data isolated across the stack.
+
+```text
+Anonymous workspace
+      ↓
+anon_* user_id
+      ↓
+DB + files + vectors
+      ↓
+Isolated patient record
+```
 
 ---
 
 ## Slide 1 — Intelligence pipeline
 
-Input → extraction → validation → clinical intelligence → grounded AI.
+Upload creates and updates the record. Timeline, safety, labs, and the search index are **derived** from that record. Ask AI reads the index. They are not three parallel inputs to a snapshot.
 
 ```text
-                    MediMind
-                       │
-                       ▼
-             Anonymous Workspace
-          No signup · Isolated user_id
-                       │
-                       ▼
-              Patient Snapshot
-                       │
-          ┌────────────┼────────────┐
-          ▼            ▼            ▼
-       Upload       Timeline      Ask AI
-          │            │            │
-          ▼            ▼            ▼
-     Extraction      Safety      Retrieval
-          │            │            │
-          └────────────┼────────────┘
-                       ▼
-             Patient Intelligence
-                       │
-       ┌───────────────┼────────────────┐
-       ▼               ▼                ▼
-    History         Medicines          Labs
-       │               │                │
-       └───────────────┼────────────────┘
-                       ▼
-                    Safety
-                       │
-                       ▼
-                 Ask / Chat
+                         MediMind
+                            │
+                            ▼
+                 Anonymous Workspace
+                    isolated user_id
+                            │
+                            ▼
+                       Upload
+                            │
+                            ▼
+                  PDF / Image Documents
+                            │
+                            ▼
+                     Extraction
+                            │
+                            ▼
+                  Document Validation
+                            │
+                            ▼
+                   Patient Timeline
+                            │
+             ┌──────────────┼──────────────┐
+             ▼              ▼              ▼
+          Safety        Lab Trends      Search Index
+             │              │              │
+             └──────────────┼──────────────┘
+                            ▼
+                   Patient Intelligence
+                            │
+                  ┌─────────┴─────────┐
+                  ▼                   ▼
+             Dashboard            Ask AI / Chat
 ```
-
-What the judge should take away:
-
-> Upload a private medical file. MediMind structures it, checks safety, tracks labs, and answers only from that record.
 
 ---
 
-## Slide 2 — Patient data pipeline
+## Slide 2 — From record to grounded answers
 
 ```text
-Upload
-  │
-  ▼
-PDF / Image
-  │
-  ├── Digital PDF → text layer
-  │
-  └── Scanned / photo → vision OCR
-              │
-              ▼
-        Medical extraction
-              │
-              ▼
-        Document validation
-              │
-              ▼
-        Patient timeline
-              │
-      ┌───────┼────────┐
-      ▼       ▼        ▼
-   Safety   Lab      Search index
-            trends
+Original documents
+       │
+       ▼
+Structured patient record
+       │
+       ├── Timeline
+       ├── Safety
+       ├── Lab Trends
+       │
+       ▼
+   Search index
+       │
+       ▼
+    Ask AI
+
+   Grounded in structured patient data
 ```
 
-Safety is a medication / allergy / dosage review over the extracted record. Lab trends are arithmetic over extracted numbers. Neither is a diagnosis.
+Lab trends: **no language model. No diagnosis.** Direction, crossing, recovery, and threshold are computed; the sentence is filled from those numbers.
+
+Ask AI never re-reads the PDF or photo.
 
 ---
 
 ## Slide 3 — Privacy and isolation
 
-```text
-Anonymous session
-      │
-      ▼
- anon_* user_id
-      │
-      ├──────── JWT
-      │
-      ├──────── X-User-Id must match the token
-      │
-      ├──────── Postgres rows scoped by user_id
-      │
-      ├──────── Files under /<user_id>/
-      │
-      └──────── Vector collection / patient_key
-```
+Say: **one anonymous workspace → one isolated patient record.**
 
-One browser → one isolated patient workspace.
-
-Isolation is enforced **in the application data-access layer**, not by “turning on RLS”:
+The browser only stores session credentials. The backend enforces the boundary.
 
 ```text
-Frontend
-   ↓
-JWT authentication
-   ↓
-user_id ↔ X-User-Id verification
-   ↓
-Backend authorization
-   ↓
-Service-role database access
-   ↓
-Every query filtered by that user_id
+                    Anonymous Session
+                           │
+                           ▼
+                       anon_* ID
+                           │
+                           ▼
+                     Signed JWT
+                           │
+                           ▼
+                 Backend authentication
+                           │
+                    ┌──────┴──────┐
+                    ▼             ▼
+              JWT user_id    Header user_id
+                    │             │
+                    └──────┬──────┘
+                           ▼
+                       Must match
+                           │
+                           ▼
+                  user_id-scoped queries
+                           │
+          ┌────────────────┼────────────────┐
+          ▼                ▼                ▼
+      Supabase         Cloudinary        Vectors
+      user_id          mediscan/         patient key
+                       <user_id>/
 ```
 
-Supabase RLS is enabled with **no policies**. The service-role key bypasses RLS. Do not tell a judge that RLS is what isolates tenants. The stronger claim is:
-
-> Tenant isolation uses the authenticated `user_id` across Postgres, file storage, and the vector store.
+Do **not** say “RLS protects the data.” RLS is on with no policies. The service-role key bypasses it. Isolation is application-scoped `user_id` after JWT + header verification.
 
 ---
 
-## Product on this branch
+## UI vs API (keep these separate)
 
-| Surface | Role |
+| What the user opens | What the backend does |
 |---|---|
-| History | Chronological visits |
-| Medicines | Traceable prescriptions |
-| Labs | Trends, crossings, recovery |
-| Safety | Interactions, duplicates, allergy conflicts |
-| Ask / Conversations | Grounded answers from the record |
+| `/` landing → start workspace | `POST /api/v1/anonymous/session` |
+| `/upload` | `POST /api/v1/documents` (async job + poll) |
+| `/dashboard` | `GET /api/v1/patient-snapshot` |
+| `/history` | snapshot timeline |
+| `/medicines` | snapshot medications |
+| `/labs` | `GET /api/v1/lab-trends` (or snapshot) |
+| `/safety` | snapshot cross-check |
+| `/ask` | `POST /api/v1/qa` |
+| `/conversations` | `POST /api/v1/sessions` then `/sessions/{id}/messages` |
 
-There is no Find Local Care product here. If that work lives on another branch, merge it before drawing it.
+Legacy aliases (`/timeline`, `/qa`, `/sessions`, …) still work. They are not the product names.
 
 ---
 
-## What not to put on the main slide
+## What stays off these three slides
 
-These are real, but they are backup-slide material:
+- Groq / Gemini / OpenRouter model IDs
+- Retry ladders, token budgets, JSON repair
+- Embedding implementation and Chroma name rules
+- Worker-pool concurrency
+- JPEG size, EXIF, filename heuristics
 
-- retry ladders and JSON repair
-- model IDs and token budgets
-- JPEG size / EXIF
-- collection-name sanitization
-- worker-pool concurrency
-- Geoapify / OSM / Leaflet (not in this tree)
+Those belong in the engineering notes of [02](02-extraction-engine.md)–[05](05-api-storage-and-jobs.md).
 
-The main slide is the product. Engineering notes live in [02](02-extraction-engine.md)–[05](05-api-storage-and-jobs.md).
+On the main slide the LLM layer is vendor-neutral:
+
+```text
+                 LLM provider layer
+                        │
+             ┌──────────┴──────────┐
+             ▼                     ▼
+        Text extraction        Vision extraction
+```
