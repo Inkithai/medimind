@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { Layout } from "./components/Layout";
 import { useAuth } from "./context/AuthContext";
@@ -13,6 +14,18 @@ import { DocumentsPage } from "./pages/DocumentsPage";
 import { MedicinesPage } from "./pages/MedicinesPage";
 import { HistoryPage } from "./pages/HistoryPage";
 import { Spinner } from "./components/Spinner";
+
+const FindCarePage = lazy(() =>
+  import("./pages/FindCarePage").then((module) => ({ default: module.FindCarePage }))
+);
+
+function FindCareLoading() {
+  return (
+    <div className="flex min-h-[50vh] items-center justify-center gap-3 text-sm font-medium text-slate-600">
+      <Spinner className="h-5 w-5 text-brand-600" /> Loading nearby care…
+    </div>
+  );
+}
 
 function RequireAuth({ children }: { children: JSX.Element }) {
   const { isConfigured, isInitializing, initError } = useAuth();
@@ -47,6 +60,17 @@ export default function App() {
       <Route element={<Layout />}>
         <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="/settings" element={<SettingsPage />} />
+        <Route
+          path="/find-care"
+          element={
+            <RequireAuth>
+              <Suspense fallback={<FindCareLoading />}>
+                <FindCarePage />
+              </Suspense>
+            </RequireAuth>
+          }
+        />
+        <Route path="/location-picker" element={<Navigate to="/find-care" replace />} />
         <Route
           path="/dashboard"
           element={

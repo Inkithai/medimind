@@ -136,3 +136,35 @@ export const SparkleIcon = (p: IconProps) => (
     <path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.8 2.8M15.6 15.6l2.8 2.8M18.4 5.6l-2.8 2.8M8.4 15.6l-2.8 2.8" />
   </svg>
 );
+
+export const SearchIcon = (p: IconProps) => (
+  <svg {...base(p)}>
+    <circle cx="11" cy="11" r="7" />
+    <path d="m20 20-4-4" />
+  </svg>
+);
+
+export const LocationIcon = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M20 10c0 5-8 12-8 12S4 15 4 10a8 8 0 1 1 16 0Z" />
+    <circle cx="12" cy="10" r="2.5" />
+  </svg>
+);
+
+export const NavigationIcon = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="m3 11 18-8-8 18-2.5-7.5L3 11Z" />
+  </svg>
+);
+
+export const CheckIcon = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="m5 12 4 4L19 6" />
+  </svg>
+);
+
+export const CloseIcon = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="m6 6 12 12M18 6 6 18" />
+  </svg>
+);

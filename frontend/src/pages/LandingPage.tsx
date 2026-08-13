@@ -27,14 +27,22 @@ export function LandingPage() {
             <p className="text-xs text-slate-500">Your health, in one place</p>
           </div>
         </div>
-        {isConfigured && (
+        <div className="flex items-center gap-2">
           <button
-            onClick={() => navigate("/dashboard")}
-            className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            onClick={() => navigate("/find-care")}
+            className={`rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 ${isConfigured ? "hidden sm:block" : ""}`}
           >
-            Go to workspace
+            Find care
           </button>
-        )}
+          {isConfigured && (
+            <button
+              onClick={() => navigate("/dashboard")}
+              className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            >
+              Go to workspace
+            </button>
+          )}
+        </div>
       </header>
 
       <main className="mx-auto max-w-6xl px-6 pb-20 pt-8">

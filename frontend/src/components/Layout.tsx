@@ -7,6 +7,7 @@ import {
   ChatIcon,
   FileIcon,
   PillIcon,
+  LocationIcon,
   SettingsIcon,
   ShieldIcon,
   TimelineIcon,
@@ -29,6 +30,7 @@ const NAV: NavItem[] = [
   { to: "/history", label: "Timeline", icon: TimelineIcon, chip: "bg-sky-50 text-sky-600" },
   { to: "/safety", label: "Safety Alerts", icon: ShieldIcon, chip: "bg-amber-50 text-amber-600" },
   { to: "/ask", label: "Ask AI", icon: ChatIcon, chip: "bg-brand-50 text-brand-600" },
+  { to: "/find-care", label: "Find Care", icon: LocationIcon, chip: "bg-rose-50 text-rose-600" },
   { to: "/settings", label: "Settings", icon: SettingsIcon, chip: "bg-slate-100 text-slate-500" },
 ];
 
@@ -92,8 +94,8 @@ export function Layout() {
           <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-2 scroll-thin">
             {NAV.map((item) => {
               const Icon = item.icon;
-              const isSettings = item.to === "/settings";
-              const disabled = !isSettings && !isConfigured;
+              const worksWithoutWorkspace = item.to === "/settings";
+              const disabled = !worksWithoutWorkspace && !isConfigured;
               return (
                 <NavLink
                   key={item.to}
