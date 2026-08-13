@@ -2225,16 +2225,63 @@ def _flatten_documents(raw_results: List[Dict[str, Any]]) -> List[Dict[str, Any]
     return flat
 
 
-def _is_demo_document(d: Dict[str, Any]) -> bool:
-    """Detect placeholder/template documents (e.g. sample datasets that
-    include a 'DEMO PATIENT' / 'DEMO MEDICINE' mock page) so they don't get
-    silently treated as real patient data."""
-    name = (d.get("patient_name") or "").upper()
-    if "DEMO" in name or "SAMPLE" in name or "DUMMY" in name:
+# Placeholder markers in the source language. The extractor never translates
+# patient_name / medication name, so English-only matching misses Tamil /
+# Sinhala / Hindi / Arabic / Japanese template pages and also false-rejects
+# real names like Sampleton or Demopoulos (substring "sample" / "demo").
+#
+# _DEMO_MARKERS_WORD — space-delimited scripts, matched on word boundaries.
+# _DEMO_MARKERS_SUBSTRING — CJK, where \b cannot work.
+_DEMO_MARKERS_WORD = frozenset({
+    "demo", "sample", "dummy", "placeholder", "specimen",
+    "test patient", "demo patient", "sample patient",
+    "மாதிரி", "டெமோ",
+    "නියැදිය", "ආදර්ශ",
+    "डेमो", "नमूना", "उदाहरण",
+    "muestra", "ejemplo", "prueba",
+    "exemple", "échantillon",
+    "تجريبي", "عينة", "نموذج",
+})
+
+_DEMO_MARKERS_SUBSTRING = frozenset({
+    "デモ", "サンプル",
+})
+
+_DEMO_MARKER_RE = re.compile(
+    r"(?<!\w)(?:" + "|".join(re.escape(m) for m in sorted(_DEMO_MARKERS_WORD)) + r")(?!\w)",
+    re.UNICODE,
+)
+
+
+def _has_demo_marker(value: Any) -> bool:
+    """True if `value` contains a placeholder marker in any supported script."""
+    if not value or not isinstance(value, str):
+        return False
+    folded = value.casefold()
+    if _DEMO_MARKER_RE.search(folded):
         return True
+    return any(marker in folded for marker in _DEMO_MARKERS_SUBSTRING)
+
+
+def _is_demo_document(d: Dict[str, Any]) -> bool:
+    """Detect placeholder/template documents so they don't get silently
+    treated as real patient data.
+
+    Checks, in order of reliability:
+      1. `_source.method == "synthetic"` — generated fixtures.
+      2. Placeholder markers in patient_name / medication names across scripts.
+    """
+    source = d.get("_source")
+    if isinstance(source, dict) and str(source.get("method") or "").strip().lower() == "synthetic":
+        return True
+
+    if _has_demo_marker(d.get("patient_name")):
+        return True
+
     for med in d.get("medications", []):
-        med_name = (med.get("name") or "").upper()
-        if "DEMO" in med_name or "SAMPLE" in med_name:
+        if not isinstance(med, dict):
+            continue
+        if _has_demo_marker(med.get("name")):
             return True
     return False
 

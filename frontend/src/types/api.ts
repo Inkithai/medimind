@@ -140,6 +140,7 @@ export interface LabTrend {
     | "fluctuating (net decreasing)";
   flag_sequence: string;
   crossed_into_abnormal_at: { date: string | null; flag: string } | null;
+  returned_to_normal?: boolean;
   approaching_threshold: boolean;
   confidence: number;
   explanation: string;

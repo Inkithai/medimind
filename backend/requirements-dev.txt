@@ -1,0 +1,2 @@
+# Test-only dependencies. Not installed on the deployed image.
+pytest>=7.0

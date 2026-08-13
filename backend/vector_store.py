@@ -90,11 +90,16 @@ def _sanitize_collection_name(patient_key: str) -> str:
         name = "patient"
     if not name[0].isalnum():
         name = "p" + name
+    # Truncate BEFORE the end-alphanumeric fixup — must stay identical to
+    # retrieval._sanitize_collection_name() or writes and reads diverge.
+    name = name[:63].rstrip("_.-")
+    if not name:
+        name = "patient"
     if not name[-1].isalnum():
         name = name + "0"
     while len(name) < 3:
         name += "0"
-    return name[:63]
+    return name
 
 def _chroma_upsert(patient_key: str, ids: List[str], embeddings: List[List[float]], documents: List[str], metadatas: List[Dict[str, Any]]):
     db = _get_chroma_client()

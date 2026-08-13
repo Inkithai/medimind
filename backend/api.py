@@ -60,6 +60,26 @@ import storage
 from auth import get_current_user, issue_anonymous_token
 from document_filter import NonMedicalDocumentError, assert_medical_document
 from lab_trends import track_lab_trends
+
+
+def _lab_trends_need_recompute(report: Any) -> bool:
+    """True when a stored snapshot predates recovery / unit-mismatch fixes."""
+    if not isinstance(report, dict):
+        return True
+    trends = report.get("trends")
+    if not isinstance(trends, list):
+        return True
+    for trend in trends:
+        if not isinstance(trend, dict) or "returned_to_normal" not in trend:
+            return True
+    return False
+
+
+def _lab_trends_for_snapshot(snapshot: Dict[str, Any]) -> Dict[str, Any]:
+    stored = snapshot.get("lab_trends")
+    if stored is None or _lab_trends_need_recompute(stored):
+        return track_lab_trends(snapshot["patient_timeline"])
+    return stored
 from medical_extractor import (
     ProviderRateLimitError,
     _is_demo_document,
@@ -941,9 +961,7 @@ async def get_lab_trends(user_id: str = Depends(get_current_user)) -> Dict[str, 
     snapshot = db.load_patient_snapshot(user_id)
     if snapshot is None:
         raise HTTPException(404, "No timeline found for this user.")
-    if "lab_trends" in snapshot:
-        return snapshot["lab_trends"]
-    return track_lab_trends(snapshot["patient_timeline"])
+    return _lab_trends_for_snapshot(snapshot)
 
 
 @app.get("/api/v1/patient-snapshot")
@@ -966,10 +984,7 @@ async def get_patient_snapshot(user_id: str = Depends(get_current_user)) -> Dict
         "cross_check_report": snapshot["cross_check_report"],
         "updated_at": snapshot.get("updated_at"),
     }
-    if "lab_trends" in snapshot:
-        result["lab_trends"] = snapshot["lab_trends"]
-    else:
-        result["lab_trends"] = track_lab_trends(snapshot["patient_timeline"])
+    result["lab_trends"] = _lab_trends_for_snapshot(snapshot)
     return result
 
 

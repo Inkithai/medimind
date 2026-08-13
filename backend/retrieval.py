@@ -244,11 +244,16 @@ def _sanitize_collection_name(patient_key: str) -> str:
         name = "patient"
     if not name[0].isalnum():
         name = "p" + name
+    # Truncate BEFORE the end-alphanumeric fixup. Cutting last can land on a
+    # separator (e.g. 62 'a's + space → trailing '_') and Chroma rejects it.
+    name = name[:63].rstrip("_.-")
+    if not name:
+        name = "patient"
     if not name[-1].isalnum():
         name = name + "0"
     while len(name) < 3:
         name += "0"
-    return name[:63]
+    return name
 
 
 def _get_chroma_client():
