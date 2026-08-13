@@ -60,12 +60,7 @@ Vision+text use the same Gemini model; Groq needs two. All three are OpenAI-comp
 | `inspect_chroma.py` | Read-only CLI to list collections / inspect chunks |
 | `requirements.txt` / `Procfile` | Railway Nixpacks deployment |
 
-Deep dives live in [`backend/docs/`](backend/docs/README.md). The judge-facing map is three layers — pipeline, intelligence, isolation — in [01-end-to-end-pipeline.md](backend/docs/01-end-to-end-pipeline.md). Module notes:
-
-2. [Extraction](backend/docs/02-extraction-engine.md)
-3. [Ask AI](backend/docs/03-retrieval-and-qa.md)
-4. [Lab trends](backend/docs/04-lab-trends.md)
-5. [Trust / isolation](backend/docs/05-api-storage-and-jobs.md)
+Deep dives live in [`backend/docs/`](backend/docs/README.md). Freeze [01-end-to-end-pipeline.md](backend/docs/01-end-to-end-pipeline.md) for the deck: Understand → Detect → Explain → Protect. No `/care` on this branch.
 
 ### Setup
 

@@ -246,6 +246,31 @@ export interface SessionHistory {
 
 // ---- Health --------------------------------------------------------------
 
+export type FacilityKind = "hospital" | "clinic" | "pharmacy" | "laboratory" | "any";
+
+export interface CareFacility {
+  id: string;
+  name: string;
+  kind: string;
+  latitude: number;
+  longitude: number;
+  address?: string | null;
+  phone?: string | null;
+  website?: string | null;
+  distance_km?: number | null;
+  source_url?: string | null;
+  provider: string;
+}
+
+export interface CareFacilitiesResponse {
+  query: { location: string; kind: string };
+  origin: { latitude: number; longitude: number; label: string; provider: string } | null;
+  facilities: CareFacility[];
+  result_count: number;
+  provider: string;
+  disclaimer: string;
+}
+
 export interface HealthResponse {
   status: string;
 }

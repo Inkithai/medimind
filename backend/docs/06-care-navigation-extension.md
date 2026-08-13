@@ -7,7 +7,8 @@ The frozen deck is still [01-end-to-end-pipeline.md](01-end-to-end-pipeline.md):
 
 This page is the **future / architecture** story only: a fifth capability, **Connect**, that must stay decoupled from medical intelligence.
 
-There is no Care Navigation code in this tree. If it is built, it belongs on another branch and must not rewrite Upload → Timeline → Ask AI.
+A **minimal prototype** now lives in `backend/care/` and `GET /api/v1/care/*`.
+It must not rewrite Upload → Timeline → Ask AI. The medical modules do not import `care`.
 
 ---
 

@@ -88,6 +88,8 @@ from medical_extractor import (
     process_document,
 )
 from retrieval import answer_question, index_patient_timeline
+from care.models import FACILITY_KINDS
+from care.service import CareNavigationError, get_care_service
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("api")
@@ -1090,6 +1092,58 @@ async def create_anonymous_session() -> Dict[str, str]:
 # ---------------------------------------------------------------------------
 # Health check
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Care Navigation (decoupled — does not read the patient record)
+# ---------------------------------------------------------------------------
+
+
+@app.exception_handler(CareNavigationError)
+async def care_navigation_error_handler(request: Request, exc: CareNavigationError):
+    logger.warning("care navigation %s %s: %s", request.method, request.url.path, exc)
+    return JSONResponse(
+        status_code=exc.http_status,
+        content={"detail": str(exc), "code": exc.code},
+    )
+
+
+@app.get("/api/v1/care/facilities")
+async def care_facilities(
+    location: str,
+    kind: str = "any",
+    radius_km: float = 8.0,
+    user_id: str = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """Directory search. Does not read timeline, safety, or labs."""
+    _ = user_id
+    if kind not in FACILITY_KINDS:
+        kind = "any"
+    return get_care_service().search_facilities(
+        location=location, kind=kind, radius_km=radius_km
+    )
+
+
+@app.get("/api/v1/care/geocode")
+async def care_geocode(q: str, user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
+    _ = user_id
+    point = get_care_service().geocode(q)
+    return {
+        "latitude": point.latitude,
+        "longitude": point.longitude,
+        "label": point.label,
+        "provider": point.provider,
+    }
+
+
+@app.get("/api/v1/care/routes")
+async def care_routes(
+    origin: str,
+    destination: str,
+    user_id: str = Depends(get_current_user),
+) -> Dict[str, Any]:
+    _ = user_id
+    return get_care_service().get_route(origin, destination)
+
 
 @app.get("/api/v1/health")
 async def health() -> Dict[str, str]:
