@@ -47,7 +47,7 @@ Vision+text use the same Gemini model; Groq needs two. All three are OpenAI-comp
 |---|---|
 | `medical_extractor.py` | `LLM_PROVIDER` layer, vision / text extraction, patient grouping, timeline creation, safety LLM call plus deterministic duplicate detection, local CLI persistence |
 | `document_filter.py` | Fast post-extraction filter for non-medical files (no extra LLM call, reuses `document_type` + clinical fields) |
-| `lab_trends.py` | Pure Python trend engine — parses dates/values, computes direction, detects range crossings, flags approaching thresholds |
+| `lab_trends.py` | Pure Python trend engine — direction, crossings, recovery (`returned_to_normal`), unit-clash decline, thousands-aware parse |
 | `retrieval.py` | Chunks timeline into Medication / Lab / ClinicalNote / Allergy texts, embeds (OpenAI `text-embedding-3-small` if set else local ONNX MiniLM), indexes via `vector_store` abstraction, single-shot Q&A |
 | `vector_store.py` | Abstraction over Chroma (`VECTOR_STORE=chroma`, local `CHROMA_DIR`) and Supabase `chunks` table (`VECTOR_STORE=supabase`, no volume, brute-force cosine) |
 | `jobs.py` | Thread-safe parent jobs with independent per-file progress (`queued → reading → extracting → saving → ready/failed`) and optional Supabase persistence |
@@ -60,7 +60,13 @@ Vision+text use the same Gemini model; Groq needs two. All three are OpenAI-comp
 | `inspect_chroma.py` | Read-only CLI to list collections / inspect chunks |
 | `requirements.txt` / `Procfile` | Railway Nixpacks deployment |
 
-Deep dives live in `backend/docs/`.
+Deep dives live in [`backend/docs/`](backend/docs/README.md):
+
+1. [End-to-end pipeline](backend/docs/01-end-to-end-pipeline.md)
+2. [Extraction engine](backend/docs/02-extraction-engine.md)
+3. [Retrieval & Q&A](backend/docs/03-retrieval-and-qa.md)
+4. [Lab trends](backend/docs/04-lab-trends.md)
+5. [API, storage & jobs](backend/docs/05-api-storage-and-jobs.md)
 
 ### Setup
 
@@ -143,7 +149,7 @@ Base URL `http://127.0.0.1:8000`, all routes under `/api/v1/`.
 - **My Documents** `/documents` — list + `DocumentViewer` with Original (iframe/img via Cloudinary, `split("?")[0]` fixes PDF query-param urls) vs Structured tabs.
 - **My History** `/history` — year-grouped timeline (2026 → Jul 20 🧪 Blood Test etc.) + full `TimelineView`.
 - **My Medicines** `/medicines` — current per ingredient (most recent) + historical log table, filterable, source file traceable (now fixed to original filename, not temp sanitized path).
-- **Test Results / Lab Trends** `/labs` — per-test direction, flag sequence, crossing point, approaching-threshold badge, SVG sparkline with reference band (robust parsing for `70-99 mg/dL`).
+- **Test Results / Lab Trends** `/labs` — per-test direction, flag sequence, crossing / recovery badge (green when the latest reading is back to normal), approaching-threshold, SVG sparkline with reference band. Thousands-aware values; mixed units (`mg/dL` vs `mmol/L`) are declined rather than trended.
 - **Safety** `/safety` — allergy conflicts (danger), interactions with severity, dosage conflicts, duplicates, overall recommendation.
 - **Ask** `/ask` — single-shot RAG, configurable `top_k`, confidence, sources, `recommend_professional_consult`.
 - **Conversations** `/conversations` — multi-turn, query rewriting (`rewritten_query`), session resume by ID, 404 handling when in-memory session expired after restart.
@@ -253,7 +259,7 @@ VECTOR_STORE=supabase python backend/inspect_chroma.py "anon_ab12cd34ef56"
 - **`GROQ_API_KEY` placeholder handling** — legacy var now treats `your-groq-api-key` / `your-*` as missing, not valid.
 - **AuthContext** — `clearCredentials`/`createNewWorkspace` reset `provisioningStarted` so erasing workspace no longer stalls auto-provision after StrictMode guard.
 - **DocumentViewer** — PDF detection now strips query params (`split("?")[0]`) so Cloudinary `...pdf?dl=0` renders as iframe, not broken image.
-- **Docs** — `backend/docs/*.md` and `retrieval.py`/`conversation.py`/`api.py` docstrings now provider-aware.
+- **Docs** — `backend/docs/` renamed and rewritten for the current flow (`01-end-to-end-pipeline.md` … `05-api-storage-and-jobs.md`).
 - Earlier: Supabase chained `.order("uploaded_at").order("id")`, lifespan, dateutil sorting, `_parse_range` robust to `70-99 mg/dL`, upload dedup fix, anonymous session flow.
 
 ### Limitations
