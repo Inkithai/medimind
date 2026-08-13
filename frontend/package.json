@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "lint": "tsc --noEmit",
-    "test:hook": "NODE_ENV=development tsx src/hooks/__tests__/useStrictEffect.test.tsx"
+    "test:hook": "NODE_ENV=development tsx src/hooks/__tests__/useStrictEffect.test.tsx",
+    "test:care": "tsx src/components/__tests__/CareEvidencePanel.test.tsx && tsx src/components/__tests__/ConsultationPack.test.tsx && tsx src/components/__tests__/ProviderResultCard.test.tsx"
   },
   "dependencies": {
     "leaflet": "^1.9.4",

@@ -248,17 +248,31 @@ def embed_texts(texts: List[str]) -> List[List[float]]:
 def _sanitize_collection_name(patient_key: str) -> str:
     """Chroma collection names must be 3-63 chars, start/end alphanumeric,
     and contain only [a-zA-Z0-9._-]. This maps an arbitrary patient_key
-    (e.g. 'amit sharma') into a safe, stable collection name."""
+    (e.g. 'amit sharma') into a safe, stable collection name.
+
+    Truncation to 63 chars happens BEFORE the end-alphanumeric fixup, not
+    after. Truncating last can slice a long key mid-separator (e.g. right
+    after a '_'), leaving a trailing non-alphanumeric character that
+    violates Chroma's naming rule — and it can also undo the minimum-length
+    padding below. Trimming trailing separators post-truncation and then
+    re-applying the alnum-ending fix closes both gaps.
+
+    Kept byte-identical to vector_store._sanitize_collection_name(); both
+    must agree or the Chroma path would read from a different collection
+    than it wrote to."""
     name = re.sub(r"[^a-z0-9._-]+", "_", patient_key.strip().lower()).strip("_.-")
     if not name:
         name = "patient"
     if not name[0].isalnum():
         name = "p" + name
+    name = name[:63].rstrip("_.-")
+    if not name:
+        name = "patient"
     if not name[-1].isalnum():
         name = name + "0"
     while len(name) < 3:
         name += "0"
-    return name[:63]
+    return name
 
 
 def _get_chroma_client():

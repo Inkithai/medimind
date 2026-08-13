@@ -46,7 +46,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Literal, Optional, Tuple
 
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -57,6 +57,7 @@ import conversation
 import db
 import jobs
 import storage
+from care_recommendations import ProviderSearchError, recommendation_context, search_live_providers
 from auth import get_current_user, issue_anonymous_token
 from document_filter import NonMedicalDocumentError, assert_medical_document
 from lab_trends import track_lab_trends
@@ -227,6 +228,13 @@ class CareSearchRequest(BaseModel):
     days: List[str] = Field(default_factory=lambda: ["mon", "tue", "wed", "thu", "fri"])
     time_of_day: str = Field(default="any")
     radius_km: float = Field(default=8, ge=1, le=50)
+
+
+class CareProviderSearchRequest(BaseModel):
+    """Authenticated runtime search for real local care-provider records."""
+    flag_id: str = Field(min_length=1, max_length=160)
+    location: str = Field(min_length=2, max_length=200)
+    availability: Literal["any", "today", "this_week", "evenings", "weekends"] = "any"
 
 
 # ---------------------------------------------------------------------------
@@ -999,6 +1007,56 @@ async def get_patient_snapshot(user_id: str = Depends(get_current_user)) -> Dict
     else:
         result["lab_trends"] = track_lab_trends(snapshot["patient_timeline"])
     return result
+
+
+# ---------------------------------------------------------------------------
+# Live local-care recommendations (clinical flag -> specialty -> directory)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/v1/care-recommendations")
+async def get_care_recommendations(user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
+    """Return local-care search eligibility from current saved clinical flags.
+
+    This endpoint does not diagnose and does not query a provider directory.
+    It only exposes existing high-risk/low-confidence flags so the user can
+    select one before providing a city/area and availability preference.
+    """
+    snapshot = db.load_patient_snapshot(user_id)
+    if snapshot is None:
+        raise HTTPException(404, "No patient record found for this user. Upload and process medical documents first.")
+    return recommendation_context(snapshot)
+
+
+@app.post("/api/v1/care-recommendations/search")
+async def search_care_recommendations(
+    body: CareProviderSearchRequest,
+    user_id: str = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """Search the configured live provider source from the backend only.
+
+    Provider details are returned only when the selected source provides them
+    during this request. There are no seeded, cached fallback, or fabricated
+    provider records in this application.
+    """
+    snapshot = db.load_patient_snapshot(user_id)
+    if snapshot is None:
+        raise HTTPException(404, "No patient record found for this user. Upload and process medical documents first.")
+    try:
+        return await asyncio.to_thread(
+            search_live_providers,
+            snapshot,
+            flag_id=body.flag_id,
+            location=body.location.strip(),
+            availability=body.availability,
+        )
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except ProviderSearchError as exc:
+        return JSONResponse(
+            status_code=exc.http_status,
+            content={"detail": exc.detail, "code": exc.code, "retryable": exc.retryable},
+        )
 
 
 # ---------------------------------------------------------------------------

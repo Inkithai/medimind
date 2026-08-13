@@ -1,3 +1,21 @@
+export type {
+  AvailabilityPreference,
+  CareEvidenceKind,
+  CarePathwayEvidence,
+  CareProviderSearchResponse,
+  ConsultationAllergy,
+  ConsultationDocument,
+  ConsultationLabPoint,
+  ConsultationMedication,
+  ConsultationPack,
+  LowConfidenceItem,
+  CareRecommendationContext,
+  ClinicalFlag,
+  LiveProvider,
+  SpecialtyRecommendation,
+  SpecialtyRoute,
+} from "./care";
+
 // TypeScript types that mirror the backend API schemas exactly.
 // Source of truth: medical_extractor.py (EXTRACTION_JSON_SCHEMA,
 // CROSS_CHECK_JSON_SCHEMA), lab_trends.py, retrieval.py, conversation.py,

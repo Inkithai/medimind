@@ -148,7 +148,8 @@ Base URL `http://127.0.0.1:8000`, all routes under `/api/v1/`.
 - **Safety** `/safety` — allergy conflicts (danger), interactions with severity, dosage conflicts, duplicates, overall recommendation.
 - **Ask** `/ask` — single-shot RAG, configurable `top_k`, confidence, sources, `recommend_professional_consult`.
 - **Conversations** `/conversations` — multi-turn, query rewriting (`rewritten_query`), session resume by ID, 404 handling when in-memory session expired after restart.
-- **Find care** `/care` — suggests a specialty from the record, asks city + availability, searches real clinics via **Geoapify** (geocoding + Places) with **OpenStreetMap** (Nominatim + Overpass) as fallback, ranks/filters, shows the provider source, handles empty results and directory outages, and shows a medical disclaimer. Map is **Leaflet**.
+- **Find Local Care** `/care` — evidence-to-care pathway: clinical flags → specialty → live directory (**Geoapify** primary, **OpenStreetMap** fallback) → ranked provider cards → consultation pack.
+- **Clinic map** `/find-care` — city + specialty search on a **Leaflet** map. Same Geoapify / OSM directory stack.
 
 States distinguished: loading, empty 404 (no record), 401 auth, 422 validation/non-medical, 502 ML pipeline, network/CORS.
 
@@ -190,6 +191,16 @@ Open App → Create Anonymous Session (UUID) → Store in localStorage → Patie
 2. **No volume needed if `VECTOR_STORE=supabase`** (uses Supabase `chunks` table). For `VECTOR_STORE=chroma`, attach Railway Volume mounted at `/data/chroma_db`, set `CHROMA_DIR=/data/chroma_db`.
 3. Set `USE_BACKGROUND_JOBS=true` and keep `UPLOAD_FILE_CONCURRENCY=1` for constrained quotas. Uploads return 202 immediately, while a shared bounded worker pool load-balances files and the frontend polls per-file progress.
 4. Deploy — `$PORT` assigned automatically.
+
+### Live local care recommendations (Round 2)
+
+`/care` activates only when the saved Round 1 snapshot contains an existing high-risk medication-safety signal or a low-confidence extraction/trend/safety result. The user selects the flagged evidence, enters a city/area and consultation preference, and the backend searches a **live provider directory**. Provider data is never seeded, mocked, hard-coded, or sent from the frontend.
+
+- `GET /api/v1/care-recommendations` returns the authenticated user’s qualifying flags and transparent specialty rationale. It does not call a directory.
+- `POST /api/v1/care-recommendations/search` accepts `{flag_id, location, availability}` and returns only source-provided provider fields, calculated distance, and explainable ranking.
+- Set `PROVIDER_DIRECTORY_SOURCE=google_places` + `GOOGLE_PLACES_API_KEY` for Google Places, or `PROVIDER_DIRECTORY_SOURCE=openstreetmap` + the required identifying `OSM_NOMINATIM_USER_AGENT` for the public Nominatim/Overpass alternative. Full source, ranking, and failure contract: [`backend/docs/care_recommendations.md`](backend/docs/care_recommendations.md).
+- Results visibly state `Live provider data — <source>`. A zero-result response is an empty list with a widening-search suggestion, never fabricated clinicians.
+- MediMind does not diagnose. This navigation aid helps find an appropriate professional to review existing potential issues or uncertain extractions.
 
 ### Auth contract
 
