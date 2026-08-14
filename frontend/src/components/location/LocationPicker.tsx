@@ -7,6 +7,12 @@ import {
   type KeyboardEvent,
 } from "react";
 import { locationSecondaryText, reverseGeocode, searchLocations } from "../../services/geocoding";
+import {
+  COARSE_ACCURACY_THRESHOLD_M,
+  GeolocationFailure,
+  accuracyLabel,
+  getAccuratePosition,
+} from "../../services/geolocation";
 import type { ConfirmedLocation, Coordinates, LocationPlace } from "../../types/location";
 import { classNames } from "../../utils/format";
 import { CheckIcon, CloseIcon, LocationIcon, NavigationIcon, SearchIcon } from "../icons";
@@ -94,6 +100,8 @@ export function LocationPicker({
   const [selectedPlace, setSelectedPlace] = useState<LocationPlace | null>(initialValue || null);
   const [addressDetails, setAddressDetails] = useState(initialValue?.addressDetails || "");
   const [isLocating, setIsLocating] = useState(false);
+  /** Accuracy radius of the active GPS fix; null when the point came from search or a pin. */
+  const [gpsAccuracyMetres, setGpsAccuracyMetres] = useState<number | null>(null);
   const [isResolvingPin, setIsResolvingPin] = useState(false);
   const [isConfirming, setIsConfirming] = useState(false);
   const [confirmError, setConfirmError] = useState<string | null>(null);
@@ -160,8 +168,15 @@ export function LocationPicker({
     setStep("confirm");
   }
 
+  /** Choosing a searched place discards any previous GPS accuracy radius. */
+  function selectSearchResult(place: LocationPlace) {
+    setGpsAccuracyMetres(null);
+    selectPlace(place);
+  }
+
   function returnToSearch() {
     reverseRequestRef.current?.abort();
+    setGpsAccuracyMetres(null);
     setStep("search");
     setSelectedPlace(null);
     setStatus("idle");
@@ -189,7 +204,7 @@ export function LocationPicker({
     } else if (event.key === "Enter" && activeIndex >= 0) {
       event.preventDefault();
       const place = results[activeIndex];
-      if (place) selectPlace(place);
+      if (place) selectSearchResult(place);
     } else if (event.key === "Escape") {
       event.preventDefault();
       setIsInputFocused(false);
@@ -202,62 +217,68 @@ export function LocationPicker({
     }
   }
 
+  /**
+   * Label a GPS fix without ever moving it.
+   *
+   * Reverse geocoding returns the *centroid* of whatever feature matched (a
+   * street, suburb, or whole city), which can sit hundreds of metres from the
+   * user. Only the naming fields are adopted here; latitude/longitude stay
+   * exactly as the device reported them.
+   */
   async function resolveAndSelect(coordinates: Coordinates, fallbackName: string) {
     reverseRequestRef.current?.abort();
     const controller = new AbortController();
     reverseRequestRef.current = controller;
+
+    const pinned = pinnedFallback(coordinates);
+    pinned.name = fallbackName;
+    pinned.displayName = `${fallbackName} · ${coordinatesLabel(coordinates)}`;
+    selectPlace(pinned);
+
     try {
       const place = await reverseGeocode(coordinates, controller.signal);
-      if (!controller.signal.aborted && mountedRef.current) selectPlace(place);
-    } catch (error) {
       if (controller.signal.aborted || !mountedRef.current) return;
-      const fallback = pinnedFallback(coordinates);
-      fallback.name = fallbackName;
-      fallback.displayName = `${fallbackName} · ${coordinatesLabel(coordinates)}`;
-      selectPlace(fallback);
+      setSelectedPlace({
+        ...place,
+        // Authoritative: the device's own coordinates, not the geocoder's.
+        latitude: coordinates.latitude,
+        longitude: coordinates.longitude,
+        id: pinned.id,
+      });
+    } catch {
+      // The coordinates are already selected; only the pretty name is missing.
     }
   }
 
-  function useCurrentLocation() {
+  async function useCurrentLocation() {
     setLocationError(null);
-    if (!("geolocation" in navigator)) {
-      setLocationError("Your browser doesn't support location access. Search for a place instead.");
-      return;
-    }
-
     setIsLocating(true);
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        if (!mountedRef.current) return;
-        const coordinates = {
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude,
-        };
-        void resolveAndSelect(coordinates, "Current location").finally(() => {
-          if (mountedRef.current) setIsLocating(false);
-        });
-      },
-      (error) => {
-        if (!mountedRef.current) return;
-        setIsLocating(false);
-        if (error.code === error.PERMISSION_DENIED) {
-          setLocationError(
-            "Location access was blocked. Allow it in your browser settings, or search for a place instead."
-          );
-        } else if (error.code === error.TIMEOUT) {
-          setLocationError("We couldn't get your location in time. Try again or search for a place.");
-        } else {
-          setLocationError("We couldn't find your current location. Search for a place instead.");
-        }
-      },
-      { enableHighAccuracy: true, timeout: 12_000, maximumAge: 60_000 }
-    );
+    try {
+      const fix = await getAccuratePosition();
+      if (!mountedRef.current) return;
+      setGpsAccuracyMetres(fix.accuracyMetres);
+      await resolveAndSelect(
+        { latitude: fix.latitude, longitude: fix.longitude },
+        "Current location"
+      );
+    } catch (error) {
+      if (!mountedRef.current) return;
+      setLocationError(
+        error instanceof GeolocationFailure
+          ? error.message
+          : "We couldn't find your current location. Search for a place instead."
+      );
+    } finally {
+      if (mountedRef.current) setIsLocating(false);
+    }
   }
 
   function handlePinChange(coordinates: Coordinates) {
     reverseRequestRef.current?.abort();
     const controller = new AbortController();
     reverseRequestRef.current = controller;
+    // A hand-placed pin is exact by definition, so the GPS radius no longer applies.
+    setGpsAccuracyMetres(null);
     setSelectedPlace(pinnedFallback(coordinates));
     setIsResolvingPin(true);
     setConfirmError(null);
@@ -400,7 +421,7 @@ export function LocationPicker({
                         aria-selected={activeIndex === index}
                         onMouseDown={(event) => event.preventDefault()}
                         onMouseEnter={() => setActiveIndex(index)}
-                        onClick={() => selectPlace(place)}
+                        onClick={() => selectSearchResult(place)}
                         className={classNames(
                           "flex cursor-pointer items-start gap-3 border-b border-slate-100 px-4 py-3.5 last:border-0",
                           activeIndex === index ? "bg-brand-50" : "bg-white hover:bg-slate-50"
@@ -481,6 +502,7 @@ export function LocationPicker({
           <LocationMap
             coordinates={selectedPlace}
             onCoordinatesChange={handlePinChange}
+            accuracyMetres={gpsAccuracyMetres}
             className="h-[300px] w-full border-b border-slate-200 sm:h-[360px]"
           />
 
@@ -507,9 +529,30 @@ export function LocationPicker({
                     Change
                   </button>
                 </div>
-                <p className="mt-2 font-mono text-xs text-slate-400" aria-label="Selected coordinates">
-                  {coordinatesLabel(selectedPlace)}
-                </p>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <p className="font-mono text-xs text-slate-400" aria-label="Selected coordinates">
+                    {coordinatesLabel(selectedPlace)}
+                  </p>
+                  {gpsAccuracyMetres !== null && (
+                    <span
+                      className={classNames(
+                        "rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide",
+                        gpsAccuracyMetres <= COARSE_ACCURACY_THRESHOLD_M
+                          ? "bg-emerald-50 text-emerald-700"
+                          : "bg-amber-50 text-amber-700"
+                      )}
+                    >
+                      GPS {accuracyLabel(gpsAccuracyMetres)}
+                    </span>
+                  )}
+                </div>
+
+                {gpsAccuracyMetres !== null && gpsAccuracyMetres > COARSE_ACCURACY_THRESHOLD_M && (
+                  <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-800">
+                    Your device reported a rough position ({accuracyLabel(gpsAccuracyMetres)}). Drag the
+                    pin to your exact spot so distances are correct.
+                  </p>
+                )}
               </div>
             </div>
 

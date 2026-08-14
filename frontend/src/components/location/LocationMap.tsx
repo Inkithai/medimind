@@ -7,6 +7,10 @@ interface LocationMapProps {
   coordinates: Coordinates;
   onCoordinatesChange: (coordinates: Coordinates) => void;
   className?: string;
+  /** Initial zoom. Precise GPS fixes deserve a closer view for pin adjustment. */
+  zoom?: number;
+  /** GPS accuracy radius in metres, drawn as a circle so the user sees the margin of error. */
+  accuracyMetres?: number | null;
 }
 
 const TILE_URL =
@@ -22,11 +26,19 @@ const pinIcon = L.divIcon({
   iconAnchor: [20, 44],
 });
 
-export function LocationMap({ coordinates, onCoordinatesChange, className }: LocationMapProps) {
+export function LocationMap({
+  coordinates,
+  onCoordinatesChange,
+  className,
+  zoom = 16,
+  accuracyMetres = null,
+}: LocationMapProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
   const markerRef = useRef<L.Marker | null>(null);
+  const accuracyCircleRef = useRef<L.Circle | null>(null);
   const onChangeRef = useRef(onCoordinatesChange);
+  const zoomRef = useRef(zoom);
 
   useEffect(() => {
     onChangeRef.current = onCoordinatesChange;
@@ -44,7 +56,7 @@ export function LocationMap({ coordinates, onCoordinatesChange, className }: Loc
 
     const map = L.map(container, {
       center: [coordinates.latitude, coordinates.longitude],
-      zoom: 14,
+      zoom: zoomRef.current,
       zoomControl: false,
       scrollWheelZoom: true,
       keyboard: true,
@@ -94,6 +106,34 @@ export function LocationMap({ coordinates, onCoordinatesChange, className }: Loc
       mapRef.current.panTo(point);
     }
   }, [coordinates.latitude, coordinates.longitude]);
+
+  // Show the GPS margin of error so a coarse fix is visible rather than implied.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    if (!accuracyMetres || !Number.isFinite(accuracyMetres) || accuracyMetres <= 0) {
+      accuracyCircleRef.current?.remove();
+      accuracyCircleRef.current = null;
+      return;
+    }
+
+    const center = L.latLng(coordinates.latitude, coordinates.longitude);
+    if (accuracyCircleRef.current) {
+      accuracyCircleRef.current.setLatLng(center).setRadius(accuracyMetres);
+    } else {
+      accuracyCircleRef.current = L.circle(center, {
+        radius: accuracyMetres,
+        color: "#0f766e",
+        weight: 1,
+        fillColor: "#14b8a6",
+        fillOpacity: 0.12,
+        interactive: false,
+      }).addTo(map);
+    }
+    // Frame the whole uncertainty area so the user understands the margin.
+    map.fitBounds(accuracyCircleRef.current.getBounds().pad(0.25), { maxZoom: 17 });
+  }, [accuracyMetres, coordinates.latitude, coordinates.longitude]);
 
   return (
     <div className={`relative overflow-hidden bg-slate-100 ${className || "h-80"}`}>

@@ -6,10 +6,12 @@
 # Frontend (deployed separately to Vercel)
 frontend/
 
-# Documentation and guides
-DEPLOYMENT_GUIDE.md
+# Documentation, pitch decks and guides (all now live in docs/)
+docs/
 README.md
 *.docx
+*.pptx
+generate_pptx.py
 
 # Local data (never ship patient data in images)
 chroma_db/
