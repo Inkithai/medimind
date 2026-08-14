@@ -3,10 +3,14 @@ import type {
   CareFacility,
   CareFacilityResponse,
   CareRecommendation,
-  FacilityKind,
+  FacilityKind as DirectoryFacilityKind,
 } from "../types/facility";
 import type {
+  CareFacilitiesResponse,
+  CareRecommendationContext,
+  CareProviderSearchResponse,
   CrossCheckReport,
+  FacilityKind,
   HealthResponse,
   LabTrendsReport,
   PatientSnapshot,
@@ -15,6 +19,10 @@ import type {
   SessionInfo,
   Timeline,
   UploadResponse,
+  CareSuggestion,
+  CareSearchResponse,
+  CareDay,
+  CareTimeOfDay,
 } from "../types/api";
 
 export type JobFileStatus = "queued" | "processing" | "completed" | "failed";
@@ -364,11 +372,26 @@ export const api = {
     return request<CareRecommendation>(credentials, "/api/v1/care/recommendation");
   },
 
+  getCareRecommendationContext(credentials: Credentials): Promise<CareRecommendationContext> {
+    return request<CareRecommendationContext>(credentials, "/api/v1/care-recommendations");
+  },
+
+  searchCareProviders(
+    credentials: Credentials,
+    body: { flag_id: string; location: string; availability: "any" | "today" | "this_week" | "evenings" | "weekends" }
+  ): Promise<CareProviderSearchResponse> {
+    return request<CareProviderSearchResponse>(credentials, "/api/v1/care-recommendations/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  },
+
   async getCareFacilities(
     credentials: Credentials,
     options: {
       location: string;
-      kind?: "any" | FacilityKind;
+      kind?: "any" | DirectoryFacilityKind;
       radiusKm?: number;
       latitude?: number;
       longitude?: number;
@@ -438,5 +461,40 @@ export const api = {
       `/api/v1/sessions/${encodeURIComponent(sessionId)}`,
       { method: "DELETE" }
     );
+  },
+
+  searchFacilities(
+    credentials: Credentials,
+    location: string,
+    kind: FacilityKind = "any",
+    radiusKm = 8
+  ): Promise<CareFacilitiesResponse> {
+    const params = new URLSearchParams({
+      location,
+      kind,
+      radius_km: String(radiusKm),
+    });
+    return request<CareFacilitiesResponse>(credentials, `/api/v1/care/facilities?${params}`);
+  },
+
+  getCareSuggestion(credentials: Credentials): Promise<CareSuggestion> {
+    return request<CareSuggestion>(credentials, "/api/v1/care/suggestion");
+  },
+
+  searchCare(
+    credentials: Credentials,
+    body: {
+      city: string;
+      specialty?: string;
+      days?: CareDay[];
+      time_of_day?: CareTimeOfDay;
+      radius_km?: number;
+    }
+  ): Promise<CareSearchResponse> {
+    return request<CareSearchResponse>(credentials, "/api/v1/care/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
   },
 };

@@ -64,9 +64,11 @@ export function HistoryPage() {
         if (b[0] === t("common.unknownYear")) return -1;
         return parseInt(b[0], 10) - parseInt(a[0], 10);
       })
+      // Keep backend chronological order (oldest first). localeCompare on
+      // mixed formats ("5 Jan 2026" vs "20 Apr 2026") is not chronological.
       .map(([year, visits]) => ({
         year,
-        visits: visits.sort((x, y) => (x.date || "").localeCompare(y.date || "")),
+        visits,
       }));
   })();
 

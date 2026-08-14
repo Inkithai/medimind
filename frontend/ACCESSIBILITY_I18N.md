@@ -30,15 +30,19 @@ Catalogs are isolated in `src/i18n/locales`. Medical names, extracted clinical t
 - ARIA tab pattern and arrow-key navigation for document views.
 - Table captions and scoped column headers.
 - SVG chart title/description plus the equivalent data table.
-- Accessible location combobox, map region, language selector, file upload, conversation log, alerts, and loading states.
-- Unicode-capable Sinhala/Tamil font fallback stack and layouts that wrap longer labels.
+- Accessible location combobox, high-accuracy GPS feedback, map region, language selector, file upload, conversation log, alerts, and loading states.
+- Source-grounded care evidence, provider-result cards, consultation checklist, and lab/result tables use translated headings, named regions, non-color labels, and locale-aware values.
+- Unicode-capable Sinhala/Tamil web fonts plus a Unicode fallback stack and layouts that wrap longer labels.
 
 ## Test coverage
 
-- `npm run test:i18n`: language detection, fallback, Sinhala/Tamil Unicode, interpolation, switching, persistence, refresh behavior, and `<html lang>`.
-- `npm run test:a11y`: axe-core audit of shared interactive controls, alerts, loading state, language selector, and document tabs/viewer.
+- `npm run test:i18n`: language detection, fallback, Sinhala/Tamil Unicode, interpolation, switching, persistence, refresh behavior, `<html lang>`, and complete Sinhala/Tamil coverage of all English catalog keys.
+- `npm run test:a11y`: axe-core audit of shared interactive controls, alerts, loading state, language selector, document tabs/viewer, consultation tables, and provider cards, plus document-tab arrow-key assertions.
+- `npm run test:geolocation`: high-accuracy refinement, coarse-fix handling, permission/timeout behavior, and accuracy labels.
+- `npm run test:care`: care evidence, consultation checklist, sparse data, safe external links, and provider-result regressions.
 - `npm run lint`: strict TypeScript validation.
 - `npm run build`: production Vite build and long-string layout compilation.
+- `cd ../backend && .venv/bin/python -m pytest -q`: backend API and medical/care regression suite.
 
 Manual release checks should still cover keyboard-only use at 320px/200% zoom and current screen-reader/browser combinations (NVDA/Firefox, JAWS/Chrome, VoiceOver/Safari).
 

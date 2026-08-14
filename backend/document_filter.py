@@ -196,11 +196,54 @@ if __name__ == "__main__":
         "overall_confidence": 0.78,
     }
 
+    tamil_prescription = {
+        # non-English document in Tamil script, but the structured medication
+        # field IS populated — the content path accepts it regardless of what
+        # language the page happens to be in
+        "document_type": "prescription",
+        "medications": [{"name": "Metformin", "confidence": 0.88}],
+        "lab_results": [],
+        "allergies_noted": [],
+        "clinical_notes": "மருந்துச்சீட்டு: மெட்ஃபோர்மின் 500 மி.கி., காலை மற்றும் இரவு உணவுடன் ஒரு மாத்திரை.",
+        "overall_confidence": 0.92,
+    }
+    arabic_lab_report = {
+        # non-English document in Arabic script — passes via structured
+        # lab_results even though the free-text notes are entirely Arabic
+        "document_type": "lab_report",
+        "medications": [],
+        "lab_results": [{"test_name": "HbA1c", "value": "7.2", "unit": "%"}],
+        "allergies_noted": [],
+        "clinical_notes": "تقرير المختبر: الهيموغلوبين السكري HbA1c بنسبة 7.2٪.",
+        "overall_confidence": 0.9,
+    }
+    tamil_bus_ticket = {
+        # non-English NON-medical document: a non-empty Tamil transcription
+        # with zero structured clinical content, typed "other" — must be
+        # rejected, proving a non-English OCR dump alone can't slip past the
+        # filter (the Tamil analogue of conference_slide_screenshot)
+        "document_type": "other",
+        "medications": [],
+        "lab_results": [],
+        "allergies_noted": [],
+        "clinical_notes": "பேருந்து முன்பதிவு: சென்னையிலிருந்து மதுரைக்கு, இருக்கை 12, விலை ₹450.",
+        "overall_confidence": 0.71,
+    }
+
     kept, rejected = filter_non_medical_documents(
-        [real_prescription, empty_other, unusual_but_real, mistagged_screenshot, conference_slide_screenshot]
+        [
+            real_prescription,
+            empty_other,
+            unusual_but_real,
+            mistagged_screenshot,
+            conference_slide_screenshot,
+            tamil_prescription,
+            arabic_lab_report,
+            tamil_bus_ticket,
+        ]
     )
-    assert len(kept) == 2, f"expected 2 kept, got {len(kept)}"
-    assert len(rejected) == 3, f"expected 3 rejected, got {len(rejected)}"
+    assert len(kept) == 4, f"expected 4 kept, got {len(kept)}"
+    assert len(rejected) == 4, f"expected 4 rejected, got {len(rejected)}"
 
     try:
         assert_medical_document(empty_other, "boarding_pass.jpg")

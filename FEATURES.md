@@ -1,7 +1,5 @@
 # MediMind Features
 
-> Checklist status: `[x]` is implemented in the current repository; `[ ]` is pending or not yet verified end to end.
-
 ## Visible Features
 
 - Upload → Extract → Timeline → Safety/Labs → Ask AI
@@ -11,19 +9,27 @@
 - Patient-grounded RAG / Ask AI
 - English, Sinhala, and Tamil UI with persisted/browser-detected language and locale-aware formatting
 - WCAG-oriented keyboard, screen-reader, focus, contrast, reduced-motion, table, chart, form, and responsive-navigation support
-- Optional Care Navigation with search-as-you-type, current location, map confirmation, and nearby facility results
+- Care Navigation with search-as-you-type, current location, map confirmation, and nearby facility results — works with no API key or billing account
 - Facility category filters for hospitals, clinics, pharmacies, laboratories, and doctors
 - Public listing details including distance, address, rating, phone, website, opening hours, and map link when available
+- High-accuracy GPS capture that refines the fix before use, shows its margin of error, and asks for a pin correction when the reading is coarse
+- Sticky desktop sidebar that stays in view on long pages
 
 ## Hidden / Engineering Features
 
 - Synthetic lab fixture generator `generate_lab_test_data.py`
-- Provider-neutral care interface; Google Places API (New) is isolated from the medical layer
+- Provider-neutral care interface; Google Places API (New) and OpenStreetMap/Overpass are both isolated from the medical layer
+- Keyless-by-default directory: OpenStreetMap/Overpass needs no API key, billing, or cloud project
+- Automatic provider fallback—a Google rejection or empty result silently degrades to OpenStreetMap instead of a 503
+- Overpass mirror failover across multiple public endpoints
 - Server-side Google key handling—the browser never receives `GOOGLE_MAPS_API_KEY`
-- Coordinate searches use Google Nearby Search; city/area-only legacy clients use Google Text Search
-- Google responses normalized to a stable `Facility[]` contract
+- Coordinate searches use Google Nearby Search; city/area-only legacy clients use Google Text Search, and OpenStreetMap geocodes area text before querying
+- Every provider's response normalized to one stable `Facility[]` contract
 - Provider-neutral empty and failure responses; provider details and credentials stay in server logs
-- Regression tests for Google payloads, normalization, distance ordering, empty results, and neutral API failures
+- Regression tests for Google payloads, OpenStreetMap tags, normalization, distance ordering, mirror failover, provider fallback, empty results, and neutral API failures
+- Geolocation refinement via watchPosition with best-fix retention, early exit at 30 m, and best-effort return on timeout
+- Reverse geocoding used for naming only—device coordinates are never overwritten by a feature centroid
+- Regression tests for GPS refinement, cache avoidance, permission/timeout handling, and accuracy labelling
 - Regression tests for reference-range formatting + trend direction
 - Chroma collection sanitization; confidence-aware extraction
 - Early cost-protection gate (reject before downstream AI)
@@ -33,249 +39,44 @@
 - Language-independent medical structure (multilingual → English INN)
 - Longitudinal trend intelligence (not just extraction)
 - Safety-first AI (interpretation ≠ diagnosis; professional-care cues)
-- Provider-decoupled Care Navigation with a server-side Google Places adapter
+- Provider-decoupled Care Navigation with pluggable server-side adapters (Google Places, OpenStreetMap) and graceful degradation between them
 - Location accuracy through saved latitude/longitude rather than city text alone
 - Neutral distance/category presentation with no “best hospital” or clinical referral claim
 
-# Detailed Feature Checklist
+## Round 1 (Core System — Verified)
 
-## Core Medical Intelligence
+- [x] Multi-document extraction
+- [x] Patient timeline
+- [x] Prescription interaction checking
+- [x] Duplicate medication detection
+- [x] Dosage conflict detection
+- [x] Lab trend analysis
+- [x] Plain-language explanations
+- [x] Multi-document Q&A
+- [x] Confidence scoring
+- [x] High-risk/low-confidence detection
+- [x] English, Sinhala, and Tamil UI catalogs with persistence and locale formatting
+- [x] WCAG-oriented keyboard and screen-reader interaction across the existing UI
+- [ ] Official competition dataset integration (intentionally left unchanged)
 
-### 1. Document Upload
+## Round 2 (Care Navigation — Added)
 
-- [x] Upload multiple PDFs.
-- [x] Support reports from different visits.
-- [x] Support lab reports.
-- [x] Support prescriptions.
-- [x] Support doctor's notes.
-- [x] Support discharge summaries.
-- [x] Show uploaded document list.
-- [x] Show processing status.
-- [x] Handle failed document processing.
-
-### 2. Medical Document Processing
-
-- [x] Extract text from PDFs.
-- [x] OCR scanned documents.
-- [x] Identify patient information.
-- [x] Identify document type.
-- [x] Identify doctor/provider.
-- [x] Identify visit date.
-- [x] Preserve document/page references.
-- [x] Handle messy document layouts.
-
-### 3. Structured Medical Extraction
-
-- [x] Extract medication names.
-- [x] Extract dosage.
-- [x] Extract frequency.
-- [x] Extract duration.
-- [x] Extract test names.
-- [x] Extract test values.
-- [x] Extract reference ranges.
-- [x] Extract allergies.
-- [x] Extract diagnoses/conditions mentioned.
-- [x] Extract important clinical notes.
-
-### 4. Patient Timeline
-
-- [x] Merge information from all documents.
-- [x] Sort events chronologically.
-- [x] Group information by visit.
-- [x] Show medications by date.
-- [x] Show lab results by date.
-- [x] Show allergies/contradictions.
-- [x] Allow clicking an event to see its source document.
-
-### 5. Prescription Cross-Checker ⭐
-
-- [x] Detect duplicate medications.
-- [x] Detect possible drug interactions.
-- [x] Detect conflicting dosages.
-- [x] Detect conflicting frequencies.
-- [x] Detect medication changes.
-- [x] Detect medication continuation.
-- [x] Detect allergy–medication conflicts.
-- [x] Compare prescriptions across visits.
-- [x] Explain why something was flagged.
-- [x] Show severity/risk level.
-- [x] Show source documents for the flag.
-
-### 6. Lab Trend Analysis ⭐
-
-- [x] Group the same lab test across visits.
-- [x] Compare values over time.
-- [x] Detect increasing trends.
-- [x] Detect decreasing trends.
-- [x] Detect abnormal values.
-- [x] Detect gradual deterioration.
-- [x] Detect improvement.
-- [x] Show trend graph.
-- [x] Explain trend in simple language.
-- [x] Show supporting test dates.
-
-### 7. Multi-Document AI Reasoning ⭐⭐⭐
-
-- [x] Allow questions about all documents.
-- [x] Retrieve relevant documents.
-- [x] Retrieve relevant pages/chunks.
-- [x] Connect information across visits.
-- [x] Connect medications with allergies.
-- [x] Connect medications with previous prescriptions.
-- [x] Connect lab results across time.
-- [x] Answer questions using evidence.
-- [x] Show source citations.
-- [x] Never answer from unsupported information.
-
-### 8. Confidence & Safety ⭐
-
-- [x] Give confidence score to every AI answer.
-- [x] Explain why confidence is low.
-- [x] Flag high-risk findings.
-- [x] Flag low-confidence findings.
-- [x] Recommend doctor/pharmacist when appropriate.
-- [x] Add medical disclaimer.
-- [x] Never claim to diagnose.
-- [x] Clearly separate **AI observation** from **medical diagnosis**.
-
-### 9. Dashboard
-
-- [x] Patient overview.
-- [x] Medical timeline.
-- [x] Medication section.
-- [x] Allergy section.
-- [x] Lab trends.
-- [x] Risk/flag section.
-- [x] Document viewer.
-- [x] AI chat.
-- [x] Confidence indicators.
-- [x] Source references.
-
-### 10. AI Architecture ⭐⭐⭐
-
-- [x] PDF extraction pipeline.
-- [x] OCR pipeline.
-- [x] Structured extraction layer.
-- [x] Medical normalization layer.
-- [x] Timeline engine.
-- [x] Deterministic safety rules.
-- [x] RAG/retrieval layer.
-- [x] LLM reasoning layer.
-- [x] Confidence calculation.
-- [x] Evidence/source tracking.
-
-### 11. Robustness
-
-- [x] Handle missing fields.
-- [x] Handle unreadable PDFs.
-- [x] Handle duplicate documents.
-- [x] Handle conflicting information.
-- [x] Handle different date formats.
-- [x] Handle different medication formats.
-- [x] Handle API failures.
-- [x] Handle LLM failures.
-- [x] Show useful error messages.
-
-### 12. Demo Preparation ⭐⭐⭐
-
-- [ ] Use the **official competition dataset**.
-- [x] Upload multiple documents.
-- [x] Show extraction.
-- [x] Show patient timeline.
-- [x] Show a real prescription conflict.
-- [x] Show a real lab trend.
-- [x] Ask a cross-document question.
-- [x] Show confidence score.
-- [x] Show source evidence.
-- [x] Show doctor/pharmacist warning.
-- [x] Finish within 4–5 minutes.
-
-## Care Recommendation and Provider Search
-
-### 1. Detect High-Risk Flag
-
-- [x] Detect high-risk prescription issue.
-- [x] Detect low-confidence result.
-- [x] Detect allergy conflict.
-- [x] Detect serious lab trend.
-- [x] Trigger recommendation flow.
-
-### 2. Determine Doctor Specialty ⭐
-
-- [x] Map issue → appropriate specialty.
-- [x] Heart issue → cardiologist.
-- [x] Drug interaction → prescribing doctor/pharmacist.
-- [x] Skin issue → dermatologist.
-- [x] Digestive issue → gastroenterologist.
-- [x] Blood-related issue → relevant specialist.
-- [x] Unknown issue → general physician.
-- [x] Explain why the specialty was selected.
-
-### 3. Ask User Location
-
-- [x] Ask user's city/area.
-- [x] Allow manual location entry.
-- [x] Example: Jaffna.
-- [x] Example: Colombo.
-- [x] Validate location input.
-
-### 4. Ask Availability
-
-- [x] Ask when user is available.
-- [x] This week.
-- [x] Today.
-- [x] Evening.
-- [x] Weekend.
-- [x] Store selection for filtering/display.
-
-### 5. Real Doctor/Clinic Search ⭐⭐⭐
-
-- [x] Connect to Google Places API **or** permitted free alternative.
-- [x] Search using location.
-- [x] Search using required specialty.
-- [x] Search real clinics/doctors.
-- [x] Do **not** use mock doctor data.
-- [x] Do **not** hard-code fake clinics.
-- [x] Do **not** fabricate ratings.
-- [x] Do **not** fabricate phone numbers.
-
-### 6. Doctor Results
-
-Show:
-
-- [x] Doctor/clinic name.
-- [x] Specialty.
-- [x] Address.
-- [x] Distance.
-- [x] Rating if available.
-- [x] Contact number if available.
-- [x] Map/directions link if available.
-- [x] Source/provider information.
-
-### 7. Doctor Ranking ⭐⭐
-
-Instead of simply showing random results:
-
-- [x] Rank by specialty match.
-- [x] Rank by distance.
-- [x] Consider rating.
-- [x] Consider availability if API provides it.
-- [x] Explain ranking logic.
-- [x] Show top relevant results first.
-
-### 8. No-Result Handling
-
-- [x] Detect zero results.
-- [x] Tell user no suitable result was found.
-- [x] Never create fake results.
-- [x] Suggest expanding search area.
-- [x] Allow user to change location.
-- [x] Allow broader specialty search.
-
-### 9. Safety
-
-- [x] Say this is **not a diagnosis**.
-- [x] Say the AI detected a potential issue.
-- [x] Recommend professional consultation.
-- [x] Don't tell user to start/stop medication.
-- [x] Don't claim a doctor is medically suitable beyond specialty matching.
+- [x] Detect appropriate specialty
+- [x] Ask user's city/area
+- [x] Search-as-you-type location suggestions
+- [x] “Use my current location” fallback
+- [x] Confirm or adjust the location on a map
+- [x] Save and send latitude/longitude
+- [x] Ask user's availability
+- [x] Connect to Google Places API (New) through the backend
+- [x] Keyless OpenStreetMap/Overpass adapter as the default and as a fallback
+- [x] Keep the Google Maps API key server-side
+- [x] Search based on coordinates, radius, and facility type
+- [x] Support city/area-only legacy searches through Google Text Search
+- [x] Match results to specialty
+- [x] Rank/filter results (distance/category neutral, no “best” claim)
+- [x] Show real provider info through normalized `Facility[]`
+- [x] Handle zero results (empty list + message)
+- [x] Handle API failure (provider-neutral error; key hidden)
+- [x] Clearly indicate source (public listings; not a MediMind recommendation)
+- [x] Medical disclaimer (directory extension; not clinical referral)

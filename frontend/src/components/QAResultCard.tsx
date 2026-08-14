@@ -2,7 +2,7 @@ import { Link } from "react-router-dom";
 import type { QAResponse } from "../types/api";
 import { useI18n } from "../i18n/I18nContext";
 import { classNames, confidenceTone, formatConfidence, formatDate } from "../utils/format";
-import { Alert } from "./Alert";
+import { ConsiderProfessionalCare } from "./ConsiderProfessionalCare";
 
 export function QAResultCard({
   result,
@@ -21,9 +21,7 @@ export function QAResultCard({
       }
     >
       {result.recommend_professional_consult && (
-        <Alert variant="warning" title={t("ask.consult")}>
-          {t("common.medicalDisclaimer")} {t("ask.consult")}.
-        </Alert>
+        <ConsiderProfessionalCare message={t("ask.consult")} />
       )}
 
       <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-800">

@@ -102,6 +102,9 @@ def _make_fake_chromadb():
                 raise ValueError(f"Collection {name} does not exist")
             return state["collections"][name]
 
+        def delete_collection(self, name):
+            state["collections"].pop(name, None)
+
     fake_module = types.ModuleType("chromadb")
     fake_module.PersistentClient = FakeClient
     return fake_module, state

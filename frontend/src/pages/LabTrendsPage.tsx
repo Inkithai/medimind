@@ -4,6 +4,7 @@ import { api } from "../api/client";
 import { ErrorState } from "../components/ErrorState";
 import { Card, CardBody } from "../components/Card";
 import { LabTrendsView } from "../components/LabTrendsView";
+import { ConsiderProfessionalCare } from "../components/ConsiderProfessionalCare";
 import { LoadingState } from "../components/Spinner";
 import { RefreshIcon, UploadIcon } from "../components/icons";
 import { useAuth } from "../context/AuthContext";
@@ -62,9 +63,28 @@ export function LabTrendsPage() {
         />
       )}
 
-      {!loading && report && <LabTrendsView report={report} />}
+      {!loading && report && (
+        <>
+          <LabTrendsView report={report} />
+          {worthDiscussing(report) && (
+            <ConsiderProfessionalCare message={t("care.labReview")} />
+          )}
+        </>
+      )}
     </div>
   );
+}
+
+function worthDiscussing(report: LabTrendsReport): boolean {
+  return report.trends.some((trend) => {
+    const last = trend.data_points[trend.data_points.length - 1];
+    const recovered =
+      trend.returned_to_normal === true ||
+      (Boolean(trend.crossed_into_abnormal_at) && last?.flag === "normal");
+    if (trend.approaching_threshold) return true;
+    if (trend.crossed_into_abnormal_at && !recovered) return true;
+    return last?.flag === "high" || last?.flag === "low";
+  });
 }
 
 function NotFoundOrError({ error, onRetry }: { error: unknown; onRetry: () => void }) {

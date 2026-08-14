@@ -5,17 +5,19 @@ Google key remains on the server and every response is normalized to
 ``Facility`` before it reaches the medical/application layer.
 """
 
+from __future__ import annotations
+
 import json
 import math
 import os
 import re
-import socket
 from typing import Any, Dict, List, Optional
-from urllib.error import HTTPError, URLError
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from care.errors import CareConfigurationError, CareProviderError
-from care.models import Facility
+from care.models import Facility, GeoPoint, RouteEstimate
+from care.providers.base import ProviderNotConfiguredError
 
 
 _GOOGLE_FIELD_MASK = ",".join(
@@ -79,7 +81,7 @@ class GoogleProvider:
         timeout_seconds: Optional[float] = None,
     ) -> None:
         key = (api_key if api_key is not None else os.environ.get("GOOGLE_MAPS_API_KEY", "")).strip()
-        if key.lower() in _PLACEHOLDER_KEYS:
+        if key.lower() in _PLACEHOLDER_KEYS or key.startswith("your-"):
             raise CareConfigurationError(
                 "CARE_PROVIDER=google requires a real GOOGLE_MAPS_API_KEY. "
                 "Enable Places API (New) and billing for the key's Google Cloud project."
@@ -179,6 +181,22 @@ class GoogleProvider:
             facilities.sort(key=lambda item: item.distance_km if item.distance_km is not None else math.inf)
         return facilities
 
+    def geocode(self, query: str) -> Optional[GeoPoint]:
+        """Legacy CareNavigationService hook — Places search is the primary path."""
+        raise ProviderNotConfiguredError(self.name)
+
+    def search_nearby(self, origin: GeoPoint, kind: str, radius_m: int) -> List[Facility]:
+        return self.search(
+            origin.label or "",
+            kind,
+            max(radius_m, 1000) / 1000.0,
+            latitude=origin.latitude,
+            longitude=origin.longitude,
+        )
+
+    def route(self, origin: GeoPoint, destination: GeoPoint) -> RouteEstimate:
+        raise ProviderNotConfiguredError(self.name)
+
     @staticmethod
     def _nearby_payload(
         kind: str,
@@ -259,7 +277,10 @@ class GoogleProvider:
             raise CareProviderError(
                 f"Google Places API rejected the request (HTTP {error.code}): {detail}"
             ) from error
-        except (URLError, socket.timeout, TimeoutError) as error:
+        except OSError as error:
+            # URLError, socket/TLS/timeout failures all subclass OSError, so a
+            # transport problem stays a CareProviderError the caller can fall
+            # back from instead of an unexpected 500-class crash.
             raise CareProviderError(f"Google Places API could not be reached: {type(error).__name__}") from error
 
         try:
@@ -347,6 +368,7 @@ class GoogleProvider:
             ranking_score=ranking_score,
             ranking_reason=ranking_reason,
             source="Google Places public listing",
+            provider="google",
         )
 
 

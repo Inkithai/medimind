@@ -17,6 +17,7 @@ const routeKeys: Record<string, string> = {
   "/conversations": "nav.ask",
   "/sessions": "nav.ask",
   "/find-care": "nav.care",
+  "/care": "nav.care",
   "/settings": "nav.settings",
   "/upload": "nav.upload",
 };

@@ -5,8 +5,10 @@ import { Alert } from "../../components/Alert";
 import { DocumentViewer } from "../../components/DocumentViewer";
 import { LanguageSelector } from "../../components/LanguageSelector";
 import { LoadingState } from "../../components/Spinner";
+import { ConsultationPack } from "../../components/ConsultationPack";
+import { ProviderResultCard } from "../../components/ProviderResultCard";
 import { I18nProvider } from "../../i18n/I18nContext";
-import type { Visit } from "../../types/api";
+import type { ConsultationPack as ConsultationPackData, LiveProvider, Visit } from "../../types/api";
 
 const dom = new JSDOM("<!doctype html><html lang='en'><head><title>Accessibility test</title></head><body><main id='root'></main></body></html>", {
   url: "https://medimind.test/",
@@ -37,6 +39,45 @@ const visit: Visit = {
   _source: { file: "record.pdf", method: "text_layer" },
 };
 
+const consultationPack: ConsultationPackData = {
+  documents_to_bring: [],
+  medication_records_to_discuss: [],
+  allergies: [],
+  relevant_lab_points: [
+    { test: "Creatinine", value: "1.2", unit: "mg/dL", source_file: "labs.pdf" },
+  ],
+  low_confidence_items: [],
+  clinician_questions: ["What should I verify?"],
+  disclaimer: "Review original information with a qualified clinician.",
+};
+
+const provider: LiveProvider = {
+  source_provider_id: "test-provider",
+  name: "Directory result",
+  provider_type: "clinic",
+  source_specialties: [],
+  address: "Test address",
+  latitude: null,
+  longitude: null,
+  distance_km: 2.4,
+  rating: null,
+  rating_count: null,
+  phone: null,
+  opening_hours: [],
+  open_now: null,
+  map_url: null,
+  website_url: null,
+  source: "Test directory",
+  ranking: {
+    score: 70,
+    specialty_relevance: "Category match",
+    distance: "Nearby",
+    rating: "No rating supplied",
+    availability: "Not confirmed",
+    availability_preference: "Any time",
+  },
+};
+
 async function main() {
   const { default: axe } = await import("axe-core");
   const root = createRoot(document.getElementById("root")!);
@@ -48,6 +89,11 @@ async function main() {
         <Alert variant="danger" title="Error">Example error</Alert>
         <LoadingState label="Loading records" />
         <DocumentViewer visit={visit} onClose={() => undefined} />
+        <ConsultationPack pack={consultationPack} />
+        <section>
+          <h2>Test provider results</h2>
+          <ProviderResultCard provider={provider} index={0} />
+        </section>
       </I18nProvider>
     );
   });

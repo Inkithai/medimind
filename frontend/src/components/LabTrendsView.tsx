@@ -63,10 +63,23 @@ export function LabTrendsView({ report }: { report: LabTrendsReport }) {
   );
 }
 
+function lastFlag(trend: LabTrend): string {
+  const points = trend.data_points || [];
+  return points.length ? points[points.length - 1].flag : "";
+}
+
+function recovered(trend: LabTrend): boolean {
+  if (typeof trend.returned_to_normal === "boolean") return trend.returned_to_normal;
+  // Old snapshots omit the field — a last-reading "normal" after a recorded
+  // crossing is a recovery, not an ongoing alarm.
+  return Boolean(trend.crossed_into_abnormal_at) && lastFlag(trend) === "normal";
+}
+
 function TrendCard({ trend }: { trend: LabTrend }) {
   const { t } = useI18n();
   const crossed = trend.crossed_into_abnormal_at;
   const approaching = trend.approaching_threshold;
+  const isRecovered = recovered(trend);
 
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-4">
@@ -75,7 +88,12 @@ function TrendCard({ trend }: { trend: LabTrend }) {
           <div className="flex flex-wrap items-center gap-2">
             <h4 className="text-base font-semibold text-slate-900">{trend.test_name}</h4>
             <StatusBadge tone={directionBadgeTone(trend.direction)}>{trend.direction}</StatusBadge>
-            {crossed && (
+            {crossed && isRecovered && (
+              <StatusBadge tone="success">
+                returned to normal (was {crossed.flag} on {crossed.date || "unknown date"})
+              </StatusBadge>
+            )}
+            {crossed && !isRecovered && (
               <StatusBadge tone="danger">
                 crossed to {crossed.flag} on {crossed.date || "unknown date"}
               </StatusBadge>
@@ -152,10 +170,32 @@ function TrendCard({ trend }: { trend: LabTrend }) {
 }
 
 function directionBadgeTone(direction: string): "danger" | "info" | "success" | "warning" {
-  if (direction.startsWith("increasing")) return "danger";
-  if (direction.startsWith("decreasing")) return "info";
+  if (direction.includes("increasing")) return "danger";
+  if (direction.includes("decreasing")) return "info";
   if (direction === "stable") return "success";
   return "warning";
+}
+
+function parseLabNumber(value: string): number | null {
+  // Consume thousands separators so "150,000" is 150000, not 150.
+  const match = /-?\d[\d,.]*/.exec(String(value ?? ""));
+  if (!match) return null;
+  let token = match[0].replace(/[.,]+$/, "");
+  if (!token || token === "-") return null;
+  const hasComma = token.includes(",");
+  const hasDot = token.includes(".");
+  if (hasComma && hasDot) {
+    token = token.lastIndexOf(",") > token.lastIndexOf(".")
+      ? token.replace(/\./g, "").replace(",", ".")
+      : token.replace(/,/g, "");
+  } else if (hasComma) {
+    const parts = token.replace(/^-/, "").split(",");
+    token = parts.length > 1 && parts.slice(1).every((p) => p.length === 3 && /^\d+$/.test(p))
+      ? token.replace(/,/g, "")
+      : token.replace(",", ".").replace(/,/g, "");
+  }
+  const n = Number(token);
+  return Number.isFinite(n) ? n : null;
 }
 
 function Sparkline({ trend }: { trend: LabTrend }) {
@@ -167,11 +207,8 @@ function Sparkline({ trend }: { trend: LabTrend }) {
   const PAD = 4;
 
   const numericPoints = trend.data_points
-    .map((p) => {
-      const m = /-?\d+(?:\.\d+)?/.exec(p.value);
-      return m ? parseFloat(m[0]) : NaN;
-    })
-    .filter((v) => !Number.isNaN(v));
+    .map((p) => parseLabNumber(p.value))
+    .filter((v): v is number => v !== null);
 
   if (numericPoints.length < 2) {
     return <div className="h-12 w-40 text-xs text-slate-600">{t("labs.plotUnavailable")}</div>;

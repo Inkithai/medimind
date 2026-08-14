@@ -34,8 +34,9 @@ Env:
     MiniLM model)
     (optional: VECTOR_STORE=chroma|supabase, USE_BACKGROUND_JOBS=true,
      UPLOAD_FILE_CONCURRENCY=1 for async per-file worker load control)
-    (optional care directory: CARE_PROVIDER=google,
-     GOOGLE_MAPS_API_KEY with Places API (New) enabled + billing)
+    (care directory needs no key: defaults to OpenStreetMap/Overpass.
+     Optional CARE_PROVIDER=google + GOOGLE_MAPS_API_KEY with Places API
+     (New) enabled + billing, which falls back to OpenStreetMap on failure)
 """
 
 import asyncio
@@ -48,7 +49,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Literal, Optional, Tuple
 
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -61,9 +62,34 @@ import jobs
 import storage
 from care import CareConfigurationError, CareProviderError, get_care_provider
 from care.recommendation import recommend_care
+from care_recommendations import ProviderSearchError, recommendation_context, search_live_providers
 from auth import get_current_user, issue_anonymous_token
 from document_filter import NonMedicalDocumentError, assert_medical_document
 from lab_trends import track_lab_trends
+
+
+def _lab_trends_need_recompute(report: Any) -> bool:
+    """True when a stored snapshot predates recovery / unit-mismatch fixes."""
+    if not isinstance(report, dict):
+        return True
+    trends = report.get("trends")
+    if not isinstance(trends, list):
+        return True
+    for trend in trends:
+        if (
+            not isinstance(trend, dict)
+            or "returned_to_normal" not in trend
+            or "risk_level" not in trend
+        ):
+            return True
+    return False
+
+
+def _lab_trends_for_snapshot(snapshot: Dict[str, Any]) -> Dict[str, Any]:
+    stored = snapshot.get("lab_trends")
+    if stored is None or _lab_trends_need_recompute(stored):
+        return track_lab_trends(snapshot["patient_timeline"])
+    return stored
 from medical_extractor import (
     ProviderRateLimitError,
     _is_demo_document,
@@ -72,6 +98,9 @@ from medical_extractor import (
     process_document,
 )
 from retrieval import answer_question, index_patient_timeline
+from care.models import FACILITY_KINDS
+from care.service import CareNavigationError, get_care_service
+import care_finder
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("api")
@@ -127,12 +156,13 @@ from contextlib import asynccontextmanager
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Document worker pool ready: concurrency=%d", UPLOAD_FILE_CONCURRENCY)
-    if os.environ.get("CARE_PROVIDER", "").strip():
-        try:
-            care_provider = get_care_provider()
-            logger.info("Care directory configured: provider=%s", care_provider.name)
-        except CareConfigurationError as error:
-            logger.warning("Care directory is not configured: %s", error)
+    # The care directory always has a keyless OpenStreetMap default, so this
+    # only reports which adapter is active rather than gating the feature.
+    try:
+        care_provider = get_care_provider()
+        logger.info("Care directory ready: provider=%s", care_provider.name)
+    except CareConfigurationError as error:
+        logger.warning("Care directory is not configured: %s", error)
     # Startup: ensure tables exist (Supabase schema is created via SQL editor,
     # so this is a no-op but kept for compatibility)
     try:
@@ -189,6 +219,20 @@ async def upload_pipeline_error_handler(request: Request, exc: UploadPipelineErr
     )
 
 
+@app.exception_handler(care_finder.CareFinderError)
+async def care_finder_error_handler(request: Request, exc: care_finder.CareFinderError):
+    status = 422 if exc.code == "city_not_found" else 502
+    logger.warning("care finder error for %s %s: %s", request.method, request.url.path, exc)
+    return JSONResponse(
+        status_code=status,
+        content={
+            "detail": str(exc),
+            "code": exc.code,
+            "retryable": exc.retryable,
+        },
+    )
+
+
 @app.exception_handler(db.SchemaNotInitializedError)
 async def schema_not_initialized_handler(request: Request, exc: db.SchemaNotInitializedError):
     """Supabase is reachable but the app's tables don't exist (setup SQL
@@ -213,6 +257,22 @@ class MessageRequest(BaseModel):
     """Body for posting a message into a conversation session (Phase 2)."""
     question: str
     top_k: int = Field(default=8, ge=1, le=50)
+
+
+class CareSearchRequest(BaseModel):
+    """Find clinics/doctors near a city (Geoapify, OSM fallback)."""
+    city: str = Field(..., min_length=2, max_length=160)
+    specialty: Optional[str] = None
+    days: List[str] = Field(default_factory=lambda: ["mon", "tue", "wed", "thu", "fri"])
+    time_of_day: str = Field(default="any")
+    radius_km: float = Field(default=8, ge=1, le=50)
+
+
+class CareProviderSearchRequest(BaseModel):
+    """Authenticated runtime search for real local care-provider records."""
+    flag_id: str = Field(min_length=1, max_length=160)
+    location: str = Field(min_length=2, max_length=200)
+    availability: Literal["any", "today", "this_week", "evenings", "weekends"] = "any"
 
 
 # ---------------------------------------------------------------------------
@@ -819,11 +879,15 @@ async def upload_documents(
     files_data: List[Tuple[str, bytes]] = []
     for upload in files:
         original_name = Path(upload.filename or "").name or "upload"
-        # Validate extension early
+        # Unsupported types are recorded per-file in the pipeline (failed_files)
+        # rather than aborting the whole batch — one .txt next to a valid
+        # prescription must not discard the prescription.
         suffix = Path(original_name).suffix.lower()
         if suffix not in SUPPORTED_EXTENSIONS:
-            logger.warning("upload_documents: user=%s rejected '%s' (unsupported type '%s')", user_id, original_name, suffix or "(none)")
-            raise HTTPException(400, f"Unsupported file type '{suffix or '(no extension)'}' for '{original_name}'. Supported: {', '.join(SUPPORTED_EXTENSIONS)}")
+            logger.warning(
+                "upload_documents: user=%s will skip '%s' (unsupported type '%s')",
+                user_id, original_name, suffix or "(none)",
+            )
         content = await upload.read()
         files_data.append((original_name, content))
 
@@ -974,7 +1038,7 @@ async def get_lab_trends(user_id: str = Depends(get_current_user)) -> Dict[str, 
     snapshot = db.load_patient_snapshot(user_id)
     if snapshot is None:
         raise HTTPException(404, "No timeline found for this user.")
-    return _enhanced_lab_trends(snapshot)
+    return _lab_trends_for_snapshot(snapshot)
 
 
 @app.get("/api/v1/patient-snapshot")
@@ -997,12 +1061,12 @@ async def get_patient_snapshot(user_id: str = Depends(get_current_user)) -> Dict
         "cross_check_report": _enhanced_cross_check(snapshot),
         "updated_at": snapshot.get("updated_at"),
     }
-    result["lab_trends"] = _enhanced_lab_trends(snapshot)
+    result["lab_trends"] = _lab_trends_for_snapshot(snapshot)
     return result
 
 
 # ---------------------------------------------------------------------------
-# Care navigation (optional, provider-neutral public directory)
+# Live local-care recommendations (clinical flag -> specialty -> directory)
 # ---------------------------------------------------------------------------
 
 @app.get("/api/v1/care/recommendation")
@@ -1016,81 +1080,52 @@ async def get_care_recommendation(
     return recommend_care(
         snapshot["patient_timeline"],
         _enhanced_cross_check(snapshot),
-        _enhanced_lab_trends(snapshot),
+        _lab_trends_for_snapshot(snapshot),
     )
 
+@app.get("/api/v1/care-recommendations")
+async def get_care_recommendations(user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
+    """Return local-care search eligibility from current saved clinical flags.
 
-@app.get("/api/v1/care/facilities")
-async def get_care_facilities(
-    location: str = Query(default="", max_length=200),
-    kind: str = Query(default="any", max_length=30),
-    radius_km: float = Query(default=8.0, ge=1.0, le=50.0),
-    latitude: Optional[float] = Query(default=None, ge=-90.0, le=90.0),
-    longitude: Optional[float] = Query(default=None, ge=-180.0, le=180.0),
-    specialty: Optional[str] = Query(default=None, max_length=80),
-    availability: Optional[str] = Query(default=None, max_length=20),
-    user_id: str = Depends(get_current_user),
-) -> List[Dict[str, Any]]:
-    """Return normalized public healthcare listings near an area or point.
-
-    The Google key stays server-side. Supplying coordinates uses Places API
-    (New) Nearby Search and gives distance ordering; legacy clients that send
-    only ``location=Jaffna`` use Places Text Search. Results are directory
-    listings, not clinical referrals or a claim that a facility is "best".
+    This endpoint does not diagnose and does not query a provider directory.
+    It only exposes existing high-risk/low-confidence flags so the user can
+    select one before providing a city/area and availability preference.
     """
-    del user_id  # Authentication protects the optional directory from abuse.
-    if not location.strip() and (latitude is None or longitude is None):
-        raise HTTPException(400, "Choose a city/area or provide latitude and longitude.")
-    if (latitude is None) != (longitude is None):
-        raise HTTPException(400, "latitude and longitude must be provided together.")
+    snapshot = db.load_patient_snapshot(user_id)
+    if snapshot is None:
+        raise HTTPException(404, "No patient record found for this user. Upload and process medical documents first.")
+    return recommendation_context(snapshot)
 
-    normalized_kind = kind.strip().lower() or "any"
-    allowed_kinds = {"any", "hospital", "clinic", "pharmacy", "laboratory", "lab", "doctor"}
-    if normalized_kind not in allowed_kinds:
-        raise HTTPException(400, "Unsupported facility type.")
 
+@app.post("/api/v1/care-recommendations/search")
+async def search_care_recommendations(
+    body: CareProviderSearchRequest,
+    user_id: str = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """Search the configured live provider source from the backend only.
+
+    Provider details are returned only when the selected source provides them
+    during this request. There are no seeded, cached fallback, or fabricated
+    provider records in this application.
+    """
+    snapshot = db.load_patient_snapshot(user_id)
+    if snapshot is None:
+        raise HTTPException(404, "No patient record found for this user. Upload and process medical documents first.")
     try:
-        provider = get_care_provider()
-        search_options: Dict[str, Any] = {"latitude": latitude, "longitude": longitude}
-        if specialty and specialty.strip():
-            search_options["specialty"] = specialty.strip()
-        if availability and availability.strip():
-            search_options["availability"] = availability.strip()
-        facilities = await asyncio.to_thread(
-            provider.search,
-            location,
-            normalized_kind,
-            radius_km,
-            **search_options,
+        return await asyncio.to_thread(
+            search_live_providers,
+            snapshot,
+            flag_id=body.flag_id,
+            location=body.location.strip(),
+            availability=body.availability,
         )
-        logger.info(
-            "care navigation: provider=%s kind=%s coordinate_search=%s results=%d",
-            provider.name,
-            normalized_kind,
-            latitude is not None,
-            len(facilities),
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except ProviderSearchError as exc:
+        return JSONResponse(
+            status_code=exc.http_status,
+            content={"detail": exc.detail, "code": exc.code, "retryable": exc.retryable},
         )
-        return [facility.to_dict() for facility in facilities]
-    except ValueError as error:
-        raise HTTPException(400, str(error)) from error
-    except CareConfigurationError as error:
-        logger.error("care navigation configuration error: %s", error)
-        raise HTTPException(
-            503,
-            "The facility directory is temporarily unavailable. Please try again shortly.",
-        ) from error
-    except CareProviderError as error:
-        logger.warning("care navigation provider error: %s", error)
-        raise HTTPException(
-            503,
-            "The facility directory is temporarily unavailable. Please try again shortly.",
-        ) from error
-    except Exception as error:
-        logger.exception("unexpected care navigation failure: %s", error)
-        raise HTTPException(
-            503,
-            "The facility directory is temporarily unavailable. Please try again shortly.",
-        ) from error
 
 
 # ---------------------------------------------------------------------------
@@ -1174,6 +1209,51 @@ async def delete_session(session_id: str, user_id: str = Depends(get_current_use
 
 
 # ---------------------------------------------------------------------------
+# Find care (specialty suggestion + OpenStreetMap directory)
+# ---------------------------------------------------------------------------
+
+def _care_timeline(user_id: str) -> Optional[Dict[str, Any]]:
+    """Best-effort record load. Find-care still works without a snapshot."""
+    try:
+        snapshot = db.load_patient_snapshot(user_id)
+    except Exception as exc:
+        logger.warning("care finder: could not load snapshot for %s: %s", user_id, exc)
+        return None
+    return snapshot["patient_timeline"] if snapshot else None
+
+
+@app.get("/api/v1/care/specialties")
+async def list_care_specialties(user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
+    """Catalogue of specialties the UI can offer, plus a suggestion from
+    the caller's saved records when they have any."""
+    return care_finder.suggest_specialties(_care_timeline(user_id))
+
+
+@app.get("/api/v1/care/suggestion")
+async def get_care_suggestion(user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
+    return care_finder.suggest_specialties(_care_timeline(user_id))
+
+
+@app.post("/api/v1/care/search")
+async def search_care(
+    body: CareSearchRequest, user_id: str = Depends(get_current_user)
+) -> Dict[str, Any]:
+    """Geocode the user's city and list nearby clinics, doctors, and
+    hospitals. Geoapify is primary when GEOAPIFY_API_KEY is set;
+    OpenStreetMap (Nominatim + Overpass) is the automatic fallback.
+    Ranked by specialty match, opening hours, and distance."""
+    return await asyncio.to_thread(
+        care_finder.search_care,
+        city=body.city,
+        specialty_id=body.specialty,
+        days=body.days,
+        time_of_day=body.time_of_day,
+        radius_km=body.radius_km,
+        timeline=_care_timeline(user_id),
+    )
+
+
+# ---------------------------------------------------------------------------
 # Anonymous session — zero-login flow for MediMind frontend
 # ---------------------------------------------------------------------------
 
@@ -1195,6 +1275,143 @@ async def create_anonymous_session() -> Dict[str, str]:
 # ---------------------------------------------------------------------------
 # Health check
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Care Navigation (decoupled — does not read the patient record)
+# ---------------------------------------------------------------------------
+
+
+@app.exception_handler(CareNavigationError)
+async def care_navigation_error_handler(request: Request, exc: CareNavigationError):
+    logger.warning("care navigation %s %s: %s", request.method, request.url.path, exc)
+    return JSONResponse(
+        status_code=exc.http_status,
+        content={"detail": str(exc), "code": exc.code},
+    )
+
+
+@app.get("/api/v1/care/facilities")
+async def care_facilities(
+    location: str = Query(default="", max_length=200),
+    kind: str = Query(default="any", max_length=30),
+    radius_km: float = Query(default=8.0, ge=1.0, le=50.0),
+    latitude: Optional[float] = Query(default=None, ge=-90.0, le=90.0),
+    longitude: Optional[float] = Query(default=None, ge=-180.0, le=180.0),
+    specialty: Optional[str] = Query(default=None, max_length=80),
+    availability: Optional[str] = Query(default=None, max_length=20),
+    user_id: str = Depends(get_current_user),
+) -> Any:
+    """Directory search. Does not read timeline, safety, or labs.
+
+    Map-confirmed clients send latitude/longitude and receive a normalized
+    Facility list. The directory needs no API key: it defaults to
+    OpenStreetMap/Overpass, and CARE_PROVIDER=google prefers Google Places
+    API (New) while falling back to OpenStreetMap on any rejection. Legacy
+    clients that only send ``location`` keep the packed OSM/Mapbox payload.
+    """
+    _ = user_id
+    if (latitude is None) != (longitude is None):
+        raise HTTPException(400, "latitude and longitude must be provided together.")
+
+    normalized_kind = (kind or "any").strip().lower() or "any"
+    allowed_kinds = {"any", "hospital", "clinic", "pharmacy", "laboratory", "lab", "doctor"}
+    if normalized_kind not in allowed_kinds and normalized_kind not in FACILITY_KINDS:
+        raise HTTPException(400, "Unsupported facility type.")
+
+    # get_care_provider() always resolves to a usable adapter now (keyless
+    # OpenStreetMap by default), so a missing/invalid Google key no longer
+    # turns a map-confirmed search into a 503.
+    try:
+        provider = get_care_provider()
+    except CareConfigurationError as error:
+        if latitude is not None:
+            logger.error("care navigation configuration error: %s", error)
+            raise HTTPException(
+                503,
+                "The facility directory is temporarily unavailable. Please try again shortly.",
+            ) from error
+        provider = None
+
+    if provider is not None:
+        if not location.strip() and (latitude is None or longitude is None):
+            raise HTTPException(400, "Choose a city/area or provide latitude and longitude.")
+        try:
+            search_options: Dict[str, Any] = {
+                "latitude": latitude,
+                "longitude": longitude,
+            }
+            if specialty and specialty.strip():
+                search_options["specialty"] = specialty.strip()
+            if availability and availability.strip():
+                search_options["availability"] = availability.strip()
+            facilities = await asyncio.to_thread(
+                provider.search,
+                location,
+                normalized_kind,
+                radius_km,
+                **search_options,
+            )
+            logger.info(
+                "care navigation: provider=%s kind=%s coordinate_search=%s results=%d",
+                provider.name,
+                normalized_kind,
+                latitude is not None,
+                len(facilities),
+            )
+            return [facility.to_dict() for facility in facilities]
+        except ValueError as error:
+            raise HTTPException(400, str(error)) from error
+        except CareConfigurationError as error:
+            logger.error("care navigation configuration error: %s", error)
+            raise HTTPException(
+                503,
+                "The facility directory is temporarily unavailable. Please try again shortly.",
+            ) from error
+        except CareProviderError as error:
+            logger.warning("care navigation provider error: %s", error)
+            raise HTTPException(
+                503,
+                "The facility directory is temporarily unavailable. Please try again shortly.",
+            ) from error
+        except Exception as error:
+            logger.exception("unexpected care navigation failure: %s", error)
+            raise HTTPException(
+                503,
+                "The facility directory is temporarily unavailable. Please try again shortly.",
+            ) from error
+
+    if not location.strip():
+        raise HTTPException(400, "Choose a city/area or provide latitude and longitude.")
+    chosen = normalized_kind if normalized_kind in FACILITY_KINDS else "any"
+    return await asyncio.to_thread(
+        get_care_service().search_facilities,
+        location=location,
+        kind=chosen,
+        radius_km=radius_km,
+    )
+
+
+@app.get("/api/v1/care/geocode")
+async def care_geocode(q: str, user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
+    _ = user_id
+    point = await asyncio.to_thread(get_care_service().geocode, q)
+    return {
+        "latitude": point.latitude,
+        "longitude": point.longitude,
+        "label": point.label,
+        "provider": point.provider,
+    }
+
+
+@app.get("/api/v1/care/routes")
+async def care_routes(
+    origin: str,
+    destination: str,
+    user_id: str = Depends(get_current_user),
+) -> Dict[str, Any]:
+    _ = user_id
+    return await asyncio.to_thread(get_care_service().get_route, origin, destination)
+
 
 @app.get("/api/v1/health")
 async def health() -> Dict[str, str]:

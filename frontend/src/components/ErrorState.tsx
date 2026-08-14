@@ -43,6 +43,12 @@ export function ErrorState({
   } else if (code === "provider_rate_limited") {
     variant = "warning";
     title = t("errors.readerBusy");
+  } else if (code === "city_not_found") {
+    variant = "warning";
+    title = t("errors.cityNotFound");
+  } else if (code === "directory_unavailable") {
+    variant = "warning";
+    title = t("errors.directoryUnavailable");
   } else if (status === 401) {
     variant = "warning";
     title = t("errors.expired");

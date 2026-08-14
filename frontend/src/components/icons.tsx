@@ -133,6 +133,13 @@ export const AlertIcon = (p: IconProps) => (
   </svg>
 );
 
+export const MapPinIcon = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
+    <circle cx="12" cy="10" r="3" />
+  </svg>
+);
+
 export const SparkleIcon = (p: IconProps) => (
   <svg {...base(p)}>
     <path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.8 2.8M15.6 15.6l2.8 2.8M18.4 5.6l-2.8 2.8M8.4 15.6l-2.8 2.8" />

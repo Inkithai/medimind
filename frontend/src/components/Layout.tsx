@@ -129,11 +129,15 @@ export function Layout() {
         </div>
       </header>
 
+      {/* Mobile drawer; desktop sticky sidebar remains visible on long pages. */}
       <aside
         ref={sidebarRef}
         id="primary-sidebar"
         className={classNames(
-          "fixed inset-y-0 left-0 z-30 w-72 transform border-r border-slate-200 bg-white transition-transform lg:static lg:translate-x-0",
+          "fixed bottom-0 left-0 top-0 z-30 w-72 transform border-r border-slate-200 bg-white transition-transform",
+          // `self-start` stops the flex row from stretching the sidebar to the
+          // full content height, which would defeat sticky positioning.
+          "lg:sticky lg:bottom-auto lg:top-0 lg:h-screen lg:shrink-0 lg:self-start lg:translate-x-0",
           sidebarOpen ? "translate-x-0" : "-translate-x-full"
         )}
         aria-label={t("nav.main")}

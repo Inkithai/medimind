@@ -8,6 +8,10 @@ interface LocationMapProps {
   coordinates: Coordinates;
   onCoordinatesChange: (coordinates: Coordinates) => void;
   className?: string;
+  /** Initial zoom. Precise GPS fixes deserve a closer view for pin adjustment. */
+  zoom?: number;
+  /** GPS accuracy radius in metres, drawn as a circle so the user sees the margin of error. */
+  accuracyMetres?: number | null;
 }
 
 const TILE_URL =
@@ -25,8 +29,7 @@ const pinIcon = L.divIcon({
 
 function normalizedPoint(point: L.LatLng): Coordinates {
   // Leaflet permits panning across repeated world copies, where a click can
-  // produce longitudes such as 540°. Normalize before the backend's
-  // [-180, 180] validation so an otherwise valid dropped pin is not rejected.
+  // produce longitudes such as 540°. Normalize before backend validation.
   const longitude = ((((point.lng + 180) % 360) + 360) % 360) - 180;
   return {
     latitude: Math.min(90, Math.max(-90, point.lat)),
@@ -34,12 +37,20 @@ function normalizedPoint(point: L.LatLng): Coordinates {
   };
 }
 
-export function LocationMap({ coordinates, onCoordinatesChange, className }: LocationMapProps) {
+export function LocationMap({
+  coordinates,
+  onCoordinatesChange,
+  className,
+  zoom = 16,
+  accuracyMetres = null,
+}: LocationMapProps) {
   const { t } = useI18n();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
   const markerRef = useRef<L.Marker | null>(null);
+  const accuracyCircleRef = useRef<L.Circle | null>(null);
   const onChangeRef = useRef(onCoordinatesChange);
+  const zoomRef = useRef(zoom);
 
   useEffect(() => {
     onChangeRef.current = onCoordinatesChange;
@@ -58,7 +69,7 @@ export function LocationMap({ coordinates, onCoordinatesChange, className }: Loc
 
     const map = L.map(container, {
       center: [coordinates.latitude, coordinates.longitude],
-      zoom: 14,
+      zoom: zoomRef.current,
       zoomControl: false,
       scrollWheelZoom: true,
       keyboard: true,
@@ -75,7 +86,7 @@ export function LocationMap({ coordinates, onCoordinatesChange, className }: Loc
       draggable: true,
       icon: pinIcon,
       keyboard: true,
-      title: "Selected location. Drag to adjust.",
+      title: t("location.mapInstructions"),
     }).addTo(map);
     markerRef.current = marker;
 
@@ -112,6 +123,37 @@ export function LocationMap({ coordinates, onCoordinatesChange, className }: Loc
       });
     }
   }, [coordinates.latitude, coordinates.longitude]);
+
+  // Show the GPS margin of error so a coarse fix is visible rather than implied.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    if (!accuracyMetres || !Number.isFinite(accuracyMetres) || accuracyMetres <= 0) {
+      accuracyCircleRef.current?.remove();
+      accuracyCircleRef.current = null;
+      return;
+    }
+
+    const center = L.latLng(coordinates.latitude, coordinates.longitude);
+    if (accuracyCircleRef.current) {
+      accuracyCircleRef.current.setLatLng(center).setRadius(accuracyMetres);
+    } else {
+      accuracyCircleRef.current = L.circle(center, {
+        radius: accuracyMetres,
+        color: "#0f766e",
+        weight: 1,
+        fillColor: "#14b8a6",
+        fillOpacity: 0.12,
+        interactive: false,
+      }).addTo(map);
+    }
+    // Frame the whole uncertainty area so the user understands the margin.
+    map.fitBounds(accuracyCircleRef.current.getBounds().pad(0.25), {
+      maxZoom: 17,
+      animate: !window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+    });
+  }, [accuracyMetres, coordinates.latitude, coordinates.longitude]);
 
   return (
     <div className={`relative overflow-hidden bg-slate-100 ${className || "h-80"}`}>
