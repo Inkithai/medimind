@@ -1,4 +1,5 @@
 import type { ConsultationPack as ConsultationPackData } from "../types/api";
+import { useI18n } from "../i18n/I18nContext";
 import { confidenceTone, formatConfidence, formatDate } from "../utils/format";
 import { Alert } from "./Alert";
 import { Card, CardBody, CardHeader } from "./Card";
@@ -14,6 +15,7 @@ function validSourceUrl(value: string | undefined): value is string {
 }
 
 function SourceLink({ url }: { url?: string }) {
+  const { t } = useI18n();
   if (!validSourceUrl(url)) return null;
   return (
     <a
@@ -22,12 +24,13 @@ function SourceLink({ url }: { url?: string }) {
       rel="noreferrer"
       className="mt-1 inline-flex text-xs font-medium text-brand-700 hover:text-brand-800 hover:underline"
     >
-      View document
+      {t("care.viewDocument")}
     </a>
   );
 }
 
 export function ConsultationPack({ pack }: { pack: ConsultationPackData }) {
+  const { t, formatNumber } = useI18n();
   const hasContent =
     pack.documents_to_bring.length > 0 ||
     pack.medication_records_to_discuss.length > 0 ||
@@ -41,12 +44,12 @@ export function ConsultationPack({ pack }: { pack: ConsultationPackData }) {
   return (
     <Card>
       <CardHeader
-        title="Prepare for your consultation"
-        description="A source-grounded checklist for discussing this selected record-level concern."
+        title={t("care.prepareTitle")}
+        description={t("care.prepareBody")}
       />
       <CardBody className="space-y-5">
         {pack.documents_to_bring.length > 0 && (
-          <Section title="Relevant documents to bring">
+          <Section title={t("care.documentsToBring")}>
             <ul className="space-y-2">
               {pack.documents_to_bring.map((document, index) => (
                 <li key={`${document.source_file}-${index}`} className="rounded-lg border border-slate-200 bg-white p-3">
@@ -56,7 +59,7 @@ export function ConsultationPack({ pack }: { pack: ConsultationPackData }) {
                     <p className="mt-1 text-xs text-slate-500">
                       {document.date ? formatDate(document.date) : ""}
                       {document.date && document.page ? " · " : ""}
-                      {document.page ? `page ${document.page}` : ""}
+                      {document.page ? `${t("common.page")} ${formatNumber(document.page)}` : ""}
                     </p>
                   )}
                   <SourceLink url={document.document_url} />
@@ -67,7 +70,7 @@ export function ConsultationPack({ pack }: { pack: ConsultationPackData }) {
         )}
 
         {pack.medication_records_to_discuss.length > 0 && (
-          <Section title="Medication records to discuss">
+          <Section title={t("care.medicationsToDiscuss")}>
             <ul className="space-y-2">
               {pack.medication_records_to_discuss.map((medication, index) => (
                 <li key={`${medication.name}-${medication.source_file || ""}-${index}`} className="rounded-lg border border-slate-200 bg-slate-50/60 p-3">
@@ -86,9 +89,9 @@ export function ConsultationPack({ pack }: { pack: ConsultationPackData }) {
                   </div>
                   {(medication.source_file || medication.date || medication.page) && (
                     <p className="mt-2 text-xs text-slate-500">
-                      {medication.source_file || "Source document"}
+                      {medication.source_file || t("care.sourceDocument")}
                       {medication.date ? ` · ${formatDate(medication.date)}` : ""}
-                      {medication.page ? ` · page ${medication.page}` : ""}
+                      {medication.page ? ` · ${t("common.page")} ${formatNumber(medication.page)}` : ""}
                     </p>
                   )}
                   <SourceLink url={medication.document_url} />
@@ -99,16 +102,16 @@ export function ConsultationPack({ pack }: { pack: ConsultationPackData }) {
         )}
 
         {pack.allergies.length > 0 && (
-          <Section title="Recorded allergies">
+          <Section title={t("common.allergies")}>
             <ul className="space-y-2">
               {pack.allergies.map((allergy, index) => (
                 <li key={`${allergy.allergen}-${allergy.source_file || ""}-${index}`} className="rounded-lg border border-red-100 bg-red-50/60 p-3">
                   <p className="text-sm font-semibold text-red-900">{allergy.allergen}</p>
                   {(allergy.source_file || allergy.date || allergy.page) && (
                     <p className="mt-1 text-xs text-red-800/80">
-                      {allergy.source_file || "Source document"}
+                      {allergy.source_file || t("care.sourceDocument")}
                       {allergy.date ? ` · ${formatDate(allergy.date)}` : ""}
-                      {allergy.page ? ` · page ${allergy.page}` : ""}
+                      {allergy.page ? ` · ${t("common.page")} ${formatNumber(allergy.page)}` : ""}
                     </p>
                   )}
                   <SourceLink url={allergy.document_url} />
@@ -119,15 +122,16 @@ export function ConsultationPack({ pack }: { pack: ConsultationPackData }) {
         )}
 
         {pack.relevant_lab_points.length > 0 && (
-          <Section title="Relevant laboratory results">
+          <Section title={t("care.relevantLabs")}>
             <div className="overflow-x-auto rounded-lg border border-slate-200">
               <table className="min-w-full text-sm">
+                <caption className="sr-only">{t("care.relevantLabs")}</caption>
                 <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
                   <tr>
-                    <th className="px-3 py-2 font-medium">Test</th>
-                    <th className="px-3 py-2 font-medium">Value</th>
-                    <th className="px-3 py-2 font-medium">Source</th>
-                    <th className="px-3 py-2 font-medium">Document</th>
+                    <th scope="col" className="px-3 py-2 font-medium">{t("common.test")}</th>
+                    <th scope="col" className="px-3 py-2 font-medium">{t("common.value")}</th>
+                    <th scope="col" className="px-3 py-2 font-medium">{t("common.source")}</th>
+                    <th scope="col" className="px-3 py-2 font-medium">{t("care.documentColumn")}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -140,7 +144,7 @@ export function ConsultationPack({ pack }: { pack: ConsultationPackData }) {
                       </td>
                       <td className="px-3 py-2 text-xs">
                         {validSourceUrl(point.document_url) ? (
-                          <a href={point.document_url} target="_blank" rel="noreferrer" className="font-medium text-brand-700 hover:underline">View</a>
+                          <a href={point.document_url} target="_blank" rel="noreferrer" className="font-medium text-brand-700 hover:underline">{t("care.viewDocument")}</a>
                         ) : "—"}
                       </td>
                     </tr>
@@ -152,7 +156,7 @@ export function ConsultationPack({ pack }: { pack: ConsultationPackData }) {
         )}
 
         {pack.low_confidence_items.length > 0 && (
-          <Section title="Information to verify">
+          <Section title={t("care.informationToVerify")}>
             <ul className="space-y-2">
               {pack.low_confidence_items.map((item, index) => (
                 <li key={`${item.type}-${item.source_file || ""}-${index}`} className="rounded-lg border border-amber-200 bg-amber-50/70 p-3">
@@ -163,15 +167,15 @@ export function ConsultationPack({ pack }: { pack: ConsultationPackData }) {
                     </div>
                     {typeof item.confidence === "number" && (
                       <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${confidenceTone(item.confidence)}`}>
-                        confidence {formatConfidence(item.confidence)}
+                        {t("care.confidenceValue", { value: formatConfidence(item.confidence) })}
                       </span>
                     )}
                   </div>
                   {(item.source_file || item.date || item.page) && (
                     <p className="mt-2 text-xs text-amber-900/70">
-                      {item.source_file || "Source document"}
+                      {item.source_file || t("care.sourceDocument")}
                       {item.date ? ` · ${formatDate(item.date)}` : ""}
-                      {item.page ? ` · page ${item.page}` : ""}
+                      {item.page ? ` · ${t("common.page")} ${formatNumber(item.page)}` : ""}
                     </p>
                   )}
                   <SourceLink url={item.document_url} />
@@ -182,7 +186,7 @@ export function ConsultationPack({ pack }: { pack: ConsultationPackData }) {
         )}
 
         {pack.clinician_questions.length > 0 && (
-          <Section title="Questions to discuss with your clinician">
+          <Section title={t("care.clinicianQuestions")}>
             <ul className="space-y-2">
               {pack.clinician_questions.map((question) => (
                 <li key={question} className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-700">• {question}</li>
@@ -191,7 +195,7 @@ export function ConsultationPack({ pack }: { pack: ConsultationPackData }) {
           </Section>
         )}
 
-        <Alert variant="info" title="Important">
+        <Alert variant="info" title={t("care.important")}>
           {pack.disclaimer}
         </Alert>
       </CardBody>

@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import type { Coordinates } from "../../types/location";
+import { useI18n } from "../../i18n/I18nContext";
 
 interface LocationMapProps {
   coordinates: Coordinates;
@@ -26,6 +27,16 @@ const pinIcon = L.divIcon({
   iconAnchor: [20, 44],
 });
 
+function normalizedPoint(point: L.LatLng): Coordinates {
+  // Leaflet permits panning across repeated world copies, where a click can
+  // produce longitudes such as 540°. Normalize before backend validation.
+  const longitude = ((((point.lng + 180) % 360) + 360) % 360) - 180;
+  return {
+    latitude: Math.min(90, Math.max(-90, point.lat)),
+    longitude,
+  };
+}
+
 export function LocationMap({
   coordinates,
   onCoordinatesChange,
@@ -33,6 +44,7 @@ export function LocationMap({
   zoom = 16,
   accuracyMetres = null,
 }: LocationMapProps) {
+  const { t } = useI18n();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
   const markerRef = useRef<L.Marker | null>(null);
@@ -45,14 +57,15 @@ export function LocationMap({
   }, [onCoordinatesChange]);
 
   useEffect(() => {
+    containerRef.current?.setAttribute("aria-label", t("location.mapInstructions"));
+  }, [t]);
+
+  useEffect(() => {
     const container = containerRef.current;
     if (!container || mapRef.current) return;
 
-    container.setAttribute("role", "application");
-    container.setAttribute(
-      "aria-label",
-      "Location confirmation map. Click the map or drag the pin to adjust the location."
-    );
+    container.setAttribute("role", "region");
+    container.setAttribute("aria-label", t("location.mapInstructions"));
 
     const map = L.map(container, {
       center: [coordinates.latitude, coordinates.longitude],
@@ -73,17 +86,19 @@ export function LocationMap({
       draggable: true,
       icon: pinIcon,
       keyboard: true,
-      title: "Selected location. Drag to adjust.",
+      title: t("location.mapInstructions"),
     }).addTo(map);
     markerRef.current = marker;
 
     map.on("click", (event: L.LeafletMouseEvent) => {
-      marker.setLatLng(event.latlng);
-      onChangeRef.current({ latitude: event.latlng.lat, longitude: event.latlng.lng });
+      const point = normalizedPoint(event.latlng);
+      marker.setLatLng([point.latitude, point.longitude]);
+      onChangeRef.current(point);
     });
     marker.on("dragend", () => {
-      const point = marker.getLatLng();
-      onChangeRef.current({ latitude: point.lat, longitude: point.lng });
+      const point = normalizedPoint(marker.getLatLng());
+      marker.setLatLng([point.latitude, point.longitude]);
+      onChangeRef.current(point);
     });
 
     // The component often appears as the picker changes steps. Let layout settle
@@ -103,7 +118,9 @@ export function LocationMap({
     const point = L.latLng(coordinates.latitude, coordinates.longitude);
     markerRef.current?.setLatLng(point);
     if (mapRef.current && !mapRef.current.getBounds().pad(-0.25).contains(point)) {
-      mapRef.current.panTo(point);
+      mapRef.current.panTo(point, {
+        animate: !window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+      });
     }
   }, [coordinates.latitude, coordinates.longitude]);
 
@@ -132,14 +149,17 @@ export function LocationMap({
       }).addTo(map);
     }
     // Frame the whole uncertainty area so the user understands the margin.
-    map.fitBounds(accuracyCircleRef.current.getBounds().pad(0.25), { maxZoom: 17 });
+    map.fitBounds(accuracyCircleRef.current.getBounds().pad(0.25), {
+      maxZoom: 17,
+      animate: !window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+    });
   }, [accuracyMetres, coordinates.latitude, coordinates.longitude]);
 
   return (
     <div className={`relative overflow-hidden bg-slate-100 ${className || "h-80"}`}>
       <div ref={containerRef} className="h-full w-full" />
       <div className="pointer-events-none absolute left-3 top-3 z-[500] rounded-lg bg-white/95 px-3 py-2 text-xs font-medium text-slate-700 shadow-sm ring-1 ring-slate-200 backdrop-blur">
-        Drag the pin or click the map to adjust
+        {t("location.mapInstructions")}
       </div>
     </div>
   );

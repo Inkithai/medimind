@@ -138,7 +138,9 @@ Base URL `http://127.0.0.1:8000`, all routes under `/api/v1/`.
 
 ### Frontend — MediMind workspace
 
-`frontend/` is React + TS + Vite + Tailwind. Zero-login anonymous model:
+`frontend/` is React + TS + Vite + Tailwind. It includes a reusable translation provider and catalogs for English, Sinhala, and Tamil; browser/saved language detection; locale-aware formatting; and WCAG-oriented landmarks, keyboard interaction, live regions, focus handling, reduced-motion support, and semantic medical-data views. See [`frontend/ACCESSIBILITY_I18N.md`](frontend/ACCESSIBILITY_I18N.md).
+
+Zero-login anonymous model:
 
 - **Landing** `/` — hero, anonymous session explanation, Start My Health Record → auto-creates workspace via `POST /anonymous/session` (token stored in `localStorage.medimind.session.v1`).
 - **Overview / Dashboard** `/dashboard` — documents / medicines / labs / safety counts, latest safety warnings, recent history, pipeline hint.
@@ -161,6 +163,9 @@ States distinguished: loading, empty 404 (no record), 401 auth, 422 validation/n
 cd frontend
 npm install
 npm run dev       # http://localhost:5173, proxies /api → http://127.0.0.1:8000
+npm run lint      # TypeScript verification
+npm run test      # auth, i18n, axe accessibility, keyboard, geolocation, and care regressions
+npm run build     # production bundle
 ```
 
 #### Find nearby care and reusable location picker
@@ -249,9 +254,9 @@ X-User-Id: <user_id>
 Q&A self-heals: if the patient's vector index is empty but their documents are saved in the DB (e.g. a local `chroma_db` wiped by a redeploy with no volume, or a Supabase `chunks` table migrated after the last upload), the index is rebuilt from those saved documents on the next question, so it answers normally instead of reporting "no indexed records". If `VECTOR_STORE=supabase` and the `chunks` table is missing entirely, Q&A returns 502 with instructions to run `supabase_schema.sql` rather than a misleading empty answer.
 
 #### Conversations
-`POST /api/v1/sessions` → `{user_id, session_id}`  
-`POST /api/v1/sessions/{id}/messages {question, top_k}` → same as Q&A + `rewritten_query`  
-`GET /api/v1/sessions/{id}` → full transcript  
+`POST /api/v1/sessions` → `{user_id, session_id}`
+`POST /api/v1/sessions/{id}/messages {question, top_k}` → same as Q&A + `rewritten_query`
+`GET /api/v1/sessions/{id}` → full transcript
 `DELETE /api/v1/sessions/{id}` → 204
 
 #### Jobs (async uploads)
@@ -279,8 +284,8 @@ Keys stay server-side. With `CARE_PROVIDER=google`, a Google rejection (invalid/
 `VECTOR_STORE=chroma` (default, local `CHROMA_DIR`) or `supabase` (Supabase `chunks` table, no volume). `inspect_chroma.py` works with both (`VECTOR_STORE=supabase python inspect_chroma.py`). After switching backends, delete `chroma_db` or clear `chunks` table and re-upload.
 
 #### Find care
-`GET /api/v1/care/suggestion` — specialty suggestion from the caller's saved records (general practice if none).  
-`GET /api/v1/care/specialties` — same payload (catalogue + suggestion).  
+`GET /api/v1/care/suggestion` — specialty suggestion from the caller's saved records (general practice if none).
+`GET /api/v1/care/specialties` — same payload (catalogue + suggestion).
 `POST /api/v1/care/search {city, specialty?, days?, time_of_day?, radius_km?}` — **Geoapify** geocodes and lists nearby clinics/doctors/hospitals when `GEOAPIFY_API_KEY` is set; **OpenStreetMap** (Nominatim + Overpass) is the automatic fallback. Ranked by specialty match + opening hours + distance. The frontend map is **Leaflet**. Response `source.name` is `Geoapify` or `OpenStreetMap` — the UI never says a provider failed. 422 `city_not_found` if the city is unknown; 502 `directory_unavailable` (retryable) if both directories are down.
 
 Errors: 400 empty question, 401 auth, 404 unknown session/no record, 422 non-medical / unknown city, 502 embedding/LLM / directory failure (provider-aware: `Provider 'gemini' ...` / `Provider 'groq' ...`).

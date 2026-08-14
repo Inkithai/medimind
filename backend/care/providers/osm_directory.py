@@ -49,7 +49,12 @@ class OpenStreetMapProvider:
         *,
         latitude: Optional[float] = None,
         longitude: Optional[float] = None,
+        specialty: Optional[str] = None,
+        availability: Optional[str] = None,
     ) -> List[Facility]:
+        # OpenStreetMap does not expose reliable specialty or appointment-slot
+        # metadata; these are accepted for provider-contract compatibility.
+        _ = specialty, availability
         normalized_kind = (kind or "any").strip().lower()
         if normalized_kind not in _SUPPORTED_KINDS:
             raise ValueError(

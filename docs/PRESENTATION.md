@@ -35,7 +35,7 @@
 #### 4. Lost Longitudinal Trends
 * A single normal or abnormal lab report tells only half the story. Tracking vital biomarker trajectories over time (e.g., eGFR, HbA1c, cholesterol, liver enzymes) is manual, tedious, and frequently ignored until acute issues arise.
 
-> **Speaker Note:**  
+> **Speaker Note:**
 > *"Judges, every one of us has experienced—or helped a family member navigate—the chaos of scattered medical records. When health data is locked inside unreadable scans and disconnected PDFs, patients face real safety risks from overlooked drug interactions and missed lab trends. MediMind solves this by turning passive medical documents into an intelligent, active health concierge."*
 
 ---
@@ -68,7 +68,7 @@
 * Continuously audits the patient's entire medication list against known allergies, chronic conditions, and drug-drug interactions.
 * Tracks lab biomarkers over time to highlight clinically significant trajectories before they turn into emergencies.
 
-> **Speaker Note:**  
+> **Speaker Note:**
 > *"MediMind is not just an OCR scanner or a general chatbot. It is a purpose-built medical intelligence platform. When a user uploads a stack of medical records, MediMind extracts the clinical facts, constructs a coherent timeline, cross-checks every medication for safety, and allows patients to ask questions against their own health history."*
 
 ---
@@ -108,7 +108,7 @@
 * **Clinical Cross-Checking (`cross_check_prescriptions`):** Generates structured safety reports classifying risks by severity (High / Moderate / Precaution) with actionable clinical advice.
 * **Biomarker Trajectory Analysis (`track_lab_trends`):** Automatically maps repeat lab tests, calculates percentage changes, and flags out-of-range clinical trends.
 
-> **Speaker Note:**  
+> **Speaker Note:**
 > *"Our AI core is engineered for clinical resilience. Medical documents are messy, and standard LLMs often break on formatting or leak verbose reasoning tags. We built a multi-rung structured recovery ladder with automated reasoning-tag suppression, local zero-network ONNX embeddings for RAG, and an automated safety engine that audits prescriptions against patient allergies and lab trends."*
 
 ---
@@ -152,7 +152,7 @@
 * Multi-turn Q&A interface allowing patients to ask natural language questions ("Is my amoxicillin safe with my penicillin allergy?", "What was my cholesterol level last March?").
 * Uses conversation query rewriting (`conversation.py`) so follow-up questions retrieve the correct context from the local vector store.
 
-> **Speaker Note:**  
+> **Speaker Note:**
 > *"From a user's perspective, MediMind offers six core features: seamless multi-file batch uploads, automated clinical data extraction, an intuitive interactive timeline, a consolidated medicine history, severity-graded safety cross-checks, and a conversational RAG assistant that understands conversational context."*
 
 ---
@@ -218,7 +218,7 @@
 * **Primary LLMs:** Groq (`openai/gpt-oss-120b`, `qwen/qwen3.6-27b`) or Google Gemini (`gemini-3.6-flash`).
 * **Auto-Activated Fallback:** Automated circuit breaker that seamlessly routes calls to OpenRouter (`openrouter/free` dynamic router) if the primary provider hits hard quota limits.
 
-> **Speaker Note:**  
+> **Speaker Note:**
 > *"Our architecture is clean, modular, and built for production. The React/Vite frontend communicates via REST with a FastAPI Python backend. The AI layer decouples extraction, RAG retrieval, and conversation memory into distinct modules, backed by Supabase Postgres, Cloudinary, and local zero-network ONNX embeddings."*
 
 ---
@@ -274,7 +274,7 @@
 3. **Extraction & Safety Audit:** The AI Core extracts medications and lab biomarkers, builds the timeline, and runs a comprehensive polypharmacy cross-check against patient allergies.
 4. **Instant Actionable Dashboard:** In seconds, the user sees a complete timeline, a clean medication schedule, an highlighted precaution alert for an interaction, and can ask the chat concierge follow-up questions.
 
-> **Speaker Note:**  
+> **Speaker Note:**
 > *"Let’s walk through the exact user journey. A patient drops a stack of mixed medical documents into MediMind. Our background worker pool ingests and OCRs each file, runs our structured recovery ladder to extract normalized clinical data, checks for drug interactions, and delivers a clean timeline, active medication list, and safety report in seconds."*
 
 ---
@@ -309,7 +309,7 @@
 * **Medication Safety:** Directly mitigates adverse drug events (ADEs)—one of the leading causes of preventable hospitalizations worldwide.
 * **Proactive Health Tracking:** Empowers early clinical intervention by tracking subtle multi-year negative biomarker trends before acute symptoms manifest.
 
-> **Speaker Note:**  
+> **Speaker Note:**
 > *"What makes MediMind truly innovative is our synthesis of clinical rigor and technical resilience. Unlike generic wrappers, our platform guarantees structured JSON output through reasoning suppression and auto-fallback circuit breakers, while running zero-network local RAG embeddings to protect patient privacy. We are saving doctors time and preventing life-threatening medication errors for patients."*
 
 ---
@@ -352,7 +352,7 @@
 * **Caregiver & Physician Sharing Portals:** Secure, permissioned QR-code and link sharing with granular Role-Based Access Control (RBAC) for primary care doctors and family members.
 * **Voice & Multilingual Concierge:** Real-time speech-to-speech Q&A in 30+ languages to assist elderly and non-English-speaking patients.
 
-> **Speaker Note:**  
+> **Speaker Note:**
 > *"Our technology stack is built on modern, type-safe, high-performance tooling—from React and Vite on the frontend to FastAPI, Supabase, and local ONNX embeddings on the backend. As we look ahead, we are expanding MediMind into a universal health OS with HL7 FHIR hospital interoperability, wearable health sync, and secure clinician sharing portals. Thank you!"*
 
 ---

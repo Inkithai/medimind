@@ -9,6 +9,7 @@ import { LoadingState, Spinner } from "../components/Spinner";
 import { StatusBadge } from "../components/StatusBadge";
 import { useAuth } from "../context/AuthContext";
 import { useStrictEffect } from "../hooks/useStrictEffect";
+import { useI18n } from "../i18n/I18nContext";
 import type {
   AvailabilityPreference,
   CareProviderSearchResponse,
@@ -16,16 +17,16 @@ import type {
 } from "../types/api";
 import { confidenceTone, formatConfidence } from "../utils/format";
 
-const AVAILABILITY_OPTIONS: Array<{ value: AvailabilityPreference; label: string }> = [
-  { value: "any", label: "Any consultation time" },
-  { value: "today", label: "Today" },
-  { value: "this_week", label: "This week" },
-  { value: "evenings", label: "Evenings" },
-  { value: "weekends", label: "Weekends" },
-];
-
 export function CareRecommendationsPage() {
   const { credentials } = useAuth();
+  const { t } = useI18n();
+  const availabilityOptions: Array<{ value: AvailabilityPreference; label: string }> = [
+    { value: "any", label: t("care.anyConsultation") },
+    { value: "today", label: t("care.today") },
+    { value: "this_week", label: t("care.thisWeek") },
+    { value: "evenings", label: t("care.evenings") },
+    { value: "weekends", label: t("care.weekends") },
+  ];
   const [context, setContext] = useState<CareRecommendationContext | null>(null);
   const [selectedFlagId, setSelectedFlagId] = useState("");
   const [location, setLocation] = useState("");
@@ -74,7 +75,7 @@ export function CareRecommendationsPage() {
     }
   }
 
-  if (loading) return <LoadingState label="Checking your existing care-review flags" />;
+  if (loading) return <LoadingState label={t("care.reviewLoading")} />;
   if (error && !context) return <ErrorState error={error} onRetry={() => setReloadKey((value) => value + 1)} />;
   if (!context) return null;
 
@@ -83,14 +84,13 @@ export function CareRecommendationsPage() {
   return (
     <div className="space-y-6">
       <header>
-        <h1 className="page-title">Find Local Care</h1>
+        <h1 className="page-title">{t("care.localTitle")}</h1>
         <p className="secondary-text mt-2 max-w-3xl">
-          When MediMind finds an existing high-risk medication-safety signal or a low-confidence record,
-          it can help you search a live provider directory for an appropriate professional near you.
+          {t("care.localSubtitle")}
         </p>
       </header>
 
-      <Alert variant="info" title="Important medical notice">
+      <Alert variant="info" title={t("care.medicalNotice")}>
         {context.disclaimer}
       </Alert>
 
@@ -98,10 +98,10 @@ export function CareRecommendationsPage() {
         <Card>
           <CardBody>
             <div className="py-8 text-center">
-              <p className="text-base font-semibold text-slate-800">No care-search flag is active</p>
+              <p className="text-base font-semibold text-slate-800">{t("care.noActiveFlag")}</p>
               <p className="mx-auto mt-2 max-w-xl text-sm leading-relaxed text-slate-600">{context.message}</p>
               <p className="mt-3 text-xs text-slate-500">
-                This feature activates from existing high-risk medication-safety signals or low-confidence extraction/trend results. It does not diagnose a medical condition.
+                {t("care.noActiveFlagBody")}
               </p>
             </div>
           </CardBody>
@@ -110,16 +110,17 @@ export function CareRecommendationsPage() {
         <>
           <Card>
             <CardHeader
-              title="1. Select the record flag to review"
-              description="Specialty matching is explained from existing extracted-record evidence, not a diagnosis."
+              title={t("care.selectFlagTitle")}
+              description={t("care.selectFlagBody")}
             />
-            <CardBody className="space-y-3">
+            <fieldset className="space-y-3 px-5 py-4">
+              <legend className="sr-only">{t("care.selectFlagTitle")}</legend>
               {context.flags.map((flag) => {
                 const selected = selectedFlagId === flag.id;
                 return (
                   <label
                     key={flag.id}
-                    className={`block cursor-pointer rounded-xl border p-4 transition ${
+                    className={`block cursor-pointer rounded-xl border p-4 transition focus-within:outline-none focus-within:ring-4 focus-within:ring-brand-200 ${
                       selected ? "border-brand-300 bg-brand-50/50 ring-2 ring-brand-100" : "border-slate-200 bg-white hover:border-slate-300"
                     }`}
                   >
@@ -138,71 +139,74 @@ export function CareRecommendationsPage() {
                         <div className="flex flex-wrap items-center gap-2">
                           <p className="font-semibold text-slate-900">{flag.title}</p>
                           <StatusBadge tone={flag.trigger === "high_risk" ? "danger" : "warning"}>
-                            {flag.trigger === "high_risk" ? "high-risk signal" : "low-confidence signal"}
+                            {flag.trigger === "high_risk" ? t("care.highRiskSignal") : t("care.lowConfidenceSignal")}
                           </StatusBadge>
                           {typeof flag.confidence === "number" && (
                             <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${confidenceTone(flag.confidence)}`}>
-                              confidence {formatConfidence(flag.confidence)}
+                              {t("care.confidenceValue", { value: formatConfidence(flag.confidence) })}
                             </span>
                           )}
                         </div>
                         <p className="mt-2 text-sm text-slate-600">{flag.evidence}</p>
-                        <p className="mt-2 text-xs text-slate-500">Source: {flag.source}</p>
+                        <p className="mt-2 text-xs text-slate-500">{t("care.sourceValue", { source: flag.source })}</p>
                       </div>
                       <div className="max-w-xs rounded-lg bg-white px-3 py-2 text-xs ring-1 ring-slate-200">
-                        <p className="font-semibold text-slate-700">Suggested search: {flag.specialty.label}</p>
+                        <p className="font-semibold text-slate-700">{t("care.suggestedSearch", { specialty: flag.specialty.label })}</p>
                         <p className="mt-1 leading-relaxed text-slate-500">{flag.specialty.reason}</p>
                       </div>
                     </div>
                   </label>
                 );
               })}
-            </CardBody>
+            </fieldset>
           </Card>
 
           {selectedFlag && <CareEvidencePanel flag={selectedFlag} />}
 
           <Card>
-            <CardHeader title="Find a local professional" description="Your city/area and preference are sent only to the selected live directory search." />
+            <CardHeader title={t("care.findProfessional")} description={t("care.directoryPrivacy")} />
             <CardBody>
               <form
                 className="grid gap-4 sm:grid-cols-2"
+                aria-busy={searching}
                 onSubmit={(event) => {
                   event.preventDefault();
                   void search();
                 }}
               >
                 <label className="block">
-                  <span className="text-sm font-medium text-slate-700">City or area</span>
+                  <span className="text-sm font-medium text-slate-700">{t("care.cityArea")}</span>
                   <input
                     value={location}
                     onChange={(event) => setLocation(event.target.value)}
-                    placeholder="e.g. Negombo"
+                    placeholder={t("care.cityPlaceholder")}
                     autoComplete="address-level2"
+                    required
+                    minLength={2}
                     className="mt-1.5 block w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
                     disabled={searching}
                   />
                 </label>
                 <label className="block">
-                  <span className="text-sm font-medium text-slate-700">Consultation preference</span>
+                  <span className="text-sm font-medium text-slate-700">{t("care.consultationPreference")}</span>
                   <select
                     value={availability}
                     onChange={(event) => setAvailability(event.target.value as AvailabilityPreference)}
                     className="mt-1.5 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
                     disabled={searching}
                   >
-                    {AVAILABILITY_OPTIONS.map((option) => (
+                    {availabilityOptions.map((option) => (
                       <option key={option.value} value={option.value}>{option.label}</option>
                     ))}
                   </select>
                 </label>
                 <div className="sm:col-span-2 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4">
                   <p className="max-w-2xl text-xs leading-relaxed text-slate-500">
-                    Opening hours are only used in ranking if the live directory actually returns them. Hours do not confirm appointment availability.
+                    {t("care.hoursRankingNotice")}
                   </p>
                   <button type="submit" disabled={searching || location.trim().length < 2 || !selectedFlagId} className="btn-primary">
                     {searching && <Spinner className="h-4 w-4" />}
-                    Search live providers
+                    {searching ? t("care.finding") : t("care.searchLive")}
                   </button>
                 </div>
               </form>

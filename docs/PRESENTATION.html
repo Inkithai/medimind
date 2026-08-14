@@ -680,13 +680,13 @@
     function updateSlide() {
       document.querySelectorAll('.slide').forEach(s => s.classList.remove('active'));
       document.querySelectorAll('.dot').forEach(d => d.classList.remove('active'));
-      
+
       const targetSlide = document.getElementById(`slide-${currentSlide}`);
       if (targetSlide) targetSlide.classList.add('active');
-      
+
       const dots = document.querySelectorAll('.dot');
       if (dots[currentSlide - 1]) dots[currentSlide - 1].classList.add('active');
-      
+
       document.getElementById('counter').innerText = `${currentSlide} / ${totalSlides}`;
       document.getElementById('prev-btn').disabled = (currentSlide === 1);
       document.getElementById('next-btn').disabled = (currentSlide === totalSlides);

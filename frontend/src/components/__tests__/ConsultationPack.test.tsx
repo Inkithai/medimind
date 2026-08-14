@@ -1,4 +1,5 @@
 import { renderToStaticMarkup } from "react-dom/server";
+import { I18nProvider } from "../../i18n/I18nContext";
 
 import { ConsultationPack } from "../ConsultationPack";
 import type { ConsultationPack as ConsultationPackData } from "../../types/api";
@@ -57,7 +58,7 @@ const completePack: ConsultationPackData = {
   disclaimer: "MediMind does not diagnose conditions or replace professional medical advice.",
 };
 
-const completeMarkup = renderToStaticMarkup(<ConsultationPack pack={completePack} />);
+const completeMarkup = renderToStaticMarkup(<I18nProvider><ConsultationPack pack={completePack} /></I18nProvider>);
 assert(completeMarkup.includes("Prepare for your consultation"), "renders consultation-pack heading");
 assert(completeMarkup.includes("Prescription_01.pdf"), "renders relevant document");
 assert(completeMarkup.includes("View document"), "renders valid document link");
@@ -79,7 +80,7 @@ const sparsePack: ConsultationPackData = {
   disclaimer: "MediMind does not diagnose conditions or replace professional medical advice.",
 };
 
-const sparseMarkup = renderToStaticMarkup(<ConsultationPack pack={sparsePack} />);
+const sparseMarkup = renderToStaticMarkup(<I18nProvider><ConsultationPack pack={sparsePack} /></I18nProvider>);
 assert(!sparseMarkup.includes("View document"), "does not create a source link without a valid URL");
 assert(!sparseMarkup.includes("Medication records to discuss"), "hides empty medication section");
 assert(!sparseMarkup.includes("Recorded allergies"), "hides empty allergy section");

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { CarePlace } from "../types/api";
+import { useI18n } from "../i18n/I18nContext";
 import "leaflet/dist/leaflet.css";
 
 interface CareMapProps {
@@ -13,6 +14,7 @@ const TILE_URL = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
 const TILE_ATTR = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
 
 export function CareMap({ center, places, selectedId, onSelect }: CareMapProps) {
+  const { t, formatNumber } = useI18n();
   const hostRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<import("leaflet").Map | null>(null);
   const markersRef = useRef<import("leaflet").CircleMarker[]>([]);
@@ -61,26 +63,28 @@ export function CareMap({ center, places, selectedId, onSelect }: CareMapProps) 
           fillOpacity: selected ? 0.95 : 0.7,
         })
           .addTo(map)
-          .bindPopup(`<strong>${escapeHtml(place.name)}</strong><br/>${place.distance_km} km`)
+          .bindPopup(`<strong>${escapeHtml(place.name)}</strong><br/>${escapeHtml(formatNumber(place.distance_km, { maximumFractionDigits: 1 }))} km`)
           .on("click", () => onSelectRef.current(place.id));
         return marker;
       });
       if (places.length > 0) {
         const bounds = L.latLngBounds(places.map((p) => [p.lat, p.lon] as [number, number]));
         bounds.extend([center.lat, center.lon]);
-        map.fitBounds(bounds.pad(0.2));
+        map.fitBounds(bounds.pad(0.2), {
+          animate: !window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+        });
       } else {
         map.setView([center.lat, center.lon], 13);
       }
     });
-  }, [places, selectedId, center.lat, center.lon, mapReady]);
+  }, [places, selectedId, center.lat, center.lon, mapReady, formatNumber]);
 
   return (
     <div
       ref={hostRef}
       className="h-72 w-full overflow-hidden rounded-xl border border-slate-200 bg-slate-100 lg:h-full lg:min-h-[420px]"
-      role="img"
-      aria-label="Map of nearby clinics from OpenStreetMap"
+      role="region"
+      aria-label={t("care.mapLabel")}
     />
   );
 }

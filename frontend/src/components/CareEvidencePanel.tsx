@@ -1,4 +1,5 @@
 import type { CarePathwayEvidence, ClinicalFlag, SpecialtyRoute } from "../types/api";
+import { useI18n } from "../i18n/I18nContext";
 import { confidenceTone, formatConfidence, formatDate } from "../utils/format";
 import { Alert } from "./Alert";
 import { Card, CardBody, CardHeader } from "./Card";
@@ -14,24 +15,15 @@ function validSourceUrl(value: string | undefined): value is string {
   }
 }
 
-function evidenceHeading(kind: CarePathwayEvidence["kind"]): string {
-  switch (kind) {
-    case "medication":
-      return "Medication record";
-    case "allergy":
-      return "Recorded allergy";
-    case "lab_result":
-      return "Lab result";
-    case "lab_trend":
-      return "Lab trend";
-    case "visit":
-      return "Visit";
-    case "document":
-      return "Document";
-    case "cross_check":
-      return "Safety check";
-  }
-}
+const EVIDENCE_KEYS: Record<CarePathwayEvidence["kind"], string> = {
+  medication: "care.evidenceMedication",
+  allergy: "care.evidenceAllergy",
+  lab_result: "care.evidenceLab",
+  lab_trend: "care.evidenceTrend",
+  visit: "care.evidenceVisit",
+  document: "care.evidenceDocument",
+  cross_check: "care.evidenceSafety",
+};
 
 function route(flag: ClinicalFlag): SpecialtyRoute {
   return flag.specialty.primary || {
@@ -42,6 +34,7 @@ function route(flag: ClinicalFlag): SpecialtyRoute {
 }
 
 export function CareEvidencePanel({ flag }: { flag: ClinicalFlag }) {
+  const { t, formatNumber } = useI18n();
   const evidence = flag.pathway_evidence || [];
   const primary = route(flag);
   const alternative = flag.specialty.alternative;
@@ -49,31 +42,31 @@ export function CareEvidencePanel({ flag }: { flag: ClinicalFlag }) {
   return (
     <Card>
       <CardHeader
-        title="Why MediMind suggests this care route"
-        description="This is a record-level interpretation, not a diagnosis."
+        title={t("care.whySuggested")}
+        description={t("care.recordInterpretation")}
       />
       <CardBody className="space-y-5">
         <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
           <div className="flex flex-wrap items-center gap-2">
             <p className="font-semibold text-slate-900">{flag.title}</p>
             <StatusBadge tone={flag.trigger === "high_risk" ? "danger" : "warning"}>
-              {flag.trigger === "high_risk" ? "high-risk signal" : "verification recommended"}
+              {flag.trigger === "high_risk" ? t("care.highRiskSignal") : t("care.verificationRecommended")}
             </StatusBadge>
             {typeof flag.confidence === "number" && (
               <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${confidenceTone(flag.confidence)}`}>
-                confidence {formatConfidence(flag.confidence)}
+                {t("care.confidenceValue", { value: formatConfidence(flag.confidence) })}
               </span>
             )}
           </div>
           {flag.evidence && <p className="mt-2 text-sm leading-relaxed text-slate-600">{flag.evidence}</p>}
-          {flag.source && <p className="mt-2 text-xs text-slate-500">Flag source: {flag.source}</p>}
+          {flag.source && <p className="mt-2 text-xs text-slate-500">{t("care.flagSource", { source: flag.source })}</p>}
         </div>
 
-        <section aria-label="Evidence from your record">
-          <h3 className="text-sm font-semibold text-slate-800">Evidence from your record</h3>
+        <section aria-labelledby="care-evidence-title">
+          <h3 id="care-evidence-title" className="text-sm font-semibold text-slate-800">{t("care.evidenceTitle")}</h3>
           {evidence.length === 0 ? (
             <p className="mt-2 rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">
-              No additional source-linked evidence is available for this flag.
+              {t("care.noEvidence")}
             </p>
           ) : (
             <ul className="mt-3 space-y-2">
@@ -81,7 +74,7 @@ export function CareEvidencePanel({ flag }: { flag: ClinicalFlag }) {
                 <li key={`${item.kind}-${item.label}-${item.source_file || ""}-${index}`} className="rounded-lg border border-slate-200 bg-white p-3">
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <div>
-                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">{evidenceHeading(item.kind)}</p>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">{t(EVIDENCE_KEYS[item.kind])}</p>
                       <p className="mt-0.5 text-sm font-medium text-slate-800">{item.label}</p>
                       {item.details && <p className="mt-1 text-sm text-slate-600">{item.details}</p>}
                     </div>
@@ -93,9 +86,9 @@ export function CareEvidencePanel({ flag }: { flag: ClinicalFlag }) {
                   </div>
                   {(item.source_file || item.date || item.page) && (
                     <p className="mt-2 text-xs text-slate-500">
-                      {item.source_file || "Source document"}
+                      {item.source_file || t("care.sourceDocument")}
                       {item.date ? ` · ${formatDate(item.date)}` : ""}
-                      {item.page ? ` · page ${item.page}` : ""}
+                      {item.page ? ` · ${t("common.page")} ${formatNumber(item.page)}` : ""}
                     </p>
                   )}
                   {validSourceUrl(item.document_url) && (
@@ -105,7 +98,7 @@ export function CareEvidencePanel({ flag }: { flag: ClinicalFlag }) {
                       rel="noreferrer"
                       className="mt-2 inline-flex text-xs font-medium text-brand-700 hover:text-brand-800 hover:underline"
                     >
-                      View source document
+                      {t("care.viewSource")}
                     </a>
                   )}
                 </li>
@@ -114,29 +107,29 @@ export function CareEvidencePanel({ flag }: { flag: ClinicalFlag }) {
           )}
         </section>
 
-        <section className="rounded-xl border border-brand-100 bg-brand-50/60 p-4" aria-label="Suggested care route">
-          <p className="text-xs font-semibold uppercase tracking-wide text-brand-700">Suggested first reviewer</p>
+        <section className="rounded-xl border border-brand-100 bg-brand-50/60 p-4" aria-labelledby="suggested-reviewer-title">
+          <p id="suggested-reviewer-title" className="text-xs font-semibold uppercase tracking-wide text-brand-700">{t("care.suggestedReviewer")}</p>
           <p className="mt-1 text-base font-semibold text-brand-950">{primary.label}</p>
           <p className="mt-2 text-sm leading-relaxed text-slate-700">
             {flag.care_route_explanation || flag.specialty.reason}
           </p>
           {flag.specialty.reason && flag.care_route_explanation && flag.specialty.reason !== flag.care_route_explanation && (
-            <p className="mt-2 text-xs leading-relaxed text-slate-600">Why this route: {flag.specialty.reason}</p>
+            <p className="mt-2 text-xs leading-relaxed text-slate-600">{t("care.whyRoute", { reason: flag.specialty.reason })}</p>
           )}
         </section>
 
         {alternative && (
-          <section className="rounded-xl border border-slate-200 bg-white p-4" aria-label="Broader alternative">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Broader alternative</p>
+          <section className="rounded-xl border border-slate-200 bg-white p-4" aria-labelledby="broader-alternative-title">
+            <p id="broader-alternative-title" className="text-xs font-semibold uppercase tracking-wide text-slate-600">{t("care.broaderAlternative")}</p>
             <p className="mt-1 text-sm font-semibold text-slate-800">{alternative.label}</p>
             <p className="mt-1 text-sm text-slate-600">
-              A broader route is available if the primary specialty is not accessible or the record does not support a narrower route.
+              {t("care.broaderAlternativeBody")}
             </p>
           </section>
         )}
 
-        <Alert variant="info" title="Not a diagnosis">
-          MediMind identifies potential issues and uncertainty in uploaded records. A care route is intended to help find an appropriate professional to review the original information.
+        <Alert variant="info" title={t("common.notDiagnosis")}>
+          {t("care.routeDisclaimer")}
         </Alert>
       </CardBody>
     </Card>

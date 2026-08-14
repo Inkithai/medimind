@@ -124,6 +124,64 @@ def test_endpoint_returns_normalized_facility_list_and_forwards_coordinates():
         api.app.dependency_overrides.clear()
 
 
+def test_endpoint_forwards_specialty_and_availability_when_requested():
+    provider = FakeProvider()
+    try:
+        with mock.patch.object(api, "get_care_provider", return_value=provider):
+            with _client() as client:
+                response = client.get(
+                    "/api/v1/care/facilities",
+                    params={
+                        "location": "Jaffna",
+                        "kind": "doctor",
+                        "radius_km": 8,
+                        "latitude": 9.668,
+                        "longitude": 80.015,
+                        "specialty": "cardiology",
+                        "availability": "today",
+                    },
+                )
+        assert response.status_code == 200, response.text
+        assert provider.calls[0][3] == {
+            "latitude": 9.668,
+            "longitude": 80.015,
+            "specialty": "cardiology",
+            "availability": "today",
+        }
+    finally:
+        api.app.dependency_overrides.clear()
+
+
+def test_recommendation_endpoint_maps_saved_high_risk_issue_to_specialty():
+    snapshot = {
+        "patient_timeline": {"medications_timeline": [], "diagnoses_timeline": [], "visits": []},
+        "cross_check_report": {
+            "potential_drug_interactions": [{
+                "medications_involved": ["Warfarin", "Aspirin"],
+                "severity": "high",
+                "confidence": 0.95,
+                "explanation": "Potential bleeding risk",
+                "sources": [{"date": "2026-01-01", "source_file": "rx.pdf", "page": 1}],
+            }],
+            "duplicate_prescriptions": [],
+            "conflicting_dosage_instructions": [],
+            "allergy_conflicts": [],
+            "overall_recommendation": "Consult a professional.",
+        },
+        "lab_trends": {"trends": [], "insufficient_data": [], "note": ""},
+    }
+    try:
+        with mock.patch.object(api.db, "load_patient_snapshot", return_value=snapshot):
+            with _client() as client:
+                response = client.get("/api/v1/care/recommendation")
+        assert response.status_code == 200, response.text
+        assert response.json()["triggered"] is True
+        assert response.json()["specialty_query"] == "clinical pharmacist"
+        assert response.json()["evidence"][0]["source_file"] == "rx.pdf"
+    finally:
+        api.app.dependency_overrides.clear()
+
+
 def test_provider_failure_is_neutral_and_does_not_expose_credentials():
     provider = FakeProvider(CareProviderError("Google said key=secret-key is invalid"))
     try:

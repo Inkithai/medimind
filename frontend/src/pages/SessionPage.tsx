@@ -12,6 +12,7 @@ import {
   TrashIcon,
 } from "../components/icons";
 import { useAuth } from "../context/AuthContext";
+import { useI18n } from "../i18n/I18nContext";
 import type { QAResponse, SessionHistory, SessionTurn } from "../types/api";
 import { classNames, formatTimestamp } from "../utils/format";
 
@@ -27,6 +28,7 @@ interface UiMessage {
 
 export function SessionPage() {
   const { credentials } = useAuth();
+  const { t } = useI18n();
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<UiMessage[]>([]);
   const [input, setInput] = useState("");
@@ -37,7 +39,8 @@ export function SessionPage() {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: reducedMotion ? "auto" : "smooth" });
   }, [messages, sending]);
 
   const startNewSession = useCallback(async () => {
@@ -143,11 +146,8 @@ export function SessionPage() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="page-title">Conversations</h1>
-          <p className="secondary-text mt-2 max-w-2xl">
-            Chat about your records — follow-up questions like “was that safe?” understand what you
-            asked earlier.
-          </p>
+          <h1 className="page-title">{t("conversation.title")}</h1>
+          <p className="secondary-text mt-2 max-w-2xl">{t("conversation.subtitle")}</p>
         </div>
         {sessionId ? (
           <button
@@ -155,7 +155,7 @@ export function SessionPage() {
             className="inline-flex items-center gap-2 rounded-md border border-red-200 bg-white px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
           >
             <TrashIcon className="h-4 w-4" />
-            End session
+            {t("conversation.endSession")}
           </button>
         ) : (
           <button
@@ -164,7 +164,7 @@ export function SessionPage() {
             className="inline-flex items-center gap-2 rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-60"
           >
             {creating ? <Spinner className="h-4 w-4" /> : <PlusIcon className="h-4 w-4" />}
-            New session
+            {t("conversation.newSession")}
           </button>
         )}
       </div>
@@ -180,17 +180,21 @@ export function SessionPage() {
       ) : (
         <Card className="flex flex-col overflow-hidden">
           <CardHeader
-            title="Conversation"
-            description="Remembers what you've asked so far"
+            title={t("conversation.conversation")}
+            description={t("conversation.remembers")}
             icon={<SessionIcon className="h-5 w-5" />}
           />
           <div
             ref={scrollRef}
+            role="log"
+            aria-live="polite"
+            aria-relevant="additions"
+            aria-label={t("conversation.conversation")}
             className="max-h-[55vh] min-h-[300px] space-y-4 overflow-y-auto bg-slate-50/50 px-5 py-4 scroll-thin"
           >
             {messages.length === 0 && (
               <p className="py-12 text-center text-sm text-slate-400">
-                Ask your first question to begin the conversation.
+                {t("conversation.empty")}
               </p>
             )}
             {messages.map((msg, idx) => (
@@ -199,13 +203,15 @@ export function SessionPage() {
             {sending && (
               <div className="flex items-center gap-2 text-sm text-slate-400">
                 <Spinner className="h-4 w-4" />
-                Thinking…
+                {t("conversation.thinking")}
               </div>
             )}
           </div>
           <CardBody className="border-t border-slate-100">
-            <div className="flex gap-2">
+            <form className="flex gap-2" onSubmit={(event) => { event.preventDefault(); void send(); }}>
+              <label htmlFor="conversation-message" className="sr-only">{t("conversation.inputLabel")}</label>
               <input
+                id="conversation-message"
                 type="text"
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
@@ -215,23 +221,23 @@ export function SessionPage() {
                     void send();
                   }
                 }}
-                placeholder="Ask a follow-up about your records…"
+                placeholder={t("conversation.placeholder")}
                 className="block w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
                 disabled={sending}
               />
               <button
-                onClick={send}
+                type="submit"
                 disabled={sending || !input.trim()}
                 className="inline-flex items-center gap-2 rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-60"
               >
                 {sending ? <Spinner className="h-4 w-4" /> : <SendIcon className="h-4 w-4" />}
-                Send
+                {t("conversation.send")}
               </button>
-            </div>
+            </form>
             <details className="mt-2 text-xs text-slate-500">
-              <summary className="cursor-pointer font-medium text-slate-600">Advanced</summary>
+              <summary className="cursor-pointer font-medium text-slate-700">{t("ask.advanced")}</summary>
               <div className="mt-2 flex items-center gap-2">
-                <label htmlFor="session-topk">How much of your record to read per answer:</label>
+                <label htmlFor="session-topk">{t("ask.amount")}:</label>
                 <input
                   id="session-topk"
                   type="range"
@@ -248,9 +254,8 @@ export function SessionPage() {
         </Card>
       )}
 
-      <Alert variant="info" title="About conversations">
-        Conversations are forgotten when the app restarts — your uploaded records are never
-        affected. If a message says the conversation is gone, just start a new one.
+      <Alert variant="info" title={t("conversation.about")}>
+        {t("conversation.aboutBody")}
       </Alert>
     </div>
   );
@@ -306,6 +311,7 @@ function NoSessionView({
   onStart: () => void;
   onResume: (id: string) => void;
 }) {
+  const { t } = useI18n();
   const [resumeId, setResumeId] = useState("");
 
   return (
@@ -316,11 +322,10 @@ function NoSessionView({
         </div>
         <div>
           <h2 className="text-lg font-semibold text-slate-900">
-            Start a conversation
+            {t("conversation.start")}
           </h2>
           <p className="mx-auto mt-1 max-w-md text-sm text-slate-500">
-            Ask follow-up questions about your records — MediMind remembers the conversation, so you
-            never have to repeat yourself.
+            {t("conversation.startBody")}
           </p>
         </div>
         <button
@@ -329,19 +334,21 @@ function NoSessionView({
           className="inline-flex items-center gap-2 rounded-md bg-brand-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-60"
         >
           {creating ? <Spinner className="h-4 w-4" /> : <PlusIcon className="h-4 w-4" />}
-          Create new session
+          {t("conversation.create")}
         </button>
 
         <div className="mt-2 w-full max-w-md border-t border-slate-100 pt-4">
           <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
-            Resume a session by ID
+            {t("conversation.resumeTitle")}
           </p>
           <div className="mt-2 flex gap-2">
+            <label htmlFor="resume-session-id" className="sr-only">{t("conversation.resumeTitle")}</label>
             <input
+              id="resume-session-id"
               type="text"
               value={resumeId}
               onChange={(e) => setResumeId(e.target.value)}
-              placeholder="Paste a session_id"
+              placeholder={t("conversation.resumePlaceholder")}
               className="block w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
             />
             <button
@@ -349,7 +356,7 @@ function NoSessionView({
               disabled={!resumeId.trim()}
               className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
             >
-              Resume
+              {t("conversation.resume")}
             </button>
           </div>
           <p className="mt-1 text-xs text-slate-400">

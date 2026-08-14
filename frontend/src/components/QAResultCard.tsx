@@ -1,4 +1,6 @@
+import { Link } from "react-router-dom";
 import type { QAResponse } from "../types/api";
+import { useI18n } from "../i18n/I18nContext";
 import { classNames, confidenceTone, formatConfidence, formatDate } from "../utils/format";
 import { ConsiderProfessionalCare } from "./ConsiderProfessionalCare";
 
@@ -9,6 +11,7 @@ export function QAResultCard({
   result: QAResponse;
   embedded?: boolean;
 }) {
+  const { t, formatNumber } = useI18n();
   return (
     <div
       className={
@@ -18,12 +21,28 @@ export function QAResultCard({
       }
     >
       {result.recommend_professional_consult && (
-        <ConsiderProfessionalCare message="You may want to discuss this with a healthcare professional." />
+        <ConsiderProfessionalCare message={t("ask.consult")} />
       )}
 
       <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-800">
         {result.answer}
       </p>
+
+      {result.confidence_reason && (
+        <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+          <span className="font-semibold text-slate-800">{t("ask.confidenceWhy")}:</span>{" "}
+          {result.confidence_reason}
+        </div>
+      )}
+
+      {result.confidence < 0.6 && (
+        <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          <p>{t("ask.lowConfidence")}</p>
+          <Link to="/find-care?from=low-confidence-answer" className="mt-1 inline-flex font-semibold text-brand-700 hover:underline">
+            {t("safety.findCare")} →
+          </Link>
+        </div>
+      )}
 
       <div className="flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3">
         <span
@@ -32,14 +51,14 @@ export function QAResultCard({
             confidenceTone(result.confidence)
           )}
         >
-          Answer confidence {formatConfidence(result.confidence)}
+          {t("common.confidence")} {formatConfidence(result.confidence)}
         </span>
         {result.sources.length > 0 ? (
           <span className="text-xs text-slate-500">
-            {result.sources.length} source{result.sources.length === 1 ? "" : "s"}
+            {t("ask.citedSources", { count: formatNumber(result.sources.length) })}
           </span>
         ) : (
-          <span className="text-xs text-slate-400">No cited sources</span>
+          <span className="text-xs text-slate-600">{t("ask.noSources")}</span>
         )}
       </div>
 
@@ -56,6 +75,7 @@ export function QAResultCard({
               </svg>
               <span className="font-medium text-slate-700">{src.source_file}</span>
               {src.date && <span className="text-slate-400">· {formatDate(src.date)}</span>}
+              {src.page && <span className="text-slate-400">· page {src.page}</span>}
             </li>
           ))}
         </ul>
@@ -63,7 +83,7 @@ export function QAResultCard({
 
       {result.rewritten_query && (
         <div className="rounded-md bg-slate-50 px-3 py-2 text-xs text-slate-500">
-          <span className="font-semibold text-slate-600">Retrieval query used:</span>{" "}
+          <span className="font-semibold text-slate-700">{t("ask.retrievalQuery")}:</span>{" "}
           {result.rewritten_query}
         </div>
       )}

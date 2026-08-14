@@ -33,7 +33,7 @@ export function LoadingState({
   description?: string;
 }) {
   return (
-    <div className="flex items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-6 text-slate-600">
+    <div role="status" aria-live="polite" aria-busy="true" className="flex items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-6 text-slate-700">
       <Spinner className="h-5 w-5 text-brand-600" />
       <div>
         <p className="text-sm font-medium text-slate-800">{label}</p>

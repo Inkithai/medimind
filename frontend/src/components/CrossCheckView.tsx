@@ -1,4 +1,6 @@
-import type { CrossCheckReport } from "../types/api";
+import { Link } from "react-router-dom";
+import { useI18n } from "../i18n/I18nContext";
+import type { CrossCheckReport, MedicationTransition, SourceReference } from "../types/api";
 import { formatConfidence, severityTone } from "../utils/format";
 import { Alert } from "./Alert";
 import { Card, CardBody, CardHeader } from "./Card";
@@ -14,50 +16,85 @@ interface Section {
     | "conflicting_dosage_instructions"
     | "allergy_conflicts"
   >;
-  title: string;
+  titleKey: string;
   tone: "danger" | "warning" | "info";
 }
 
 const SECTIONS: Section[] = [
-  { key: "allergy_conflicts", title: "Allergy conflicts", tone: "danger" },
-  { key: "potential_drug_interactions", title: "Potential drug interactions", tone: "warning" },
-  { key: "conflicting_dosage_instructions", title: "Conflicting dosage instructions", tone: "warning" },
-  { key: "duplicate_prescriptions", title: "Duplicate prescriptions", tone: "info" },
+  { key: "allergy_conflicts", titleKey: "safety.allergy", tone: "danger" },
+  { key: "potential_drug_interactions", titleKey: "safety.interactions", tone: "warning" },
+  { key: "conflicting_dosage_instructions", titleKey: "safety.dosage", tone: "warning" },
+  { key: "duplicate_prescriptions", titleKey: "safety.duplicates", tone: "info" },
 ];
 
 export function CrossCheckView({ report }: { report: CrossCheckReport }) {
-  const totalIssues = SECTIONS.reduce(
-    (sum, s) => sum + (report[s.key]?.length || 0),
-    0
+  const { t, formatNumber } = useI18n();
+  const totalIssues =
+    SECTIONS.reduce((sum, section) => sum + (report[section.key]?.length || 0), 0) +
+    (report.medication_changes?.length || 0);
+  const continuations = report.medication_continuations || [];
+  const hasLowConfidence = SECTIONS.some((section) =>
+    (report[section.key] || []).some((item) => item.confidence < 0.6)
   );
 
   return (
     <Card>
       <CardHeader
-        title="Safety Alerts"
-        description={
-          totalIssues === 0
-            ? "No issues found across your medicines."
-            : `${totalIssues} issue(s) flagged across medications and allergies.`
-        }
+        title={t("safety.title")}
+        description={totalIssues === 0 ? t("safety.noIssuesBody") : `${formatNumber(totalIssues)} · ${t("safety.subtitle")}`}
         icon={<ShieldIcon className="h-5 w-5" />}
       />
       <CardBody className="space-y-5">
         {report.overall_recommendation && (
-          <Alert variant="warning" title="Professional recommendation">
+          <Alert variant="warning" title={t("safety.recommendation")}>
             {report.overall_recommendation}
           </Alert>
         )}
 
+        {(report.allergy_conflicts.length > 0 || report.potential_drug_interactions.some((item) => item.severity === "high")) && (
+          <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">
+            <p className="font-semibold">{t("safety.highRisk")}</p>
+            <p className="mt-1">{t("safety.highRiskBody")}</p>
+            <Link to="/find-care?from=safety" className="mt-2 inline-flex font-semibold text-brand-700 hover:underline">
+              {t("safety.findCare")} →
+            </Link>
+          </div>
+        )}
+
+        {hasLowConfidence && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            <p className="font-semibold">{t("safety.lowConfidence")}</p>
+            <p className="mt-1">{t("safety.lowConfidenceBody")}</p>
+            <Link to="/find-care?from=low-confidence-safety" className="mt-2 inline-flex font-semibold text-brand-700 hover:underline">
+              {t("safety.verify")} →
+            </Link>
+          </div>
+        )}
+
         {totalIssues === 0 ? (
           <EmptyState
-            title="No safety issues flagged"
-            description="We found no interactions, duplicates, dosage conflicts, or allergy conflicts across your medicines."
+            title={t("safety.noIssues")}
+            description={t("safety.noIssuesBody")}
           />
         ) : (
-          SECTIONS.map((section) => (
-            <IssueSection key={section.key} report={report} section={section} />
-          ))
+          <>
+            {SECTIONS.map((section) => (
+              <IssueSection key={section.key} report={report} section={section} />
+            ))}
+            <TransitionSection
+              title={t("safety.changes")}
+              items={report.medication_changes || []}
+              tone="warning"
+            />
+          </>
+        )}
+
+        {continuations.length > 0 && (
+          <TransitionSection
+            title={t("safety.continuations")}
+            items={continuations}
+            tone="info"
+          />
         )}
       </CardBody>
     </Card>
@@ -65,14 +102,15 @@ export function CrossCheckView({ report }: { report: CrossCheckReport }) {
 }
 
 function IssueSection({ report, section }: { report: CrossCheckReport; section: Section }) {
+  const { t, formatNumber } = useI18n();
   const items = report[section.key] || [];
   if (items.length === 0) return null;
 
   return (
     <div>
       <div className="mb-2 flex items-center gap-2">
-        <h3 className="text-sm font-semibold text-slate-800">{section.title}</h3>
-        <StatusBadge tone={section.tone}>{items.length}</StatusBadge>
+        <h3 className="text-sm font-semibold text-slate-900">{t(section.titleKey)}</h3>
+        <StatusBadge tone={section.tone}>{formatNumber(items.length)}</StatusBadge>
       </div>
       <div className="space-y-2">
         {items.map((item, idx) => (
@@ -87,7 +125,7 @@ function IssueSection({ report, section }: { report: CrossCheckReport; section: 
                     item.severity
                   )}`}
                 >
-                  {item.severity} severity
+                  {t("safety.severity", { level: item.severity })}
                 </span>
               </div>
             )}
@@ -119,6 +157,7 @@ function IssueSection({ report, section }: { report: CrossCheckReport; section: 
                 {item.occurrences.map((o, i) => (
                   <li key={i}>
                     · {o.date || "undated"} — {o.source_file || "unknown file"}
+                    {o.page ? `, page ${o.page}` : ""}
                     {o.dosage ? ` — ${o.dosage}` : ""}
                   </li>
                 ))}
@@ -129,11 +168,16 @@ function IssueSection({ report, section }: { report: CrossCheckReport; section: 
               <ul className="mt-2 space-y-1 text-xs text-slate-500">
                 {item.conflicting_instructions.map((o, i) => (
                   <li key={i}>
-                    · {o.date || "undated"} — {o.source_file || "unknown file"} —{" "}
+                    · {o.date || "undated"} — {o.source_file || "unknown file"}
+                    {o.page ? `, page ${o.page}` : ""} —{" "}
                     {[o.dosage, o.frequency].filter(Boolean).join(", ")}
                   </li>
                 ))}
               </ul>
+            )}
+
+            {"sources" in item && Boolean(item.sources?.length) && (
+              <SourceList sources={item.sources || []} />
             )}
 
             <p className="mt-2 text-xs text-slate-400">
@@ -143,5 +187,62 @@ function IssueSection({ report, section }: { report: CrossCheckReport; section: 
         ))}
       </div>
     </div>
+  );
+}
+
+function TransitionSection({
+  title,
+  items,
+  tone,
+}: {
+  title: string;
+  items: MedicationTransition[];
+  tone: "warning" | "info";
+}) {
+  const { t, formatNumber } = useI18n();
+  if (!items.length) return null;
+  return (
+    <div>
+      <div className="mb-2 flex items-center gap-2">
+        <h3 className="text-sm font-semibold text-slate-900">{title}</h3>
+        <StatusBadge tone={tone}>{formatNumber(items.length)}</StatusBadge>
+      </div>
+      <div className="space-y-2">
+        {items.map((item, index) => (
+          <div key={`${item.medication}-${index}`} className="rounded-lg border border-slate-200 bg-slate-50/60 px-4 py-3">
+            <p className="text-sm font-semibold text-slate-800">{item.medication}</p>
+            {item.changed_fields?.length ? (
+              <p className="mt-1 text-xs font-medium text-amber-700">
+                {t("safety.changed", { fields: item.changed_fields.join(", ") })}
+              </p>
+            ) : (
+              <p className="mt-1 text-xs font-medium text-sky-800">{t("safety.same")}</p>
+            )}
+            <div className="mt-2 grid gap-2 text-xs text-slate-600 sm:grid-cols-2">
+              <p><span className="font-semibold">{t("safety.earlier")}:</span> {[item.previous.dosage, item.previous.frequency].filter(Boolean).join(" · ") || "not specified"}</p>
+              <p><span className="font-semibold">{t("safety.later")}:</span> {[item.current.dosage, item.current.frequency].filter(Boolean).join(" · ") || "not specified"}</p>
+            </div>
+            <p className="mt-2 text-sm text-slate-600">{item.explanation}</p>
+            <SourceList sources={item.sources} />
+            <p className="mt-2 text-xs text-slate-400">confidence {formatConfidence(item.confidence)}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SourceList({ sources }: { sources: SourceReference[] }) {
+  const { t } = useI18n();
+  if (!sources.length) return null;
+  return (
+    <ul className="mt-2 space-y-1 text-xs text-slate-600" aria-label={t("common.sources")}>
+      {sources.map((source, index) => (
+        <li key={`${source.source_file}-${source.page || 0}-${index}`}>
+          · {source.date || "undated"} — {source.source_file || "unknown file"}
+          {source.page ? `, page ${source.page}` : ""}
+        </li>
+      ))}
+    </ul>
   );
 }

@@ -1,4 +1,5 @@
 import { renderToStaticMarkup } from "react-dom/server";
+import { I18nProvider } from "../../i18n/I18nContext";
 
 import { ProviderResultCard } from "../ProviderResultCard";
 import type { LiveProvider } from "../../types/api";
@@ -37,7 +38,7 @@ const sparseDirectoryResult: LiveProvider = {
   },
 };
 
-const markup = renderToStaticMarkup(<ProviderResultCard provider={sparseDirectoryResult} index={0} />);
+const markup = renderToStaticMarkup(<I18nProvider><ProviderResultCard provider={sparseDirectoryResult} index={0} /></I18nProvider>);
 assert(markup.includes("Directory match 72"), "labels score as a directory match");
 assert(!markup.includes("Match score"), "does not use generic match-score wording");
 assert(!markup.includes("Rating"), "does not render a missing directory rating");

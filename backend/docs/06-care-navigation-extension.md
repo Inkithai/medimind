@@ -1,6 +1,6 @@
 # Optional extension — Care Navigation (not in this branch)
 
-**Do not put this on the main judging slides.**  
+**Do not put this on the main judging slides.**
 The frozen deck is still [01-end-to-end-pipeline.md](01-end-to-end-pipeline.md):
 
 > **Understand → Detect → Explain → Protect**
@@ -183,7 +183,7 @@ External navigation / contact
 
 AI explains the record. Care Navigation finds facilities. Those stay separate.
 
-Avoid: “AI recommends the best hospital.”  
+Avoid: “AI recommends the best hospital.”
 Say: **MediMind helps the patient find relevant nearby facilities for a need they selected.**
 
 ```text

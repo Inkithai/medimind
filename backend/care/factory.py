@@ -45,10 +45,18 @@ class FallbackProvider:
         *,
         latitude: Optional[float] = None,
         longitude: Optional[float] = None,
+        specialty: Optional[str] = None,
+        availability: Optional[str] = None,
     ) -> List[Facility]:
         try:
             results = self.primary.search(
-                location, kind, radius_km, latitude=latitude, longitude=longitude
+                location,
+                kind,
+                radius_km,
+                latitude=latitude,
+                longitude=longitude,
+                specialty=specialty,
+                availability=availability,
             )
             if results:
                 return results
@@ -68,7 +76,13 @@ class FallbackProvider:
                 self.fallback.name,
             )
         return self.fallback.search(
-            location, kind, radius_km, latitude=latitude, longitude=longitude
+            location,
+            kind,
+            radius_km,
+            latitude=latitude,
+            longitude=longitude,
+            specialty=specialty,
+            availability=availability,
         )
 
 

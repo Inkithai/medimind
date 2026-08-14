@@ -1,4 +1,5 @@
 import { renderToStaticMarkup } from "react-dom/server";
+import { I18nProvider } from "../../i18n/I18nContext";
 
 import { CareEvidencePanel } from "../CareEvidencePanel";
 import type { ClinicalFlag } from "../../types/api";
@@ -46,7 +47,7 @@ const completeFlag: ClinicalFlag = {
   ],
 };
 
-const completeMarkup = renderToStaticMarkup(<CareEvidencePanel flag={completeFlag} />);
+const completeMarkup = renderToStaticMarkup(<I18nProvider><CareEvidencePanel flag={completeFlag} /></I18nProvider>);
 assert(completeMarkup.includes("Why MediMind suggests this care route"), "renders the care-route title");
 assert(completeMarkup.includes("Medication A"), "renders source-linked medication evidence");
 assert(completeMarkup.includes("Prescription_01.pdf"), "renders the actual source filename");
@@ -70,7 +71,7 @@ const sparseFlag: ClinicalFlag = {
   ],
 };
 
-const sparseMarkup = renderToStaticMarkup(<CareEvidencePanel flag={sparseFlag} />);
+const sparseMarkup = renderToStaticMarkup(<I18nProvider><CareEvidencePanel flag={sparseFlag} /></I18nProvider>);
 assert(!sparseMarkup.includes("91%"), "does not fabricate a missing flag confidence");
 assert(!sparseMarkup.includes("View source document"), "does not render a source link without a valid URL");
 assert(!sparseMarkup.includes("General Physician"), "does not fabricate an absent broader alternative");

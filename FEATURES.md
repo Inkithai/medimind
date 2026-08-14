@@ -7,6 +7,8 @@
 - Non-medical document filter (early rejection before LLM/Chroma)
 - Patient timeline + longitudinal lab trends (threshold approach detection)
 - Patient-grounded RAG / Ask AI
+- English, Sinhala, and Tamil UI with persisted/browser-detected language and locale-aware formatting
+- WCAG-oriented keyboard, screen-reader, focus, contrast, reduced-motion, table, chart, form, and responsive-navigation support
 - Care Navigation with search-as-you-type, current location, map confirmation, and nearby facility results — works with no API key or billing account
 - Facility category filters for hospitals, clinics, pharmacies, laboratories, and doctors
 - Public listing details including distance, address, rating, phone, website, opening hours, and map link when available
@@ -53,6 +55,9 @@
 - [x] Multi-document Q&A
 - [x] Confidence scoring
 - [x] High-risk/low-confidence detection
+- [x] English, Sinhala, and Tamil UI catalogs with persistence and locale formatting
+- [x] WCAG-oriented keyboard and screen-reader interaction across the existing UI
+- [ ] Official competition dataset integration (intentionally left unchanged)
 
 ## Round 2 (Care Navigation — Added)
 

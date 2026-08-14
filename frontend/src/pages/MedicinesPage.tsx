@@ -8,11 +8,13 @@ import { StatusBadge } from "../components/StatusBadge";
 import { PillIcon, UploadIcon } from "../components/icons";
 import { useAuth } from "../context/AuthContext";
 import { useStrictEffect } from "../hooks/useStrictEffect";
+import { useI18n } from "../i18n/I18nContext";
 import type { Timeline } from "../types/api";
 import { compareDates, formatDate } from "../utils/format";
 
 export function MedicinesPage() {
   const { credentials } = useAuth();
+  const { t } = useI18n();
   const [timeline, setTimeline] = useState<Timeline | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
@@ -40,7 +42,7 @@ export function MedicinesPage() {
     return (
       <div className="space-y-6">
         <Header count={null} />
-        <LoadingState label="Loading medicines" />
+        <LoadingState label={t("medicines.loading")} />
       </div>
     );
   }
@@ -93,16 +95,17 @@ export function MedicinesPage() {
               <PillIcon className="h-5 w-5" />
             </div>
             <div>
-              <p className="text-sm font-semibold text-slate-900">Medications</p>
-              <p className="text-xs text-slate-500">
-                Found in your uploaded documents — every entry links back to its source.
-              </p>
+              <p className="text-sm font-semibold text-slate-900">{t("medicines.title")}</p>
+              <p className="text-xs text-slate-600">{t("medicines.description")}</p>
             </div>
           </div>
+          <label htmlFor="medicine-search" className="sr-only">{t("medicines.searchLabel")}</label>
           <input
+            id="medicine-search"
+            type="search"
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
-            placeholder="Search by medicine or ingredient…"
+            placeholder={t("medicines.searchPlaceholder")}
             className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm shadow-sm placeholder:text-slate-400 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 sm:w-72"
           />
         </CardBody>
@@ -112,7 +115,7 @@ export function MedicinesPage() {
         <Card>
           <CardBody className="py-12 text-center">
             <p className="text-sm font-semibold text-slate-700">
-              {timeline.medications_timeline.length === 0 ? "No medicines found" : "No matches"}
+              {timeline.medications_timeline.length === 0 ? t("medicines.noMedicines") : t("medicines.noMatches")}
             </p>
             <p className="mt-1 text-xs text-slate-500">
               {timeline.medications_timeline.length === 0
@@ -131,7 +134,7 @@ export function MedicinesPage() {
         </Card>
       ) : (
         <div className="space-y-6">
-          <Section title="Current medicines">
+          <Section title={t("medicines.current")}>
             <div className="grid gap-3 sm:grid-cols-2">
               {sortedIngredients.map(([ingredient, entries]) => {
                 const mostRecent = mostRecentOf(entries);
@@ -188,15 +191,16 @@ export function MedicinesPage() {
             </div>
           </Section>
 
-          <Section title="Full history">
+          <Section title={t("medicines.fullHistory")}>
             <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
               <table className="min-w-full text-sm">
+                <caption className="sr-only">{t("medicines.fullHistory")}</caption>
                 <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
                   <tr>
-                    <th className="px-4 py-2.5 font-medium">Date</th>
-                    <th className="px-4 py-2.5 font-medium">Medicine</th>
-                    <th className="px-4 py-2.5 font-medium">Dose</th>
-                    <th className="px-4 py-2.5 font-medium">Source</th>
+                    <th scope="col" className="px-4 py-2.5 font-medium">{t("common.date")}</th>
+                    <th scope="col" className="px-4 py-2.5 font-medium">{t("medicines.medicine")}</th>
+                    <th scope="col" className="px-4 py-2.5 font-medium">{t("medicines.dose")}</th>
+                    <th scope="col" className="px-4 py-2.5 font-medium">{t("common.source")}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -227,15 +231,16 @@ export function MedicinesPage() {
 }
 
 function Header({ count }: { count: number | null }) {
+  const { t, formatNumber } = useI18n();
   return (
-    <div>
-      <h1 className="page-title">Medications</h1>
+    <header>
+      <h1 className="page-title">{t("medicines.title")}</h1>
       <p className="secondary-text mt-2">
         {count != null
-          ? `${count} entries found across your documents. Click any medicine to see where it came from.`
-          : "Loading your medicines…"}
+          ? t("medicines.subtitle", { count: formatNumber(count) })
+          : t("medicines.loading")}
       </p>
-    </div>
+    </header>
   );
 }
 

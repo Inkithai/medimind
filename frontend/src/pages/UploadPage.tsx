@@ -15,6 +15,7 @@ import { TimelineView } from "../components/TimelineView";
 import { FileIcon, UploadIcon } from "../components/icons";
 import { useAuth } from "../context/AuthContext";
 import { useStrictEffect } from "../hooks/useStrictEffect";
+import { useI18n } from "../i18n/I18nContext";
 import type { Timeline, UploadResponse } from "../types/api";
 import { classNames, documentTypeLabel, fileSizeLabel, relativeTime } from "../utils/format";
 
@@ -112,6 +113,7 @@ function completedFallbackProgress(
 
 export function UploadPage() {
   const { credentials } = useAuth();
+  const { t } = useI18n();
   const navigate = useNavigate();
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -173,14 +175,14 @@ export function UploadPage() {
   );
 
   const validate = (): Error | null => {
-    if (pending.length === 0) return new Error("Select at least one file first.");
+    if (pending.length === 0) return new Error(t("upload.selectRequired"));
     for (const { file } of pending) {
       const lower = file.name.toLowerCase();
       if (!ACCEPTED.some((ext) => lower.endsWith(ext))) {
-        return new Error(`"${file.name}" isn't a file type we can read.`);
+        return new Error(t("upload.invalidType", { file: `“${file.name}”` }));
       }
       if (file.size > MAX_MB * 1024 * 1024) {
-        return new Error(`"${file.name}" is larger than ${MAX_MB} MB.`);
+        return new Error(t("upload.tooLarge", { file: `“${file.name}”`, size: MAX_MB }));
       }
     }
     return null;
@@ -308,10 +310,8 @@ export function UploadPage() {
   return (
     <div className="space-y-6">
       <header>
-        <h1 className="page-title">Upload Medical Documents</h1>
-        <p className="secondary-text mt-2">
-          We'll read them, find the important details, and add them to your health record.
-        </p>
+        <h1 className="page-title">{t("upload.title")}</h1>
+        <p className="secondary-text mt-2">{t("upload.subtitle")}</p>
       </header>
 
       <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
@@ -328,22 +328,22 @@ export function UploadPage() {
               "rounded-2xl border-2 border-dashed bg-white p-8 text-center transition sm:p-10",
               dragging ? "border-brand-500 bg-brand-50/40" : "border-slate-300"
             )}
-            aria-label="Document upload area"
+            aria-label={t("upload.area")}
           >
             <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-brand-50 text-brand-600">
               <UploadIcon className="h-8 w-8" />
             </div>
-            <p className="mt-4 text-lg font-semibold text-slate-800">Drag files here</p>
-            <p className="secondary-text mt-1">or</p>
+            <p className="mt-4 text-lg font-semibold text-slate-900">{t("upload.drag")}</p>
+            <p className="secondary-text mt-1">{t("upload.or")}</p>
             <button
               onClick={() => inputRef.current?.click()}
               disabled={busy}
               className="btn-primary mt-3"
             >
-              Browse Files
+              {t("upload.browse")}
             </button>
             <p className="secondary-text mt-4">
-              Supported: PDF • JPG • PNG • WEBP &nbsp;·&nbsp; Max {MAX_MB} MB each
+              {t("upload.supported", { size: MAX_MB })}
             </p>
             <div className="mt-4 flex flex-wrap justify-center gap-2">
               {SUPPORTED_TYPES.map((t) => (
@@ -358,6 +358,7 @@ export function UploadPage() {
             <input
               ref={inputRef}
               type="file"
+              aria-label={t("upload.browse")}
               multiple
               accept={ACCEPTED.join(",")}
               className="hidden"
@@ -373,7 +374,7 @@ export function UploadPage() {
           {pending.length > 0 && (
             <section
               className="rounded-2xl border border-slate-200 bg-white shadow-sm"
-              aria-label="Files ready to upload"
+              aria-label={t("upload.ready")}
             >
               <div className="border-b border-slate-100 px-5 py-4">
                 <h2 className="card-title">{pending.length} {pending.length === 1 ? "file" : "files"} ready</h2>
@@ -406,10 +407,12 @@ export function UploadPage() {
                             rel="noreferrer"
                             className="flex min-h-[44px] items-center rounded-lg px-3 text-sm font-medium text-brand-600 hover:bg-brand-50"
                           >
-                            Preview
+                            {t("upload.preview")}<span className="sr-only"> ({t("common.opensNewWindow")})</span>
                           </a>
                         )}
                         <button
+                          type="button"
+                          aria-label={t("upload.removeFile", { file: p.file.name })}
                           onClick={() => {
                             setPending((prev) => prev.filter((x) => x.id !== p.id));
                             setError(null);
@@ -419,7 +422,7 @@ export function UploadPage() {
                           disabled={busy}
                           className="flex min-h-[44px] items-center rounded-lg px-3 text-sm font-medium text-slate-400 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40"
                         >
-                          Remove
+                          {t("common.remove")}
                         </button>
                       </div>
                     </li>
@@ -437,7 +440,7 @@ export function UploadPage() {
                   disabled={busy}
                   className="btn-ghost"
                 >
-                  Clear all
+                  {t("upload.clearAll")}
                 </button>
                 <button
                   onClick={handleUpload}
@@ -445,16 +448,16 @@ export function UploadPage() {
                   className="btn-primary"
                 >
                   {retryBlocked ? (
-                    "Try again later"
+                    t("upload.retryLater")
                   ) : busy ? (
                     <>
                       <Spinner className="h-5 w-5" />
-                      Processing…
+                      {t("upload.processing")}
                     </>
                   ) : (
                     <>
                       <UploadIcon className="h-5 w-5" />
-                      Upload
+                      {t("upload.upload")}
                     </>
                   )}
                 </button>
@@ -463,11 +466,8 @@ export function UploadPage() {
           )}
 
           {busy && (
-            <Alert variant="info" title="Hang tight — we're reading your documents">
-              <p className="text-sm">
-                Scanned pages and photos take a little longer than digital PDFs. You can leave this
-                page; everything is saved automatically.
-              </p>
+            <Alert variant="info" title={t("upload.readingTitle")}>
+              <p className="text-sm">{t("upload.readingBody")}</p>
             </Alert>
           )}
 
@@ -499,8 +499,8 @@ export function UploadPage() {
                 variant={result.failed_files?.length ? "warning" : "success"}
                 title={
                   result.failed_files?.length
-                    ? "Finished — some files need your attention"
-                    : "All done — your record is up to date"
+                    ? t("upload.partial")
+                    : t("upload.success")
                 }
               >
                 <p className="text-sm">
@@ -534,7 +534,7 @@ export function UploadPage() {
               </Alert>
 
               <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-                <h2 className="card-title">What would you like to do next?</h2>
+                <h2 className="card-title">{t("upload.next")}</h2>
                 <div className="mt-4 grid grid-cols-2 gap-3">
                   <button onClick={() => navigate("/medicines")} className="btn-secondary text-sm">
                     💊 Medications
@@ -569,10 +569,10 @@ export function UploadPage() {
       <div className="grid gap-6 lg:grid-cols-2">
         <section
           className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"
-          aria-label="Recent uploads"
+          aria-label={t("upload.recent")}
         >
           <div className="flex items-center justify-between">
-            <h2 className="card-title">Recent Uploads</h2>
+            <h2 className="card-title">{t("upload.recent")}</h2>
             {recent.length > 0 && (
               <Link to="/documents" className="text-sm font-medium text-brand-600 hover:text-brand-700">
                 View all →
@@ -581,7 +581,7 @@ export function UploadPage() {
           </div>
           {recent.length === 0 ? (
             <p className="secondary-text mt-3">
-              Nothing here yet — your uploaded reports will show up in this list.
+              {t("upload.none")}
             </p>
           ) : (
             <ul className="mt-4 space-y-2">

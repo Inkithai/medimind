@@ -49,7 +49,7 @@ TIMELINE = {
 ANSWER_JSON = json.dumps({
     "answer": "You are taking Paracetamol 500 mg three times daily.",
     "confidence": 0.95,
-    "sources": [{"date": "2024-03-15", "source_file": "rx.jpg"}],
+    "sources": [{"date": "2024-03-15", "source_file": "rx.jpg", "page": 1}],
     "recommend_professional_consult": False,
 })
 
@@ -155,7 +155,8 @@ def test_index_then_answer_over_chroma_path():
             out = retrieval.answer_question("anon_qa", "what medication am I on?")
         assert out["answer"].startswith("You are taking Paracetamol")
         assert out["confidence"] == 0.95
-        assert out["sources"] == [{"date": "2024-03-15", "source_file": "rx.jpg"}]
+        assert "directly" in out["confidence_reason"]
+        assert out["sources"] == [{"date": "2024-03-15", "source_file": "rx.jpg", "page": 1}]
     finally:
         vector_store._chroma_client = None
         _restore_chromadb(saved)
