@@ -60,6 +60,7 @@ import db
 import jobs
 import storage
 from care import CareConfigurationError, CareProviderError, get_care_provider
+from care.recommendation import recommend_care
 from auth import get_current_user, issue_anonymous_token
 from document_filter import NonMedicalDocumentError, assert_medical_document
 from lab_trends import track_lab_trends
@@ -753,7 +754,7 @@ async def _execute_upload_pipeline(
         chunks_indexed = await asyncio.to_thread(index_patient_timeline, user_id, timeline)
         if chunks_indexed == 0:
             indexed = False
-            index_error = "Extraction succeeded but no medications, lab results, clinical notes, or allergies were found to index — Q&A has no documents to search yet."
+            index_error = "Extraction succeeded but no medications, lab results, clinical notes, diagnoses, or allergies were found to index — Q&A has no documents to search yet."
             logger.warning("upload: user=%s %s", user_id, index_error)
         else:
             logger.info("upload: user=%s re-indexed for Q&A (%d chunk(s))", user_id, chunks_indexed)
@@ -920,6 +921,29 @@ async def get_job(job_id: str, user_id: str = Depends(get_current_user)) -> Dict
 
 
 
+def _enhanced_cross_check(snapshot: Dict[str, Any]) -> Dict[str, Any]:
+    """Backfill deterministic findings/source links for older snapshots."""
+    from medication_history import detect_medication_transitions, enrich_cross_check_sources
+
+    timeline = snapshot["patient_timeline"]
+    report = dict(snapshot.get("cross_check_report") or {})
+    report.setdefault("potential_drug_interactions", [])
+    report.setdefault("duplicate_prescriptions", [])
+    report.setdefault("conflicting_dosage_instructions", [])
+    report.setdefault("allergy_conflicts", [])
+    transitions = detect_medication_transitions(timeline)
+    report.setdefault("medication_changes", transitions["medication_changes"])
+    report.setdefault("medication_continuations", transitions["medication_continuations"])
+    return enrich_cross_check_sources(report, timeline)
+
+
+def _enhanced_lab_trends(snapshot: Dict[str, Any]) -> Dict[str, Any]:
+    saved = snapshot.get("lab_trends")
+    if saved and all("risk_level" in trend for trend in saved.get("trends", [])):
+        return saved
+    return track_lab_trends(snapshot["patient_timeline"])
+
+
 @app.get("/api/v1/timeline")
 async def get_timeline(user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
     """Returns the authenticated user's merged timeline (medications, lab
@@ -937,7 +961,7 @@ async def get_cross_check(user_id: str = Depends(get_current_user)) -> Dict[str,
     snapshot = db.load_patient_snapshot(user_id)
     if snapshot is None:
         raise HTTPException(404, "No cross-check report found for this user.")
-    return snapshot["cross_check_report"]
+    return _enhanced_cross_check(snapshot)
 
 
 @app.get("/api/v1/lab-trends")
@@ -950,9 +974,7 @@ async def get_lab_trends(user_id: str = Depends(get_current_user)) -> Dict[str, 
     snapshot = db.load_patient_snapshot(user_id)
     if snapshot is None:
         raise HTTPException(404, "No timeline found for this user.")
-    if "lab_trends" in snapshot:
-        return snapshot["lab_trends"]
-    return track_lab_trends(snapshot["patient_timeline"])
+    return _enhanced_lab_trends(snapshot)
 
 
 @app.get("/api/v1/patient-snapshot")
@@ -972,19 +994,31 @@ async def get_patient_snapshot(user_id: str = Depends(get_current_user)) -> Dict
     result: Dict[str, Any] = {
         "user_id": user_id,
         "patient_timeline": snapshot["patient_timeline"],
-        "cross_check_report": snapshot["cross_check_report"],
+        "cross_check_report": _enhanced_cross_check(snapshot),
         "updated_at": snapshot.get("updated_at"),
     }
-    if "lab_trends" in snapshot:
-        result["lab_trends"] = snapshot["lab_trends"]
-    else:
-        result["lab_trends"] = track_lab_trends(snapshot["patient_timeline"])
+    result["lab_trends"] = _enhanced_lab_trends(snapshot)
     return result
 
 
 # ---------------------------------------------------------------------------
 # Care navigation (optional, provider-neutral public directory)
 # ---------------------------------------------------------------------------
+
+@app.get("/api/v1/care/recommendation")
+async def get_care_recommendation(
+    user_id: str = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """Map saved safety/lab evidence to a transparent directory category."""
+    snapshot = db.load_patient_snapshot(user_id)
+    if snapshot is None:
+        raise HTTPException(404, "No patient record is available for a care recommendation.")
+    return recommend_care(
+        snapshot["patient_timeline"],
+        _enhanced_cross_check(snapshot),
+        _enhanced_lab_trends(snapshot),
+    )
+
 
 @app.get("/api/v1/care/facilities")
 async def get_care_facilities(
@@ -993,6 +1027,8 @@ async def get_care_facilities(
     radius_km: float = Query(default=8.0, ge=1.0, le=50.0),
     latitude: Optional[float] = Query(default=None, ge=-90.0, le=90.0),
     longitude: Optional[float] = Query(default=None, ge=-180.0, le=180.0),
+    specialty: Optional[str] = Query(default=None, max_length=80),
+    availability: Optional[str] = Query(default=None, max_length=20),
     user_id: str = Depends(get_current_user),
 ) -> List[Dict[str, Any]]:
     """Return normalized public healthcare listings near an area or point.
@@ -1015,13 +1051,17 @@ async def get_care_facilities(
 
     try:
         provider = get_care_provider()
+        search_options: Dict[str, Any] = {"latitude": latitude, "longitude": longitude}
+        if specialty and specialty.strip():
+            search_options["specialty"] = specialty.strip()
+        if availability and availability.strip():
+            search_options["availability"] = availability.strip()
         facilities = await asyncio.to_thread(
             provider.search,
             location,
             normalized_kind,
             radius_km,
-            latitude=latitude,
-            longitude=longitude,
+            **search_options,
         )
         logger.info(
             "care navigation: provider=%s kind=%s coordinate_search=%s results=%d",

@@ -47,14 +47,15 @@ Vision+text use the same Gemini model; Groq needs two. All three are OpenAI-comp
 |---|---|
 | `medical_extractor.py` | `LLM_PROVIDER` layer, vision / text extraction, patient grouping, timeline creation, safety LLM call plus deterministic duplicate detection, local CLI persistence |
 | `document_filter.py` | Fast post-extraction filter for non-medical files (no extra LLM call, reuses `document_type` + clinical fields) |
-| `lab_trends.py` | Pure Python trend engine — parses dates/values, computes direction, detects range crossings, flags approaching thresholds |
-| `retrieval.py` | Chunks timeline into Medication / Lab / ClinicalNote / Allergy texts, embeds (OpenAI `text-embedding-3-small` if set else local ONNX MiniLM), indexes via `vector_store` abstraction, single-shot Q&A |
+| `lab_trends.py` | Pure Python trend engine — parses dates/values, computes direction, detects range crossings, approaching thresholds, and repeated worsening abnormal patterns that need professional review |
+| `medication_history.py` | Deterministic medication change/continuation detection plus document/page source attribution for every safety flag |
+| `retrieval.py` | Chunks timeline into Medication / Lab / Diagnosis / ClinicalNote / Allergy texts, embeds (OpenAI `text-embedding-3-small` if set else local ONNX MiniLM), indexes via `vector_store` abstraction, single-shot Q&A |
 | `vector_store.py` | Abstraction over Chroma (`VECTOR_STORE=chroma`, local `CHROMA_DIR`) and Supabase `chunks` table (`VECTOR_STORE=supabase`, no volume, brute-force cosine) |
 | `jobs.py` | Thread-safe parent jobs with independent per-file progress (`queued → reading → extracting → saving → ready/failed`) and optional Supabase persistence |
 | `conversation.py` | In-memory conversation store, rewrites follow-ups like “was that safe?” into self-contained retrieval queries, summarizes older turns to keep context bounded |
 | `api.py` | FastAPI wrapper — lifespan startup, CORS (fixed `*` + credentials handling), all `/api/v1/` routes, multipart upload handling (sync 201 or async 202 via `USE_BACKGROUND_JOBS`/`?async=true`), merges new docs with old, fixes `_source.file` to original filename |
 | `auth.py` | Validates `Authorization: Bearer <jwt>` + `X-User-Id`, plus issues anonymous JWTs via `issue_anonymous_token()` |
-| `care/` | Provider-neutral `Facility` model/factory plus the server-side Google Places API (New) adapter for Find Care |
+| `care/` | Provider-neutral facility model, deterministic issue→specialty recommendation rules, and server-side Google Places API (New) search/ranking with specialty, distance, rating, and listed-hours signals |
 | `db.py` | Supabase Postgres persistence (documents append-only + patient snapshot upsert), chained `.order("uploaded_at").order("id")` |
 | `storage.py` | Uploads original file to Cloudinary `mediscan/<user_id>/...` |
 | `supabase_schema.sql` | One-time table creation with RLS enabled/no policies (only service_role key can access) |
@@ -138,6 +139,7 @@ Base URL `http://127.0.0.1:8000`, all routes under `/api/v1/`.
 
 `frontend/` is React + TS + Vite + Tailwind. Zero-login anonymous model:
 
+- **Language & accessibility** — reusable `I18nProvider` with English, Sinhala, and Tamil catalogs; persisted/browser-detected language; locale-aware formatting; skip navigation, route announcements, keyboard-safe responsive navigation, accessible medical tables/charts/tabs/forms, and reduced-motion support. See `frontend/ACCESSIBILITY_I18N.md`.
 - **Landing** `/` — hero, anonymous session explanation, Start My Health Record → auto-creates workspace via `POST /anonymous/session` (token stored in `localStorage.medimind.session.v1`).
 - **Overview / Dashboard** `/dashboard` — documents / medicines / labs / safety counts, latest safety warnings, recent history, pipeline hint.
 - **Upload** `/upload` — drag-drop and dedup (`name-size-lastModified`); shows each document's independent queue/read/extract/save state, then clearly separates the one-time record finalization steps (history → safety → search).
@@ -148,7 +150,7 @@ Base URL `http://127.0.0.1:8000`, all routes under `/api/v1/`.
 - **Safety** `/safety` — allergy conflicts (danger), interactions with severity, dosage conflicts, duplicates, overall recommendation.
 - **Ask** `/ask` — single-shot RAG, configurable `top_k`, confidence, sources, `recommend_professional_consult`.
 - **Conversations** `/conversations` — multi-turn, query rewriting (`rewritten_query`), session resume by ID, 404 handling when in-memory session expired after restart.
-- **Find Care** `/find-care` — search-as-you-type or current location → map confirmation → provider-neutral hospitals, clinics, pharmacies, laboratories, and doctors within the selected radius.
+- **Find Care** `/find-care` — high-risk or low-confidence finding → explained specialty suggestion → location, availability, and 5/10/20/50 km radius → real provider-neutral hospitals, clinics, pharmacies, laboratories, and doctors, ranked transparently from Google directory signals; zero-result searches can expand radius or broaden specialty.
 
 States distinguished: loading, empty 404 (no record), 401 auth, 422 validation/non-medical, 502 ML pipeline, network/CORS.
 
@@ -178,6 +180,8 @@ The location picker combines Photon/OpenStreetMap landmark search with Open-Mete
 `vite.config.ts` proxy target overridable via `VITE_API_PROXY_TARGET`. For prod:
 
 ```bash
+npm run lint
+npm test          # StrictMode, auth, i18n persistence, and axe accessibility checks
 npm run build
 npm run preview
 ```
@@ -226,8 +230,13 @@ X-User-Id: <user_id>
 
 `GET /api/v1/timeline`, `/cross-check`, `/lab-trends` — 404 if no snapshot yet. Lab trends recomputed on-the-fly for old snapshots lacking field.
 
+#### Care recommendation and directory
+`GET /api/v1/care/recommendation` → transparent `{triggered, issue_type, specialty, specialty_query, facility_kind, urgency, reason, evidence[], disclaimer}` derived from saved safety/lab evidence.
+
+`GET /api/v1/care/facilities?location=...&latitude=...&longitude=...&kind=...&specialty=...&availability=...` → real provider listings with specialty-search match, distance, listed-hours match, rating, and an explained ranking. Specialty is a directory query match—not a referral or suitability claim.
+
 #### Single-shot Q&A
-`POST /api/v1/qa {question, chat_history?, top_k}` → `{answer, confidence, sources[], recommend_professional_consult}`
+`POST /api/v1/qa {question, chat_history?, top_k}` → `{answer, confidence, confidence_reason, sources[], recommend_professional_consult}`
 
 Q&A self-heals: if the patient's vector index is empty but their documents are saved in the DB (e.g. a local `chroma_db` wiped by a redeploy with no volume, or a Supabase `chunks` table migrated after the last upload), the index is rebuilt from those saved documents on the next question, so it answers normally instead of reporting "no indexed records". If `VECTOR_STORE=supabase` and the `chunks` table is missing entirely, Q&A returns 502 with instructions to run `supabase_schema.sql` rather than a misleading empty answer.
 

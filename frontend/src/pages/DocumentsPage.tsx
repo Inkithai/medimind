@@ -9,11 +9,13 @@ import { StatusBadge } from "../components/StatusBadge";
 import { FileIcon, LinkIcon, UploadIcon } from "../components/icons";
 import { useAuth } from "../context/AuthContext";
 import { useStrictEffect } from "../hooks/useStrictEffect";
+import { useI18n } from "../i18n/I18nContext";
 import type { Timeline, Visit } from "../types/api";
 import { documentTypeLabel, formatDate } from "../utils/format";
 
 export function DocumentsPage() {
   const { credentials } = useAuth();
+  const { t, formatNumber } = useI18n();
   const [timeline, setTimeline] = useState<Timeline | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
@@ -41,17 +43,15 @@ export function DocumentsPage() {
     <div className="space-y-6">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="page-title">Medical Records</h1>
-          <p className="secondary-text mt-2">
-            Every document you've uploaded — and what we found inside each one.
-          </p>
+          <h1 className="page-title">{t("documentsPage.title")}</h1>
+          <p className="secondary-text mt-2">{t("documentsPage.subtitle")}</p>
         </div>
         <Link to="/upload" className="btn-primary">
-          <UploadIcon className="h-5 w-5" /> Upload
+          <UploadIcon className="h-5 w-5" /> {t("upload.upload")}
         </Link>
       </div>
 
-      {loading && <LoadingState label="Loading documents" />}
+      {loading && <LoadingState label={t("documentsPage.loading")} />}
 
       {!loading && error !== null && <ErrorState error={error} onRetry={() => void load()} />}
 
@@ -61,10 +61,8 @@ export function DocumentsPage() {
             <Card>
               <CardBody>
                 <div className="py-12 text-center">
-                  <p className="text-sm font-semibold text-slate-700">No documents yet</p>
-                  <p className="mx-auto mt-1 max-w-md text-sm text-slate-500">
-                    Upload your first prescription, lab report, or discharge summary to build your MediMind record.
-                  </p>
+                  <h2 className="text-sm font-semibold text-slate-800">{t("documentsPage.emptyTitle")}</h2>
+                  <p className="mx-auto mt-1 max-w-md text-sm text-slate-600">{t("documentsPage.emptyBody")}</p>
                   <Link
                     to="/upload"
                     className="mt-4 inline-flex items-center gap-2 rounded-xl bg-brand-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-brand-700"
@@ -79,9 +77,9 @@ export function DocumentsPage() {
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    {timeline.visits.length} document(s)
+                    {formatNumber(timeline.visits.length)} {t("common.documents")}
                   </p>
-                  <p className="text-xs text-slate-400">Click a file to view it</p>
+                  <p className="text-xs text-slate-600">{t("documentsPage.clickFile")}</p>
                 </div>
 
                 <div className="space-y-2">
@@ -89,8 +87,11 @@ export function DocumentsPage() {
                     const isSelected = selected?._source.file === visit._source.file && selected?.date === visit.date;
                     return (
                       <button
+                        type="button"
                         key={`${visit._source.file}-${idx}`}
                         onClick={() => setSelected(visit)}
+                        aria-pressed={isSelected}
+                        aria-label={`${visit._source.file} — ${documentTypeLabel(visit.document_type)} — ${formatDate(visit.date)}`}
                         className={`w-full rounded-xl border bg-white px-4 py-3 text-left shadow-sm transition hover:shadow ${
                           isSelected ? "border-brand-300 ring-2 ring-brand-100" : "border-slate-200"
                         }`}
@@ -148,10 +149,8 @@ export function DocumentsPage() {
                 ) : (
                   <Card>
                     <CardBody className="py-16 text-center">
-                      <p className="text-base font-medium text-slate-700">Select a document</p>
-                      <p className="secondary-text mx-auto mt-1 max-w-sm">
-                        Choose a file on the left to see the original and everything we found inside it.
-                      </p>
+                      <h2 className="text-base font-medium text-slate-800">{t("documentsPage.select")}</h2>
+                      <p className="secondary-text mx-auto mt-1 max-w-sm">{t("documentsPage.selectBody")}</p>
                     </CardBody>
                   </Card>
                 )}

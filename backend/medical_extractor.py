@@ -1009,7 +1009,7 @@ def _format_ladder(
         # Compact JSON materially reduces prompt tokens on the 8K TPM tier.
         f"{json.dumps(schema, separators=(',', ':'))}\n"
         "Example of the required shape (illustrative values, adapt to the actual document):\n"
-        '{\n  "document_type": "prescription",\n  "date": "2024-03-15",\n  "provider_or_doctor": "Dr. Smith",\n  "patient_name": "John Doe",\n  "medications": [],\n  "lab_results": [],\n  "allergies_noted": [],\n  "clinical_notes": null,\n  "illegible_or_low_confidence_fields": [],\n  "overall_confidence": 0.92\n}\n'
+        '{\n  "document_type": "prescription",\n  "date": "2024-03-15",\n  "provider_or_doctor": "Dr. Smith",\n  "patient_name": "John Doe",\n  "medications": [],\n  "lab_results": [],\n  "allergies_noted": [],\n  "diagnoses_or_conditions": [],\n  "clinical_notes": null,\n  "illegible_or_low_confidence_fields": [],\n  "overall_confidence": 0.92\n}\n'
     )
     if model in _STRICT_SCHEMA_MODELS:
         return [
@@ -1790,6 +1790,9 @@ the same regardless of what language or units each was printed in:
   generic mapping is.
 
 Rules:
+- Extract diagnoses_or_conditions only when the document explicitly names
+  them. Preserve the printed wording; do not infer a diagnosis from a test,
+  symptom, or medication.
 - If handwriting is unclear, make your best guess but LOWER the confidence
   score for that field and add a note to illegible_or_low_confidence_fields.
 - Never invent data. Use null for missing string fields (per the schema).
@@ -1849,14 +1852,15 @@ EXTRACTION_JSON_SCHEMA = {
             },
         },
         "allergies_noted": {"type": "array", "items": {"type": "string"}},
+        "diagnoses_or_conditions": {"type": "array", "items": {"type": "string"}},
         "clinical_notes": {"type": ["string", "null"]},
         "illegible_or_low_confidence_fields": {"type": "array", "items": {"type": "string"}},
         "overall_confidence": {"type": "number"},
     },
     "required": [
         "document_type", "date", "provider_or_doctor", "patient_name",
-        "medications", "lab_results", "allergies_noted", "clinical_notes",
-        "illegible_or_low_confidence_fields", "overall_confidence",
+        "medications", "lab_results", "allergies_noted", "diagnoses_or_conditions",
+        "clinical_notes", "illegible_or_low_confidence_fields", "overall_confidence",
     ],
     "additionalProperties": False,
 }
@@ -1932,6 +1936,18 @@ def image_to_base64(img: Image.Image) -> str:
 # 3. Vision extraction call
 # ---------------------------------------------------------------------------
 
+def _normalize_extraction_result(result: Dict[str, Any]) -> Dict[str, Any]:
+    """Backfill fields when a provider falls back from strict JSON schema."""
+    diagnoses = result.get("diagnoses_or_conditions")
+    if not isinstance(diagnoses, list):
+        result["diagnoses_or_conditions"] = []
+    else:
+        result["diagnoses_or_conditions"] = [
+            value.strip() for value in diagnoses if isinstance(value, str) and value.strip()
+        ]
+    return result
+
+
 def extract_from_image(img: Image.Image, model: str = VISION_MODEL) -> Dict[str, Any]:
     """Send a single page image to the vision model and parse structured JSON.
 
@@ -1959,7 +1975,7 @@ def extract_from_image(img: Image.Image, model: str = VISION_MODEL) -> Dict[str,
         ],
         strict_format=EXTRACTION_RESPONSE_FORMAT,
     )
-    return _parse_json_object(raw)
+    return _normalize_extraction_result(_parse_json_object(raw))
 
 
 def extract_from_text(text: str, model: str = MODEL) -> Dict[str, Any]:
@@ -1973,7 +1989,7 @@ def extract_from_text(text: str, model: str = MODEL) -> Dict[str, Any]:
         user_content=f"Extract structured data from this document text:\n\n{text}",
         strict_format=EXTRACTION_RESPONSE_FORMAT,
     )
-    return _parse_json_object(raw)
+    return _normalize_extraction_result(_parse_json_object(raw))
 
 
 VISION_OCR_CONFIDENCE_CEILING = 0.85  # a vision/handwriting read is never "fully certain"
@@ -2324,17 +2340,39 @@ def build_patient_timeline(raw_results: List[Dict[str, Any]]) -> Dict[str, Any]:
 
     all_medications = []
     all_lab_results = []
+    all_diagnoses = []
     all_allergies = set()
 
     for d in docs_sorted:
         visit_date = d.get("date")
-        source_file = d.get("_source", {}).get("file")
+        source = d.get("_source", {})
+        source_file = source.get("file")
+        source_page = source.get("page")
 
         for med in d.get("medications", []):
-            all_medications.append({**med, "date": visit_date, "source_file": source_file})
+            all_medications.append({
+                **med,
+                "date": visit_date,
+                "source_file": source_file,
+                "source_page": source_page,
+            })
 
         for lab in d.get("lab_results", []):
-            all_lab_results.append({**lab, "date": visit_date, "source_file": source_file})
+            all_lab_results.append({
+                **lab,
+                "date": visit_date,
+                "source_file": source_file,
+                "source_page": source_page,
+            })
+
+        for diagnosis in d.get("diagnoses_or_conditions", []) or []:
+            if isinstance(diagnosis, str) and diagnosis.strip():
+                all_diagnoses.append({
+                    "name": diagnosis.strip(),
+                    "date": visit_date,
+                    "source_file": source_file,
+                    "source_page": source_page,
+                })
 
         for allergy in d.get("allergies_noted", []) or []:
             all_allergies.add(allergy)
@@ -2343,6 +2381,7 @@ def build_patient_timeline(raw_results: List[Dict[str, Any]]) -> Dict[str, Any]:
         "visits": docs_sorted,               # one entry per document, chronological
         "medications_timeline": all_medications,
         "lab_results_timeline": all_lab_results,
+        "diagnoses_timeline": all_diagnoses,
         "known_allergies": sorted(all_allergies),
     }
 
@@ -2614,6 +2653,10 @@ def cross_check_prescriptions(timeline: Dict[str, Any], model: str = MODEL) -> D
         if dup_sources not in existing_source_sets:
             existing.append(dup)
 
+    from medication_history import detect_medication_transitions, enrich_cross_check_sources
+
+    result.update(detect_medication_transitions(timeline))
+    enrich_cross_check_sources(result, timeline)
     return result
 
 

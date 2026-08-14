@@ -151,6 +151,56 @@ def _approaching_boundary(
     return False
 
 
+def _trend_risk(
+    points: List[Dict[str, Any]],
+    direction: str,
+    range_bounds: Optional[Tuple[float, float]],
+    approaching: bool,
+) -> Tuple[str, str]:
+    """Classify the observed numeric pattern, not clinical severity.
+
+    A high-risk trend means repeated abnormal values moving farther away from
+    the supplied reference range. It is a prompt for professional review and
+    must never be presented as a diagnosis or emergency determination.
+    """
+    latest_flag = points[-1]["flag"]
+    worsening = (
+        (latest_flag == "high" and "increasing" in direction)
+        or (latest_flag == "low" and "decreasing" in direction)
+    )
+    consecutive_abnormal = 0
+    for point in reversed(points):
+        if point["flag"] in {"high", "low"}:
+            consecutive_abnormal += 1
+        else:
+            break
+
+    materially_outside = False
+    if range_bounds and latest_flag in {"high", "low"}:
+        low, high = range_bounds
+        width = max(high - low, abs(high), abs(low), 1.0)
+        latest = points[-1]["_value"]
+        excursion = max(latest - high, low - latest, 0.0)
+        materially_outside = excursion >= 0.25 * width
+
+    if worsening and (consecutive_abnormal >= 2 or materially_outside):
+        return (
+            "high",
+            "Repeated abnormal readings are moving farther from the supplied reference range. Prompt professional review is recommended.",
+        )
+    if latest_flag in {"high", "low"}:
+        return (
+            "moderate",
+            "The latest reading is outside the supplied reference range and should be reviewed by a healthcare professional.",
+        )
+    if approaching:
+        return (
+            "low",
+            "The latest reading remains in range but is trending toward a boundary; routine professional review may be useful.",
+        )
+    return ("none", "No high-risk numeric pattern was detected from the supplied values and ranges.")
+
+
 def _crossing_point(points: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     """First point where the flag changed from 'normal' to something else,
     scanning chronologically. Returns None if it never crossed, or if it
@@ -255,6 +305,7 @@ def track_lab_trends(timeline: Dict[str, Any]) -> Dict[str, Any]:
                 "unit": e.get("unit") or "",
                 "reference_range": e.get("reference_range"),
                 "source_file": e.get("source_file"),
+                "source_page": e.get("source_page"),
                 "confidence": e.get("confidence", 1.0),
             })
             if e.get("unit"):
@@ -282,6 +333,7 @@ def track_lab_trends(timeline: Dict[str, Any]) -> Dict[str, Any]:
         direction = _direction([p["_value"] for p in usable], range_bounds)
         crossing = _crossing_point(usable)
         approaching = _approaching_boundary(usable[-1]["_value"], usable[-1]["flag"], range_bounds, direction)
+        risk_level, risk_reason = _trend_risk(usable, direction, range_bounds, approaching)
 
         # Confidence: average of the source extraction confidences, discounted
         # for dropped/unusable readings and for disagreeing units or reference
@@ -298,7 +350,13 @@ def track_lab_trends(timeline: Dict[str, Any]) -> Dict[str, Any]:
             "unit": unit,
             "reference_range": usable[-1]["reference_range"],
             "data_points": [
-                {"date": p["date"], "value": p["value"], "flag": p["flag"], "source_file": p["source_file"]}
+                {
+                    "date": p["date"],
+                    "value": p["value"],
+                    "flag": p["flag"],
+                    "source_file": p["source_file"],
+                    "source_page": p["source_page"],
+                }
                 for p in usable
             ],
             "direction": direction,
@@ -307,6 +365,9 @@ def track_lab_trends(timeline: Dict[str, Any]) -> Dict[str, Any]:
                 {"date": crossing["date"], "flag": crossing["flag"]} if crossing else None
             ),
             "approaching_threshold": approaching,
+            "risk_level": risk_level,
+            "risk_reason": risk_reason,
+            "professional_review_recommended": risk_level in {"moderate", "high"},
             "confidence": round(min(base_confidence, 0.97), 2),
             "explanation": _explain(test_name, unit, usable, direction, range_bounds, crossing, approaching),
         })

@@ -137,6 +137,14 @@ def _allergy_chunk_text(allergies: List[str]) -> str:
     return "Known allergies: " + ", ".join(allergies) + "."
 
 
+def _diagnosis_chunk_text(diagnosis: Dict[str, Any]) -> str:
+    return (
+        f"Diagnosis or condition explicitly mentioned: {diagnosis.get('name', 'unknown')} "
+        f"on {diagnosis.get('date') or 'an unknown date'} "
+        f"(source: {diagnosis.get('source_file') or 'unknown file'})."
+    )
+
+
 def build_chunks_from_timeline(patient_key: str, timeline: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
     Converts a patient timeline (the dict returned by build_patient_timeline())
@@ -158,6 +166,7 @@ def build_chunks_from_timeline(patient_key: str, timeline: Dict[str, Any]) -> Li
                 "patient_key": patient_key,
                 "date": med.get("date") or "",
                 "source_file": med.get("source_file") or "",
+                "source_page": med.get("source_page") or 0,
                 "chunk_type": "medication",
             },
         })
@@ -170,6 +179,7 @@ def build_chunks_from_timeline(patient_key: str, timeline: Dict[str, Any]) -> Li
                 "patient_key": patient_key,
                 "date": lab.get("date") or "",
                 "source_file": lab.get("source_file") or "",
+                "source_page": lab.get("source_page") or 0,
                 "chunk_type": "lab_result",
             },
         })
@@ -185,7 +195,21 @@ def build_chunks_from_timeline(patient_key: str, timeline: Dict[str, Any]) -> Li
                 "patient_key": patient_key,
                 "date": visit.get("date") or "",
                 "source_file": source_file or "",
+                "source_page": visit.get("_source", {}).get("page") or 0,
                 "chunk_type": "clinical_note",
+            },
+        })
+
+    for i, diagnosis in enumerate(timeline.get("diagnoses_timeline", []) or []):
+        chunks.append({
+            "id": _chunk_id(patient_key, diagnosis.get("source_file"), "diagnosis", i),
+            "text": _diagnosis_chunk_text(diagnosis),
+            "metadata": {
+                "patient_key": patient_key,
+                "date": diagnosis.get("date") or "",
+                "source_file": diagnosis.get("source_file") or "",
+                "source_page": diagnosis.get("source_page") or 0,
+                "chunk_type": "diagnosis",
             },
         })
 
@@ -346,7 +370,10 @@ Rules:
   conflicts, or changing/adjusting a dosage, explicitly recommend the
   patient consult a doctor or pharmacist, and set
   recommend_professional_consult to true.
-- Cite the date and source_file of every chunk you rely on in "sources".
+- Cite the date, source_file, and page (null when unavailable) of every chunk you rely on in "sources".
+- Give a concise confidence_reason that says whether the evidence was direct,
+  combined across records, partial, or insufficient. Never use model internals
+  or hidden reasoning in this explanation.
 - Respond with STRICT JSON only, matching the required schema.
 
 CONFIDENCE SCORING — "confidence" reflects how directly the retrieved
@@ -363,6 +390,7 @@ ANSWER_JSON_SCHEMA = {
     "properties": {
         "answer": {"type": "string"},
         "confidence": {"type": "number"},
+        "confidence_reason": {"type": "string"},
         "sources": {
             "type": "array",
             "items": {
@@ -370,14 +398,18 @@ ANSWER_JSON_SCHEMA = {
                 "properties": {
                     "date": {"type": "string"},
                     "source_file": {"type": "string"},
+                    "page": {"type": ["integer", "null"]},
                 },
-                "required": ["date", "source_file"],
+                "required": ["date", "source_file", "page"],
                 "additionalProperties": False,
             },
         },
         "recommend_professional_consult": {"type": "boolean"},
     },
-    "required": ["answer", "confidence", "sources", "recommend_professional_consult"],
+    "required": [
+        "answer", "confidence", "confidence_reason", "sources",
+        "recommend_professional_consult",
+    ],
     "additionalProperties": False,
 }
 
@@ -393,6 +425,7 @@ ANSWER_RESPONSE_FORMAT = {
 _NO_INFO_ANSWER = {
     "answer": "I don't have enough information — no indexed records were found for this patient yet.",
     "confidence": 0.0,
+    "confidence_reason": "No indexed patient records were available to support an answer.",
     "sources": [],
     "recommend_professional_consult": False,
 }
@@ -405,10 +438,11 @@ _NO_INFO_ANSWER = {
 _NO_INDEXABLE_CONTENT_ANSWER = {
     "answer": (
         "I don't have enough information — your records were found, but they "
-        "contain no medications, lab results, clinical notes, or allergies for "
+        "contain no medications, lab results, clinical notes, diagnoses, or allergies for "
         "Q&A to search."
     ),
     "confidence": 0.0,
+    "confidence_reason": "The uploaded records contain no medications, lab results, clinical notes, diagnoses, or allergies that Q&A can retrieve.",
     "sources": [],
     "recommend_professional_consult": False,
 }
@@ -546,7 +580,7 @@ def answer_question(
 
     context_blocks = [
         f"[date: {meta.get('date') or 'unknown'} | source_file: {meta.get('source_file') or 'unknown'} "
-        f"| type: {meta.get('chunk_type') or 'unknown'}]\n{text}"
+        f"| page: {meta.get('source_page') or 'unknown'} | type: {meta.get('chunk_type') or 'unknown'}]\n{text}"
         for text, meta in zip(docs, metadatas)
     ]
     context_str = "\n\n".join(context_blocks)
@@ -589,6 +623,19 @@ def answer_question(
     # to plain-text mode) doesn't blow up the Q&A endpoint.
     from medical_extractor import _parse_json_object
     try:
-        return _parse_json_object(raw)
+        result = _parse_json_object(raw)
+        for source in result.get("sources", []) or []:
+            if isinstance(source, dict):
+                source.setdefault("page", None)
+        if not result.get("confidence_reason"):
+            confidence = result.get("confidence")
+            if isinstance(confidence, (int, float)) and confidence >= 0.9:
+                reason = "The retrieved records directly and consistently support this answer."
+            elif isinstance(confidence, (int, float)) and confidence >= 0.6:
+                reason = "The answer combines relevant records, but some supporting detail is incomplete."
+            else:
+                reason = "The retrieved evidence is partial or insufficient, so this answer has low confidence."
+            result["confidence_reason"] = reason
+        return result
     except ValueError as e:
         raise RuntimeError(f"Chat model returned unparseable output: {e}") from e

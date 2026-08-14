@@ -22,6 +22,11 @@ class Facility:
     maps_url: Optional[str] = None
     opening_hours: Optional[List[str]] = None
     open_now: Optional[bool] = None
+    specialty: Optional[str] = None
+    specialty_match: Optional[float] = None
+    availability_match: Optional[bool] = None
+    ranking_score: Optional[float] = None
+    ranking_reason: Optional[str] = None
     source: str = "public listings"
 
     def to_dict(self) -> Dict[str, Any]:

@@ -61,6 +61,8 @@ def _has_medical_content(doc: Dict[str, Any]) -> bool:
         return True
     if doc.get("allergies_noted"):
         return True
+    if doc.get("diagnoses_or_conditions"):
+        return True
     return False
 
 
