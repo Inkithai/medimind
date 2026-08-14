@@ -2228,7 +2228,17 @@ def _flatten_documents(raw_results: List[Dict[str, Any]]) -> List[Dict[str, Any]
 def _is_demo_document(d: Dict[str, Any]) -> bool:
     """Detect placeholder/template documents (e.g. sample datasets that
     include a 'DEMO PATIENT' / 'DEMO MEDICINE' mock page) so they don't get
-    silently treated as real patient data."""
+    silently treated as real patient data.
+
+    Also treats documents produced by generate_lab_test_data.py as demo:
+    their `_source.method == "synthetic"` is a structural marker (not a
+    content guess), so synthetic fixtures can never be silently ingested
+    as real patient data if one is ever accidentally fed to the upload
+    pipeline."""
+    source = d.get("_source")
+    if isinstance(source, dict) and str(source.get("method") or "").strip().lower() == "synthetic":
+        return True
+
     name = (d.get("patient_name") or "").upper()
     if "DEMO" in name or "SAMPLE" in name or "DUMMY" in name:
         return True

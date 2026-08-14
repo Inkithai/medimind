@@ -50,12 +50,61 @@ def _parse_date(date_str: Optional[str]) -> Optional[datetime]:
 
 
 def _parse_value(value: Any) -> Optional[float]:
+    """Extracts the numeric magnitude from an extracted lab value.
+
+    Thousands separators must be consumed as part of the number. A bare
+    `\\d+(\\.\\d+)?` search stops at the first comma, so a platelet count of
+    "150,000" parsed as 150 — a ~1000x understatement that silently
+    inverts trend direction and reads as a critical thrombocytopenia
+    rather than a normal count. Same class of error for WBC/RBC counts
+    and any lab reported in the hundreds of thousands.
+
+    Both conventions appear in real reports, so the separator is
+    disambiguated by grouping rather than assumed:
+      * "150,000"    -> 150000.0  (comma = thousands, groups of 3)
+      * "1.234,56"   -> 1234.56   (European: dot thousands, comma decimal)
+      * "5,3"        -> 5.3       (comma decimal, no 3-digit group)
+    Qualifiers are dropped ("<5" -> 5.0), matching prior behavior: the
+    magnitude is what trends, and the flag field carries the censoring.
+    """
     if value is None:
+        return None
+    if isinstance(value, bool):  # bool is an int subclass; not a lab value
         return None
     if isinstance(value, (int, float)):
         return float(value)
-    match = re.search(r"-?\d+(\.\d+)?", str(value))
-    return float(match.group()) if match else None
+    text = str(value).strip()
+    if not text:
+        return None
+
+    # Grab a numeric run that may contain , and . as group/decimal marks.
+    match = re.search(r"-?\d[\d,.]*", text)
+    if not match:
+        return None
+    token = match.group().rstrip(".,")
+    if not token or token in ("-",):
+        return None
+
+    has_comma, has_dot = "," in token, "." in token
+    if has_comma and has_dot:
+        # Whichever separator appears last is the decimal mark.
+        if token.rfind(",") > token.rfind("."):
+            token = token.replace(".", "").replace(",", ".")   # 1.234,56
+        else:
+            token = token.replace(",", "")                     # 1,234.56
+    elif has_comma:
+        parts = token.lstrip("-").split(",")
+        # Thousands grouping iff every group after the first is exactly 3
+        # digits ("150,000", "1,234,567"); otherwise a decimal comma.
+        if len(parts) > 1 and all(len(p) == 3 and p.isdigit() for p in parts[1:]):
+            token = token.replace(",", "")
+        else:
+            token = token.replace(",", ".", 1).replace(",", "")
+
+    try:
+        return float(token)
+    except ValueError:
+        return None
 
 
 def _parse_range(reference_range: Optional[str]) -> Optional[Tuple[float, float]]:
@@ -68,35 +117,24 @@ def _parse_range(reference_range: Optional[str]) -> Optional[Tuple[float, float]
     # The pattern looks for number, optional spaces, hyphen, optional spaces, number.
     # This works even when units follow, e.g. "70-99 mg/dL" -> 70,99.
     s = reference_range.strip()
-    # First try strict anchored regex (keeps previous behavior for clean inputs)
-    m = re.match(r"^\s*(-?\d+(?:\.\d+)?)\s*-\s*(-?\d+(?:\.\d+)?)\s*$", s)
+
+    # A number may carry thousands separators ("150,000-450,000") and an
+    # explicit leading sign. The separator between low and high is a
+    # hyphen, an en/em dash, or the word "to" — real reports use all three.
+    num = r"[+-]?\d[\d,]*(?:\.\d+)?"
+    sep = r"(?:\s*(?:[-–—]|to)\s*|\s+-\s+)"
+
+    m = re.search(rf"({num}){sep}({num})", s, flags=re.IGNORECASE)
     if m:
-        low, high = float(m.group(1)), float(m.group(2))
-        return (low, high) if low <= high else (high, low)
-    # Fallback: find low-high pattern anywhere (handles units / prefix text)
-    m2 = re.search(r"(-?\d+(?:\.\d+)?)\s*-\s*(-?\d+(?:\.\d+)?)", s)
-    if m2:
-        try:
-            low, high = float(m2.group(1)), float(m2.group(2))
-            # Guard against still mis-reading hyphen as negative when low is positive
-            # and high negative with same abs as expected positive: e.g. if we still
-            # get 70 and -99, the second number's absolute value is plausible but
-            # sign is wrong — if low>0 and high<0 and abs(high) >0, flip sign if
-            # that makes sense: e.g. 70 and -99 -> treat -99 as 99.
-            # Simpler: if high <0 and low>=0 and reference_range contains "-"
-            # as separator, and abs(high) != low, assume separator mis-read.
-            # However our regex already avoids that by requiring spaces around dash
-            #? Actually it allows no spaces, but group for second number includes optional
-            # leading minus. To disambiguate "70-99" vs "70 - -5", we check:
-            # if low>=0 and high<0 and f"{int(low)}-{int(abs(high))}" in s.replace(" ",""),
-            # then high should be positive.
-            if low >= 0 and high < 0:
-                # Check if the string contains "low-abs(high)" as substring without second minus
-                if f"{m2.group(1)}-{abs(high):g}" in s.replace(" ", "") or f"{int(low)}-{int(abs(high))}" in s:
-                    high = abs(high)
+        low, high = _parse_value(m.group(1)), _parse_value(m.group(2))
+        if low is not None and high is not None:
             return (low, high) if low <= high else (high, low)
-        except ValueError:
-            return None
+
+    # Single-bounded ranges ("<5", "≤5", ">10", "up to 40") are common for
+    # markers with only one clinically meaningful limit. Returning None
+    # here (rather than a bogus two-sided range) is deliberate: it
+    # disables boundary/width math for this test instead of computing
+    # "approaching" against a limit that was never stated.
     return None
 
 
@@ -162,6 +200,19 @@ def _crossing_point(points: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     return None
 
 
+def _returned_to_normal(points: List[Dict[str, Any]], crossing: Optional[Dict[str, Any]]) -> bool:
+    """True when the series crossed into an abnormal range but the most
+    recent reading is back to normal.
+
+    _explain() used to append 'and has stayed there since' to every
+    crossing unconditionally, which is false for the single most
+    encouraging pattern in the data: abnormal result, treatment, recovery
+    (normal -> high -> normal). The patient was told a resolved excursion
+    was ongoing. Distinguishing the two also lets the explanation lead
+    with the recovery instead of the crossing."""
+    return crossing is not None and points[-1]["flag"] == "normal"
+
+
 def _explain(
     test_name: str,
     unit: str,
@@ -188,7 +239,16 @@ def _explain(
             f"to {values[-1]:g} {unit} ({trail})."
         )
 
-    if crossing is not None:
+    if crossing is not None and points[-1]["flag"] == "normal":
+        # Crossed out of range, but the latest reading is back to normal.
+        # Reporting this as an ongoing excursion ("has stayed there since")
+        # misrepresents a recovery — the most reassuring pattern in the data.
+        base += (
+            f" It moved out of the normal range into the '{crossing['flag']}' range "
+            f"at the {crossing.get('date', 'interim')} test, but the most recent reading is "
+            f"back within the normal range."
+        )
+    elif crossing is not None:
         base += (
             f" It moved from within the normal range into the '{crossing['flag']}' range "
             f"starting with the {crossing.get('date', 'most recent')} test, and has stayed there since."
@@ -196,9 +256,19 @@ def _explain(
     elif points[-1]["flag"] != "normal" and points[0]["flag"] != "normal":
         base += f" It was already outside the normal range at the earliest available test and has remained '{points[-1]['flag']}'."
     elif approaching:
+        # Use the same substring test as _approaching_boundary() above, NOT
+        # direction.startswith("increasing"). _direction() can return
+        # "fluctuating (net increasing)" for a noisy-but-climbing series —
+        # that string does not *start* with "increasing", so startswith()
+        # fell through to "lower" and told the patient a rising value was
+        # drifting toward the BOTTOM of its reference range. Medically
+        # inverted advice, emitted silently with HTTP 200, and only on the
+        # approaching_threshold early-warning path — i.e. exactly when the
+        # feature matters most. Noisy series are the common case in real
+        # lab data, so this fired often.
         base += (
             f" It's still within the normal range but has been trending toward the "
-            f"{'upper' if direction.startswith('increasing') else 'lower'} boundary — worth watching even "
+            f"{'upper' if 'increasing' in direction else 'lower'} boundary — worth watching even "
             "though it hasn't been flagged abnormal yet."
         )
     elif direction == "stable":
@@ -222,6 +292,7 @@ def track_lab_trends(timeline: Dict[str, Any]) -> Dict[str, Any]:
             "direction": "increasing" | "decreasing" | "stable" | "fluctuating (net increasing/decreasing)",
             "flag_sequence": "normal → normal → high",
             "crossed_into_abnormal_at": {"date":..., "flag":...} | None,
+            "returned_to_normal": bool,  # crossed out, then latest reading is normal
             "approaching_threshold": bool,
             "confidence": float,   # lower if dates/values had to be dropped, or reference ranges disagreed
             "explanation": str,    # plain-language, template-generated from the numbers above
@@ -276,12 +347,39 @@ def track_lab_trends(timeline: Dict[str, Any]) -> Dict[str, Any]:
 
         usable.sort(key=lambda p: p["_dt"])
 
+        # Refuse to trend across incompatible units. Values in mg/dL and
+        # mmol/L (or g/L vs g/dL) live on different scales, so subtracting
+        # them is meaningless: Glucose 95 mg/dL -> 5.3 mmol/L is the SAME
+        # clinical value, but the raw arithmetic reported it as a steep
+        # fall, and _explain() then relabelled every point with the last
+        # visit's unit ("from 95 mmol/L") — a fabricated number that reads
+        # as a hypoglycemic crash. Unit conversion needs a per-analyte
+        # molar-mass table we don't have, so the honest output is to
+        # decline the trend and say why, rather than emit a confident
+        # wrong direction. Comparison is case/whitespace-insensitive so
+        # "mg/dL" and "mg/dl " don't count as a real disagreement.
+        distinct_units = {
+            re.sub(r"\s+", "", p["unit"]).lower() for p in usable if p.get("unit")
+        }
+        if len(distinct_units) > 1:
+            insufficient.append({
+                "test_name": test_name,
+                "reason": (
+                    f"readings use {len(distinct_units)} different units "
+                    f"({', '.join(sorted(p['unit'] for p in usable if p.get('unit')))}) — "
+                    "values are not directly comparable, so no trend was computed. "
+                    "Re-check the source reports or record these under separate test names."
+                ),
+            })
+            continue
+
         unit = usable[-1]["unit"]
         range_bounds = _parse_range(usable[-1]["reference_range"])
 
         direction = _direction([p["_value"] for p in usable], range_bounds)
         crossing = _crossing_point(usable)
         approaching = _approaching_boundary(usable[-1]["_value"], usable[-1]["flag"], range_bounds, direction)
+        recovered = _returned_to_normal(usable, crossing)
 
         # Confidence: average of the source extraction confidences, discounted
         # for dropped/unusable readings and for disagreeing units or reference
@@ -306,6 +404,7 @@ def track_lab_trends(timeline: Dict[str, Any]) -> Dict[str, Any]:
             "crossed_into_abnormal_at": (
                 {"date": crossing["date"], "flag": crossing["flag"]} if crossing else None
             ),
+            "returned_to_normal": recovered,
             "approaching_threshold": approaching,
             "confidence": round(min(base_confidence, 0.97), 2),
             "explanation": _explain(test_name, unit, usable, direction, range_bounds, crossing, approaching),
@@ -357,6 +456,14 @@ if __name__ == "__main__":
     # Regression check for the reference-range parsing bug (hyphen
     # mis-read as a negative sign): must render as "70-99", not "-99-70".
     assert "70-99 mg/dL" in by_name["Fasting Glucose"]["explanation"], by_name["Fasting Glucose"]["explanation"]
+
+    # Thousand-separated lab values (WBC, platelets) must not be truncated
+    # at the first comma: "12,500" used to parse as 12.
+    assert _parse_value("12,500") == 12500.0
+    assert _parse_value("1,234.5") == 1234.5
+    assert _parse_value("6.1") == 6.1
+    assert _parse_value("<5.7") == 5.7
+    assert _parse_value("1,5") == 1.5
 
     for t in result["trends"]:
         print(f"--- {t['test_name']} ---")
