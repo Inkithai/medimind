@@ -1,10 +1,19 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import { LocationPicker } from "../components/location";
-import { LocationIcon, RefreshIcon } from "../components/icons";
+import { SpecialtySelector, FACILITY_TYPES } from "../components/SpecialtySelector";
+import {
+  LocationIcon,
+  RefreshIcon,
+  SparkleIcon,
+} from "../components/icons";
+import { Spinner } from "../components/Spinner";
 import { useAuth } from "../context/AuthContext";
+import { useStrictEffect } from "../hooks/useStrictEffect";
 import type { CareFacility, FacilityKind } from "../types/facility";
 import type { ConfirmedLocation } from "../types/location";
+import type { CareRecommendation } from "../types/recommendations";
 import { classNames } from "../utils/format";
 
 const STORAGE_KEY = "medimind.find-care.location.v1";
@@ -13,15 +22,6 @@ const SEARCH_RADIUS_METRES = 5_000;
 type SearchStatus = "idle" | "loading" | "success" | "error";
 type FacilityFilter = "all" | FacilityKind;
 type SearchKind = Exclude<FacilityFilter, "healthcare">;
-
-const FILTERS: Array<{ value: SearchKind; label: string }> = [
-  { value: "all", label: "All" },
-  { value: "hospital", label: "Hospitals" },
-  { value: "clinic", label: "Clinics" },
-  { value: "pharmacy", label: "Pharmacies" },
-  { value: "laboratory", label: "Laboratories" },
-  { value: "doctor", label: "Doctors" },
-];
 
 function readSavedLocation(): ConfirmedLocation | null {
   try {
@@ -56,9 +56,48 @@ export function FindCarePage() {
   const [status, setStatus] = useState<SearchStatus>("idle");
   const [error, setError] = useState<string | null>(null);
   const [searchKind, setSearchKind] = useState<SearchKind>("all");
+  const [specialty, setSpecialty] = useState<string>("");
   const [filter, setFilter] = useState<FacilityFilter>("all");
   const requestRef = useRef<AbortController | null>(null);
   const resultsRef = useRef<HTMLDivElement | null>(null);
+
+  // Recommendations state
+  const [recommendations, setRecommendations] = useState<CareRecommendation[]>([]);
+  const [recsLoading, setRecsLoading] = useState(true);
+  const [recsError, setRecsError] = useState<string | null>(null);
+  const [recsNote, setRecsNote] = useState<string | null>(null);
+
+  // Expand/collapse evidence per recommendation
+  const [expandedEvidence, setExpandedEvidence] = useState<Set<number>>(new Set());
+
+  const recsRequestRef = useRef<AbortController | null>(null);
+
+  // Load care recommendations on mount
+  useStrictEffect(() => {
+    const controller = new AbortController();
+    recsRequestRef.current = controller;
+    setRecsLoading(true);
+    setRecsError(null);
+
+    api
+      .getCareRecommendations(credentials, controller.signal)
+      .then((res) => {
+        if (controller.signal.aborted) return;
+        setRecommendations(res.recommendations || []);
+        setRecsNote(res.note || null);
+      })
+      .catch((err) => {
+        if (controller.signal.aborted) return;
+        // Non-critical: if recommendations fail, page still works
+        setRecsError(err instanceof Error ? err.message : "Could not load recommendations");
+        setRecommendations([]);
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setRecsLoading(false);
+      });
+
+    return () => controller.abort();
+  }, [credentials]);
 
   useEffect(() => () => requestRef.current?.abort(), []);
 
@@ -67,16 +106,19 @@ export function FindCarePage() {
     [facilities, filter]
   );
 
-  function handleConfirm(location: ConfirmedLocation) {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(location));
-    setSavedLocation(location);
-    setFilter(searchKind);
-    void loadFacilities(location, searchKind);
-    window.setTimeout(
-      () => resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }),
-      150
-    );
-  }
+  const handleConfirm = useCallback(
+    (location: ConfirmedLocation) => {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(location));
+      setSavedLocation(location);
+      setFilter(searchKind);
+      void loadFacilities(location, searchKind);
+      window.setTimeout(
+        () => resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }),
+        150
+      );
+    },
+    [searchKind]
+  );
 
   async function loadFacilities(location: ConfirmedLocation, requestedKind: SearchKind) {
     requestRef.current?.abort();
@@ -120,16 +162,36 @@ export function FindCarePage() {
     setPickerKey((value) => value + 1);
   }
 
+  /** Called when user clicks "Find nearby" on a recommendation card. */
+  function handleUseRecommendation(rec: CareRecommendation) {
+    setSpecialty(rec.specialty_key);
+    setSearchKind("doctor");
+    // Scroll to the search form
+    window.setTimeout(() => {
+      document.getElementById("care-search-form")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 100);
+  }
+
+  function toggleEvidence(idx: number) {
+    setExpandedEvidence((prev) => {
+      const next = new Set(prev);
+      if (next.has(idx)) next.delete(idx);
+      else next.add(idx);
+      return next;
+    });
+  }
+
   return (
     <div className="space-y-7">
+      {/* ─── Header ────────────────────────────────────────────────────── */}
       <header className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
         <div>
           <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-brand-200 bg-brand-50 px-3 py-1 text-xs font-bold uppercase tracking-wider text-brand-700">
             <CareIcon className="h-3.5 w-3.5" /> Find care
           </div>
-          <h1 className="page-title">Find nearby facilities</h1>
+          <h1 className="page-title">Find care based on your records</h1>
           <p className="secondary-text mt-2 max-w-2xl leading-relaxed">
-            Choose a location to find hospitals, clinics, pharmacies, laboratories, and doctors within 5 km.
+            MediMind found care options that may be relevant to the information in your medical records.
           </p>
         </div>
         {savedLocation && (
@@ -139,6 +201,7 @@ export function FindCarePage() {
         )}
       </header>
 
+      {/* ─── Urgent help banner ────────────────────────────────────────── */}
       <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-900">
         <p className="font-semibold">Need urgent help?</p>
         <p className="mt-0.5 text-amber-800">
@@ -147,33 +210,143 @@ export function FindCarePage() {
         </p>
       </div>
 
-      <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        <label htmlFor="care-kind" className="block text-sm font-semibold text-slate-800">
-          What type of facility do you need?
-        </label>
-        <p className="mt-1 text-xs text-slate-500">Choose a category or search all public healthcare listings.</p>
-        <select
-          id="care-kind"
-          value={searchKind}
-          onChange={(event) => setSearchKind(event.target.value as SearchKind)}
-          className="mt-3 min-h-[48px] w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-800 outline-none focus:border-brand-500 focus:ring-4 focus:ring-brand-100 sm:max-w-xs"
-        >
-          {FILTERS.map((option) => (
-            <option key={option.value} value={option.value}>{option.label}</option>
-          ))}
-        </select>
+      {/* ─── Care Recommendations ──────────────────────────────────────── */}
+      {recsLoading ? (
+        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="flex items-center gap-3">
+            <Spinner className="h-5 w-5 text-brand-600" />
+            <p className="text-sm font-medium text-slate-600">Analysing your records for care options…</p>
+          </div>
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
+            {[0, 1, 2].map((i) => (
+              <div key={i} className="h-28 animate-pulse rounded-2xl bg-slate-100" />
+            ))}
+          </div>
+        </section>
+      ) : recsError ? (
+        <section className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-900">
+          <p className="font-semibold">Recommendations unavailable</p>
+          <p className="mt-0.5 text-amber-800">{recsError}. You can still search for nearby care below.</p>
+        </section>
+      ) : recommendations.length > 0 ? (
+        <section className="space-y-4">
+          <div>
+            <h2 className="section-title">Care recommendations</h2>
+            <p className="secondary-text mt-1">
+              Based on diagnoses, medications, allergies, and lab results in your records.
+            </p>
+          </div>
+          <div className="grid gap-4 md:grid-cols-2">
+            {recommendations.map((rec, idx) => (
+              <RecommendationCard
+                key={`${rec.specialty_key}-${idx}`}
+                rec={rec}
+                expanded={expandedEvidence.has(idx)}
+                onToggleEvidence={() => toggleEvidence(idx)}
+                onFindNearby={() => handleUseRecommendation(rec)}
+              />
+            ))}
+          </div>
+          {recsNote && (
+            <p className="text-xs text-slate-400">{recsNote}</p>
+          )}
+        </section>
+      ) : (
+        <section className="rounded-2xl border border-slate-200 bg-white px-6 py-10 text-center shadow-sm">
+          <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-brand-50 text-brand-700">
+            <SparkleIcon className="h-6 w-6" />
+          </span>
+          <h2 className="mt-4 text-lg font-semibold text-slate-900">No specific care needs detected</h2>
+          <p className="mx-auto mt-1 max-w-md text-sm text-slate-500">
+            Upload medical records to receive personalised care recommendations based on your health history.
+          </p>
+          <Link to="/upload" className="btn-primary mt-5">
+            Upload Documents
+          </Link>
+        </section>
+      )}
+
+      {/* ─── Search Form ───────────────────────────────────────────────── */}
+      <section
+        id="care-search-form"
+        className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm scroll-mt-8"
+      >
+        <h2 className="section-title mb-5">Find nearby care</h2>
+
+        <div className="grid gap-5 sm:grid-cols-2">
+          {/* Facility type */}
+          <div>
+            <label htmlFor="care-facility-type" className="mb-2 block text-sm font-semibold text-slate-800">
+              Care type
+            </label>
+            <select
+              id="care-facility-type"
+              value={searchKind}
+              onChange={(event) => setSearchKind(event.target.value as SearchKind)}
+              className="min-h-[52px] w-full rounded-2xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-800 outline-none focus:border-brand-500 focus:ring-4 focus:ring-brand-100"
+            >
+              {FACILITY_TYPES.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Specialty selector */}
+          <SpecialtySelector
+            value={specialty}
+            onChange={setSpecialty}
+            recommendations={recommendations.length > 0 ? recommendations : undefined}
+          />
+        </div>
+
+        {/* Availability and radius */}
+        <div className="mt-5 grid gap-5 sm:grid-cols-2">
+          <div>
+            <label htmlFor="care-availability" className="mb-2 block text-sm font-semibold text-slate-800">
+              When are you available?
+            </label>
+            <select
+              id="care-availability"
+              className="min-h-[52px] w-full rounded-2xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-800 outline-none focus:border-brand-500 focus:ring-4 focus:ring-brand-100"
+              defaultValue="any"
+            >
+              <option value="any">Any time</option>
+              <option value="today">Available today</option>
+              <option value="week">This week</option>
+            </select>
+          </div>
+          <div>
+            <label htmlFor="care-radius" className="mb-2 block text-sm font-semibold text-slate-800">
+              Search within
+            </label>
+            <select
+              id="care-radius"
+              className="min-h-[52px] w-full rounded-2xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-800 outline-none focus:border-brand-500 focus:ring-4 focus:ring-brand-100"
+              defaultValue="5"
+            >
+              <option value="2">2 km</option>
+              <option value="5">5 km</option>
+              <option value="10">10 km</option>
+              <option value="25">25 km</option>
+            </select>
+          </div>
+        </div>
       </section>
 
+      {/* ─── Location Picker ───────────────────────────────────────────── */}
       <LocationPicker
         key={pickerKey}
         initialValue={savedLocation}
         onConfirm={handleConfirm}
         title="Where should we search?"
         description="Search for a city, area or landmark, or use your current location."
-        confirmLabel="Find facilities nearby"
+        confirmLabel="Search nearby care"
         showAddressDetails={false}
       />
 
+      {/* ─── Results ───────────────────────────────────────────────────── */}
       <div ref={resultsRef} className="scroll-mt-8">
         {status === "idle" ? (
           <section className="rounded-2xl border border-dashed border-slate-300 bg-white px-6 py-10 text-center">
@@ -211,9 +384,121 @@ export function FindCarePage() {
           />
         )}
       </div>
+
+      {/* ─── About section ─────────────────────────────────────────────── */}
+      <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <details>
+          <summary className="cursor-pointer text-sm font-semibold text-slate-800">
+            About these recommendations
+          </summary>
+          <div className="mt-3 space-y-2 text-sm text-slate-600 leading-relaxed">
+            <p>
+              MediMind analysed diagnoses, medications, allergies, and laboratory results in your uploaded
+              records to generate the care recommendations shown above.
+            </p>
+            <p>
+              These suggestions are intended to help you decide what type of care to search for. They are
+              <strong> not a diagnosis or medical referral</strong>.
+            </p>
+            <p>
+              Facility information comes from public directory listings. MediMind does not verify clinical
+              quality, availability, or affiliation of any listed provider.
+            </p>
+            <Link to="/safety" className="inline-flex items-center gap-1 font-medium text-brand-700 hover:text-brand-800 hover:underline">
+              View supporting records →
+            </Link>
+          </div>
+        </details>
+      </section>
     </div>
   );
 }
+
+// ─── Recommendation Card ────────────────────────────────────────────────────
+
+function RecommendationCard({
+  rec,
+  expanded,
+  onToggleEvidence,
+  onFindNearby,
+}: {
+  rec: CareRecommendation;
+  expanded: boolean;
+  onToggleEvidence: () => void;
+  onFindNearby: () => void;
+}) {
+  return (
+    <article className="flex flex-col rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
+      {/* Header row */}
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span
+              className={classNames(
+                "inline-flex items-center rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide",
+                relevanceTone(rec.relevance)
+              )}
+            >
+              {relevanceLabel(rec.relevance)}
+            </span>
+            {rec.source_records > 0 && (
+              <span className="text-[10px] font-medium text-slate-400">
+                {rec.source_records} {rec.source_records === 1 ? "record" : "records"}
+              </span>
+            )}
+          </div>
+          <h3 className="mt-2 text-base font-bold text-slate-900">{rec.specialty}</h3>
+          <p className="mt-0.5 text-sm font-medium text-slate-600">{rec.title}</p>
+        </div>
+      </div>
+
+      {/* Explanation */}
+      <p className="mt-3 flex-1 text-sm leading-relaxed text-slate-500">{rec.explanation}</p>
+
+      {/* Evidence section */}
+      {rec.evidence.length > 0 && (
+        <div className="mt-4 border-t border-slate-100 pt-3">
+          <button
+            type="button"
+            onClick={onToggleEvidence}
+            className="flex items-center gap-1.5 text-xs font-medium text-brand-700 hover:text-brand-800"
+          >
+            <span className="inline-flex items-center rounded-full bg-brand-50 px-2 py-0.5 text-[10px] font-bold text-brand-600 ring-1 ring-brand-100">
+              Evidence · {rec.evidence.length}
+            </span>
+            {expanded ? "Hide" : "View"} evidence
+          </button>
+          {expanded && (
+            <ul className="mt-2 space-y-1">
+              {rec.evidence.map((e, i) => (
+                <li key={i} className="text-xs text-slate-500 leading-relaxed">
+                  {e.date && <span className="font-medium text-slate-600">{e.date}: </span>}
+                  {e.description}
+                  {e.source_file && (
+                    <span className="ml-1 text-slate-400">({e.source_file})</span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
+      {/* Action buttons */}
+      <div className="mt-4 flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={onFindNearby}
+          className="btn-primary min-h-[40px] px-4 py-2 text-sm"
+        >
+          <LocationIcon className="h-4 w-4" /> Find nearby
+        </button>
+      </div>
+    </article>
+  );
+}
+
+// ─── Facility sub-components ────────────────────────────────────────────────
 
 function FacilityLoading({ locationName }: { locationName: string }) {
   return (
@@ -270,7 +555,7 @@ function FacilityResults({
 
       {facilities.length > 0 && (
         <div className="flex gap-2 overflow-x-auto pb-1 scroll-thin" aria-label="Filter facilities">
-          {FILTERS.map((item) => {
+          {FILTERS_LIST.map((item) => {
             const count =
               item.value === "all"
                 ? facilities.length
@@ -312,6 +597,12 @@ function FacilityResults({
             <FacilityCard key={facility.id} facility={facility} />
           ))}
         </div>
+      )}
+
+      {facilities.length > 0 && (
+        <p className="text-xs text-slate-400 leading-relaxed">
+          Public directory information · MediMind does not verify clinical quality, availability, or affiliation.
+        </p>
       )}
     </section>
   );
@@ -391,6 +682,47 @@ function FacilityCard({ facility }: { facility: CareFacility }) {
       </div>
     </article>
   );
+}
+
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
+const FILTERS_LIST: Array<{ value: FacilityFilter; label: string }> = [
+  { value: "all", label: "All" },
+  { value: "hospital", label: "Hospitals" },
+  { value: "clinic", label: "Clinics" },
+  { value: "pharmacy", label: "Pharmacies" },
+  { value: "laboratory", label: "Laboratories" },
+  { value: "doctor", label: "Doctors" },
+];
+
+function relevanceTone(relevance: string): string {
+  switch (relevance) {
+    case "high":
+      return "bg-red-50 text-red-700 ring-1 ring-red-200";
+    case "moderate":
+      return "bg-amber-50 text-amber-700 ring-1 ring-amber-200";
+    case "possible":
+      return "bg-sky-50 text-sky-700 ring-1 ring-sky-200";
+    case "needs_clinical_review":
+      return "bg-purple-50 text-purple-700 ring-1 ring-purple-200";
+    default:
+      return "bg-slate-100 text-slate-600 ring-1 ring-slate-200";
+  }
+}
+
+function relevanceLabel(relevance: string): string {
+  switch (relevance) {
+    case "high":
+      return "High relevance";
+    case "moderate":
+      return "Moderate relevance";
+    case "possible":
+      return "Possible";
+    case "needs_clinical_review":
+      return "Needs clinical review";
+    default:
+      return relevance;
+  }
 }
 
 function kindLabel(kind: FacilityKind): string {

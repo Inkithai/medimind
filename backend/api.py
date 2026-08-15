@@ -60,6 +60,7 @@ import db
 import jobs
 import storage
 from care import CareConfigurationError, CareProviderError, get_care_provider
+from care.recommendations import generate_care_recommendations
 from auth import get_current_user, issue_anonymous_token
 from document_filter import NonMedicalDocumentError, assert_medical_document
 from lab_trends import track_lab_trends
@@ -985,6 +986,37 @@ async def get_patient_snapshot(user_id: str = Depends(get_current_user)) -> Dict
 # ---------------------------------------------------------------------------
 # Care navigation (optional, provider-neutral public directory)
 # ---------------------------------------------------------------------------
+
+@app.get("/api/v1/care/recommendations")
+async def get_care_recommendations(user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
+    """Analyze patient records and return ranked care-recommendations.
+
+    The recommendations are derived from the patient's timeline (medications,
+    allergies, visits), cross-check report (interactions, duplicates, allergy
+    conflicts), and lab trends. Each recommendation includes a specialty,
+    relevance level, explanation, and supporting evidence.
+
+    This is a frontend-friendly endpoint that does NOT use any LLM -- it is
+    pure rule-based analysis of the patient's structured data.
+    """
+    snapshot = db.load_patient_snapshot(user_id)
+    if snapshot is None:
+        return {"recommendations": [], "note": "No patient records found. Upload documents to get personalised care recommendations."}
+    timeline = snapshot["patient_timeline"]
+    cross_check = snapshot["cross_check_report"]
+    lab_trends_data = snapshot.get("lab_trends") or {}
+    if not lab_trends_data:
+        lab_trends_data = track_lab_trends(timeline)
+    try:
+        recs = generate_care_recommendations(timeline, cross_check, lab_trends_data)
+    except Exception as exc:
+        logger.error("care recommendations failed for user=%s: %s", user_id, exc, exc_info=True)
+        raise HTTPException(500, "Failed to generate care recommendations.")
+    return {
+        "recommendations": recs,
+        "note": "These suggestions are derived from your medical records and are not a diagnosis or referral.",
+    }
+
 
 @app.get("/api/v1/care/facilities")
 async def get_care_facilities(
