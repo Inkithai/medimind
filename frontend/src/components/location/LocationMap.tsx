@@ -39,7 +39,9 @@ export function LocationMap({ coordinates, onCoordinatesChange, className }: Loc
     container.setAttribute("role", "application");
     container.setAttribute(
       "aria-label",
-      "Location confirmation map. Click the map or drag the pin to adjust the location."
+      "Location confirmation map. Click the map or drag the pin to adjust the location. " +
+        "The selected place name and coordinates are also shown as text below the map, " +
+        "and the location can be changed without the map by using the search field."
     );
 
     const map = L.map(container, {
@@ -74,6 +76,37 @@ export function LocationMap({ coordinates, onCoordinatesChange, className }: Loc
       onChangeRef.current({ latitude: point.lat, longitude: point.lng });
     });
 
+    // Keyboard equivalent of dragging: focus the pin, then nudge it with the
+    // arrow keys (Shift for a coarser step).
+    const markerElement = marker.getElement();
+    if (markerElement) {
+      markerElement.setAttribute("tabindex", "0");
+      markerElement.setAttribute("role", "button");
+      markerElement.setAttribute(
+        "aria-label",
+        "Selected location pin. Use the arrow keys to move it, holding Shift for larger steps."
+      );
+      markerElement.addEventListener("keydown", (event: KeyboardEvent) => {
+        const steps: Record<string, [number, number]> = {
+          ArrowUp: [1, 0],
+          ArrowDown: [-1, 0],
+          ArrowLeft: [0, -1],
+          ArrowRight: [0, 1],
+        };
+        const step = steps[event.key];
+        if (!step) return;
+        event.preventDefault();
+        const delta = (event.shiftKey ? 0.005 : 0.0005);
+        const point = marker.getLatLng();
+        const next = {
+          latitude: point.lat + step[0] * delta,
+          longitude: point.lng + step[1] * delta,
+        };
+        marker.setLatLng([next.latitude, next.longitude]);
+        onChangeRef.current(next);
+      });
+    }
+
     // The component often appears as the picker changes steps. Let layout settle
     // before Leaflet measures its container.
     window.setTimeout(() => map.invalidateSize(), 0);
@@ -99,7 +132,7 @@ export function LocationMap({ coordinates, onCoordinatesChange, className }: Loc
     <div className={`relative overflow-hidden bg-slate-100 ${className || "h-80"}`}>
       <div ref={containerRef} className="h-full w-full" />
       <div className="pointer-events-none absolute left-3 top-3 z-[500] rounded-lg bg-white/95 px-3 py-2 text-xs font-medium text-slate-700 shadow-sm ring-1 ring-slate-200 backdrop-blur">
-        Drag the pin or click the map to adjust
+        Drag the pin, click the map, or focus the pin and use the arrow keys
       </div>
     </div>
   );

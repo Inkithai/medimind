@@ -6,8 +6,14 @@ import {
   type FocusEvent,
   type KeyboardEvent,
 } from "react";
+import { useCopy } from "../../i18n";
 import { locationSecondaryText, reverseGeocode, searchLocations } from "../../services/geocoding";
-import type { ConfirmedLocation, Coordinates, LocationPlace } from "../../types/location";
+import type {
+  ConfirmedLocation,
+  Coordinates,
+  LocationPlace,
+  LocationSource,
+} from "../../types/location";
 import { classNames } from "../../utils/format";
 import { CheckIcon, CloseIcon, LocationIcon, NavigationIcon, SearchIcon } from "../icons";
 import { Spinner } from "../Spinner";
@@ -78,6 +84,7 @@ export function LocationPicker({
   showAddressDetails = true,
   className,
 }: LocationPickerProps) {
+  const copy = useCopy();
   const listboxId = useId();
   const inputRef = useRef<HTMLInputElement | null>(null);
   const reverseRequestRef = useRef<AbortController | null>(null);
@@ -92,6 +99,11 @@ export function LocationPicker({
   const [isInputFocused, setIsInputFocused] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
   const [selectedPlace, setSelectedPlace] = useState<LocationPlace | null>(initialValue || null);
+  // How the current coordinates were obtained. Shown to the user so an
+  // auto-detected or restored location is never presented as a deliberate choice.
+  const [locationSource, setLocationSource] = useState<LocationSource>(
+    initialValue?.source || (initialValue ? "saved" : "search")
+  );
   const [addressDetails, setAddressDetails] = useState(initialValue?.addressDetails || "");
   const [isLocating, setIsLocating] = useState(false);
   const [isResolvingPin, setIsResolvingPin] = useState(false);
@@ -151,8 +163,9 @@ export function LocationPicker({
     query.trim().length >= MIN_QUERY_LENGTH &&
     (status === "loading" || status === "error" || status === "success");
 
-  function selectPlace(place: LocationPlace) {
+  function selectPlace(place: LocationPlace, source: LocationSource = "search") {
     setSelectedPlace(place);
+    setLocationSource(source);
     setQuery(place.name);
     setResults([]);
     setLocationError(null);
@@ -164,6 +177,7 @@ export function LocationPicker({
     reverseRequestRef.current?.abort();
     setStep("search");
     setSelectedPlace(null);
+    setLocationSource("search");
     setStatus("idle");
     setResults([]);
     setConfirmError(null);
@@ -202,19 +216,23 @@ export function LocationPicker({
     }
   }
 
-  async function resolveAndSelect(coordinates: Coordinates, fallbackName: string) {
+  async function resolveAndSelect(
+    coordinates: Coordinates,
+    fallbackName: string,
+    source: LocationSource = "search"
+  ) {
     reverseRequestRef.current?.abort();
     const controller = new AbortController();
     reverseRequestRef.current = controller;
     try {
       const place = await reverseGeocode(coordinates, controller.signal);
-      if (!controller.signal.aborted && mountedRef.current) selectPlace(place);
-    } catch (error) {
+      if (!controller.signal.aborted && mountedRef.current) selectPlace(place, source);
+    } catch {
       if (controller.signal.aborted || !mountedRef.current) return;
       const fallback = pinnedFallback(coordinates);
       fallback.name = fallbackName;
       fallback.displayName = `${fallbackName} · ${coordinatesLabel(coordinates)}`;
-      selectPlace(fallback);
+      selectPlace(fallback, source);
     }
   }
 
@@ -233,7 +251,7 @@ export function LocationPicker({
           latitude: position.coords.latitude,
           longitude: position.coords.longitude,
         };
-        void resolveAndSelect(coordinates, "Current location").finally(() => {
+        void resolveAndSelect(coordinates, "Current location", "geolocation").finally(() => {
           if (mountedRef.current) setIsLocating(false);
         });
       },
@@ -259,6 +277,7 @@ export function LocationPicker({
     const controller = new AbortController();
     reverseRequestRef.current = controller;
     setSelectedPlace(pinnedFallback(coordinates));
+    setLocationSource("pin");
     setIsResolvingPin(true);
     setConfirmError(null);
 
@@ -282,6 +301,7 @@ export function LocationPicker({
       ...selectedPlace,
       addressDetails: addressDetails.trim() || undefined,
       confirmedAt: new Date().toISOString(),
+      source: locationSource,
     };
     try {
       await onConfirm(confirmed);
@@ -291,6 +311,13 @@ export function LocationPicker({
       if (mountedRef.current) setIsConfirming(false);
     }
   }
+
+  const sourceLabel = {
+    geolocation: copy.location.currentLocationSource,
+    search: copy.location.searchedLocationSource,
+    pin: copy.location.pinnedLocationSource,
+    saved: copy.location.savedLocationSource,
+  }[locationSource];
 
   return (
     <section
@@ -303,16 +330,25 @@ export function LocationPicker({
       <div className="border-b border-slate-100 px-5 py-5 sm:px-7 sm:py-6">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <p className="mb-2 text-xs font-bold uppercase tracking-[0.14em] text-brand-600">
-              {step === "search" ? "Step 1 of 2 · Search" : "Step 2 of 2 · Confirm"}
-            </p>
+            {/* Both steps are named, so the label can never contradict the
+                content that is actually on screen. */}
+            <ol className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs font-bold uppercase tracking-[0.14em]">
+              <li className={step === "search" ? "text-brand-600" : "text-slate-400"}>
+                {step === "confirm" && <span aria-hidden="true">✓ </span>}
+                {copy.location.stepSearch}
+              </li>
+              <li aria-hidden="true" className="text-slate-300">
+                ›
+              </li>
+              <li className={step === "confirm" ? "text-brand-600" : "text-slate-400"}>
+                {copy.location.stepConfirm}
+              </li>
+            </ol>
             <h2 id={`${listboxId}-title`} className="text-2xl font-bold tracking-tight text-slate-900">
-              {step === "search" ? title : "Confirm your location"}
+              {step === "search" ? title : copy.location.confirmTitle}
             </h2>
             <p className="mt-1.5 max-w-xl text-sm leading-relaxed text-slate-500">
-              {step === "search"
-                ? description
-                : "Check the pin is in the right area. You can drag it for a more accurate location."}
+              {step === "search" ? description : copy.location.confirmDescription}
             </p>
           </div>
           <div className="hidden items-center gap-2 sm:flex" aria-hidden="true">
@@ -485,29 +521,41 @@ export function LocationPicker({
           />
 
           <div className="px-5 py-6 sm:px-7">
+            {/* Text equivalent of the map: name, provenance, and coordinates
+                are all readable and actionable without touching the map. */}
             <div className="flex items-start gap-3">
-              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-brand-50 text-brand-700 ring-1 ring-brand-100">
+              <span
+                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-brand-50 text-brand-700 ring-1 ring-brand-100"
+                aria-hidden="true"
+              >
                 {isResolvingPin ? <Spinner className="h-5 w-5" /> : <LocationIcon className="h-6 w-6" />}
               </span>
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div>
+                    <p className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                      {copy.location.selectedLocation}
+                    </p>
                     <p className="text-lg font-bold text-slate-900">
                       {isResolvingPin ? "Finding this address…" : selectedPlace.name}
                     </p>
                     <p className="mt-0.5 text-sm leading-relaxed text-slate-500">
-                      {isResolvingPin ? "The pin is set. We're updating the place name." : locationSecondaryText(selectedPlace)}
+                      {isResolvingPin
+                        ? "The pin is set. We're updating the place name."
+                        : locationSecondaryText(selectedPlace)}
                     </p>
+                    <p className="mt-1 text-xs text-slate-500">{sourceLabel}</p>
                   </div>
                   <button
                     type="button"
                     onClick={returnToSearch}
-                    className="rounded-lg px-2.5 py-1.5 text-sm font-semibold text-brand-700 hover:bg-brand-50"
+                    className="rounded-lg px-2.5 py-1.5 text-sm font-semibold text-brand-700 hover:bg-brand-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
                   >
-                    Change
+                    {copy.location.changeLocation}
                   </button>
                 </div>
-                <p className="mt-2 font-mono text-xs text-slate-400" aria-label="Selected coordinates">
+                <p className="mt-2 font-mono text-xs text-slate-400">
+                  <span className="sr-only">{copy.location.coordinates}: </span>
                   {coordinatesLabel(selectedPlace)}
                 </p>
               </div>
@@ -537,7 +585,7 @@ export function LocationPicker({
 
             <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
               <button type="button" onClick={returnToSearch} className="btn-secondary sm:min-w-[120px]">
-                Back
+                {copy.location.back}
               </button>
               <button
                 type="button"

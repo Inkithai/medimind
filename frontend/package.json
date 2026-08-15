@@ -8,7 +8,11 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "lint": "tsc --noEmit",
-    "test:hook": "NODE_ENV=development tsx src/hooks/__tests__/useStrictEffect.test.tsx"
+    "test:hook": "NODE_ENV=development tsx src/hooks/__tests__/useStrictEffect.test.tsx",
+    "test:facilities": "tsx src/utils/__tests__/facilities.test.ts",
+    "test:specialty": "tsx src/utils/__tests__/specialty.test.ts",
+    "test:card": "tsx src/components/care/__tests__/FacilityCard.test.tsx",
+    "test": "npm run test:facilities && npm run test:specialty && npm run test:card"
   },
   "dependencies": {
     "leaflet": "^1.9.4",

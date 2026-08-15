@@ -70,7 +70,11 @@ def test_endpoint_returns_normalized_facility_list_and_forwards_coordinates():
         assert response.status_code == 200, response.text
         assert response.json()[0]["name"] == "Jaffna Teaching Hospital"
         assert provider.calls[0][1] == "hospital"
-        assert provider.calls[0][3] == {"latitude": 9.668, "longitude": 80.015}
+        assert provider.calls[0][3] == {
+            "latitude": 9.668,
+            "longitude": 80.015,
+            "specialty": None,
+        }
     finally:
         api.app.dependency_overrides.clear()
 
@@ -89,6 +93,60 @@ def test_provider_failure_is_neutral_and_does_not_expose_credentials():
             "The facility directory is temporarily unavailable. Please try again shortly."
         )
         assert "secret-key" not in response.text
+    finally:
+        api.app.dependency_overrides.clear()
+
+
+def test_specialty_is_forwarded_to_the_provider():
+    provider = FakeProvider()
+    try:
+        with mock.patch.object(api, "get_care_provider", return_value=provider):
+            with _client() as client:
+                response = client.get(
+                    "/api/v1/care/facilities",
+                    params={
+                        "location": "Colombo",
+                        "kind": "any",
+                        "radius_km": 5,
+                        "specialty": "  gastroenterologist  ",
+                    },
+                )
+        assert response.status_code == 200, response.text
+        assert provider.calls[0][3]["specialty"] == "gastroenterologist"
+    finally:
+        api.app.dependency_overrides.clear()
+
+
+def test_response_exposes_every_card_field_including_explicit_nulls():
+    """The client can distinguish "not available" from "not returned"."""
+    provider = FakeProvider()
+    try:
+        with mock.patch.object(api, "get_care_provider", return_value=provider):
+            with _client() as client:
+                response = client.get(
+                    "/api/v1/care/facilities",
+                    params={"location": "Jaffna", "kind": "hospital", "radius_km": 8},
+                )
+        facility = response.json()[0]
+        for field in (
+            "name",
+            "kind",
+            "address",
+            "distance_km",
+            "rating",
+            "user_rating_count",
+            "phone",
+            "opening_hours",
+            "open_now",
+            "maps_url",
+            "specialty",
+            "specialty_match",
+        ):
+            assert field in facility, field
+        # The fake provider supplied none of these — they must be null, not invented.
+        assert facility["rating"] is None
+        assert facility["phone"] is None
+        assert facility["opening_hours"] is None
     finally:
         api.app.dependency_overrides.clear()
 

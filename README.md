@@ -175,6 +175,27 @@ import { LocationPicker, type ConfirmedLocation } from "./components/location";
 
 The location picker combines Photon/OpenStreetMap landmark search with Open-Meteo/GeoNames city prefix matching and Leaflet/OpenStreetMap tiles. Confirmed coordinates are sent to the authenticated backend, where `CARE_PROVIDER=google` uses Google Places API (New) Nearby Search and normalizes results to `Facility[]`; city/area-only legacy requests fall back to Places Text Search. Configure `GOOGLE_MAPS_API_KEY` only on the backend—never as a `VITE_*` variable. Enable **Places API (New)** and billing for the key's Google Cloud project.
 
+#### Discovery vs. navigation layers
+
+The two mapping stacks have distinct jobs, and neither replaces the other:
+
+| Layer | Provider | Responsibility |
+| --- | --- | --- |
+| Place search / geocoding | Photon + Open-Meteo (OpenStreetMap data) | Turn the user's typing or GPS fix into a name + coordinates |
+| Map tiles / pin picking | Leaflet + OpenStreetMap tiles | Show and adjust the search pin, and plot results — no browser-side API key |
+| Facility directory | Google Places API (New), server-side | Facility identity, address, rating, reviews, phone, opening hours |
+| Navigation | Google Maps deep links | "Open in Google Maps" from every result card |
+
+Every result card's map action resolves through `googleMapsUrl()` in `frontend/src/utils/facilities.ts`, which prefers Google's canonical `googleMapsUri` and otherwise builds a `https://www.google.com/maps/search/` link from the facility's real name + address (coordinates as a last resort). OpenStreetMap is never used as a navigation target.
+
+#### Category normalization (one source of truth)
+
+Google place types are collapsed to exactly one of `hospital`, `clinic`, `pharmacy`, `laboratory`, `doctor`, or `other` by `normalize_kind()` (`backend/care/providers/google.py`), mirrored client-side by `normalizeFacilityKind()`. The filter chips, their counts, and the rendered cards are all derived from that single normalized array through the same predicate, so the category totals can never disagree with what is on screen. Unclassifiable healthcare listings fall into `other` rather than disappearing.
+
+#### No fabricated data
+
+Rating, review count, phone, address, and opening hours are emitted only when the directory published them. Missing values stay `null` end-to-end and the card renders an explicit "Not available"; an unnamed listing is dropped rather than labelled with a generic category name.
+
 `vite.config.ts` proxy target overridable via `VITE_API_PROXY_TARGET`. For prod:
 
 ```bash

@@ -1,12 +1,21 @@
-export type FacilityKind =
-  | "hospital"
-  | "clinic"
-  | "pharmacy"
-  | "laboratory"
-  | "doctor"
-  | "healthcare";
+/** The canonical Find Care categories. `other` keeps unclassified healthcare
+ * listings visible under "All" instead of silently dropping them. */
+export const FACILITY_KINDS = [
+  "hospital",
+  "clinic",
+  "pharmacy",
+  "laboratory",
+  "doctor",
+  "other",
+] as const;
 
-/** Provider-neutral facility shape used by the Find Care page. */
+export type FacilityKind = (typeof FACILITY_KINDS)[number];
+
+/** Provider-neutral facility shape used by the Find Care page.
+ *
+ * Optional fields are `undefined` only when the directory did not publish
+ * them. The UI must render a "not available" fallback instead of inventing a
+ * value. */
 export interface CareFacility {
   id: string;
   name: string;
@@ -22,6 +31,10 @@ export interface CareFacility {
   mapsUrl?: string;
   openingHours?: string[];
   openNow?: boolean;
+  /** Directory-provided specialty/primary-type label, e.g. "Dentist". */
+  specialty?: string;
+  /** True/false only when the search requested a specialty. */
+  specialtyMatch?: boolean;
   source: string;
 }
 
@@ -29,7 +42,7 @@ export interface CareFacility {
 export interface CareFacilityResponse {
   id: string;
   name: string;
-  kind: FacilityKind;
+  kind: string;
   latitude: number;
   longitude: number;
   distance_km: number | null;
@@ -41,5 +54,7 @@ export interface CareFacilityResponse {
   maps_url: string | null;
   opening_hours: string[] | null;
   open_now: boolean | null;
+  specialty?: string | null;
+  specialty_match?: boolean | null;
   source: string;
 }

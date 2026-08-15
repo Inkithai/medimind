@@ -993,6 +993,7 @@ async def get_care_facilities(
     radius_km: float = Query(default=8.0, ge=1.0, le=50.0),
     latitude: Optional[float] = Query(default=None, ge=-90.0, le=90.0),
     longitude: Optional[float] = Query(default=None, ge=-180.0, le=180.0),
+    specialty: str = Query(default="", max_length=80),
     user_id: str = Depends(get_current_user),
 ) -> List[Dict[str, Any]]:
     """Return normalized public healthcare listings near an area or point.
@@ -1013,6 +1014,8 @@ async def get_care_facilities(
     if normalized_kind not in allowed_kinds:
         raise HTTPException(400, "Unsupported facility type.")
 
+    normalized_specialty = specialty.strip() or None
+
     try:
         provider = get_care_provider()
         facilities = await asyncio.to_thread(
@@ -1022,12 +1025,14 @@ async def get_care_facilities(
             radius_km,
             latitude=latitude,
             longitude=longitude,
+            specialty=normalized_specialty,
         )
         logger.info(
-            "care navigation: provider=%s kind=%s coordinate_search=%s results=%d",
+            "care navigation: provider=%s kind=%s coordinate_search=%s specialty=%s results=%d",
             provider.name,
             normalized_kind,
             latitude is not None,
+            bool(normalized_specialty),
             len(facilities),
         )
         return [facility.to_dict() for facility in facilities]

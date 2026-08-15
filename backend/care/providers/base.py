@@ -16,6 +16,7 @@ class CareProvider(Protocol):
         *,
         latitude: Optional[float] = None,
         longitude: Optional[float] = None,
+        specialty: Optional[str] = None,
     ) -> List[Facility]:
         """Return normalized public facility listings near a place or point."""
         ...

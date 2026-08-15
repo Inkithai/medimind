@@ -6,7 +6,12 @@ from typing import Any, Dict, List, Optional
 
 @dataclass(frozen=True)
 class Facility:
-    """Provider-neutral public facility listing returned by every adapter."""
+    """Provider-neutral public facility listing returned by every adapter.
+
+    Every optional field stays ``None`` when the directory does not publish
+    it. Adapters must never invent a name, rating, phone number, or opening
+    hour: the UI renders "Not available" instead.
+    """
 
     id: str
     name: str
@@ -22,6 +27,8 @@ class Facility:
     maps_url: Optional[str] = None
     opening_hours: Optional[List[str]] = None
     open_now: Optional[bool] = None
+    specialty: Optional[str] = None
+    specialty_match: Optional[bool] = None
     source: str = "public listings"
 
     def to_dict(self) -> Dict[str, Any]:

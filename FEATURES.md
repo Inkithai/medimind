@@ -66,3 +66,12 @@
 - [x] Handle API failure (provider-neutral error; key hidden)
 - [x] Clearly indicate source (public listings; not a MediMind recommendation)
 - [x] Medical disclaimer (directory extension; not clinical referral)
+- [x] Single normalized facility-type mapping shared by counts, filters, and cards
+- [x] Each card shows the real provider name, ⭐ rating + review count, type, address, phone, hours/open status, and distance
+- [x] "Open in Google Maps" and "Call" actions on every result (Call only for real numbers)
+- [x] Explicit "Not available" fallbacks — ratings, phones, hours, and names are never fabricated
+- [x] Results overview map with numbered pins matching the card order
+- [x] Suggested specialty pre-applied from extracted records, with keyword → specialty → verification reasoning
+- [x] Named two-step location flow with location provenance (current / searched / pinned / saved)
+- [x] Keyboard-movable map pin plus a text equivalent of the selected location
+- [x] User-facing copy centralised in `frontend/src/i18n/` (no hardcoded strings in components)

@@ -79,6 +79,27 @@ body {
   background: white;
 }
 
+/* Numbered pins on the Find Care results map, matching the card order. */
+.care-map-pin-wrapper {
+  background: transparent;
+  border: 0;
+}
+
+.care-map-pin {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 2px solid white;
+  border-radius: 9999px;
+  background: #0f766e;
+  color: white;
+  font-size: 12px;
+  font-weight: 700;
+  box-shadow: 0 4px 10px rgb(15 23 42 / 30%);
+}
+
 .leaflet-container {
   font-family: inherit;
 }
