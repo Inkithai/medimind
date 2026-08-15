@@ -141,14 +141,24 @@ export const en = {
 
     answerTitle: "Answer",
     askedLabel: "You asked",
-    confidenceLabel: (value: string) => `Answer confidence ${value}`,
+    // "Evidence match" not "confidence": this measures how directly the
+    // retrieved records answer the question, NOT medical certainty.
+    confidenceLabel: (value: string) => `Evidence match ${value}`,
+    confidenceBand: (band: string, records: number) =>
+      records === 1
+        ? `${band} · based on 1 record`
+        : `${band} · based on ${records} records`,
+    confidenceHigh: "Strong match",
+    confidenceMedium: "Partial match",
+    confidenceLow: "Weak match",
     confidenceHelp:
-      "How directly your records answer the question — not how correct the wording is.",
+      "How directly your records answer the question. This is not a measure of medical certainty.",
     consultTitle: "Check with a healthcare professional",
     consultBody:
       "This answer touches on a risk, interaction, allergy, or dosage matter. Review it with a doctor or pharmacist before acting on it.",
 
-    sourcesTitle: (count: number) => (count === 1 ? "1 source" : `${count} sources`),
+    sourcesTitle: (count: number) =>
+      count === 1 ? "1 source document" : `${count} source documents`,
     noSourcesTitle: "No sources cited",
     noSourcesBody:
       "Nothing in your uploaded records supported this answer, so treat it with care.",

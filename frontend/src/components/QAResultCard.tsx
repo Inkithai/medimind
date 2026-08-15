@@ -25,7 +25,11 @@ export function QAResultCard({
   onOpenSource?: (source: QASource) => void;
 }) {
   const copy = useCopy();
-  const hasSources = result.sources.length > 0;
+  // Defensive dedupe: the server already returns one entry per document, but
+  // a cached or older response must never render the same file twice or
+  // inflate the source count.
+  const sources = dedupeSources(result.sources);
+  const hasSources = sources.length > 0;
 
   return (
     <div
@@ -57,6 +61,8 @@ export function QAResultCard({
       </p>
 
       <div className="flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3">
+        {/* Plain-language band leads; the percentage is supporting detail, so
+            "98%" cannot read as "98% medically certain". */}
         <span
           className={classNames(
             "inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium",
@@ -64,18 +70,21 @@ export function QAResultCard({
           )}
           title={copy.askAi.confidenceHelp}
         >
+          {copy.askAi.confidenceBand(confidenceBand(result.confidence, copy), sources.length)}
+        </span>
+        <span className="text-xs text-slate-500">
           {copy.askAi.confidenceLabel(formatConfidence(result.confidence))}
         </span>
         <span className="text-xs text-slate-500">
-          {hasSources ? copy.askAi.sourcesTitle(result.sources.length) : copy.askAi.noSourcesTitle}
+          {hasSources ? copy.askAi.sourcesTitle(sources.length) : copy.askAi.noSourcesTitle}
         </span>
       </div>
 
       {hasSources ? (
         <div>
           <ul className="space-y-1.5">
-            {result.sources.map((source, index) => (
-              <li key={`${source.source_file}-${source.date}-${index}`}>
+            {sources.map((source) => (
+              <li key={source.source_file}>
                 <SourceRow source={source} onOpenSource={onOpenSource} />
               </li>
             ))}
@@ -121,8 +130,11 @@ function SourceRow({
           {copy.askAi.pageLabel(source.page)}
         </span>
       )}
-      {source.date && (
-        <span className="shrink-0 text-slate-400">{formatDate(source.date)}</span>
+      {/* Every date this document was cited for — one document, one row. */}
+      {sourceDates(source).length > 0 && (
+        <span className="shrink-0 text-slate-400">
+          {sourceDates(source).map(formatDate).join(" · ")}
+        </span>
       )}
     </>
   );
@@ -148,4 +160,41 @@ function SourceRow({
       </span>
     </button>
   );
+}
+
+/** All dates a source was cited for, newest-first, with `date` as fallback. */
+function sourceDates(source: QASource): string[] {
+  const dates = source.dates?.length ? source.dates : source.date ? [source.date] : [];
+  return [...new Set(dates.filter(Boolean))].sort();
+}
+
+/**
+ * Collapse citations to one entry per document.
+ *
+ * A file cited for two visit dates is still a single document the patient
+ * can open, so it must count once. Dates from the duplicates are merged so
+ * no evidence is lost.
+ */
+function dedupeSources(sources: QASource[]): QASource[] {
+  const byFile = new Map<string, QASource>();
+  for (const source of sources || []) {
+    const file = source?.source_file?.trim();
+    if (!file) continue;
+    const existing = byFile.get(file);
+    if (!existing) {
+      byFile.set(file, { ...source, source_file: file, dates: sourceDates(source) });
+      continue;
+    }
+    existing.dates = [...new Set([...(existing.dates || []), ...sourceDates(source)])].sort();
+    // Keep the first page we saw rather than dropping page information.
+    if (existing.page == null && typeof source.page === "number") existing.page = source.page;
+  }
+  return [...byFile.values()];
+}
+
+/** Plain-language band for an evidence-match score. */
+function confidenceBand(confidence: number, copy: ReturnType<typeof useCopy>): string {
+  if (confidence >= 0.85) return copy.askAi.confidenceHigh;
+  if (confidence >= 0.6) return copy.askAi.confidenceMedium;
+  return copy.askAi.confidenceLow;
 }

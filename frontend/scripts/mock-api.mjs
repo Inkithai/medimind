@@ -245,6 +245,24 @@ const QA_SCENARIOS = {
     ],
     recommend_professional_consult: false,
   },
+  duplicated: {
+    answer:
+      "Paracetamol, Ferrous sulfate, and Omeprazole each appear more than once across your records.",
+    confidence: 0.98,
+    sources: [
+      { date: "2026-08-07", dates: ["2026-08-07", "2026-08-11"], source_file: "Arun (2).jpg", page: 1 },
+      { date: "2026-08-11", dates: ["2026-08-11"], source_file: "Arun (4).jpg", page: null },
+    ],
+    recommend_professional_consult: false,
+  },
+  hemoglobin: {
+    answer: "Your most recent hemoglobin was 9.8 g/dL on 11 August 2026, flagged low.",
+    confidence: 0.94,
+    sources: [
+      { date: "2026-08-11", dates: ["2026-08-11"], source_file: "Arun (4).jpg", page: null },
+    ],
+    recommend_professional_consult: true,
+  },
   notfound: {
     answer:
       "I couldn't find a blood pressure reading in your uploaded records. Nothing in the documents you've uploaded records that measurement.",
@@ -329,6 +347,11 @@ const server = createServer((request, response) => {
       }
       const lowered = question.toLowerCase();
       let answer = QA_SCENARIOS.grounded;
+      if (/multiple records|more than once|appear in both/.test(lowered)) {
+        answer = QA_SCENARIOS.duplicated;
+      } else if (/hemoglobin|haemoglobin/.test(lowered)) {
+        answer = QA_SCENARIOS.hemoglobin;
+      } else
       if (/blood pressure|cholesterol|blood type|address|appointment/.test(lowered)) {
         answer = QA_SCENARIOS.notfound;
       } else if (/should i (stop|increase|start)|dose/.test(lowered)) {

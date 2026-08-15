@@ -697,8 +697,11 @@ def _validate_answer(
         if date:
             entry["dates"].add(date)
 
-    validated_sources: List[Dict[str, Any]] = []
-    seen = set()
+    # One entry per DOCUMENT, not per (document, date). A single file cited
+    # for two visit dates is still one source the patient can open, so
+    # counting it twice would overstate how much evidence there is.
+    by_file: Dict[str, Dict[str, Any]] = {}
+    order: List[str] = []
     dropped: List[str] = []
     for source in parsed.get("sources") or []:
         if not isinstance(source, dict):
@@ -709,19 +712,27 @@ def _validate_answer(
         if source_file not in retrieved:
             dropped.append(source_file)
             continue
+        if source_file not in by_file:
+            by_file[source_file] = {"dates": set()}
+            order.append(source_file)
         date = str(source.get("date") or "").strip()
         # Keep the model's date only when it matches what was retrieved.
-        known_dates = retrieved[source_file]["dates"]
-        if date not in known_dates:
-            date = sorted(known_dates)[0] if known_dates else ""
-        key = (source_file, date)
-        if key in seen:
-            continue
-        seen.add(key)
+        if date and date in retrieved[source_file]["dates"]:
+            by_file[source_file]["dates"].add(date)
+
+    validated_sources: List[Dict[str, Any]] = []
+    for source_file in order:
+        dates = sorted(by_file[source_file]["dates"])
+        if not dates:
+            # The model gave no usable date: fall back to what was retrieved.
+            dates = sorted(retrieved[source_file]["dates"])
         pages = sorted(retrieved[source_file]["pages"], key=lambda value: str(value))
         validated_sources.append(
             {
-                "date": date,
+                # `date` stays the earliest for backward compatibility; `dates`
+                # carries the full set so the UI can show every occurrence.
+                "date": dates[0] if dates else "",
+                "dates": dates,
                 "source_file": source_file,
                 "page": pages[0] if len(pages) == 1 else None,
             }

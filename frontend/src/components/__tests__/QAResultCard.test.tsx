@@ -39,6 +39,24 @@ function render(result: QAResponse, extra: Record<string, unknown> = {}): string
   return renderToStaticMarkup(<QAResultCard result={result} {...extra} />);
 }
 
+/** Regression: one document cited across two visits is ONE source. */
+const DUPLICATED: QAResponse = {
+  answer: "Paracetamol, Ferrous sulfate, and Omeprazole each appear more than once.",
+  confidence: 0.98,
+  sources: [
+    { date: "2026-08-07", source_file: "Arun (2).jpg", page: null },
+    { date: "2026-08-11", source_file: "Arun (2).jpg", page: null },
+    { date: "2026-08-07", source_file: "Arun (4).jpg", page: null },
+    { date: "2026-08-11", source_file: "Arun (4).jpg", page: null },
+  ],
+  recommend_professional_consult: false,
+};
+
+/** Count non-overlapping occurrences of a needle. */
+function occurrences(haystack: string, needle: string): number {
+  return haystack.split(needle).length - 1;
+}
+
 const tests: Array<[string, () => void]> = [
   [
     "shows the answer, its confidence, and every cited source",
@@ -48,7 +66,7 @@ const tests: Array<[string, () => void]> = [
       assert.ok(html.includes("92%"), "confidence percentage");
       assert.ok(html.includes("Arun (2).jpg"));
       assert.ok(html.includes("Arun (4).jpg"));
-      assert.ok(html.includes("2 sources"));
+      assert.ok(html.includes("2 source documents"));
     },
   ],
   [
@@ -116,6 +134,78 @@ const tests: Array<[string, () => void]> = [
     () => {
       const html = render({ ...GROUNDED, answer: "A".repeat(400) });
       assert.ok(html.includes("break-words"), "wrapping class present");
+    },
+  ],
+  [
+    "a document cited for two dates renders once, not twice",
+    () => {
+      const html = render(DUPLICATED, { onOpenSource: () => {} });
+      assert.equal(occurrences(html, 'aria-label="Open Arun (2).jpg"'), 1);
+      assert.equal(occurrences(html, 'aria-label="Open Arun (4).jpg"'), 1);
+    },
+  ],
+  [
+    "the source count reflects unique documents, not citations",
+    () => {
+      const html = render(DUPLICATED);
+      assert.ok(html.includes("2 source documents"), "should say 2, not 4");
+      assert.ok(!html.includes("4 source"));
+    },
+  ],
+  [
+    "collapsing duplicates keeps both cited dates visible",
+    () => {
+      const html = render({
+        ...DUPLICATED,
+        sources: [
+          {
+            date: "2026-08-07",
+            dates: ["2026-08-07", "2026-08-11"],
+            source_file: "Arun (2).jpg",
+            page: null,
+          },
+        ],
+      });
+      assert.ok(html.includes("Aug 7, 2026"), html.slice(0, 200));
+      assert.ok(html.includes("Aug 11, 2026"));
+    },
+  ],
+  [
+    "a single source is labelled in the singular",
+    () => {
+      const html = render({
+        ...GROUNDED,
+        sources: [{ date: "2026-08-07", source_file: "Arun (2).jpg", page: 1 }],
+      });
+      assert.ok(html.includes("1 source document"));
+    },
+  ],
+  [
+    "confidence leads with plain language, not a bare percentage",
+    () => {
+      const html = render(DUPLICATED);
+      assert.ok(html.includes("Strong match"), "plain-language band");
+      assert.ok(html.includes("based on 2 records"));
+      // The number stays, but labelled as evidence rather than certainty.
+      assert.ok(html.includes("Evidence match"));
+      assert.ok(!html.includes("Answer confidence"));
+    },
+  ],
+  [
+    "a weak evidence match is not dressed up as a strong one",
+    () => {
+      const html = render({ ...UNGROUNDED, confidence: 0.1 });
+      assert.ok(html.includes("Weak match"));
+      assert.ok(!html.includes("Strong match"));
+    },
+  ],
+  [
+    "never renders a placeholder page when page metadata is absent",
+    () => {
+      const html = render(DUPLICATED);
+      assert.ok(!html.toLowerCase().includes("page unknown"));
+      assert.ok(!html.includes("page null"));
+      assert.ok(!html.includes("page undefined"));
     },
   ],
   [

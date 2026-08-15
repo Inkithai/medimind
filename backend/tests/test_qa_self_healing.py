@@ -137,7 +137,12 @@ def test_index_lost_but_documents_exist_self_heals_and_answers():
         assert "Paracetamol" in out["answer"], out
         assert out["confidence"] == 0.95
         assert out["sources"] == [
-            {"date": "2024-03-15", "source_file": "rx.pdf", "page": None}
+            {
+                "date": "2024-03-15",
+                "dates": ["2024-03-15"],
+                "source_file": "rx.pdf",
+                "page": None,
+            }
         ]
         # The store must now actually contain the rebuilt index.
         assert state["collections"]["anon_self_heal"].count() == 3  # med + lab + allergy

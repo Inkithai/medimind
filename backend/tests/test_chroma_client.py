@@ -155,7 +155,12 @@ def test_index_then_answer_over_chroma_path():
         # answer_question() attaches the page from the retrieved chunk metadata
         # (None here — the fixture timeline has no page numbers).
         assert out["sources"] == [
-            {"date": "2024-03-15", "source_file": "rx.jpg", "page": None}
+            {
+                "date": "2024-03-15",
+                "dates": ["2024-03-15"],
+                "source_file": "rx.jpg",
+                "page": None,
+            }
         ]
     finally:
         vector_store._chroma_client = None

@@ -102,6 +102,73 @@ def test_duplicate_citations_are_collapsed():
     assert len(result["sources"]) == 1
 
 
+# Regression: "4 sources" was shown for 2 documents because the same file
+# cited at two visit dates produced two entries. One document = one source.
+MULTI_DATE_RETRIEVED = [
+    {"date": "2026-08-07", "source_file": "Arun (2).jpg", "source_page": ""},
+    {"date": "2026-08-11", "source_file": "Arun (2).jpg", "source_page": ""},
+    {"date": "2026-08-07", "source_file": "Arun (4).jpg", "source_page": ""},
+    {"date": "2026-08-11", "source_file": "Arun (4).jpg", "source_page": ""},
+]
+
+
+def test_one_document_cited_for_two_dates_is_a_single_source():
+    parsed = {
+        "answer": "Paracetamol, Ferrous sulfate and Omeprazole each appear more than once.",
+        "confidence": 0.98,
+        "sources": [
+            {"date": "2026-08-07", "source_file": "Arun (2).jpg"},
+            {"date": "2026-08-11", "source_file": "Arun (2).jpg"},
+            {"date": "2026-08-07", "source_file": "Arun (4).jpg"},
+            {"date": "2026-08-11", "source_file": "Arun (4).jpg"},
+        ],
+        "recommend_professional_consult": False,
+    }
+    result = retrieval._validate_answer(parsed, MULTI_DATE_RETRIEVED)
+
+    assert len(result["sources"]) == 2, result["sources"]
+    assert [source["source_file"] for source in result["sources"]] == [
+        "Arun (2).jpg",
+        "Arun (4).jpg",
+    ]
+
+
+def test_collapsing_a_source_keeps_every_cited_date():
+    """Deduplicating must not lose evidence — both visit dates survive."""
+    parsed = {
+        "answer": "Paracetamol appears in both records.",
+        "confidence": 0.9,
+        "sources": [
+            {"date": "2026-08-11", "source_file": "Arun (2).jpg"},
+            {"date": "2026-08-07", "source_file": "Arun (2).jpg"},
+        ],
+        "recommend_professional_consult": False,
+    }
+    result = retrieval._validate_answer(parsed, MULTI_DATE_RETRIEVED)
+
+    assert len(result["sources"]) == 1
+    assert result["sources"][0]["dates"] == ["2026-08-07", "2026-08-11"]
+    # `date` stays the earliest, for clients reading the older field.
+    assert result["sources"][0]["date"] == "2026-08-07"
+
+
+def test_citation_order_follows_the_model_not_the_alphabet():
+    parsed = {
+        "answer": "Both records are relevant.",
+        "confidence": 0.9,
+        "sources": [
+            {"date": "2026-08-11", "source_file": "Arun (4).jpg"},
+            {"date": "2026-08-07", "source_file": "Arun (2).jpg"},
+        ],
+        "recommend_professional_consult": False,
+    }
+    result = retrieval._validate_answer(parsed, MULTI_DATE_RETRIEVED)
+    assert [source["source_file"] for source in result["sources"]] == [
+        "Arun (4).jpg",
+        "Arun (2).jpg",
+    ]
+
+
 def test_uncited_answer_cannot_claim_high_confidence():
     """No verifiable source => the UI must not show 95% confidence."""
     parsed = {
