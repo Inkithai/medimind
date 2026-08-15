@@ -9,10 +9,13 @@ import { DocumentViewer } from "../components/DocumentViewer";
 import { UploadIcon } from "../components/icons";
 import { useAuth } from "../context/AuthContext";
 import { useStrictEffect } from "../hooks/useStrictEffect";
+import { useI18n } from "../i18n/I18nContext";
+import { documentTypeLabel, formatDate } from "../utils/format";
 import type { Timeline, Visit } from "../types/api";
 
 export function HistoryPage() {
   const { credentials } = useAuth();
+  const { t, formatNumber } = useI18n();
   const [timeline, setTimeline] = useState<Timeline | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
@@ -42,7 +45,7 @@ export function HistoryPage() {
     const map = new Map<string, Visit[]>();
     for (const v of timeline.visits) {
       // Try to extract year from date string
-      let year = "Unknown year";
+      let year = t("common.unknownYear");
       if (v.date) {
         const m = /(\d{4})/.exec(v.date);
         if (m) year = m[1];
@@ -57,27 +60,26 @@ export function HistoryPage() {
     // sort years desc, unknown last
     return Array.from(map.entries())
       .sort((a, b) => {
-        if (a[0] === "Unknown year") return 1;
-        if (b[0] === "Unknown year") return -1;
+        if (a[0] === t("common.unknownYear")) return 1;
+        if (b[0] === t("common.unknownYear")) return -1;
         return parseInt(b[0], 10) - parseInt(a[0], 10);
       })
+      // Keep backend chronological order (oldest first). localeCompare on
+      // mixed formats ("5 Jan 2026" vs "20 Apr 2026") is not chronological.
       .map(([year, visits]) => ({
         year,
-        visits: visits.sort((x, y) => (x.date || "").localeCompare(y.date || "")),
+        visits,
       }));
   })();
 
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="page-title">Timeline</h1>
-        <p className="secondary-text mt-2 max-w-2xl">
-          Your medical history in date order — built automatically from your uploaded documents. Nothing to
-          type in.
-        </p>
+        <h1 className="page-title">{t("history.title")}</h1>
+        <p className="secondary-text mt-2 max-w-2xl">{t("history.subtitle")}</p>
       </div>
 
-      {loading && <LoadingState label="Loading history" />}
+      {loading && <LoadingState label={t("history.loading")} />}
 
       {!loading && error !== null && <ErrorState error={error} onRetry={() => void load()} />}
 
@@ -86,10 +88,8 @@ export function HistoryPage() {
           {timeline.visits.length === 0 ? (
             <Card>
               <CardBody className="py-12 text-center">
-                <p className="text-sm font-semibold text-slate-700">No history yet</p>
-                <p className="mt-1 text-xs text-slate-500">
-                  Upload documents to see them organized along a timeline.
-                </p>
+                <p className="text-sm font-semibold text-slate-800">{t("history.empty")}</p>
+                <p className="mt-1 text-xs text-slate-600">{t("history.emptyBody")}</p>
                 <Link
                   to="/upload"
                   className="mt-4 inline-flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700"
@@ -108,14 +108,17 @@ export function HistoryPage() {
                         {g.year}
                       </div>
                       <div className="h-px flex-1 bg-slate-200" />
-                      <span className="text-xs text-slate-500">{g.visits.length} events</span>
+                      <span className="text-xs text-slate-600">{t("history.events", { count: formatNumber(g.visits.length) })}</span>
                     </div>
 
                     <div className="mt-4 space-y-4 border-l-2 border-slate-100 pl-6">
                       {g.visits.map((visit, idx) => (
                         <button
                           key={`${visit._source.file}-${idx}`}
+                          type="button"
                           onClick={() => setSelected(visit)}
+                          aria-pressed={selected === visit}
+                          aria-label={`${formatDate(visit.date)} — ${documentTypeLabel(visit.document_type)} — ${visit._source.file}`}
                           className="group relative w-full rounded-xl border border-slate-200 bg-white p-4 text-left shadow-sm hover:border-brand-200 hover:shadow"
                         >
                           <span className="absolute -left-[29px] top-5 flex h-4 w-4 items-center justify-center rounded-full bg-brand-600 ring-4 ring-white">
@@ -124,7 +127,7 @@ export function HistoryPage() {
                           <div className="flex items-start justify-between gap-2">
                             <div>
                               <p className="text-sm font-semibold text-slate-900">
-                                {visit.date || "Undated"} — {iconForDoc(visit.document_type)} {visit.document_type.replace("_", " ")}
+                                {formatDate(visit.date)} — {iconForDoc(visit.document_type)} {documentTypeLabel(visit.document_type)}
                               </p>
                               {visit.provider_or_doctor && (
                                 <p className="text-xs text-slate-500">{visit.provider_or_doctor}</p>
@@ -149,7 +152,7 @@ export function HistoryPage() {
                 ))}
 
                 <div className="pt-4">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Full structured timeline</p>
+                  <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-600">{t("history.full")}</h2>
                   <div className="mt-3">
                     <TimelineView timeline={timeline} />
                   </div>
@@ -162,10 +165,8 @@ export function HistoryPage() {
                 ) : (
                   <Card>
                     <CardBody className="py-12 text-center">
-                      <p className="text-sm font-medium text-slate-700">Select an event</p>
-                      <p className="mx-auto mt-1 max-w-sm text-xs text-slate-500">
-                        Click any history item to see its full structured extraction and original document.
-                      </p>
+                      <h2 className="text-sm font-medium text-slate-800">{t("history.select")}</h2>
+                      <p className="mx-auto mt-1 max-w-sm text-xs text-slate-600">{t("history.selectBody")}</p>
                     </CardBody>
                   </Card>
                 )}

@@ -47,6 +47,7 @@ def test_empty_timeline_returns_zero():
 def test_full_timeline_returns_chunk_count():
     collection = mock.Mock()
     with mock.patch.object(retrieval, "_get_patient_collection", return_value=collection), \
+         mock.patch.object(retrieval.vector_store, "delete_collection"), \
          mock.patch.object(retrieval, "embed_texts", side_effect=lambda texts: [[0.1] * 384 for _ in texts]):
         count = retrieval.index_patient_timeline("anon_test", FULL_TIMELINE)
     # 1 medication chunk + 1 allergy chunk
@@ -190,6 +191,27 @@ def test_chunk_building_counts():
     chunks = retrieval.build_chunks_from_timeline("anon_test", FULL_TIMELINE)
     types = {c["metadata"]["chunk_type"] for c in chunks}
     assert types == {"medication", "allergy"}
+
+
+def test_chunk_ids_are_stable_when_timeline_order_changes():
+    """IDs must not include the list index — adding an older medication
+    used to rename every subsequent chunk and leave the old ids behind."""
+    older = {
+        "name": "Aspirin", "ingredients": ["Aspirin"], "dosage": "75 mg",
+        "dosage_value": 75, "dosage_unit": "mg", "frequency": "daily",
+        "frequency_per_day": 1, "is_as_needed": False, "duration": None,
+        "date": "2023-01-01", "source_file": "old.pdf", "confidence": 0.9,
+    }
+    first = retrieval.build_chunks_from_timeline("anon_test", FULL_TIMELINE)
+    shifted = {
+        **FULL_TIMELINE,
+        "medications_timeline": [older, *FULL_TIMELINE["medications_timeline"]],
+    }
+    second = retrieval.build_chunks_from_timeline("anon_test", shifted)
+    first_med_ids = {c["id"] for c in first if c["metadata"]["chunk_type"] == "medication"}
+    second_med_ids = {c["id"] for c in second if c["metadata"]["chunk_type"] == "medication"}
+    assert first_med_ids <= second_med_ids
+    assert len(second_med_ids) == len(first_med_ids) + 1
 
 
 if __name__ == "__main__":

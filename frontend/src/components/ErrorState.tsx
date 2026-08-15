@@ -1,3 +1,4 @@
+import { useI18n } from "../i18n/I18nContext";
 import { Alert } from "./Alert";
 
 export function ErrorState({
@@ -7,8 +8,9 @@ export function ErrorState({
   error: unknown;
   onRetry?: () => void;
 }) {
+  const { t, formatNumber } = useI18n();
   const message =
-    error instanceof Error ? error.message : "Something went wrong.";
+    error instanceof Error ? error.message : t("errors.generic");
   const status =
     error && typeof error === "object" && "status" in error
       ? (error as { status?: number }).status
@@ -27,44 +29,50 @@ export function ErrorState({
       : undefined;
 
   let variant: "danger" | "warning" | "info" = "danger";
-  let title = "Something went wrong";
+  let title = t("errors.genericTitle");
 
   if (code === "job_poll_timeout") {
     variant = "info";
-    title = "This upload may still be processing";
+    title = t("errors.processingStill");
   } else if (code === "job_status_unavailable") {
     // The upload itself succeeded — only the progress connection dropped.
     // This must NOT read like a failed upload, or users re-upload files
     // that are already saved.
     variant = "warning";
-    title = "Uploaded — we lost the progress connection";
+    title = t("errors.uploadSavedNoProgress");
   } else if (code === "provider_model_unavailable") {
     variant = "warning";
-    title = "Document reading needs a server update";
+    title = t("errors.serverUpdate");
   } else if (code === "provider_quota_exhausted") {
     variant = "warning";
-    title = "Document reading is temporarily unavailable";
+    title = t("errors.temporarilyUnavailable");
   } else if (code === "provider_rate_limited") {
     variant = "warning";
-    title = "The document reader is busy";
+    title = t("errors.readerBusy");
+  } else if (code === "city_not_found") {
+    variant = "warning";
+    title = t("errors.cityNotFound");
+  } else if (code === "directory_unavailable") {
+    variant = "warning";
+    title = t("errors.directoryUnavailable");
   } else if (status === 401) {
     variant = "warning";
-    title = "Your session has expired";
+    title = t("errors.expired");
   } else if (status === 404) {
     variant = "info";
-    title = "Nothing here yet";
+    title = t("errors.notFound");
   } else if (status === 422) {
     variant = "warning";
-    title = "We couldn't process that file";
+    title = t("errors.validation");
   } else if (status === 502) {
     variant = "danger";
-    title = "Something went wrong while processing";
+    title = t("errors.processingFailed");
   } else if (status === 0) {
     variant = "danger";
-    title = "Can't reach the server";
+    title = t("errors.server");
   } else if (status === 503) {
     variant = "warning";
-    title = "The server is still being set up";
+    title = t("errors.serverSetup");
   }
 
   return (
@@ -75,24 +83,21 @@ export function ErrorState({
           onClick={onRetry}
           className="mt-2 inline-flex min-h-[44px] items-center rounded-lg bg-white/70 px-4 py-2 text-sm font-medium text-slate-700 ring-1 ring-inset ring-slate-300 hover:bg-white"
         >
-          Try again
+          {t("common.retry")}
         </button>
       )}
       {retryable !== false && retryAfterSeconds && (
         <p className="mt-2 text-sm font-medium">
-          Wait about {Math.max(1, Math.round(retryAfterSeconds))} seconds before retrying.
+          {t("errors.retryWait", { seconds: formatNumber(Math.max(1, Math.round(retryAfterSeconds))) })}
         </p>
       )}
       {retryable === false && (
         <p className="mt-2 text-sm font-medium">
-          Retrying immediately will not help. Your files are not the cause of this problem.
+          {t("errors.noRetry")}
         </p>
       )}
       {code === "job_status_unavailable" && (
-        <p className="mt-2 text-sm font-medium">
-          Please don't upload the same files again — open your dashboard in a minute to confirm
-          they're there.
-        </p>
+        <p className="mt-2 text-sm font-medium">{t("errors.uploadSavedNoProgressBody")}</p>
       )}
     </Alert>
   );

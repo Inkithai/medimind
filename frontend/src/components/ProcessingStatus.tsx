@@ -1,4 +1,5 @@
 import type { JobFileProgress } from "../api/client";
+import { useI18n } from "../i18n/I18nContext";
 import { classNames } from "../utils/format";
 import { Spinner } from "./Spinner";
 
@@ -50,18 +51,18 @@ const FINAL_STEPS: FinalStep[] = [
   },
 ];
 
-function fileStepLabel(file: JobFileProgress): string {
-  if (file.status === "failed") return "Needs attention";
-  if (file.status === "completed") return "Details ready";
+function fileStepLabel(file: JobFileProgress, t: (key: string) => string): string {
+  if (file.status === "failed") return t("processing.attention");
+  if (file.status === "completed") return t("processing.detailsReady");
   switch (file.step) {
     case "reading":
-      return "Reading file";
+      return t("processing.reading");
     case "extracting":
-      return "Finding health details";
+      return t("processing.extracting");
     case "saving":
-      return "Saving securely";
+      return t("processing.saving");
     default:
-      return "Waiting for a processing slot";
+      return t("processing.waiting");
   }
 }
 
@@ -101,6 +102,7 @@ export function ProcessingStatus({
   error?: string | null;
   workerLimit?: number;
 }) {
+  const { t, formatNumber } = useI18n();
   const successful = files.filter((file) => file.status === "completed").length;
   const failed = files.filter((file) => file.status === "failed").length;
   const processed = successful + failed;
@@ -118,23 +120,24 @@ export function ProcessingStatus({
     <section
       className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"
       aria-live="polite"
-      aria-label="Upload processing status"
+      aria-busy={current !== "ready" && current !== "failed"}
+      aria-label={t("processing.status")}
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h3 className="card-title">
             {current === "ready"
-              ? "Upload complete"
+              ? t("processing.complete")
               : isPartial
-              ? "Your records are saved"
+              ? t("processing.recordsSaved")
               : current === "failed"
-              ? "Processing stopped"
-              : "Processing your documents"}
+              ? t("processing.stopped")
+              : t("processing.documents")}
           </h3>
           <p className="secondary-text mt-1">
             {total > 0
-              ? `${processed} of ${total} ${total === 1 ? "file" : "files"} finished`
-              : "Preparing your files"}
+              ? t("processing.progress", { processed: formatNumber(processed), total: formatNumber(total) })
+              : t("processing.preparing")}
           </p>
         </div>
         {total > 0 && (
@@ -145,7 +148,15 @@ export function ProcessingStatus({
       </div>
 
       {total > 0 && (
-        <div className="mt-4 h-2 overflow-hidden rounded-full bg-slate-100" aria-hidden="true">
+        <div
+          className="mt-4 h-2 overflow-hidden rounded-full bg-slate-100"
+          role="progressbar"
+          aria-label={t("processing.status")}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={percent}
+          aria-valuetext={`${formatNumber(percent)}%`}
+        >
           <div
             className={classNames(
               "h-full rounded-full transition-all duration-500",
@@ -165,7 +176,7 @@ export function ProcessingStatus({
           <div className="flex items-end justify-between gap-3">
             <div>
               <h4 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
-                Each file
+                {t("processing.eachFile")}
               </h4>
               {files.length > 1 && (
                 <p className="mt-1 text-xs leading-5 text-slate-500">
@@ -236,7 +247,7 @@ export function ProcessingStatus({
                               : "text-slate-500"
                           )}
                         >
-                          {fileStepLabel(file)}
+                          {fileStepLabel(file, t)}
                         </span>
                       </div>
                       <p
@@ -259,10 +270,10 @@ export function ProcessingStatus({
       <div className="mt-6 border-t border-slate-100 pt-5">
         <div>
           <h4 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
-            Then, finalize the record
+            {t("processing.finalize")}
           </h4>
           <p className="mt-1 text-xs leading-5 text-slate-500">
-            These shared steps run once after all readable files finish. They are not repeated for every file.
+            {t("processing.finalizeBody")}
           </p>
         </div>
 
@@ -331,7 +342,7 @@ export function ProcessingStatus({
       )}
 
       {error && (
-        <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+        <div role="alert" className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">
           {error}
         </div>
       )}

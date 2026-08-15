@@ -1,3 +1,5 @@
+import { Link } from "react-router-dom";
+import { useI18n } from "../i18n/I18nContext";
 import type { Timeline, Visit } from "../types/api";
 import {
   classNames,
@@ -11,20 +13,21 @@ import { BeakerIcon, FileIcon, LinkIcon, PillIcon } from "./icons";
 import { StatusBadge } from "./StatusBadge";
 
 export function TimelineView({ timeline }: { timeline: Timeline }) {
+  const { t } = useI18n();
   const hasVisits = timeline.visits.length > 0;
 
   return (
     <Card>
       <CardHeader
-        title="Patient timeline"
-        description={`${timeline.visits.length} visit(s) · ${timeline.medications_timeline.length} medication(s) · ${timeline.lab_results_timeline.length} lab result(s)`}
+        title={t("history.title")}
+        description={`${timeline.visits.length} · ${t("common.documents")} · ${timeline.medications_timeline.length} · ${t("common.medications")} · ${timeline.lab_results_timeline.length} · ${t("common.labResults")}`}
         icon={<TimelineIconSmall />}
       />
       <CardBody className="space-y-6">
         {timeline.known_allergies.length > 0 && (
           <div className="rounded-lg border border-red-100 bg-red-50/60 px-4 py-3">
             <p className="text-xs font-semibold uppercase tracking-wide text-red-700">
-              Known allergies
+              {t("common.allergies")}
             </p>
             <div className="mt-1.5 flex flex-wrap gap-1.5">
               {timeline.known_allergies.map((a) => (
@@ -38,8 +41,8 @@ export function TimelineView({ timeline }: { timeline: Timeline }) {
 
         {!hasVisits ? (
           <EmptyState
-            title="No visits in this timeline"
-            description="Upload medical documents to build this patient's record."
+            title={t("history.empty")}
+            description={t("history.emptyBody")}
           />
         ) : (
           <ol className="relative space-y-6 border-l-2 border-slate-100 pl-6">
@@ -54,6 +57,7 @@ export function TimelineView({ timeline }: { timeline: Timeline }) {
 }
 
 function TimelineVisit({ visit }: { visit: Visit }) {
+  const { t } = useI18n();
   const lowConfidence = visit.overall_confidence < 0.6;
   return (
     <li className="relative">
@@ -102,14 +106,21 @@ function TimelineVisit({ visit }: { visit: Visit }) {
         <div className="space-y-4 px-4 py-4">
           {visit.patient_name && (
             <p className="text-sm text-slate-600">
-              <span className="text-slate-400">Patient:</span> {visit.patient_name}
+              <span className="text-slate-600">{t("common.patient")}:</span> {visit.patient_name}
             </p>
           )}
 
-          {visit.illegible_or_low_confidence_fields.length > 0 && (
+          {(visit.overall_confidence < 0.6 || visit.illegible_or_low_confidence_fields.length > 0) && (
             <div className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800">
-              <span className="font-semibold">Low-confidence fields:</span>{" "}
-              {visit.illegible_or_low_confidence_fields.join("; ")}
+              <p>
+                <span className="font-semibold">{t("common.lowConfidenceExtraction")}:</span>{" "}
+                {visit.illegible_or_low_confidence_fields.length
+                  ? visit.illegible_or_low_confidence_fields.join("; ")
+                  : "The document could not be read with enough certainty."}
+              </p>
+              <Link to="/find-care?from=low-confidence-document" className="mt-1 inline-flex font-semibold text-brand-700 hover:underline">
+                Find a professional to verify this →
+              </Link>
             </div>
           )}
 
@@ -153,12 +164,13 @@ function TimelineVisit({ visit }: { visit: Visit }) {
               </SectionLabel>
               <div className="mt-2 overflow-x-auto">
                 <table className="min-w-full text-sm">
+                  <caption className="sr-only">{t("common.labResults")} — {visit._source.file}</caption>
                   <thead>
                     <tr className="text-left text-xs uppercase tracking-wide text-slate-400">
-                      <th className="py-1.5 pr-3 font-medium">Test</th>
-                      <th className="py-1.5 pr-3 font-medium">Value</th>
-                      <th className="py-1.5 pr-3 font-medium">Range</th>
-                      <th className="py-1.5 pr-3 font-medium">Flag</th>
+                      <th scope="col" className="py-1.5 pr-3 font-medium">{t("common.test")}</th>
+                      <th scope="col" className="py-1.5 pr-3 font-medium">{t("common.value")}</th>
+                      <th scope="col" className="py-1.5 pr-3 font-medium">{t("common.range")}</th>
+                      <th scope="col" className="py-1.5 pr-3 font-medium">{t("common.flag")}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -199,7 +211,7 @@ function TimelineVisit({ visit }: { visit: Visit }) {
 
           {visit.allergies_noted.length > 0 && (
             <div>
-              <SectionLabel>Allergies noted</SectionLabel>
+              <SectionLabel>{t("common.allergies")}</SectionLabel>
               <div className="mt-1.5 flex flex-wrap gap-1.5">
                 {visit.allergies_noted.map((a) => (
                   <StatusBadge key={a} tone="danger">
@@ -210,9 +222,23 @@ function TimelineVisit({ visit }: { visit: Visit }) {
             </div>
           )}
 
+          {Boolean(visit.diagnoses_or_conditions?.length) && (
+            <div>
+              <SectionLabel>{t("common.diagnoses")}</SectionLabel>
+              <div className="mt-1.5 flex flex-wrap gap-1.5">
+                {visit.diagnoses_or_conditions?.map((diagnosis) => (
+                  <StatusBadge key={diagnosis} tone="warning">
+                    {diagnosis}
+                  </StatusBadge>
+                ))}
+              </div>
+              <p className="mt-1 text-xs text-slate-600">{t("common.sourceObservation")}</p>
+            </div>
+          )}
+
           {visit.clinical_notes && (
             <div>
-              <SectionLabel>Clinical notes</SectionLabel>
+              <SectionLabel>{t("common.clinicalNotes")}</SectionLabel>
               <p className="mt-1 rounded-md bg-slate-50 px-3 py-2 text-sm text-slate-600">
                 {visit.clinical_notes}
               </p>

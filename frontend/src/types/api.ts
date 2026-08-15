@@ -1,3 +1,21 @@
+export type {
+  AvailabilityPreference,
+  CareEvidenceKind,
+  CarePathwayEvidence,
+  CareProviderSearchResponse,
+  ConsultationAllergy,
+  ConsultationDocument,
+  ConsultationLabPoint,
+  ConsultationMedication,
+  ConsultationPack,
+  LowConfidenceItem,
+  CareRecommendationContext,
+  ClinicalFlag,
+  LiveProvider,
+  SpecialtyRecommendation,
+  SpecialtyRoute,
+} from "./care";
+
 // TypeScript types that mirror the backend API schemas exactly.
 // Source of truth: medical_extractor.py (EXTRACTION_JSON_SCHEMA,
 // CROSS_CHECK_JSON_SCHEMA), lab_trends.py, retrieval.py, conversation.py,
@@ -42,6 +60,7 @@ export interface Visit {
   medications: Medication[];
   lab_results: LabResult[];
   allergies_noted: string[];
+  diagnoses_or_conditions?: string[];
   clinical_notes: string | null;
   illegible_or_low_confidence_fields: string[];
   overall_confidence: number;
@@ -50,20 +69,36 @@ export interface Visit {
   cloudinary_public_id?: string;
 }
 
+export interface SourceReference {
+  date: string | null;
+  source_file: string | null;
+  page?: number | null;
+}
+
 export interface MedicationTimelineEntry extends Medication {
   date: string | null;
   source_file: string | null;
+  source_page?: number | null;
 }
 
 export interface LabResultTimelineEntry extends LabResult {
   date: string | null;
   source_file: string | null;
+  source_page?: number | null;
+}
+
+export interface DiagnosisTimelineEntry {
+  name: string;
+  date: string | null;
+  source_file: string | null;
+  source_page?: number | null;
 }
 
 export interface Timeline {
   visits: Visit[];
   medications_timeline: MedicationTimelineEntry[];
   lab_results_timeline: LabResultTimelineEntry[];
+  diagnoses_timeline?: DiagnosisTimelineEntry[];
   known_allergies: string[];
 }
 
@@ -74,11 +109,13 @@ export interface DrugInteraction {
   explanation: string;
   severity: "low" | "moderate" | "high";
   confidence: number;
+  sources?: SourceReference[];
 }
 
 export interface DuplicateOccurrence {
   date: string | null;
   source_file: string | null;
+  page?: number | null;
   dosage: string | null;
 }
 
@@ -92,6 +129,7 @@ export interface DuplicatePrescription {
 export interface ConflictingInstruction {
   date: string | null;
   source_file: string | null;
+  page?: number | null;
   dosage: string | null;
   frequency: string | null;
 }
@@ -108,6 +146,26 @@ export interface AllergyConflict {
   allergy: string;
   explanation: string;
   confidence: number;
+  sources?: SourceReference[];
+}
+
+export interface MedicationInstruction extends SourceReference {
+  dosage: string | null;
+  dosage_value: number | null;
+  dosage_unit: string | null;
+  frequency: string | null;
+  frequency_per_day: number | null;
+  is_as_needed: boolean;
+}
+
+export interface MedicationTransition {
+  medication: string;
+  previous: MedicationInstruction;
+  current: MedicationInstruction;
+  changed_fields?: string[];
+  sources: SourceReference[];
+  explanation: string;
+  confidence: number;
 }
 
 export interface CrossCheckReport {
@@ -115,6 +173,8 @@ export interface CrossCheckReport {
   duplicate_prescriptions: DuplicatePrescription[];
   conflicting_dosage_instructions: ConflictingDosage[];
   allergy_conflicts: AllergyConflict[];
+  medication_changes?: MedicationTransition[];
+  medication_continuations?: MedicationTransition[];
   overall_recommendation: string;
 }
 
@@ -125,6 +185,7 @@ export interface LabDataPoint {
   value: string;
   flag: "normal" | "high" | "low" | "unknown";
   source_file: string | null;
+  source_page?: number | null;
 }
 
 export interface LabTrend {
@@ -140,7 +201,11 @@ export interface LabTrend {
     | "fluctuating (net decreasing)";
   flag_sequence: string;
   crossed_into_abnormal_at: { date: string | null; flag: string } | null;
+  returned_to_normal?: boolean;
   approaching_threshold: boolean;
+  risk_level?: "none" | "low" | "moderate" | "high";
+  risk_reason?: string;
+  professional_review_recommended?: boolean;
   confidence: number;
   explanation: string;
 }
@@ -161,11 +226,13 @@ export interface LabTrendsReport {
 export interface QASource {
   date: string;
   source_file: string;
+  page?: number | null;
 }
 
 export interface QAResponse {
   answer: string;
   confidence: number;
+  confidence_reason?: string;
   sources: QASource[];
   recommend_professional_consult: boolean;
   rewritten_query?: string;
@@ -252,6 +319,95 @@ export interface SessionHistory {
 
 // ---- Health --------------------------------------------------------------
 
+export type FacilityKind = "hospital" | "clinic" | "pharmacy" | "laboratory" | "any";
+
+export interface CareFacility {
+  id: string;
+  name: string;
+  kind: string;
+  latitude: number;
+  longitude: number;
+  address?: string | null;
+  phone?: string | null;
+  website?: string | null;
+  distance_km?: number | null;
+  source_url?: string | null;
+  provider: string;
+}
+
+export interface CareFacilitiesResponse {
+  query: { location: string; kind: string };
+  origin: { latitude: number; longitude: number; label: string; provider: string } | null;
+  facilities: CareFacility[];
+  result_count: number;
+  provider: string;
+  disclaimer: string;
+}
+
 export interface HealthResponse {
   status: string;
+}
+
+// ---- Find care (Geoapify primary, OpenStreetMap fallback) ---------------
+
+export type CareDay = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
+export type CareTimeOfDay = "any" | "morning" | "afternoon" | "evening";
+export type CareAvailability = "open" | "closed" | "unknown";
+export type CareMatchKind = "specialty" | "hospital" | "general" | "other";
+
+export interface CareSpecialtyOption {
+  id: string;
+  label: string;
+  reasons?: string[];
+}
+
+export interface CareSuggestion {
+  suggested: CareSpecialtyOption;
+  alternatives: CareSpecialtyOption[];
+  all: CareSpecialtyOption[];
+  has_records: boolean;
+}
+
+export interface CarePlace {
+  id: string;
+  name: string;
+  place_type: string;
+  match_kind: CareMatchKind;
+  specialties: string[];
+  address: string | null;
+  phone: string | null;
+  website: string | null;
+  opening_hours: string | null;
+  availability: CareAvailability;
+  lat: number;
+  lon: number;
+  distance_km: number;
+  score: number;
+  source: string;
+  source_url: string;
+}
+
+export interface CareSearchResponse {
+  query: {
+    city: string;
+    specialty_id: string;
+    specialty_label: string;
+    days: CareDay[];
+    time_of_day: CareTimeOfDay;
+    radius_km: number;
+  };
+  location: { lat: number; lon: number; label: string; source: string };
+  suggestion: CareSpecialtyOption;
+  results: CarePlace[];
+  result_count: number;
+  zero_results_hint: string | null;
+  source: {
+    name: string;
+    geocoder: string;
+    directory: string;
+    license: string;
+    attribution: string;
+    url: string;
+  };
+  disclaimer: string;
 }
