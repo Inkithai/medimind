@@ -135,10 +135,7 @@ function Sparkline({ trend }: { trend: LabTrend }) {
   const PAD = 4;
 
   const numericPoints = trend.data_points
-    .map((p) => {
-      const m = /-?\d+(?:\.\d+)?/.exec(p.value);
-      return m ? parseFloat(m[0]) : NaN;
-    })
+    .map((p) => parseLabValue(p.value))
     .filter((v) => !Number.isNaN(v));
 
   if (numericPoints.length < 2) {
@@ -216,4 +213,17 @@ function Sparkline({ trend }: { trend: LabTrend }) {
       ))}
     </svg>
   );
+}
+
+/**
+ * Numeric value from a lab result string, tolerating grouped thousands.
+ *
+ * Lab reports print counts as "1,200"; a plain `\d+` match reads that as 1
+ * and would plot the point three orders of magnitude too low. Mirrors
+ * `_parse_value()` in backend/lab_trends.py.
+ */
+function parseLabValue(value: string): number {
+  const match = /-?\d{1,3}(?:[,\u00a0\u202f ]\d{3})+(?:\.\d+)?|-?\d+(?:\.\d+)?/.exec(value || "");
+  if (!match) return NaN;
+  return parseFloat(match[0].replace(/[,\u00a0\u202f ]/g, ""));
 }

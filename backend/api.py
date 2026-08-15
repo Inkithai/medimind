@@ -1090,7 +1090,12 @@ async def qa(body: QARequest, user_id: str = Depends(get_current_user)) -> Dict[
     timeline, with no session/conversation state (caller manages
     chat_history, if any)."""
     try:
-        return answer_question(
+        # answer_question() does blocking embedding + LLM I/O. Running it
+        # directly in this coroutine would stall the whole event loop, so a
+        # single slow answer froze every other request (health checks and
+        # uploads included). Hand it to a worker thread instead.
+        return await asyncio.to_thread(
+            answer_question,
             patient_key=user_id,
             question=body.question,
             chat_history=body.chat_history,
@@ -1129,7 +1134,11 @@ async def post_message(
     if session is None:
         raise HTTPException(404, f"Session '{session_id}' not found.")
     try:
-        return conversation.ask(session, body.question, top_k=body.top_k)
+        # Same reasoning as /qa: query rewriting + retrieval + answering are
+        # blocking calls and must not run on the event loop.
+        return await asyncio.to_thread(
+            conversation.ask, session, body.question, top_k=body.top_k
+        )
     except ValueError as e:
         raise HTTPException(400, str(e))
     except RuntimeError as e:

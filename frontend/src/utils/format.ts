@@ -55,7 +55,36 @@ export function formatDate(date: string | null | undefined): string {
   if (!date) return "—";
   const trimmed = date.trim();
   if (!trimmed) return "—";
-  // ISO-ish: YYYY-MM-DD or full ISO timestamp
+
+  // A date-only string is a CALENDAR date, not an instant. `new Date(
+  // "2026-08-07")` parses as UTC midnight, which renders as Aug 6 anywhere
+  // west of UTC — a medical record must never show the wrong day. Build it
+  // in local time instead so it displays as written.
+  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmed);
+  if (dateOnly) {
+    const year = Number(dateOnly[1]);
+    const month = Number(dateOnly[2]);
+    const day = Number(dateOnly[3]);
+    const d = new Date(year, month - 1, day);
+    // JS rolls impossible dates over ("2026-13-01" -> Jan 1 2027), which
+    // would show a date the record never contained. An OCR misread must be
+    // surfaced as-is, not silently converted into a plausible-looking one.
+    const isRealDate =
+      !Number.isNaN(d.getTime()) &&
+      d.getFullYear() === year &&
+      d.getMonth() === month - 1 &&
+      d.getDate() === day;
+    if (isRealDate) {
+      return d.toLocaleDateString(undefined, {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+      });
+    }
+    return trimmed;
+  }
+
+  // A full timestamp carries its own offset, so let Date handle it.
   if (/^\d{4}-\d{2}-\d{2}/.test(trimmed)) {
     const d = new Date(trimmed);
     if (!Number.isNaN(d.getTime())) {

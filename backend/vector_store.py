@@ -28,6 +28,7 @@ Env:
 """
 
 import os
+import hashlib
 import re
 import math
 import logging
@@ -85,11 +86,24 @@ def get_chroma_client():
     return _get_chroma_client()
 
 def _sanitize_collection_name(patient_key: str) -> str:
+    """Chroma-safe collection name that is UNIQUE per patient.
+
+    The sanitising itself is lossy — lowercasing and replacing punctuation
+    maps "Bob"/"bob" and "user@x.com"/"user_x.com" onto the same string, and
+    truncation collides any two keys sharing a long prefix. Two patients
+    sharing a collection would mean one seeing the other's records, so a
+    short hash of the ORIGINAL key is appended to keep them distinct.
+    """
     name = re.sub(r"[^a-z0-9._-]+", "_", patient_key.strip().lower()).strip("_.-")
     if not name:
         name = "patient"
     if not name[0].isalnum():
         name = "p" + name
+
+    # Derived from the raw key, so case and punctuation still differentiate.
+    digest = hashlib.sha256(patient_key.encode("utf-8")).hexdigest()[:10]
+    # Keep the whole suffix within Chroma's 63-character limit.
+    name = f"{name[:52]}_{digest}"
     if not name[-1].isalnum():
         name = name + "0"
     while len(name) < 3:

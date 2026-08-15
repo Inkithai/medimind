@@ -49,13 +49,32 @@ def _parse_date(date_str: Optional[str]) -> Optional[datetime]:
         return None
 
 
+#: Matches a number that may carry thousands separators ("1,200", "1 200")
+#: and/or a decimal part. Lab reports routinely print platelet and WBC
+#: counts this way; a naive `-?\d+` match reads "1,200" as 1.
+_NUMBER_PATTERN = re.compile(r"-?\d{1,3}(?:[,\u00a0\u202f ]\d{3})+(?:\.\d+)?|-?\d+(?:\.\d+)?")
+
+
 def _parse_value(value: Any) -> Optional[float]:
+    """Best-effort numeric value from a lab result string.
+
+    Handles grouped thousands so "1,200" is 1200 rather than 1 — silently
+    truncating a platelet count by three orders of magnitude would put a
+    wrong number in patient-facing trend text.
+    """
     if value is None:
+        return None
+    if isinstance(value, bool):
         return None
     if isinstance(value, (int, float)):
         return float(value)
-    match = re.search(r"-?\d+(\.\d+)?", str(value))
-    return float(match.group()) if match else None
+    match = _NUMBER_PATTERN.search(str(value))
+    if not match:
+        return None
+    try:
+        return float(re.sub(r"[,\u00a0\u202f ]", "", match.group()))
+    except ValueError:
+        return None
 
 
 def _parse_range(reference_range: Optional[str]) -> Optional[Tuple[float, float]]:
