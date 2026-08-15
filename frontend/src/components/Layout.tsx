@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { classNames } from "../utils/format";
@@ -34,10 +34,30 @@ const NAV: NavItem[] = [
   { to: "/settings", label: "Settings", icon: SettingsIcon, chip: "bg-slate-100 text-slate-500" },
 ];
 
+const COLLAPSE_KEY = "medimind.sidebar.collapsed";
+
+function readCollapsed(): boolean {
+  try {
+    return localStorage.getItem(COLLAPSE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
 export function Layout() {
   const { isConfigured, credentials, createNewWorkspace, clearCredentials } = useAuth();
   const navigate = useNavigate();
+  // Mobile: slide-in drawer. Desktop: collapsible icon rail (persisted).
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(readCollapsed);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(COLLAPSE_KEY, collapsed ? "1" : "0");
+    } catch {
+      // Persistence is best-effort only.
+    }
+  }, [collapsed]);
 
   return (
     <div className="min-h-full lg:flex">
@@ -64,18 +84,52 @@ export function Layout() {
       {/* Sidebar */}
       <aside
         className={classNames(
-          "fixed inset-y-0 left-0 z-30 w-72 transform border-r border-slate-200 bg-white transition-transform lg:static lg:translate-x-0",
-          sidebarOpen ? "translate-x-0" : "-translate-x-full"
+          "fixed inset-y-0 left-0 z-30 w-72 transform border-r border-slate-200 bg-white transition-all duration-200 lg:static lg:translate-x-0",
+          sidebarOpen ? "translate-x-0" : "-translate-x-full",
+          collapsed ? "lg:w-[84px]" : "lg:w-72"
         )}
         aria-label="Main navigation"
       >
         <div className="flex h-full flex-col">
-          <div className="flex items-center gap-3 px-6 pb-5 pt-6">
+          <div
+            className={classNames(
+              "flex items-center gap-3 pb-5 pt-6",
+              collapsed ? "px-6 lg:justify-center lg:px-0" : "px-6"
+            )}
+          >
             <Logo />
-            <div className="min-w-0 flex-1">
+            <div className={classNames("min-w-0 flex-1", collapsed && "lg:hidden")}>
               <p className="text-lg font-bold leading-tight text-slate-900">MediMind</p>
               <p className="truncate text-sm text-slate-500">Your health, in one place</p>
             </div>
+          </div>
+
+          {/* Desktop collapse toggle */}
+          <div className={classNames("hidden pb-2 lg:block", collapsed ? "px-4" : "px-4")}>
+            <button
+              onClick={() => setCollapsed((v) => !v)}
+              className={classNames(
+                "flex min-h-[40px] w-full items-center gap-2 rounded-xl border border-slate-200 bg-white text-sm font-medium text-slate-500 transition hover:bg-slate-50 hover:text-slate-700",
+                collapsed ? "justify-center px-0" : "justify-center px-3"
+              )}
+              aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+              aria-expanded={!collapsed}
+              title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            >
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className={classNames("h-4 w-4 shrink-0 transition-transform", collapsed && "rotate-180")}
+              >
+                <polyline points="11 17 6 12 11 7" />
+                <polyline points="18 17 13 12 18 7" />
+              </svg>
+              {!collapsed && <span>Collapse</span>}
+            </button>
           </div>
 
           {isConfigured && (
@@ -83,10 +137,11 @@ export function Layout() {
               <NavLink
                 to="/upload"
                 onClick={() => setSidebarOpen(false)}
-                className="btn-primary w-full"
+                className={classNames("btn-primary w-full", collapsed && "lg:min-w-0 lg:px-0")}
+                title={collapsed ? "Upload Document" : undefined}
               >
-                <UploadIcon className="h-5 w-5" />
-                Upload Document
+                <UploadIcon className="h-5 w-5 shrink-0" />
+                <span className={classNames(collapsed && "lg:hidden")}>Upload Document</span>
               </NavLink>
             </div>
           )}
@@ -108,9 +163,11 @@ export function Layout() {
                     setSidebarOpen(false);
                   }}
                   aria-disabled={disabled}
+                  title={collapsed ? item.label : undefined}
                   className={({ isActive }) =>
                     classNames(
                       "group flex min-h-[48px] items-center gap-3 rounded-xl px-3 py-2.5 text-base transition",
+                      collapsed && "lg:justify-center lg:px-0",
                       disabled
                         ? "pointer-events-none cursor-not-allowed text-slate-300"
                         : isActive
@@ -130,7 +187,7 @@ export function Layout() {
                       >
                         <Icon className="h-[18px] w-[18px]" />
                       </span>
-                      <span className="truncate">{item.label}</span>
+                      <span className={classNames("truncate", collapsed && "lg:hidden")}>{item.label}</span>
                     </>
                   )}
                 </NavLink>
@@ -139,7 +196,7 @@ export function Layout() {
           </nav>
 
           {isConfigured && (
-            <div className="border-t border-slate-100 p-4">
+            <div className={classNames("border-t border-slate-100 p-4", collapsed && "lg:hidden")}>
               <div className="rounded-xl bg-brand-50 p-4 ring-1 ring-brand-100">
                 <p className="text-sm font-semibold text-brand-900">Private — no account needed</p>
                 <p className="mt-1 text-xs leading-relaxed text-brand-800/80">
