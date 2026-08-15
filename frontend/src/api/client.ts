@@ -1,4 +1,5 @@
 import type { CareFacility, CareFacilityResponse, FacilityKind } from "../types/facility";
+import type { CareRecommendationsResponse } from "../types/recommendations";
 import type {
   CrossCheckReport,
   HealthResponse,
@@ -361,6 +362,17 @@ export const api = {
       { signal: options.signal }
     );
     return facilities.map(normalizeCareFacility);
+  },
+
+  async getCareRecommendations(
+    credentials: Credentials,
+    signal?: AbortSignal
+  ): Promise<CareRecommendationsResponse> {
+    return request<CareRecommendationsResponse>(
+      credentials,
+      "/api/v1/care/recommendations",
+      { signal }
+    );
   },
 
   ask(credentials: Credentials, question: string, topK = 8): Promise<QAResponse> {
