@@ -333,7 +333,10 @@ def test_google_permission_denied_now_serves_openstreetmap_instead_of_503():
                     params={
                         "location": "Nelliyady, Jaffna District",
                         "kind": "hospital",
-                        "radius_km": 5,
+                        # The fake facility sits ~24 km from this pin; the
+                        # radius must cover it because out-of-radius results
+                        # are now enforced server-side.
+                        "radius_km": 30,
                         "latitude": 9.80138,
                         "longitude": 80.1945344,
                     },

@@ -71,6 +71,8 @@ export const ta = {
     newWorkspace: "புதிய பணியிடம்",
     resetData: "தரவை மீட்டமை",
     currentPage: "தற்போதைய பக்கம்",
+    collapseSidebar: "பக்கப்பட்டியைச் சுருக்கவும்",
+    expandSidebar: "பக்கப்பட்டியை விரிக்கவும்",
   },
   auth: {
     preparing: "உங்கள் தனிப்பட்ட பணியிடத்தைத் தயாரிக்கிறது…",

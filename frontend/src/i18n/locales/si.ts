@@ -71,6 +71,8 @@ export const si = {
     newWorkspace: "නව වැඩබිම",
     resetData: "දත්ත යළි සකසන්න",
     currentPage: "වත්මන් පිටුව",
+    collapseSidebar: "පැති තීරුව හකුළන්න",
+    expandSidebar: "පැති තීරුව දිග හරින්න",
   },
   auth: {
     preparing: "ඔබේ පුද්ගලික වැඩබිම සකසමින්…",

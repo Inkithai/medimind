@@ -61,6 +61,7 @@ import db
 import jobs
 import storage
 from care import CareConfigurationError, CareProviderError, get_care_provider
+from care.postprocess import finalize as finalize_facilities
 from care.recommendation import recommend_care
 from care_recommendations import ProviderSearchError, recommendation_context, search_live_providers
 from auth import get_current_user, issue_anonymous_token
@@ -1350,6 +1351,17 @@ async def care_facilities(
                 normalized_kind,
                 radius_km,
                 **search_options,
+            )
+            # Enforce the kind and radius promises and remove duplicate
+            # listings on the server, regardless of which provider produced
+            # the results. A selected 5 km radius must never return a 17 km
+            # facility, and a hospital search must never return a laboratory.
+            facilities = finalize_facilities(
+                facilities,
+                radius_km=radius_km,
+                latitude=latitude,
+                longitude=longitude,
+                kind=normalized_kind,
             )
             logger.info(
                 "care navigation: provider=%s kind=%s coordinate_search=%s results=%d",

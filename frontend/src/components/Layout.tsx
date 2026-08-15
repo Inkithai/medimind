@@ -35,6 +35,16 @@ const NAV: NavItem[] = [
   { to: "/settings", labelKey: "nav.settings", icon: SettingsIcon, chip: "bg-slate-100 text-slate-700" },
 ];
 
+const COLLAPSE_KEY = "medimind.sidebar.collapsed";
+
+function readCollapsed(): boolean {
+  try {
+    return localStorage.getItem(COLLAPSE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
 function useDesktopLayout(): boolean {
   const [desktop, setDesktop] = useState(() =>
     typeof window !== "undefined" ? window.matchMedia("(min-width: 1024px)").matches : false
@@ -54,7 +64,17 @@ export function Layout() {
   const { t } = useI18n();
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  // Desktop-only: collapse the sidebar to an icon rail (persisted).
+  const [collapsed, setCollapsed] = useState(readCollapsed);
   const desktop = useDesktopLayout();
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(COLLAPSE_KEY, collapsed ? "1" : "0");
+    } catch {
+      // Persistence is best-effort only.
+    }
+  }, [collapsed]);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const sidebarRef = useRef<HTMLElement>(null);
   const firstNavRef = useRef<HTMLAnchorElement>(null);
@@ -134,20 +154,26 @@ export function Layout() {
         ref={sidebarRef}
         id="primary-sidebar"
         className={classNames(
-          "fixed bottom-0 left-0 top-0 z-30 w-72 transform border-r border-slate-200 bg-white transition-transform",
+          "fixed bottom-0 left-0 top-0 z-30 w-72 transform border-r border-slate-200 bg-white transition-all duration-200",
           // `self-start` stops the flex row from stretching the sidebar to the
           // full content height, which would defeat sticky positioning.
           "lg:sticky lg:bottom-auto lg:top-0 lg:h-screen lg:shrink-0 lg:self-start lg:translate-x-0",
-          sidebarOpen ? "translate-x-0" : "-translate-x-full"
+          sidebarOpen ? "translate-x-0" : "-translate-x-full",
+          collapsed ? "lg:w-[84px]" : "lg:w-72"
         )}
         aria-label={t("nav.main")}
         aria-modal={!desktop && sidebarOpen ? true : undefined}
         role={!desktop && sidebarOpen ? "dialog" : undefined}
       >
         <div className="flex h-full flex-col">
-          <div className="flex items-center gap-3 px-6 pb-5 pt-6">
+          <div
+            className={classNames(
+              "flex items-center gap-3 pb-5 pt-6",
+              collapsed ? "px-6 lg:justify-center lg:px-0" : "px-6"
+            )}
+          >
             <Logo />
-            <div className="min-w-0 flex-1">
+            <div className={classNames("min-w-0 flex-1", collapsed && "lg:hidden")}>
               <p className="text-lg font-bold leading-tight text-slate-900">MediMind</p>
               <p className="truncate text-sm text-slate-600">{t("common.tagline")}</p>
             </div>
@@ -158,11 +184,46 @@ export function Layout() {
             )}
           </div>
 
+          {/* Desktop collapse toggle */}
+          {desktop && (
+            <div className="hidden px-4 pb-2 lg:block">
+              <button
+                type="button"
+                onClick={() => setCollapsed((value) => !value)}
+                className="flex min-h-[40px] w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-500 transition hover:bg-slate-50 hover:text-slate-700"
+                aria-label={collapsed ? t("nav.expandSidebar") : t("nav.collapseSidebar")}
+                aria-expanded={!collapsed}
+                title={collapsed ? t("nav.expandSidebar") : t("nav.collapseSidebar")}
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className={classNames("h-4 w-4 shrink-0 transition-transform", collapsed && "rotate-180")}
+                  aria-hidden="true"
+                >
+                  <polyline points="11 17 6 12 11 7" />
+                  <polyline points="18 17 13 12 18 7" />
+                </svg>
+                {!collapsed && <span>{t("nav.collapseSidebar")}</span>}
+              </button>
+            </div>
+          )}
+
           {isConfigured && (
             <div className="px-4 pb-3">
-              <NavLink to="/upload" onClick={closeSidebar} tabIndex={navInteractive ? undefined : -1} className="btn-primary w-full">
-                <UploadIcon className="h-5 w-5" />
-                {t("nav.upload")}
+              <NavLink
+                to="/upload"
+                onClick={closeSidebar}
+                tabIndex={navInteractive ? undefined : -1}
+                className={classNames("btn-primary w-full", collapsed && "lg:min-w-0 lg:px-0")}
+                title={collapsed ? t("nav.upload") : undefined}
+              >
+                <UploadIcon className="h-5 w-5 shrink-0" />
+                <span className={classNames(collapsed && "lg:hidden")}>{t("nav.upload")}</span>
               </NavLink>
             </div>
           )}
@@ -186,9 +247,11 @@ export function Layout() {
                     closeSidebar();
                   }}
                   aria-disabled={disabled}
+                  title={collapsed ? t(item.labelKey) : undefined}
                   className={({ isActive }) =>
                     classNames(
                       "group flex min-h-[48px] items-center gap-3 rounded-xl px-3 py-2.5 text-base transition",
+                      collapsed && "lg:justify-center lg:px-0",
                       disabled
                         ? "cursor-not-allowed text-slate-400"
                         : isActive
@@ -202,7 +265,7 @@ export function Layout() {
                       <span className={classNames("flex h-8 w-8 shrink-0 items-center justify-center rounded-lg", item.chip, !isActive && "opacity-90")}>
                         <Icon className="h-[18px] w-[18px]" />
                       </span>
-                      <span className="min-w-0 flex-1 break-words">{t(item.labelKey)}</span>
+                      <span className={classNames("min-w-0 flex-1 break-words", collapsed && "lg:hidden")}>{t(item.labelKey)}</span>
                       {isActive && <span className="sr-only">({t("nav.currentPage")})</span>}
                     </>
                   )}
@@ -211,7 +274,7 @@ export function Layout() {
             })}
           </nav>
 
-          <div className="border-t border-slate-100 p-4">
+          <div className={classNames("border-t border-slate-100 p-4", collapsed && "lg:hidden")}>
             <LanguageSelector className="mb-3 hidden lg:block" />
             {isConfigured && (
               <>

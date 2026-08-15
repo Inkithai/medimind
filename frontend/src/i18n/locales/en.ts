@@ -71,6 +71,8 @@ export const en = {
     newWorkspace: "New workspace",
     resetData: "Reset data",
     currentPage: "current page",
+    collapseSidebar: "Collapse sidebar",
+    expandSidebar: "Expand sidebar",
   },
   auth: {
     preparing: "Preparing your private workspace…",
