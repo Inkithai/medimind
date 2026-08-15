@@ -1,15 +1,17 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import { Alert } from "../components/Alert";
 import { ErrorState } from "../components/ErrorState";
 import { Card, CardBody, CardHeader } from "../components/Card";
+import { DocumentViewer } from "../components/DocumentViewer";
 import { QAResultCard } from "../components/QAResultCard";
 import { Spinner } from "../components/Spinner";
 import { ChatIcon, SendIcon } from "../components/icons";
 import { useAuth } from "../context/AuthContext";
 import { useI18n } from "../i18n/I18nContext";
-import type { QAResponse } from "../types/api";
+import type { QAResponse, QASource, Timeline, Visit } from "../types/api";
+import { findVisitForSource } from "../utils/sources";
 
 const SUGGESTION_KEYS = ["ask.suggestion1", "ask.suggestion2", "ask.suggestion3", "ask.suggestion4"] as const;
 
@@ -21,14 +23,42 @@ export function QAPage() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<QAResponse | null>(null);
   const [error, setError] = useState<unknown>(null);
+  const [openSource, setOpenSource] = useState<{ source: QASource; visit: Visit | null } | null>(
+    null
+  );
+  const inFlightRef = useRef(false);
+  const timelineRef = useRef<Timeline | null>(null);
+
+  // Loaded lazily so a citation can resolve to its document. A failure here
+  // must never break asking questions — citations stay non-clickable.
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getTimeline(credentials)
+      .then((timeline) => {
+        if (!cancelled) timelineRef.current = timeline;
+      })
+      .catch(() => {
+        if (!cancelled) timelineRef.current = null;
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [credentials]);
 
   async function ask(q?: string) {
     const text = (q ?? question).trim();
     if (!text) return;
+    // A ref, not `loading`: it must block a second submit within the same
+    // tick, before React has re-rendered. Guards Ask -> Ask -> Ask from
+    // firing three concurrent LLM requests.
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
     setLoading(true);
     setError(null);
     setResult(null);
     setQuestion(text);
+    setOpenSource(null);
     try {
       const res = await api.ask(credentials, text, topK);
       setResult(res);
@@ -36,7 +66,12 @@ export function QAPage() {
       setError(err);
     } finally {
       setLoading(false);
+      inFlightRef.current = false;
     }
+  }
+
+  function handleOpenSource(source: QASource) {
+    setOpenSource({ source, visit: findVisitForSource(timelineRef.current, source) });
   }
 
   return (
@@ -142,7 +177,23 @@ export function QAPage() {
       {!loading && result && (
         <div className="space-y-3">
           <h2 className="section-title">{t("ask.answer")}</h2>
-          <QAResultCard result={result} />
+          <QAResultCard
+            result={result}
+            onOpenSource={timelineRef.current ? handleOpenSource : undefined}
+          />
+        </div>
+      )}
+
+      {openSource && (
+        <div className="space-y-3">
+          <h2 className="section-title">{openSource.source.source_file}</h2>
+          {openSource.visit ? (
+            <DocumentViewer visit={openSource.visit} onClose={() => setOpenSource(null)} />
+          ) : (
+            <Alert variant="info" title={t("ask.sourceUnavailable")}>
+              {t("ask.sourceUnavailableBody", { file: openSource.source.source_file })}
+            </Alert>
+          )}
         </div>
       )}
 

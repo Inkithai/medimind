@@ -30,6 +30,10 @@ export function ErrorState({
 
   let variant: "danger" | "warning" | "info" = "danger";
   let title = t("errors.genericTitle");
+  // Raw provider text ("Chat completion failed: RateLimitError...") is never
+  // the headline; it moves into a collapsible block for support.
+  let body = message;
+  let technicalDetail: string | null = null;
 
   if (code === "job_poll_timeout") {
     variant = "info";
@@ -64,12 +68,21 @@ export function ErrorState({
   } else if (status === 422) {
     variant = "warning";
     title = t("errors.validation");
-  } else if (status === 502) {
+  } else if (status === 429) {
+    variant = "warning";
+    title = t("errors.tooManyRequests");
+    body = t("errors.tooManyRequestsBody");
+    technicalDetail = message;
+  } else if (status === 502 || status === 500) {
     variant = "danger";
     title = t("errors.processingFailed");
+    body = t("errors.answerFailedBody");
+    technicalDetail = message;
   } else if (status === 0) {
     variant = "danger";
     title = t("errors.server");
+    body = t("errors.offlineBody");
+    technicalDetail = message;
   } else if (status === 503) {
     variant = "warning";
     title = t("errors.serverSetup");
@@ -77,7 +90,16 @@ export function ErrorState({
 
   return (
     <Alert variant={variant} title={title}>
-      <p className="break-words">{message}</p>
+      <p className="break-words">{body}</p>
+
+      {technicalDetail && technicalDetail !== body && (
+        <details className="mt-2">
+          <summary className="cursor-pointer text-xs font-medium opacity-80">
+            {t("errors.technicalDetails")}
+          </summary>
+          <p className="mt-1 break-words text-xs opacity-80">{technicalDetail}</p>
+        </details>
+      )}
       {onRetry && retryable !== false && (
         <button
           onClick={onRetry}

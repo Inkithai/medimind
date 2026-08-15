@@ -274,6 +274,36 @@ export function Layout() {
             })}
           </nav>
 
+          {/* Secondary and informational — deliberately outside the workflow
+              nav above, and available with or without a workspace. Collapses
+              to an icon on the desktop rail like the other nav items. */}
+          <div className="border-t border-slate-100 px-3 py-2">
+            <NavLink
+              to="/about"
+              onClick={closeSidebar}
+              title={t("about.nav")}
+              className={({ isActive }) =>
+                classNames(
+                  "flex min-h-[44px] items-center gap-2.5 rounded-xl px-3 py-2 text-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500",
+                  collapsed && "lg:justify-center lg:px-0",
+                  isActive
+                    ? "bg-slate-100 font-semibold text-slate-900"
+                    : "text-slate-500 hover:bg-slate-50 hover:text-slate-800"
+                )
+              }
+            >
+              {({ isActive }) => (
+                <>
+                  <InfoIcon className="h-4 w-4 shrink-0" />
+                  <span className={classNames("min-w-0 truncate", collapsed && "lg:hidden")}>
+                    {t("about.nav")}
+                  </span>
+                  {isActive && <span className="sr-only">({t("nav.currentPage")})</span>}
+                </>
+              )}
+            </NavLink>
+          </div>
+
           <div className={classNames("border-t border-slate-100 p-4", collapsed && "lg:hidden")}>
             <LanguageSelector className="mb-3 hidden lg:block" />
             {isConfigured && (
@@ -335,5 +365,23 @@ function Logo({ small }: { small?: boolean }) {
     <div aria-hidden="true" className={classNames("flex shrink-0 items-center justify-center rounded-xl bg-brand-600 text-white shadow-sm", small ? "h-8 w-8" : "h-10 w-10")}>
       <span className={classNames("font-black tracking-tight", small ? "text-sm" : "text-[18px]")}>M</span>
     </div>
+  );
+}
+
+function InfoIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      <circle cx="12" cy="12" r="10" />
+      <path d="M12 16v-4M12 8h.01" />
+    </svg>
   );
 }

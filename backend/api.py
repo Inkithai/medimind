@@ -54,7 +54,7 @@ from typing import Any, Dict, List, Literal, Optional, Tuple
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 import conversation
 import db
@@ -263,17 +263,39 @@ async def schema_not_initialized_handler(request: Request, exc: db.SchemaNotInit
 # Request bodies
 # ---------------------------------------------------------------------------
 
+#: A question longer than this is a paste accident or an abuse attempt, not
+#: a question about a medical record. Rejected before it reaches the LLM.
+MAX_QUESTION_LENGTH = 2000
+
+
 class QARequest(BaseModel):
     """Body for the single-shot (Phase 1) Q&A endpoint."""
-    question: str
+    question: str = Field(min_length=1, max_length=MAX_QUESTION_LENGTH)
     chat_history: Optional[List[Dict[str, str]]] = None
     top_k: int = Field(default=8, ge=1, le=50)
+
+    @field_validator("question")
+    @classmethod
+    def _question_not_blank(cls, value: str) -> str:
+        """A whitespace-only question must never reach the model."""
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("Enter a question about your records.")
+        return cleaned
 
 
 class MessageRequest(BaseModel):
     """Body for posting a message into a conversation session (Phase 2)."""
-    question: str
+    question: str = Field(min_length=1, max_length=MAX_QUESTION_LENGTH)
     top_k: int = Field(default=8, ge=1, le=50)
+
+    @field_validator("question")
+    @classmethod
+    def _question_not_blank(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("Enter a question about your records.")
+        return cleaned
 
 
 class CareSearchRequest(BaseModel):
@@ -1295,7 +1317,12 @@ async def qa(body: QARequest, user_id: str = Depends(get_current_user)) -> Dict[
     timeline, with no session/conversation state (caller manages
     chat_history, if any)."""
     try:
-        return answer_question(
+        # answer_question() does blocking embedding + LLM I/O. Running it
+        # directly in this coroutine stalls the whole event loop, so one slow
+        # answer froze every other request (health checks and uploads
+        # included). Hand it to a worker thread instead.
+        return await asyncio.to_thread(
+            answer_question,
             patient_key=user_id,
             question=body.question,
             chat_history=body.chat_history,
@@ -1334,7 +1361,11 @@ async def post_message(
     if session is None:
         raise HTTPException(404, f"Session '{session_id}' not found.")
     try:
-        return conversation.ask(session, body.question, top_k=body.top_k)
+        # Same reasoning as /qa: query rewriting + retrieval + answering are
+        # blocking calls and must not run on the event loop.
+        return await asyncio.to_thread(
+            conversation.ask, session, body.question, top_k=body.top_k
+        )
     except ValueError as e:
         raise HTTPException(400, str(e))
     except RuntimeError as e:

@@ -156,7 +156,18 @@ def test_index_then_answer_over_chroma_path():
         assert out["answer"].startswith("You are taking Paracetamol")
         assert out["confidence"] == 0.95
         assert "directly" in out["confidence_reason"]
-        assert out["sources"] == [{"date": "2024-03-15", "source_file": "rx.jpg", "page": 1}]
+        # `dates` carries every date a document was cited for; the page comes
+        # from the retrieved chunk metadata, never from the model.
+        assert out["sources"] == [
+            {
+                "date": "2024-03-15",
+                "dates": ["2024-03-15"],
+                "source_file": "rx.jpg",
+                # The fixture timeline has no _source.page, so the validator
+                # attaches None rather than trusting the model's "page": 1.
+                "page": None,
+            }
+        ]
     finally:
         vector_store._chroma_client = None
         _restore_chromadb(saved)
@@ -189,7 +200,8 @@ def test_reindex_does_not_leave_stale_chunks_after_order_shift():
             n2 = retrieval.index_patient_timeline("anon_shift", older)
         # 2 medications + 1 lab + 1 allergy
         assert n2 == 4
-        assert state["collections"]["anon_shift"].count() == 4, (
+        shift_collection = vector_store._sanitize_collection_name("anon_shift")
+        assert state["collections"][shift_collection].count() == 4, (
             "stale chunks from the previous index survived re-index"
         )
     finally:

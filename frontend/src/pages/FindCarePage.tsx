@@ -520,9 +520,12 @@ function FacilityResults({
 
 function FacilityCard({ facility }: { facility: CareFacility }) {
   const { t, formatNumber } = useI18n();
-  const mapUrl =
-    facility.mapsUrl ||
-    `https://www.openstreetmap.org/?mlat=${facility.latitude}&mlon=${facility.longitude}#map=17/${facility.latitude}/${facility.longitude}`;
+  // "Open in Google Maps" must open Google Maps, never OpenStreetMap. OSM
+  // remains the keyless DISCOVERY/tile layer, but navigation goes to Google:
+  // prefer a canonical Google URI, else build a Maps search from the real
+  // facility name + address, with coordinates as the last resort.
+  const mapUrl = googleMapsUrl(facility);
+  const callHref = telHref(facility.phone);
   return (
     <article className="flex flex-col rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
       <div className="flex items-start gap-3">
@@ -592,9 +595,25 @@ function FacilityCard({ facility }: { facility: CareFacility }) {
       </div>
 
       <div className="mt-4 flex flex-wrap gap-2">
-        <a href={mapUrl} target="_blank" rel="noreferrer" className="btn-secondary min-h-[40px] px-4 py-2 text-sm">
-          <LocationIcon className="h-4 w-4" /> {t("care.viewMap")}<span className="sr-only"> ({t("common.opensNewWindow")})</span>
+        <a
+          href={mapUrl}
+          target="_blank"
+          rel="noreferrer"
+          aria-label={t("care.openInGoogleMapsAria", { name: facility.name })}
+          className="btn-secondary min-h-[44px] px-4 py-2 text-sm"
+        >
+          <LocationIcon className="h-4 w-4" aria-hidden="true" /> {t("care.openInGoogleMaps")}
+          <span className="sr-only"> ({t("common.opensNewWindow")})</span>
         </a>
+        {callHref && (
+          <a
+            href={callHref}
+            aria-label={t("care.callAria", { name: facility.name })}
+            className="btn-secondary min-h-[44px] px-4 py-2 text-sm"
+          >
+            {t("care.call")}
+          </a>
+        )}
         {facility.website && (
           <a href={facility.website} target="_blank" rel="noreferrer" className="btn-ghost min-h-[40px] px-4 py-2 text-sm">
             {t("care.website")}<span className="sr-only"> ({t("common.opensNewWindow")})</span>
@@ -650,4 +669,36 @@ function CareIcon({ className }: { className?: string }) {
       <path d="M12 8v5M9.5 10.5h5" />
     </svg>
   );
+}
+
+/**
+ * Always a Google Maps deep link — never OpenStreetMap.
+ *
+ * Google's canonical URI is preferred; otherwise a Maps search is built from
+ * the facility's real name + address, with coordinates as a last resort so
+ * the pin still lands on the right building.
+ */
+function googleMapsUrl(facility: CareFacility): string {
+  const isGoogleHost = /^https?:\/\/([a-z0-9-]+\.)*(google\.[a-z.]+|goo\.gl)(\/|$)/i;
+  if (facility.mapsUrl && isGoogleHost.test(facility.mapsUrl)) return facility.mapsUrl;
+
+  const hasCoordinates =
+    Number.isFinite(facility.latitude) && Number.isFinite(facility.longitude);
+  const query = [facility.name, facility.address].filter(Boolean).join(", ");
+  if (!query && hasCoordinates) {
+    return `https://www.google.com/maps/search/?api=1&query=${facility.latitude},${facility.longitude}`;
+  }
+  const params = new URLSearchParams({
+    api: "1",
+    // Coordinates keep the map centred when several listings share a name.
+    query: hasCoordinates ? `${query} ${facility.latitude},${facility.longitude}` : query,
+  });
+  return `https://www.google.com/maps/search/?${params.toString()}`;
+}
+
+/** `tel:` target, or null when the directory published no usable number. */
+function telHref(phone: string | undefined): string | null {
+  if (!phone) return null;
+  const cleaned = phone.replace(/[^\d+]/g, "");
+  return cleaned.length >= 3 ? `tel:${cleaned}` : null;
 }

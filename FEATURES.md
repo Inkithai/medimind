@@ -59,6 +59,20 @@
 - [x] WCAG-oriented keyboard and screen-reader interaction across the existing UI
 - [ ] Official competition dataset integration (intentionally left unchanged)
 
+### Ask AI groundedness & safety
+
+- [x] Citations validated server-side — a source the model invents is dropped, never shown
+- [x] Page numbers attached from retrieved chunk metadata, never guessed by the model
+- [x] An answer with no verifiable source cannot claim high confidence (capped at 0.5)
+- [x] Clickable citations open the exact source document (and page) behind a claim
+- [x] Prompt-injection defence: retrieved documents are fenced and treated as data, not instructions
+- [x] Refuses to diagnose, or to advise starting/stopping/changing a dose
+- [x] States plainly when something is not in the records instead of inventing it
+- [x] Empty/whitespace/oversized questions rejected before reaching the model
+- [x] Double-submit guard — rapid Ask clicks issue exactly one request
+- [x] Friendly error copy for 401/422/429/500/502/offline, with technical detail collapsible
+- [x] Suggested questions fill the box for editing instead of auto-sending
+
 ## Round 2 (Care Navigation — Added)
 
 - [x] Detect appropriate specialty
@@ -80,3 +94,12 @@
 - [x] Handle API failure (provider-neutral error; key hidden)
 - [x] Clearly indicate source (public listings; not a MediMind recommendation)
 - [x] Medical disclaimer (directory extension; not clinical referral)
+- [x] Single normalized facility-type mapping shared by counts, filters, and cards
+- [x] Each card shows the real provider name, ⭐ rating + review count, type, address, phone, hours/open status, and distance
+- [x] "Open in Google Maps" and "Call" actions on every result (Call only for real numbers)
+- [x] Explicit "Not available" fallbacks — ratings, phones, hours, and names are never fabricated
+- [x] Results overview map with numbered pins matching the card order
+- [x] Suggested specialty pre-applied from extracted records, with keyword → specialty → verification reasoning
+- [x] Named two-step location flow with location provenance (current / searched / pinned / saved)
+- [x] Keyboard-movable map pin plus a text equivalent of the selected location
+- [x] User-facing copy centralised in `frontend/src/i18n/` (no hardcoded strings in components)

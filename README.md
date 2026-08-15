@@ -150,7 +150,21 @@ Zero-login anonymous model:
 - **My Medicines** `/medicines` — current per ingredient (most recent) + historical log table, filterable, source file traceable (now fixed to original filename, not temp sanitized path).
 - **Test Results / Lab Trends** `/labs` — per-test direction, flag sequence, crossing / recovery badge (green when the latest reading is back to normal), approaching-threshold, SVG sparkline with reference band. Thousands-aware values; mixed units (`mg/dL` vs `mmol/L`) are declined rather than trended.
 - **Safety** `/safety` — allergy conflicts (danger), interactions with severity, dosage conflicts, duplicates, overall recommendation.
-- **Ask** `/ask` — single-shot RAG, configurable `top_k`, confidence, sources, `recommend_professional_consult`.
+- **Ask** `/ask` — single-shot RAG, configurable `top_k`, confidence, clickable sources, `recommend_professional_consult`.
+
+##### Ask AI groundedness
+
+For a medical RAG product a confidently wrong answer is worse than no answer, so the answer path is defended at three layers rather than by prompt wording alone:
+
+| Layer | Where | Guarantee |
+| --- | --- | --- |
+| Instruction | `QA_SYSTEM_PROMPT` | Refuses to diagnose, to advise starting/stopping/changing a dose, or to supply a value absent from the records |
+| Isolation | `_neutralize_injection()` + `<patient_records>` fencing | Retrieved documents are untrusted **data**; instruction-shaped text is defanged and the boundary is restated after the block, so an injected line can't pose as the final instruction |
+| Verification | `_validate_answer()` | Citations the model invents are **dropped** before reaching the UI, dates are corrected to what was retrieved, pages come from chunk metadata, and an answer with no verifiable source is capped at 0.5 confidence |
+
+The UI completes the chain: every citation is a button that opens the exact source document (and page) behind the claim — `Ask AI → citation → source document → page evidence`. When nothing supported an answer the card says so explicitly instead of looking equally authoritative.
+
+Citations resolve to documents by **exact** filename match (`frontend/src/utils/sources.ts`); a near-miss returns nothing rather than opening the wrong record.
 - **Conversations** `/conversations` — multi-turn, query rewriting (`rewritten_query`), session resume by ID, 404 handling when in-memory session expired after restart.
 - **Find Local Care** `/care` — evidence-to-care pathway: clinical flags → specialty → live directory (**Geoapify** primary, **OpenStreetMap** fallback) → ranked provider cards → consultation pack.
 - **Find Care** `/find-care` — search-as-you-type or current location → map confirmation → provider-neutral hospitals, clinics, pharmacies, laboratories, and doctors within the selected radius.
@@ -186,6 +200,27 @@ import { LocationPicker, type ConfirmedLocation } from "./components/location";
 The location picker combines Photon/OpenStreetMap landmark search with Open-Meteo/GeoNames city prefix matching and Leaflet/OpenStreetMap tiles. Confirmed coordinates are sent to the authenticated backend, which normalizes every provider's response to `Facility[]`. By default the backend queries OpenStreetMap/Overpass, which needs no API key. Optionally set `CARE_PROVIDER=google` to prefer Google Places API (New) Nearby Search (city/area-only requests use Places Text Search), with OpenStreetMap as an automatic fallback. Configure `GOOGLE_MAPS_API_KEY` only on the backend—never as a `VITE_*` variable—and enable **Places API (New)** plus billing for the key's Google Cloud project.
 
 The location picker combines Photon/OpenStreetMap landmark search with Open-Meteo/GeoNames city prefix matching and Leaflet/OpenStreetMap tiles. Confirmed coordinates are sent to the authenticated backend, where `CARE_PROVIDER=google` uses Google Places API (New) Nearby Search and normalizes results to `Facility[]`; city/area-only legacy requests fall back to Places Text Search. Configure `GOOGLE_MAPS_API_KEY` only on the backend—never as a `VITE_*` variable. Enable **Places API (New)** and billing for the key's Google Cloud project.
+
+#### Discovery vs. navigation layers
+
+The two mapping stacks have distinct jobs, and neither replaces the other:
+
+| Layer | Provider | Responsibility |
+| --- | --- | --- |
+| Place search / geocoding | Photon + Open-Meteo (OpenStreetMap data) | Turn the user's typing or GPS fix into a name + coordinates |
+| Map tiles / pin picking | Leaflet + OpenStreetMap tiles | Show and adjust the search pin, and plot results — no browser-side API key |
+| Facility directory | Google Places API (New), server-side | Facility identity, address, rating, reviews, phone, opening hours |
+| Navigation | Google Maps deep links | "Open in Google Maps" from every result card |
+
+Every result card's map action resolves through `googleMapsUrl()` in `frontend/src/utils/facilities.ts`, which prefers Google's canonical `googleMapsUri` and otherwise builds a `https://www.google.com/maps/search/` link from the facility's real name + address (coordinates as a last resort). OpenStreetMap is never used as a navigation target.
+
+#### Category normalization (one source of truth)
+
+Google place types are collapsed to exactly one of `hospital`, `clinic`, `pharmacy`, `laboratory`, `doctor`, or `other` by `normalize_kind()` (`backend/care/providers/google.py`), mirrored client-side by `normalizeFacilityKind()`. The filter chips, their counts, and the rendered cards are all derived from that single normalized array through the same predicate, so the category totals can never disagree with what is on screen. Unclassifiable healthcare listings fall into `other` rather than disappearing.
+
+#### No fabricated data
+
+Rating, review count, phone, address, and opening hours are emitted only when the directory published them. Missing values stay `null` end-to-end and the card renders an explicit "Not available"; an unnamed listing is dropped rather than labelled with a generic category name.
 
 `vite.config.ts` proxy target overridable via `VITE_API_PROXY_TARGET`. For prod:
 

@@ -2,6 +2,7 @@ import { lazy, Suspense } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { Layout } from "./components/Layout";
 import { useAuth } from "./context/AuthContext";
+import { AboutPage } from "./pages/AboutPage";
 import { CrossCheckPage } from "./pages/CrossCheckPage";
 import { CareRecommendationsPage } from "./pages/CareRecommendationsPage";
 import { DashboardPage } from "./pages/DashboardPage";
@@ -64,6 +65,8 @@ export default function App() {
       <Route element={<Layout />}>
         <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="/settings" element={<SettingsPage />} />
+        {/* Informational, like /settings: readable without a workspace. */}
+        <Route path="/about" element={<AboutPage />} />
         <Route
           path="/find-care"
           element={

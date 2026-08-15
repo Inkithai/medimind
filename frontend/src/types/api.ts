@@ -224,8 +224,15 @@ export interface LabTrendsReport {
 // ---- Q&A / conversation (retrieval.py, conversation.py) ------------------
 
 export interface QASource {
+  /** Earliest cited date. Kept for backward compatibility — prefer `dates`. */
   date: string;
+  /** Every date this document was cited for. One document cited across two
+   *  visits is still ONE source, so the dates live here rather than
+   *  producing duplicate entries. */
+  dates?: string[];
   source_file: string;
+  /** Page within a multi-page document, when the retrieved chunk had one.
+   *  Attached server-side from chunk metadata — never guessed by the model. */
   page?: number | null;
 }
 

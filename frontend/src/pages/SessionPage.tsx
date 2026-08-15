@@ -37,6 +37,7 @@ export function SessionPage() {
   const [sending, setSending] = useState(false);
   const [sessionError, setSessionError] = useState<unknown>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const inFlightRef = useRef(false);
 
   useEffect(() => {
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -94,7 +95,10 @@ export function SessionPage() {
 
   async function send() {
     const text = input.trim();
-    if (!text || !sessionId || sending) return;
+    // A ref, not `sending`: state hasn't re-rendered yet within the same
+    // tick, so a fast double-click would otherwise send twice.
+    if (!text || !sessionId || inFlightRef.current) return;
+    inFlightRef.current = true;
     setInput("");
     setSending(true);
     setSessionError(null);
@@ -139,6 +143,7 @@ export function SessionPage() {
       if (gone) setSessionId(null);
     } finally {
       setSending(false);
+      inFlightRef.current = false;
     }
   }
 

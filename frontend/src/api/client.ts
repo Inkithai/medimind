@@ -211,7 +211,9 @@ function safeExternalUrl(value: string | null): string | undefined {
 function normalizeCareFacility(facility: CareFacilityResponse): CareFacility {
   return {
     id: facility.id,
-    name: facility.name,
+    // The provider name is the facility's identity: never substitute a
+    // category label such as "Clinic" for a missing name.
+    name: facility.name?.trim() || "Unnamed listing",
     kind: facility.kind,
     latitude: facility.latitude,
     longitude: facility.longitude,
@@ -488,11 +490,17 @@ export const api = {
     return facilities.map(normalizeCareFacility);
   },
 
-  ask(credentials: Credentials, question: string, topK = 8): Promise<QAResponse> {
+  ask(
+    credentials: Credentials,
+    question: string,
+    topK = 8,
+    signal?: AbortSignal
+  ): Promise<QAResponse> {
     return request<QAResponse>(credentials, "/api/v1/qa", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ question, top_k: topK }),
+      signal,
     });
   },
 
