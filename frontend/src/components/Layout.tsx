@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import { aboutEn } from "../i18n";
 import { classNames } from "../utils/format";
 import {
   BeakerIcon,
@@ -33,6 +34,10 @@ const NAV: NavItem[] = [
   { to: "/find-care", label: "Find Care", icon: LocationIcon, chip: "bg-rose-50 text-rose-600" },
   { to: "/settings", label: "Settings", icon: SettingsIcon, chip: "bg-slate-100 text-slate-500" },
 ];
+
+/** Read directly (not via the hook) so the label stays available to the
+ *  plain function components below without threading props through. */
+const ABOUT_LABEL = aboutEn.nav;
 
 export function Layout() {
   const { isConfigured, credentials, createNewWorkspace, clearCredentials } = useAuth();
@@ -138,6 +143,27 @@ export function Layout() {
             })}
           </nav>
 
+          {/* Secondary, informational — deliberately outside the workflow
+              nav above, and available with or without a workspace. */}
+          <div className="border-t border-slate-100 px-3 py-2">
+            <NavLink
+              to="/about"
+              onClick={() => setSidebarOpen(false)}
+              title={ABOUT_LABEL}
+              className={({ isActive }) =>
+                classNames(
+                  "flex min-h-[44px] items-center gap-2.5 rounded-xl px-3 py-2 text-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500",
+                  isActive
+                    ? "bg-slate-100 font-semibold text-slate-900"
+                    : "text-slate-500 hover:bg-slate-50 hover:text-slate-800"
+                )
+              }
+            >
+              <InfoIcon className="h-4 w-4 shrink-0" />
+              <span className="truncate">{ABOUT_LABEL}</span>
+            </NavLink>
+          </div>
+
           {isConfigured && (
             <div className="border-t border-slate-100 p-4">
               <div className="rounded-xl bg-brand-50 p-4 ring-1 ring-brand-100">
@@ -197,5 +223,23 @@ function Logo({ small }: { small?: boolean }) {
     >
       <span className={classNames("font-black tracking-tight", small ? "text-sm" : "text-[18px]")}>M</span>
     </div>
+  );
+}
+
+function InfoIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      <circle cx="12" cy="12" r="10" />
+      <path d="M12 16v-4M12 8h.01" />
+    </svg>
   );
 }

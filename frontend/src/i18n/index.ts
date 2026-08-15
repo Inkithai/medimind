@@ -1,16 +1,31 @@
 import { en, type Copy } from "./en";
+import { aboutEn, type AboutCopy } from "./about";
 
 /**
- * Minimal copy provider. The app ships English today; adding a locale means
- * adding a dictionary here rather than editing components.
+ * Minimal copy provider.
+ *
+ * The app ships English today. Adding a locale means registering a
+ * dictionary here — components read strings through these hooks and never
+ * hardcode visible text, so no component changes are needed to translate.
  */
 const DICTIONARIES: Record<string, Copy> = { en };
+const ABOUT_DICTIONARIES: Record<string, AboutCopy> = { en: aboutEn };
 
-export function useCopy(): Copy {
-  const language =
-    typeof navigator !== "undefined" ? navigator.language.split("-")[0].toLowerCase() : "en";
-  return DICTIONARIES[language] || en;
+/** BCP-47 tag reduced to the base language, e.g. "en-GB" -> "en". */
+function currentLanguage(): string {
+  return typeof navigator !== "undefined"
+    ? navigator.language.split("-")[0].toLowerCase()
+    : "en";
 }
 
-export type { Copy };
-export { en };
+export function useCopy(): Copy {
+  return DICTIONARIES[currentLanguage()] || en;
+}
+
+/** Copy for the About / technical overview page. */
+export function useAboutCopy(): AboutCopy {
+  return ABOUT_DICTIONARIES[currentLanguage()] || aboutEn;
+}
+
+export type { Copy, AboutCopy };
+export { en, aboutEn };
