@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
+import { Alert } from "../components/Alert";
 import { ErrorState } from "../components/ErrorState";
 import { LoadingState } from "../components/Spinner";
 import { StatusBadge } from "../components/StatusBadge";
@@ -22,6 +23,7 @@ interface RecordState {
   timeline: Timeline;
   crossCheck: CrossCheckReport;
   labTrends: LabTrendsReport;
+  rebuiltFromDocuments: boolean;
 }
 
 export function DashboardPage() {
@@ -45,6 +47,10 @@ export function DashboardPage() {
         timeline: snapshot.patient_timeline,
         crossCheck: snapshot.cross_check_report,
         labTrends: snapshot.lab_trends,
+        // The server rebuilds this from the saved documents when the cached
+        // snapshot row is gone, so a backend restart never empties the
+        // dashboard — it just means the safety check is pending.
+        rebuiltFromDocuments: snapshot.rebuilt_from_documents === true,
       });
     } catch (err) {
       setRecord(null);
@@ -131,6 +137,15 @@ export function DashboardPage() {
   return (
     <div className="space-y-6">
       <PageHeader onReload={() => setReloadKey((k) => k + 1)} />
+
+      {record.rebuiltFromDocuments && (
+        <Alert variant="info" title="Restored from your saved records">
+          <p className="text-sm">
+            Everything below was rebuilt from your stored documents, so nothing was lost. The
+            medication safety check refreshes the next time you upload a document.
+          </p>
+        </Alert>
+      )}
 
       {/* Stat cards */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

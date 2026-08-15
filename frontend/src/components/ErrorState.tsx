@@ -34,6 +34,12 @@ export function ErrorState({
   if (code === "job_poll_timeout") {
     variant = "info";
     title = t("errors.processingStill");
+  } else if (code === "job_status_unavailable") {
+    // The upload itself succeeded — only the progress connection dropped.
+    // This must NOT read like a failed upload, or users re-upload files
+    // that are already saved.
+    variant = "warning";
+    title = t("errors.uploadSavedNoProgress");
   } else if (code === "provider_model_unavailable") {
     variant = "warning";
     title = t("errors.serverUpdate");
@@ -89,6 +95,9 @@ export function ErrorState({
         <p className="mt-2 text-sm font-medium">
           {t("errors.noRetry")}
         </p>
+      )}
+      {code === "job_status_unavailable" && (
+        <p className="mt-2 text-sm font-medium">{t("errors.uploadSavedNoProgressBody")}</p>
       )}
     </Alert>
   );

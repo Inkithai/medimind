@@ -32,9 +32,59 @@ const SUPPORTED_TYPES = [
 
 type Phase = "idle" | "uploading";
 
+// The in-flight job id is kept outside React state so a refresh, an
+// accidental tab close, or a crashed render does not orphan work that the
+// server is still doing. The job row on the backend is the source of truth;
+// this is just the pointer back to it.
+const ACTIVE_JOB_KEY = "medimind.activeJob.v1";
+
+interface StoredActiveJob {
+  jobId: string;
+  userId: string;
+  startedAt: number;
+  fileNames: string[];
+}
+
+const ACTIVE_JOB_MAX_AGE_MS = 60 * 60 * 1000;
+
+function readActiveJob(userId: string): StoredActiveJob | null {
+  try {
+    const raw = window.localStorage.getItem(ACTIVE_JOB_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as StoredActiveJob;
+    if (!parsed?.jobId || parsed.userId !== userId) return null;
+    if (Date.now() - (parsed.startedAt || 0) > ACTIVE_JOB_MAX_AGE_MS) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writeActiveJob(job: StoredActiveJob | null) {
+  try {
+    if (job) window.localStorage.setItem(ACTIVE_JOB_KEY, JSON.stringify(job));
+    else window.localStorage.removeItem(ACTIVE_JOB_KEY);
+  } catch {
+    /* storage disabled — recovery is best effort */
+  }
+}
+
 interface PendingFile {
   file: File;
   id: string; // dedup key: name-size-lastModified (no random)
+}
+
+function toStep(step: string): ProcessingStepId {
+  if (step === "failed") return "failed";
+  if (step === "reading") return "reading";
+  if (step === "extracting" || step === "upload") return "extracting";
+  if (step === "organizing") return "organizing";
+  if (step === "safety") return "safety";
+  if (step === "saving") return "saving";
+  if (step === "indexing") return "indexing";
+  if (step === "partial") return "partial";
+  if (step === "ready" || step === "completed") return "ready";
+  return "upload";
 }
 
 function initialFileProgress(files: PendingFile[]): JobFileProgress[] {
@@ -124,6 +174,10 @@ export function UploadPage() {
   const [error, setError] = useState<unknown>(null);
   const [processingStep, setProcessingStep] = useState<ProcessingStepId>("upload");
   const [jobProgress, setJobProgress] = useState<JobProgress | null>(null);
+  // "The server went quiet" is NOT "the upload failed". Tracked separately so
+  // the UI can reassure instead of alarming while polling retries.
+  const [serverUnreachable, setServerUnreachable] = useState(false);
+  const [resumedJob, setResumedJob] = useState(false);
 
   // Recent uploads + health summary fill the page's right column / bottom.
   const [timeline, setTimeline] = useState<Timeline | null>(null);
@@ -188,6 +242,123 @@ export function UploadPage() {
     return null;
   };
 
+  // Shared completion handling for both a fresh upload and a resumed job.
+  const applyFinalJob = useCallback(
+    (
+      finalStatus: "completed" | "failed" | string,
+      progress: JobProgress | undefined,
+      response: UploadResponse | undefined,
+      jobError: string | null | undefined,
+      filesForRun: PendingFile[] | null
+    ) => {
+      if (finalStatus === "failed") {
+        throw new ApiError(
+          progress?.http_status || 502,
+          jobError || progress?.message || "Document processing could not finish.",
+          progress,
+          {
+            code: progress?.error_code,
+            retryable: progress?.retryable,
+            retryAfterSeconds: progress?.retry_after_seconds,
+          }
+        );
+      }
+      if (!response) {
+        throw new ApiError(500, "Processing finished, but the server returned no result.");
+      }
+      setResult(response);
+      if (filesForRun) setPending(filesAfterResult(filesForRun, response));
+      // Indexing is derived data. If it did not finish, the record is still
+      // saved, so this is the "partial" success state — never an error.
+      const indexingIncomplete =
+        response.indexed === false && response.index_error_code !== "no_indexable_content";
+      setProcessingStep(indexingIncomplete || progress?.step === "partial" ? "partial" : "ready");
+      if (progress) setJobProgress(progress);
+    },
+    []
+  );
+
+  const watchJob = useCallback(
+    async (jobId: string, filesForRun: PendingFile[] | null) => {
+      const final = await api.pollJobUntilDone(
+        credentials,
+        jobId,
+        (job) => {
+          if (job.progress) {
+            setJobProgress(job.progress);
+            setProcessingStep(toStep(job.progress.step));
+          }
+        },
+        undefined,
+        undefined,
+        {
+          onUnreachable: () => setServerUnreachable(true),
+          onReconnected: () => setServerUnreachable(false),
+        }
+      );
+      setServerUnreachable(false);
+      applyFinalJob(
+        final.status,
+        final.progress,
+        final.result as UploadResponse | undefined,
+        final.error,
+        filesForRun
+      );
+    },
+    [applyFinalJob, credentials]
+  );
+
+  // Recover an upload that was in flight when the page was closed, refreshed,
+  // or when the backend restarted mid-job. The server keeps working; we just
+  // reattach to the job instead of showing an empty upload form.
+  useStrictEffect(() => {
+    const stored = readActiveJob(credentials.userId);
+    if (!stored) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const job = await api.getJob(credentials, stored.jobId);
+        if (cancelled) return;
+        if (job.status === "completed" || job.status === "failed") {
+          // Already finished while we were away — show the outcome, then
+          // stop tracking it so a later visit starts clean.
+          writeActiveJob(null);
+          if (job.status === "completed") {
+            setResumedJob(true);
+            try {
+              applyFinalJob(job.status, job.progress, job.result, job.error, null);
+            } catch (finalError) {
+              setError(finalError);
+              setProcessingStep("failed");
+            }
+          }
+          return;
+        }
+        setResumedJob(true);
+        setPhase("uploading");
+        if (job.progress) {
+          setJobProgress(job.progress);
+          setProcessingStep(toStep(job.progress.step));
+        }
+        await watchJob(stored.jobId, null);
+        writeActiveJob(null);
+      } catch (resumeError) {
+        if (cancelled) return;
+        // A job we can no longer read is not an upload failure. The records
+        // may already be saved; the dashboard reads them from the database.
+        writeActiveJob(null);
+        if (resumeError instanceof ApiError && resumeError.status === 404) return;
+        setError(resumeError);
+        setProcessingStep("failed");
+      } finally {
+        if (!cancelled) setPhase("idle");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [credentials.userId]);
+
   async function handleUpload() {
     const problem = validate();
     if (problem) {
@@ -199,6 +370,8 @@ export function UploadPage() {
     const initialFiles = initialFileProgress(filesForRun);
     setError(null);
     setResult(null);
+    setResumedJob(false);
+    setServerUnreachable(false);
     setPhase("uploading");
     setProcessingStep("upload");
     setJobProgress({
@@ -210,17 +383,6 @@ export function UploadPage() {
       failed_files: 0,
       files: initialFiles,
     });
-
-    const toStep = (step: string): ProcessingStepId => {
-      if (step === "failed") return "failed";
-      if (step === "reading") return "reading";
-      if (step === "extracting" || step === "upload") return "extracting";
-      if (step === "organizing") return "organizing";
-      if (step === "safety") return "safety";
-      if (step === "indexing") return "indexing";
-      if (step === "ready" || step === "completed") return "ready";
-      return "upload";
-    };
 
     try {
       // Every upload uses the parent job endpoint. It is the only path that
@@ -240,35 +402,20 @@ export function UploadPage() {
           );
         }
 
-        const final = await api.pollJobUntilDone(credentials, queued.job_id, (job) => {
-          if (job.progress) {
-            setJobProgress(job.progress);
-            setProcessingStep(toStep(job.progress.step));
-          }
+        // Remember the job before waiting on it: from here on the server owns
+        // the work, and a refresh or a backend restart must not lose track.
+        writeActiveJob({
+          jobId: queued.job_id,
+          userId: credentials.userId,
+          startedAt: Date.now(),
+          fileNames: filesForRun.map((pendingFile) => pendingFile.file.name),
         });
 
-        if (final.status === "failed") {
-          const progress = final.progress;
-          throw new ApiError(
-            progress?.http_status || 502,
-            final.error || progress?.message || "Document processing could not finish.",
-            final,
-            {
-              code: progress?.error_code,
-              retryable: progress?.retryable,
-              retryAfterSeconds: progress?.retry_after_seconds,
-            }
-          );
+        try {
+          await watchJob(queued.job_id, filesForRun);
+        } finally {
+          writeActiveJob(null);
         }
-
-        const response = final.result as UploadResponse | undefined;
-        if (!response) {
-          throw new ApiError(500, "Processing finished, but the server returned no result.");
-        }
-        setResult(response);
-        setPending(filesAfterResult(filesForRun, response));
-        setProcessingStep("ready");
-        if (final.progress) setJobProgress(final.progress);
         return;
       } catch (asyncError) {
         // Only an explicitly old server without job routes may use the legacy
@@ -294,6 +441,7 @@ export function UploadPage() {
       setProcessingStep("failed");
     } finally {
       setPhase("idle");
+      setServerUnreachable(false);
     }
   }
 
@@ -465,7 +613,19 @@ export function UploadPage() {
             </section>
           )}
 
-          {busy && (
+          {busy && resumedJob && (
+            <Alert variant="info" title={t("upload.resumedTitle")}>
+              <p className="text-sm">{t("upload.resumedBody")}</p>
+            </Alert>
+          )}
+
+          {busy && serverUnreachable && (
+            <Alert variant="warning" title={t("upload.reconnectingTitle")}>
+              <p className="text-sm">{t("upload.reconnectingBody")}</p>
+            </Alert>
+          )}
+
+          {busy && !serverUnreachable && (
             <Alert variant="info" title={t("upload.readingTitle")}>
               <p className="text-sm">{t("upload.readingBody")}</p>
             </Alert>
@@ -486,7 +646,15 @@ export function UploadPage() {
         <div className="space-y-4">
           {(busy || result || uploadFailed) && (
             <ProcessingStatus
-              current={busy ? processingStep : uploadFailed ? "failed" : "ready"}
+              current={
+                busy
+                  ? processingStep
+                  : uploadFailed
+                  ? "failed"
+                  : processingStep === "partial"
+                  ? "partial"
+                  : "ready"
+              }
               files={jobProgress?.files || []}
               workerLimit={jobProgress?.worker_limit}
               error={null}
@@ -510,9 +678,10 @@ export function UploadPage() {
                   {result.documents_total === 1 ? "document page" : "document pages"} in total.
                 </p>
                 {!result.indexed && result.index_error && (
-                  <p className="mt-2 rounded-lg bg-red-100/60 px-3 py-2 text-sm text-red-800">
-                    Your documents were saved, but question-answering couldn't be set up this time.
-                    It will retry on your next upload.
+                  <p className="mt-2 rounded-lg bg-amber-100/70 px-3 py-2 text-sm text-amber-900">
+                    {result.index_error_code === "memory_limit"
+                      ? "Your documents are saved and visible in your record. Search and Q&A ran out of memory while indexing this batch — they rebuild automatically the next time you ask a question."
+                      : "Your documents are saved and visible in your record. Only question-answering search couldn't be set up this time; it rebuilds automatically the next time you ask a question."}
                   </p>
                 )}
                 {result.failed_files && result.failed_files.length > 0 && (

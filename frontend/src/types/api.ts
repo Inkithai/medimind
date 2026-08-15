@@ -253,6 +253,10 @@ export interface PatientSnapshot {
   cross_check_report: CrossCheckReport;
   lab_trends: LabTrendsReport;
   updated_at: string | null;
+  // True when the server reconstructed this view from the durable documents
+  // table because the cached snapshot row was missing. The record is intact;
+  // only the AI safety cross-check still needs to be re-run.
+  rebuilt_from_documents?: boolean;
 }
 
 // ---- Upload response (api.py) --------------------------------------------
@@ -287,6 +291,9 @@ export interface UploadResponse {
   lab_trends: LabTrendsReport;
   indexed: boolean;
   index_error?: string;
+  // Machine-readable reason indexing did not complete:
+  // "memory_limit" | "no_indexable_content" | "indexing_failed".
+  index_error_code?: string;
   // Files that failed while the rest of the batch succeeded (partial upload).
   failed_files?: FailedFile[];
 }
