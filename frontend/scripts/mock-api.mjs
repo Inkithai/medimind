@@ -183,6 +183,94 @@ const SNAPSHOT = {
   updated_at: "2026-08-15T00:00:00Z",
 };
 
+const VISITS = [
+  {
+    document_type: "prescription",
+    date: "2026-08-07",
+    provider_or_doctor: "Dr. S. Perera",
+    patient_name: "Arun Kumar",
+    medications: [
+      {
+        name: "Paracetamol",
+        ingredients: ["paracetamol"],
+        dosage: "500 mg",
+        frequency: "twice daily",
+        duration: "5 days",
+        dosage_value: 500,
+        dosage_unit: "mg",
+        frequency_per_day: 2,
+        is_as_needed: false,
+        confidence: 0.93,
+      },
+    ],
+    lab_results: [],
+    allergies_noted: [],
+    clinical_notes: "Patient reports intermittent abdominal pain.",
+    illegible_or_low_confidence_fields: [],
+    overall_confidence: 0.9,
+    _source: { file: "Arun (2).jpg", method: "vision_ocr", page: 1 },
+  },
+  {
+    document_type: "lab_report",
+    date: "2026-08-11",
+    provider_or_doctor: null,
+    patient_name: "Arun Kumar",
+    medications: [],
+    lab_results: [
+      {
+        test_name: "Hemoglobin",
+        value: "9.8",
+        unit: "g/dL",
+        reference_range: "13.0-17.0",
+        flag: "low",
+        confidence: 0.95,
+      },
+    ],
+    allergies_noted: [],
+    clinical_notes: null,
+    illegible_or_low_confidence_fields: [],
+    overall_confidence: 0.94,
+    _source: { file: "Arun (4).jpg", method: "vision_ocr" },
+  },
+];
+
+const QA_SCENARIOS = {
+  grounded: {
+    answer:
+      "Your records document Paracetamol 500 mg, taken twice daily for 5 days, prescribed on 7 August 2026.",
+    confidence: 0.92,
+    sources: [
+      { date: "2026-08-07", source_file: "Arun (2).jpg", page: 1 },
+      { date: "2026-08-11", source_file: "Arun (4).jpg", page: null },
+    ],
+    recommend_professional_consult: false,
+  },
+  notfound: {
+    answer:
+      "I couldn't find a blood pressure reading in your uploaded records. Nothing in the documents you've uploaded records that measurement.",
+    confidence: 0.1,
+    sources: [],
+    recommend_professional_consult: false,
+  },
+  risky: {
+    answer:
+      "Your records list Ferrous sulfate, but whether to stop it is not something I can advise on. Please discuss it with your doctor or pharmacist.",
+    confidence: 0.7,
+    sources: [{ date: "2026-08-07", source_file: "Arun (2).jpg", page: 1 }],
+    recommend_professional_consult: true,
+  },
+  long: {
+    answer: Array.from(
+      { length: 14 },
+      (_, index) =>
+        `${index + 1}. A deliberately long paragraph used to check that the answer card wraps text, keeps citations readable, and never widens the layout on a narrow viewport. Supercalifragilisticexpialidocious${"x".repeat(40)}`
+    ).join("\n\n"),
+    confidence: 0.65,
+    sources: [{ date: "2026-08-07", source_file: "Arun (2).jpg", page: 1 }],
+    recommend_professional_consult: false,
+  },
+};
+
 const server = createServer((request, response) => {
   const url = new URL(request.url, `http://${request.headers.host}`);
   response.setHeader("Content-Type", "application/json");
@@ -203,6 +291,54 @@ const server = createServer((request, response) => {
   }
   if (url.pathname === "/api/v1/patient-snapshot") {
     response.end(JSON.stringify(SNAPSHOT));
+    return;
+  }
+  if (url.pathname === "/api/v1/timeline") {
+    response.end(
+      JSON.stringify({
+        visits: VISITS,
+        medications_timeline: [],
+        lab_results_timeline: [],
+        known_allergies: [],
+      })
+    );
+    return;
+  }
+  if (url.pathname === "/api/v1/qa" && request.method === "POST") {
+    let body = "";
+    request.on("data", (chunk) => {
+      body += chunk;
+    });
+    request.on("end", () => {
+      let question = "";
+      try {
+        question = String(JSON.parse(body || "{}").question || "");
+      } catch {
+        question = "";
+      }
+      const scenario = process.env.MOCK_QA_SCENARIO || "";
+      if (scenario === "error") {
+        response
+          .writeHead(502)
+          .end(JSON.stringify({ detail: "Chat completion failed while answering question: boom" }));
+        return;
+      }
+      if (scenario === "ratelimit") {
+        response.writeHead(429).end(JSON.stringify({ detail: "rate limited" }));
+        return;
+      }
+      const lowered = question.toLowerCase();
+      let answer = QA_SCENARIOS.grounded;
+      if (/blood pressure|cholesterol|blood type|address|appointment/.test(lowered)) {
+        answer = QA_SCENARIOS.notfound;
+      } else if (/should i (stop|increase|start)|dose/.test(lowered)) {
+        answer = QA_SCENARIOS.risky;
+      } else if (/detailed summary|everything/.test(lowered)) {
+        answer = QA_SCENARIOS.long;
+      }
+      // Slow enough to actually observe the loading state and double-click guard.
+      setTimeout(() => response.end(JSON.stringify(answer)), 900);
+    });
     return;
   }
   if (url.pathname === "/api/v1/care/facilities") {

@@ -12,8 +12,11 @@ import {
   TrashIcon,
 } from "../components/icons";
 import { useAuth } from "../context/AuthContext";
-import type { QAResponse, SessionHistory, SessionTurn } from "../types/api";
+import { useCopy } from "../i18n";
+import type { QAResponse, QASource, SessionHistory, SessionTurn, Timeline, Visit } from "../types/api";
 import { classNames, formatTimestamp } from "../utils/format";
+import { findVisitForSource } from "../utils/sources";
+import { DocumentViewer } from "../components/DocumentViewer";
 
 interface UiMessage {
   role: "user" | "assistant";
@@ -34,7 +37,31 @@ export function SessionPage() {
   const [creating, setCreating] = useState(false);
   const [sending, setSending] = useState(false);
   const [sessionError, setSessionError] = useState<unknown>(null);
+  const [openSource, setOpenSource] = useState<{ source: QASource; visit: Visit | null } | null>(
+    null
+  );
   const scrollRef = useRef<HTMLDivElement>(null);
+  const timelineRef = useRef<Timeline | null>(null);
+  // Blocks a second send within the same tick, before `sending` re-renders.
+  const inFlightRef = useRef(false);
+  const copy = useCopy();
+
+  // Lets a citation resolve to its document. Failure only makes citations
+  // non-clickable; it never blocks the conversation.
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getTimeline(credentials)
+      .then((timeline) => {
+        if (!cancelled) timelineRef.current = timeline;
+      })
+      .catch(() => {
+        if (!cancelled) timelineRef.current = null;
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [credentials]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
@@ -91,7 +118,8 @@ export function SessionPage() {
 
   async function send() {
     const text = input.trim();
-    if (!text || !sessionId || sending) return;
+    if (!text || !sessionId || inFlightRef.current) return;
+    inFlightRef.current = true;
     setInput("");
     setSending(true);
     setSessionError(null);
@@ -136,7 +164,12 @@ export function SessionPage() {
       if (gone) setSessionId(null);
     } finally {
       setSending(false);
+      inFlightRef.current = false;
     }
+  }
+
+  function handleOpenSource(source: QASource) {
+    setOpenSource({ source, visit: findVisitForSource(timelineRef.current, source) });
   }
 
   return (
@@ -194,7 +227,11 @@ export function SessionPage() {
               </p>
             )}
             {messages.map((msg, idx) => (
-              <MessageBubble key={idx} message={msg} />
+              <MessageBubble
+                key={idx}
+                message={msg}
+                onOpenSource={timelineRef.current ? handleOpenSource : undefined}
+              />
             ))}
             {sending && (
               <div className="flex items-center gap-2 text-sm text-slate-400">
@@ -204,34 +241,43 @@ export function SessionPage() {
             )}
           </div>
           <CardBody className="border-t border-slate-100">
-            <div className="flex gap-2">
-              <input
-                type="text"
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <label htmlFor="session-input" className="sr-only">
+                Ask a follow-up about your records
+              </label>
+              <textarea
+                id="session-input"
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
+                  // Shift+Enter and an open IME composition must not send.
+                  if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
                     e.preventDefault();
                     void send();
                   }
                 }}
+                rows={2}
+                maxLength={2000}
                 placeholder="Ask a follow-up about your records…"
-                className="block w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                className="block w-full resize-y rounded-xl border border-slate-300 px-3 py-2 text-sm shadow-sm outline-none focus:border-brand-500 focus:ring-4 focus:ring-brand-100"
                 disabled={sending}
               />
               <button
                 onClick={send}
                 disabled={sending || !input.trim()}
-                className="inline-flex items-center gap-2 rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-60"
+                aria-busy={sending}
+                className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-xl bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {sending ? <Spinner className="h-4 w-4" /> : <SendIcon className="h-4 w-4" />}
-                Send
+                {sending ? <Spinner className="h-4 w-4" /> : <SendIcon className="h-4 w-4" aria-hidden="true" />}
+                {sending ? "Sending…" : "Send"}
               </button>
             </div>
             <details className="mt-2 text-xs text-slate-500">
-              <summary className="cursor-pointer font-medium text-slate-600">Advanced</summary>
-              <div className="mt-2 flex items-center gap-2">
-                <label htmlFor="session-topk">How much of your record to read per answer:</label>
+              <summary className="cursor-pointer font-medium text-slate-600">
+                {copy.askAi.advancedTitle}
+              </summary>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <label htmlFor="session-topk">{copy.askAi.depthLabel}</label>
                 <input
                   id="session-topk"
                   type="range"
@@ -239,13 +285,28 @@ export function SessionPage() {
                   max={20}
                   value={topK}
                   onChange={(e) => setTopK(parseInt(e.target.value, 10))}
+                  aria-valuetext={copy.askAi.depthValue(topK)}
                   className="w-32"
                 />
-                <span className="font-medium text-slate-700">{topK}</span>
+                <span className="font-medium text-slate-700">{copy.askAi.depthValue(topK)}</span>
               </div>
             </details>
           </CardBody>
         </Card>
+      )}
+
+      {openSource && (
+        <div className="space-y-3">
+          <h2 className="section-title">{openSource.source.source_file}</h2>
+          {openSource.visit ? (
+            <DocumentViewer visit={openSource.visit} onClose={() => setOpenSource(null)} />
+          ) : (
+            <Alert variant="info" title="That document isn't available to open">
+              This answer cites {openSource.source.source_file}, but the document isn't in your
+              records list right now.
+            </Alert>
+          )}
+        </div>
       )}
 
       <Alert variant="info" title="About conversations">
@@ -256,7 +317,13 @@ export function SessionPage() {
   );
 }
 
-function MessageBubble({ message }: { message: UiMessage }) {
+function MessageBubble({
+  message,
+  onOpenSource,
+}: {
+  message: UiMessage;
+  onOpenSource?: (source: QASource) => void;
+}) {
   const isUser = message.role === "user";
   if (message.error) {
     return (
@@ -280,7 +347,7 @@ function MessageBubble({ message }: { message: UiMessage }) {
         {isUser ? (
           <p className="whitespace-pre-wrap">{message.content}</p>
         ) : message.result ? (
-          <QAResultCard result={message.result} embedded />
+          <QAResultCard result={message.result} embedded onOpenSource={onOpenSource} />
         ) : (
           <p className="whitespace-pre-wrap">{message.content}</p>
         )}

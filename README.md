@@ -146,7 +146,21 @@ Base URL `http://127.0.0.1:8000`, all routes under `/api/v1/`.
 - **My Medicines** `/medicines` — current per ingredient (most recent) + historical log table, filterable, source file traceable (now fixed to original filename, not temp sanitized path).
 - **Test Results / Lab Trends** `/labs` — per-test direction, flag sequence, crossing point, approaching-threshold badge, SVG sparkline with reference band (robust parsing for `70-99 mg/dL`).
 - **Safety** `/safety` — allergy conflicts (danger), interactions with severity, dosage conflicts, duplicates, overall recommendation.
-- **Ask** `/ask` — single-shot RAG, configurable `top_k`, confidence, sources, `recommend_professional_consult`.
+- **Ask** `/ask` — single-shot RAG, configurable `top_k`, confidence, clickable sources, `recommend_professional_consult`.
+
+##### Ask AI groundedness
+
+For a medical RAG product a confidently wrong answer is worse than no answer, so the answer path is defended at three layers rather than by prompt wording alone:
+
+| Layer | Where | Guarantee |
+| --- | --- | --- |
+| Instruction | `QA_SYSTEM_PROMPT` | Refuses to diagnose, to advise starting/stopping/changing a dose, or to supply a value absent from the records |
+| Isolation | `_neutralize_injection()` + `<patient_records>` fencing | Retrieved documents are untrusted **data**; instruction-shaped text is defanged and the boundary is restated after the block, so an injected line can't pose as the final instruction |
+| Verification | `_validate_answer()` | Citations the model invents are **dropped** before reaching the UI, dates are corrected to what was retrieved, pages come from chunk metadata, and an answer with no verifiable source is capped at 0.5 confidence |
+
+The UI completes the chain: every citation is a button that opens the exact source document (and page) behind the claim — `Ask AI → citation → source document → page evidence`. When nothing supported an answer the card says so explicitly instead of looking equally authoritative.
+
+Citations resolve to documents by **exact** filename match (`frontend/src/utils/sources.ts`); a near-miss returns nothing rather than opening the wrong record.
 - **Conversations** `/conversations` — multi-turn, query rewriting (`rewritten_query`), session resume by ID, 404 handling when in-memory session expired after restart.
 - **Find Care** `/find-care` — search-as-you-type or current location → map confirmation → provider-neutral hospitals, clinics, pharmacies, laboratories, and doctors within the selected radius.
 

@@ -152,7 +152,11 @@ def test_index_then_answer_over_chroma_path():
             out = retrieval.answer_question("anon_qa", "what medication am I on?")
         assert out["answer"].startswith("You are taking Paracetamol")
         assert out["confidence"] == 0.95
-        assert out["sources"] == [{"date": "2024-03-15", "source_file": "rx.jpg"}]
+        # answer_question() attaches the page from the retrieved chunk metadata
+        # (None here — the fixture timeline has no page numbers).
+        assert out["sources"] == [
+            {"date": "2024-03-15", "source_file": "rx.jpg", "page": None}
+        ]
     finally:
         vector_store._chroma_client = None
         _restore_chromadb(saved)

@@ -2330,11 +2330,19 @@ def build_patient_timeline(raw_results: List[Dict[str, Any]]) -> Dict[str, Any]:
         visit_date = d.get("date")
         source_file = d.get("_source", {}).get("file")
 
+        # Carry the page through so Q&A citations can point at the exact
+        # page of a multi-page document, not just the file.
+        source_page = d.get("_source", {}).get("page")
+
         for med in d.get("medications", []):
-            all_medications.append({**med, "date": visit_date, "source_file": source_file})
+            all_medications.append(
+                {**med, "date": visit_date, "source_file": source_file, "source_page": source_page}
+            )
 
         for lab in d.get("lab_results", []):
-            all_lab_results.append({**lab, "date": visit_date, "source_file": source_file})
+            all_lab_results.append(
+                {**lab, "date": visit_date, "source_file": source_file, "source_page": source_page}
+            )
 
         for allergy in d.get("allergies_noted", []) or []:
             all_allergies.add(allergy)

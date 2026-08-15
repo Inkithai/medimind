@@ -161,6 +161,9 @@ export interface LabTrendsReport {
 export interface QASource {
   date: string;
   source_file: string;
+  /** Page within a multi-page document, when the retrieved chunk had one.
+   *  Attached server-side from chunk metadata — never guessed by the model. */
+  page?: number | null;
 }
 
 export interface QAResponse {

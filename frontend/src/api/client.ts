@@ -370,11 +370,17 @@ export const api = {
     return facilities.map(normalizeCareFacility);
   },
 
-  ask(credentials: Credentials, question: string, topK = 8): Promise<QAResponse> {
+  ask(
+    credentials: Credentials,
+    question: string,
+    topK = 8,
+    signal?: AbortSignal
+  ): Promise<QAResponse> {
     return request<QAResponse>(credentials, "/api/v1/qa", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ question, top_k: topK }),
+      signal,
     });
   },
 

@@ -53,7 +53,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 import conversation
 import db
@@ -201,17 +201,39 @@ async def schema_not_initialized_handler(request: Request, exc: db.SchemaNotInit
 # Request bodies
 # ---------------------------------------------------------------------------
 
+#: A question longer than this is a paste accident or an abuse attempt, not
+#: a question about a medical record. Rejected before it reaches the LLM.
+MAX_QUESTION_LENGTH = 2000
+
+
 class QARequest(BaseModel):
     """Body for the single-shot (Phase 1) Q&A endpoint."""
-    question: str
+    question: str = Field(min_length=1, max_length=MAX_QUESTION_LENGTH)
     chat_history: Optional[List[Dict[str, str]]] = None
     top_k: int = Field(default=8, ge=1, le=50)
+
+    @field_validator("question")
+    @classmethod
+    def _question_not_blank(cls, value: str) -> str:
+        """A whitespace-only question must never reach the model."""
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("Enter a question about your records.")
+        return cleaned
 
 
 class MessageRequest(BaseModel):
     """Body for posting a message into a conversation session (Phase 2)."""
-    question: str
+    question: str = Field(min_length=1, max_length=MAX_QUESTION_LENGTH)
     top_k: int = Field(default=8, ge=1, le=50)
+
+    @field_validator("question")
+    @classmethod
+    def _question_not_blank(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("Enter a question about your records.")
+        return cleaned
 
 
 # ---------------------------------------------------------------------------

@@ -46,6 +46,20 @@
 - [x] Confidence scoring
 - [x] High-risk/low-confidence detection
 
+### Ask AI groundedness & safety
+
+- [x] Citations validated server-side — a source the model invents is dropped, never shown
+- [x] Page numbers attached from retrieved chunk metadata, never guessed by the model
+- [x] An answer with no verifiable source cannot claim high confidence (capped at 0.5)
+- [x] Clickable citations open the exact source document (and page) behind a claim
+- [x] Prompt-injection defence: retrieved documents are fenced and treated as data, not instructions
+- [x] Refuses to diagnose, or to advise starting/stopping/changing a dose
+- [x] States plainly when something is not in the records instead of inventing it
+- [x] Empty/whitespace/oversized questions rejected before reaching the model
+- [x] Double-submit guard — rapid Ask clicks issue exactly one request
+- [x] Friendly error copy for 401/422/429/500/502/offline, with technical detail collapsible
+- [x] Suggested questions fill the box for editing instead of auto-sending
+
 ## Round 2 (Care Navigation — Added)
 
 - [x] Detect appropriate specialty

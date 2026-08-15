@@ -119,6 +119,62 @@ export const en = {
     mapListFallback: "Facility locations are also listed as text below the map.",
   },
 
+  askAi: {
+    title: "Ask AI",
+    subtitle:
+      "Ask questions about your uploaded medical records. Answers are grounded in your records and include sources.",
+    questionLabel: "Your question",
+    placeholder: "e.g. What was I prescribed for my sinus infection?",
+    ask: "Ask AI",
+    asking: "Asking…",
+    stop: "Stop",
+    emptyQuestionError: "Enter a question about your records first.",
+    tooLongError: (max: number) => `Please shorten your question to ${max} characters or fewer.`,
+    charactersRemaining: (remaining: number) => `${remaining} characters left`,
+    submitHint: "Press Enter to ask, Shift+Enter for a new line.",
+
+    suggestionsTitle: "Suggested questions",
+    suggestionsHint: "Pick one to fill the box, then edit it or ask as-is.",
+
+    loadingTitle: "Reading your records…",
+    loadingBody: "Looking through your documents for the most relevant passages.",
+
+    answerTitle: "Answer",
+    askedLabel: "You asked",
+    confidenceLabel: (value: string) => `Answer confidence ${value}`,
+    confidenceHelp:
+      "How directly your records answer the question — not how correct the wording is.",
+    consultTitle: "Check with a healthcare professional",
+    consultBody:
+      "This answer touches on a risk, interaction, allergy, or dosage matter. Review it with a doctor or pharmacist before acting on it.",
+
+    sourcesTitle: (count: number) => (count === 1 ? "1 source" : `${count} sources`),
+    noSourcesTitle: "No sources cited",
+    noSourcesBody:
+      "Nothing in your uploaded records supported this answer, so treat it with care.",
+    openSource: (file: string) => `Open ${file}`,
+    pageLabel: (page: number) => `page ${page}`,
+    sourceHint: "Open a source to see the document this answer came from.",
+    retrievalQueryLabel: "Records searched for",
+
+    groundedNote:
+      "Answers come only from your uploaded documents — never from the open internet. MediMind does not diagnose.",
+
+    advancedTitle: "Advanced settings",
+    depthLabel: "Records used for each answer",
+    depthHelp:
+      "More records give broader answers but can dilute a specific question. Default is 8.",
+    depthValue: (value: number) => `${value} records`,
+
+    conversationPrompt: "Prefer a back-and-forth chat?",
+    conversationLink: "Open Conversations",
+    singleQuestionNote:
+      "Each question here is answered on its own — it doesn't remember your previous question. Use Conversations for follow-ups.",
+
+    clear: "Clear",
+    newQuestion: "Ask another question",
+  },
+
   location: {
     stepSearch: "Step 1 of 2 — Search",
     stepConfirm: "Step 2 of 2 — Confirm location",
