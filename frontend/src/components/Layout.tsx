@@ -154,7 +154,7 @@ export function Layout() {
         ref={sidebarRef}
         id="primary-sidebar"
         className={classNames(
-          "fixed bottom-0 left-0 top-0 z-30 h-dvh w-72 transform border-r border-slate-200 bg-white transition-all duration-200",
+          "fixed bottom-0 left-0 top-0 z-30 h-dvh w-[min(18rem,calc(100vw-2rem))] transform border-r border-slate-200 bg-white transition-all duration-200",
           // Keep the desktop sidebar pinned to the viewport rather than stretching with page content.
           "lg:sticky lg:bottom-auto lg:top-0 lg:h-dvh lg:shrink-0 lg:self-start lg:translate-x-0",
           sidebarOpen ? "translate-x-0" : "-translate-x-full",
@@ -171,25 +171,18 @@ export function Layout() {
               collapsed && "lg:justify-center lg:px-2"
             )}
           >
-            <Logo />
-            <div className={classNames("min-w-0 flex-1", collapsed && "lg:hidden")}>
-              <p className="text-lg font-bold leading-tight text-slate-900">MediMind</p>
-              <p className="truncate text-sm text-slate-600">{t("common.tagline")}</p>
+            <div className={classNames("contents", collapsed && "lg:hidden")}>
+              <Logo />
+              <div className="min-w-0 flex-1">
+                <p className="text-lg font-bold leading-tight text-slate-900">MediMind</p>
+                <p className="truncate text-sm text-slate-600">{t("common.tagline")}</p>
+              </div>
             </div>
-            {!desktop && (
-              <button type="button" onClick={closeSidebar} className="btn-ghost !min-h-[44px] !px-3" aria-label={t("nav.close")}>
-                <span aria-hidden="true">✕</span>
-              </button>
-            )}
-          </div>
-
-          {/* Desktop collapse toggle */}
-          {desktop && (
-            <div className="hidden shrink-0 px-3 pb-1 lg:block">
+            {desktop && (
               <button
                 type="button"
                 onClick={() => setCollapsed((value) => !value)}
-                className="flex h-8 w-full items-center justify-center gap-2 rounded-lg px-2 text-xs font-medium text-slate-500 transition hover:bg-slate-50 hover:text-slate-700"
+                className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 lg:flex"
                 aria-label={collapsed ? t("nav.expandSidebar") : t("nav.collapseSidebar")}
                 aria-expanded={!collapsed}
                 title={collapsed ? t("nav.expandSidebar") : t("nav.collapseSidebar")}
@@ -201,16 +194,20 @@ export function Layout() {
                   strokeWidth={2}
                   strokeLinecap="round"
                   strokeLinejoin="round"
-                  className={classNames("h-4 w-4 shrink-0 transition-transform", collapsed && "rotate-180")}
+                  className={classNames("h-5 w-5 transition-transform", collapsed && "rotate-180")}
                   aria-hidden="true"
                 >
                   <polyline points="11 17 6 12 11 7" />
                   <polyline points="18 17 13 12 18 7" />
                 </svg>
-                {!collapsed && <span>{t("nav.collapseSidebar")}</span>}
               </button>
-            </div>
-          )}
+            )}
+            {!desktop && (
+              <button type="button" onClick={closeSidebar} className="btn-ghost !min-h-[44px] !px-3" aria-label={t("nav.close")}>
+                <span aria-hidden="true">✕</span>
+              </button>
+            )}
+          </div>
 
           {isConfigured && (
             <div className="shrink-0 px-3 pb-2">
@@ -227,7 +224,10 @@ export function Layout() {
             </div>
           )}
 
-          <nav className="min-h-0 flex-1 space-y-0.5 px-3 py-1" aria-label={t("nav.main")}>
+          <nav
+            className="scroll-thin min-h-0 flex-1 space-y-0.5 overflow-y-auto overscroll-contain px-3 py-1"
+            aria-label={t("nav.main")}
+          >
             {NAV.map((item, index) => {
               const Icon = item.icon;
               const worksWithoutWorkspace = item.to === "/settings";
@@ -249,7 +249,7 @@ export function Layout() {
                   title={collapsed ? t(item.labelKey) : undefined}
                   className={({ isActive }) =>
                     classNames(
-                      "group flex h-9 items-center gap-2.5 rounded-lg px-2 text-sm transition",
+                      "group flex min-h-[44px] items-center gap-2.5 rounded-lg px-2 text-sm transition lg:min-h-9",
                       collapsed && "lg:justify-center lg:px-0",
                       disabled
                         ? "cursor-not-allowed text-slate-400"
@@ -306,32 +306,26 @@ export function Layout() {
           <div className={classNames("shrink-0 border-t border-slate-100 px-3 py-2", collapsed && "lg:hidden")}>
             <LanguageSelector className="mb-1.5 hidden lg:block" />
             {isConfigured && (
-              <>
-                <div className="rounded-lg bg-brand-50 px-2.5 py-2 ring-1 ring-brand-200">
-                  <p className="text-xs font-semibold leading-4 text-brand-900">{t("nav.privateTitle")}</p>
-                  <p className="text-[11px] leading-4 text-brand-900">{t("nav.privateBody")}</p>
-                </div>
-                <div className="mt-1.5 grid grid-cols-2 gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => void createNewWorkspace()}
-                    className="h-9 rounded-lg border border-slate-300 bg-white px-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
-                    title={`${t("nav.newWorkspace")} (${credentials.userId})`}
-                  >
-                    {t("nav.newWorkspace")}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      clearCredentials();
-                      navigate("/");
-                    }}
-                    className="h-9 rounded-lg border border-slate-300 bg-white px-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
-                  >
-                    {t("nav.resetData")}
-                  </button>
-                </div>
-              </>
+              <div className="grid grid-cols-2 gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => void createNewWorkspace()}
+                  className="min-h-[44px] rounded-lg border border-slate-300 bg-white px-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 lg:min-h-9"
+                  title={`${t("nav.newWorkspace")} (${credentials.userId})`}
+                >
+                  {t("nav.newWorkspace")}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    clearCredentials();
+                    navigate("/");
+                  }}
+                  className="min-h-[44px] rounded-lg border border-slate-300 bg-white px-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 lg:min-h-9"
+                >
+                  {t("nav.resetData")}
+                </button>
+              </div>
             )}
           </div>
         </div>
