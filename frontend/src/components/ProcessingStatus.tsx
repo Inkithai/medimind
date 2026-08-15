@@ -8,12 +8,16 @@ export type ProcessingStepId =
   | "extracting"
   | "organizing"
   | "safety"
+  | "saving"
   | "indexing"
   | "ready"
+  // Records are saved in the database, but the derived search index did
+  // not finish. This is a success state with a caveat, never an error.
+  | "partial"
   | "failed";
 
 interface FinalStep {
-  id: "organizing" | "safety" | "indexing" | "ready";
+  id: "organizing" | "safety" | "saving" | "indexing" | "ready";
   label: string;
   description: string;
 }
@@ -28,6 +32,11 @@ const FINAL_STEPS: FinalStep[] = [
     id: "safety",
     label: "Run safety check",
     description: "Check medicines, dosages and allergies together",
+  },
+  {
+    id: "saving",
+    label: "Save to your record",
+    description: "Store the results so they survive any restart",
   },
   {
     id: "indexing",
@@ -73,8 +82,9 @@ function progressPercent(current: ProcessingStepId, files: JobFileProgress[]): n
     return sum;
   }, 0);
   const filePortion = Math.round((fileUnits / total) * 65);
-  if (current === "ready") return 100;
-  if (current === "indexing") return 92;
+  if (current === "ready" || current === "partial") return 100;
+  if (current === "indexing") return 94;
+  if (current === "saving") return 88;
   if (current === "safety") return 82;
   if (current === "organizing") return 72;
   return filePortion;
@@ -95,7 +105,12 @@ export function ProcessingStatus({
   const failed = files.filter((file) => file.status === "failed").length;
   const processed = successful + failed;
   const total = files.length;
-  const finalIdx = FINAL_STEPS.findIndex((step) => step.id === current);
+  // "partial" means everything up to and including saving succeeded, so the
+  // checklist should show progress frozen at the indexing step.
+  const isPartial = current === "partial";
+  const finalIdx = isPartial
+    ? FINAL_STEPS.findIndex((step) => step.id === "indexing")
+    : FINAL_STEPS.findIndex((step) => step.id === current);
   const isFinalizing = finalIdx >= 0;
   const percent = progressPercent(current, files);
 
@@ -110,6 +125,8 @@ export function ProcessingStatus({
           <h3 className="card-title">
             {current === "ready"
               ? "Upload complete"
+              : isPartial
+              ? "Your records are saved"
               : current === "failed"
               ? "Processing stopped"
               : "Processing your documents"}
@@ -132,7 +149,11 @@ export function ProcessingStatus({
           <div
             className={classNames(
               "h-full rounded-full transition-all duration-500",
-              current === "failed" ? "bg-amber-500" : "bg-brand-600"
+              current === "failed"
+                ? "bg-amber-500"
+                : isPartial
+                ? "bg-amber-400"
+                : "bg-brand-600"
             )}
             style={{ width: `${percent}%` }}
           />
@@ -256,6 +277,8 @@ export function ProcessingStatus({
                   "flex gap-3 rounded-xl border px-3 py-3",
                   isPast
                     ? "border-emerald-200 bg-emerald-50/60"
+                    : isCurrent && isPartial
+                    ? "border-amber-200 bg-amber-50/70"
                     : isCurrent
                     ? "border-brand-200 bg-brand-50/60"
                     : "border-slate-100 bg-slate-50/60 opacity-60"
@@ -266,6 +289,8 @@ export function ProcessingStatus({
                     "flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold",
                     isPast
                       ? "bg-emerald-600 text-white"
+                      : isCurrent && isPartial
+                      ? "bg-amber-500 text-white"
                       : isCurrent
                       ? "bg-brand-600 text-white"
                       : "bg-slate-200 text-slate-500"
@@ -274,6 +299,8 @@ export function ProcessingStatus({
                 >
                   {isPast || (current === "ready" && step.id === "ready") ? (
                     "✓"
+                  ) : isCurrent && isPartial ? (
+                    "!"
                   ) : isCurrent && current !== "ready" ? (
                     <Spinner className="h-3.5 w-3.5" />
                   ) : (
@@ -289,6 +316,19 @@ export function ProcessingStatus({
           })}
         </ol>
       </div>
+
+      {isPartial && (
+        <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <p className="font-semibold">Saved — search is still catching up</p>
+          <p className="mt-1 leading-5">
+            {successful > 0
+              ? `All ${successful} ${successful === 1 ? "file is" : "files are"} stored in your record and visible on your dashboard. `
+              : "Your record is stored and visible on your dashboard. "}
+            Only the question-answering index did not finish, and it rebuilds
+            automatically the next time you ask a question.
+          </p>
+        </div>
+      )}
 
       {error && (
         <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">

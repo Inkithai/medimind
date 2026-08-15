@@ -32,6 +32,12 @@ export function ErrorState({
   if (code === "job_poll_timeout") {
     variant = "info";
     title = "This upload may still be processing";
+  } else if (code === "job_status_unavailable") {
+    // The upload itself succeeded — only the progress connection dropped.
+    // This must NOT read like a failed upload, or users re-upload files
+    // that are already saved.
+    variant = "warning";
+    title = "Uploaded — we lost the progress connection";
   } else if (code === "provider_model_unavailable") {
     variant = "warning";
     title = "Document reading needs a server update";
@@ -80,6 +86,12 @@ export function ErrorState({
       {retryable === false && (
         <p className="mt-2 text-sm font-medium">
           Retrying immediately will not help. Your files are not the cause of this problem.
+        </p>
+      )}
+      {code === "job_status_unavailable" && (
+        <p className="mt-2 text-sm font-medium">
+          Please don't upload the same files again — open your dashboard in a minute to confirm
+          they're there.
         </p>
       )}
     </Alert>

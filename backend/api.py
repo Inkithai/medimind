@@ -70,7 +70,8 @@ from medical_extractor import (
     cross_check_prescriptions,
     process_document,
 )
-from retrieval import answer_question, index_patient_timeline
+from memory_probe import log_rss
+from retrieval import answer_question, index_patient_timeline, preload_embedding_model
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("api")
@@ -138,8 +139,23 @@ async def lifespan(app: FastAPI):
         db.ensure_indexes()
     except Exception as e:
         logger.warning("ensure_indexes failed on startup: %s", e)
+
+    # Load the embedding model ONCE, at startup, outside any request. The
+    # local ONNX MiniLM weights (~79 MB) were previously downloaded and the
+    # session created in the middle of an upload, adding a large memory
+    # spike exactly when extraction results were also in memory. Warming it
+    # here makes startup memory visible and keeps uploads flat. Opt out with
+    # PRELOAD_EMBEDDING_MODEL=false (it then loads lazily on first index).
+    log_rss(logger, "startup")
+    if os.environ.get("PRELOAD_EMBEDDING_MODEL", "true").strip().lower() not in ("false", "0", "no"):
+        try:
+            await asyncio.to_thread(preload_embedding_model)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("Embedding model preload skipped: %s", exc)
+        log_rss(logger, "startup_embeddings_ready")
     yield
-    # Shutdown: nothing to clean up (Chroma client is short-lived per request)
+    # Shutdown: nothing to clean up. The Chroma client and the embedding
+    # model are process-wide singletons that live for the app's lifetime.
 
 
 app = FastAPI(title="MediMind API", version="1.0.0", lifespan=lifespan)
@@ -747,22 +763,48 @@ async def _execute_upload_pipeline(
         len(lab_trends["insufficient_data"]),
     )
 
-    _progress("indexing", "Making your record searchable")
+    # ------------------------------------------------------------------
+    # PERSIST FIRST. The medical record is the product; the vector index is
+    # derived data that can always be rebuilt from it (retrieval.py
+    # self-heals via _reindex_from_persisted_documents). Indexing used to
+    # run before these two writes, so when the container was OOM-killed
+    # during indexing the process died with the extracted documents still
+    # only in memory — the user's upload "succeeded" in the logs and then
+    # vanished. Writing to Supabase first makes a crash at worst cost the
+    # search index, never the record.
+    # ------------------------------------------------------------------
+    _progress("saving", "Saving your records securely")
+    log_rss(logger, "upload_before_persist", user=user_id, new_pages=len(new_docs))
+    db.insert_documents(user_id, new_docs)
+    db.save_patient_snapshot(user_id, timeline, cross_check, lab_trends=lab_trends)
+    logger.info(
+        "upload: user=%s persisted %d new page(s) to Supabase before indexing",
+        user_id,
+        len(new_docs),
+    )
+
+    _progress("indexing", "Making your record searchable", records_saved=True)
+    log_rss(logger, "upload_indexing_start", user=user_id)
     indexed, index_error = True, None
+    index_error_code: Optional[str] = None
     try:
         chunks_indexed = await asyncio.to_thread(index_patient_timeline, user_id, timeline)
         if chunks_indexed == 0:
             indexed = False
+            index_error_code = "no_indexable_content"
             index_error = "Extraction succeeded but no medications, lab results, clinical notes, or allergies were found to index — Q&A has no documents to search yet."
             logger.warning("upload: user=%s %s", user_id, index_error)
         else:
             logger.info("upload: user=%s re-indexed for Q&A (%d chunk(s))", user_id, chunks_indexed)
+    except MemoryError as exc:
+        indexed, index_error, index_error_code = False, str(exc) or "out of memory", "memory_limit"
+        logger.error("upload: user=%s indexing ran out of memory: %s", user_id, exc)
     except Exception as exc:
         indexed, index_error = False, str(exc)
+        index_error_code = "indexing_failed"
         logger.error("upload: user=%s indexing failed: %s", user_id, exc, exc_info=True)
+    log_rss(logger, "upload_indexing_end", user=user_id, indexed=indexed)
 
-    db.insert_documents(user_id, new_docs)
-    db.save_patient_snapshot(user_id, timeline, cross_check, lab_trends=lab_trends)
     logger.info(
         "upload: user=%s complete: +%d new pages, %d saved files, %d total pages, indexed=%s, failed=%d",
         user_id,
@@ -786,12 +828,37 @@ async def _execute_upload_pipeline(
     }
     if not indexed:
         response["index_error"] = index_error
-    done_message = (
-        "Your health record is up to date"
-        if not file_errors
-        else f"Finished — {successfully_saved_files} of {total_files} file(s) added"
-    )
-    _progress("ready", done_message)
+        response["index_error_code"] = index_error_code
+    # Indexing is derived data, so a failure there is NOT an upload failure:
+    # the record is already saved. Report it as an explicit "partial" state
+    # with machine-readable metadata instead of leaving the client stuck on
+    # "indexing" (or lying with "ready").
+    indexing_broke = index_error_code in {"memory_limit", "indexing_failed"}
+    if indexing_broke:
+        _progress(
+            "partial",
+            "Your documents are saved. Search and Q&A will finish setting up shortly.",
+            stage="indexing",
+            error=index_error_code,
+            error_detail=index_error,
+            records_saved=True,
+            indexing_completed=False,
+            files_completed=successfully_saved_files,
+            retryable=True,
+        )
+    else:
+        done_message = (
+            "Your health record is up to date"
+            if not file_errors
+            else f"Finished — {successfully_saved_files} of {total_files} file(s) added"
+        )
+        _progress(
+            "ready",
+            done_message,
+            records_saved=True,
+            indexing_completed=indexed,
+            files_completed=successfully_saved_files,
+        )
     return response
 
 
@@ -842,12 +909,21 @@ async def upload_documents(
                     progress={"step": "upload", "message": "Files received; assigning processing slots"},
                 )
                 result = await _execute_upload_pipeline(user_id, files_data, job_id=job_id)
-                jobs.update_job(
-                    job_id,
-                    status="completed",
-                    progress={"step": "ready", "message": "Your health record is up to date"},
-                    result=result,
-                )
+                # The pipeline may have finished in the "partial" state
+                # (records saved, indexing did not complete). Don't overwrite
+                # that with a blanket "ready" — the client needs to know the
+                # difference between a fully-ready record and a saved record
+                # whose search index still has to be rebuilt.
+                current = jobs.get_job(job_id, user_id) or {}
+                if (current.get("progress") or {}).get("step") == "partial":
+                    jobs.update_job(job_id, status="completed", result=result)
+                else:
+                    jobs.update_job(
+                        job_id,
+                        status="completed",
+                        progress={"step": "ready", "message": "Your health record is up to date"},
+                        result=result,
+                    )
             except HTTPException as exc:
                 # Keep public text concise and expose structured retry metadata
                 # through progress. Per-file rows are preserved by update_job's
@@ -920,11 +996,87 @@ async def get_job(job_id: str, user_id: str = Depends(get_current_user)) -> Dict
 
 
 
+@app.get("/api/v1/documents")
+async def list_documents(user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
+    """Return every document page persisted for the authenticated user.
+
+    This reads straight from Supabase, so it is the authoritative answer to
+    "did my records survive the restart?". It never touches the vector
+    index or any in-process state: a redeployed/OOM-restarted container
+    returns exactly the same list. An empty list means the rows genuinely
+    are not there — not that the process forgot them.
+    """
+    documents = db.load_documents(user_id)
+    return {
+        "user_id": user_id,
+        "count": len(documents),
+        "documents": documents,
+    }
+
+
+_EMPTY_CROSS_CHECK: Dict[str, Any] = {
+    "potential_drug_interactions": [],
+    "duplicate_prescriptions": [],
+    "conflicting_dosage_instructions": [],
+    "allergy_conflicts": [],
+    "overall_recommendation": (
+        "Your records were restored from storage, so the medication safety "
+        "check has not been re-run yet. Upload a document or ask a question "
+        "to refresh it."
+    ),
+}
+
+
+def _rebuild_snapshot_from_documents(user_id: str) -> Optional[Dict[str, Any]]:
+    """Reconstruct the patient snapshot directly from the saved documents.
+
+    `patient_snapshots` is a convenience cache: everything in it is derived
+    from the append-only `documents` rows. If that cache row is missing
+    (never written because the process died mid-upload, or wiped), the
+    dashboard must NOT claim the user has no records — the documents are
+    still in the database. Rebuilding here is deterministic and free: the
+    timeline merge and lab-trend analysis are pure functions. Only the
+    safety cross-check needs an LLM, so it is returned empty and refreshed
+    on the next upload rather than firing a provider call from a GET.
+    """
+    try:
+        documents = db.load_documents(user_id)
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("snapshot rebuild: user=%s could not load documents: %s", user_id, exc)
+        return None
+    if not documents:
+        return None
+
+    logger.info(
+        "snapshot rebuild: user=%s reconstructing from %d persisted document(s)",
+        user_id,
+        len(documents),
+    )
+    timeline = build_patient_timeline(documents)
+    return {
+        "patient_timeline": timeline,
+        "cross_check_report": dict(_EMPTY_CROSS_CHECK),
+        "lab_trends": track_lab_trends(timeline),
+        "updated_at": None,
+        "rebuilt_from_documents": True,
+    }
+
+
+def _load_snapshot_or_rebuild(user_id: str) -> Optional[Dict[str, Any]]:
+    """Snapshot cache first, persisted documents second, None only if the
+    user genuinely has no records. A backend restart therefore has zero
+    effect on what the dashboard shows."""
+    snapshot = db.load_patient_snapshot(user_id)
+    if snapshot is not None:
+        return snapshot
+    return _rebuild_snapshot_from_documents(user_id)
+
+
 @app.get("/api/v1/timeline")
 async def get_timeline(user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
     """Returns the authenticated user's merged timeline (medications, lab
     results, visits, allergies) from the most recent upload/processing run."""
-    snapshot = db.load_patient_snapshot(user_id)
+    snapshot = _load_snapshot_or_rebuild(user_id)
     if snapshot is None:
         raise HTTPException(404, "No timeline found for this user.")
     return snapshot["patient_timeline"]
@@ -934,7 +1086,7 @@ async def get_timeline(user_id: str = Depends(get_current_user)) -> Dict[str, An
 async def get_cross_check(user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
     """Returns the authenticated user's latest cross-check report
     (interactions, duplicates, dosage conflicts, allergy conflicts)."""
-    snapshot = db.load_patient_snapshot(user_id)
+    snapshot = _load_snapshot_or_rebuild(user_id)
     if snapshot is None:
         raise HTTPException(404, "No cross-check report found for this user.")
     return snapshot["cross_check_report"]
@@ -947,7 +1099,7 @@ async def get_lab_trends(user_id: str = Depends(get_current_user)) -> Dict[str, 
     computed from the most recent upload/processing run. Recomputed on the
     fly from the saved timeline for snapshots saved before this field
     existed."""
-    snapshot = db.load_patient_snapshot(user_id)
+    snapshot = _load_snapshot_or_rebuild(user_id)
     if snapshot is None:
         raise HTTPException(404, "No timeline found for this user.")
     if "lab_trends" in snapshot:
@@ -966,7 +1118,7 @@ async def get_patient_snapshot(user_id: str = Depends(get_current_user)) -> Dict
     `lab_trends` is recomputed on the fly for snapshots saved before the
     field existed, mirroring get_lab_trends()'s backward-compat behavior.
     """
-    snapshot = db.load_patient_snapshot(user_id)
+    snapshot = _load_snapshot_or_rebuild(user_id)
     if snapshot is None:
         raise HTTPException(404, "No patient snapshot found for this user.")
     result: Dict[str, Any] = {
@@ -975,6 +1127,10 @@ async def get_patient_snapshot(user_id: str = Depends(get_current_user)) -> Dict
         "cross_check_report": snapshot["cross_check_report"],
         "updated_at": snapshot.get("updated_at"),
     }
+    if snapshot.get("rebuilt_from_documents"):
+        # Tells the client this view was reconstructed from the durable
+        # documents table rather than the cached snapshot row.
+        result["rebuilt_from_documents"] = True
     if "lab_trends" in snapshot:
         result["lab_trends"] = snapshot["lab_trends"]
     else:

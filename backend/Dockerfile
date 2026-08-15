@@ -20,6 +20,14 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 # Copy all backend source code into the container
 COPY . ./
+
+# Bake the local ONNX embedding model (~79 MB, all-MiniLM-L6-v2) into the
+# image. Without this it downloads on FIRST UPLOAD, inside the request, on
+# top of the extracted document text — which is what OOM-killed the 512 MB
+# web service during the indexing stage. Non-fatal if the build has no
+# network: the model then falls back to downloading lazily at runtime.
+ENV ONNX_MODEL_CACHE_DIR=/app/.cache/chroma
+RUN python prefetch_embedding_model.py || true
 # The container listens on 8000; the hosting platform maps this to its port
 EXPOSE 8000
 # Production: no --reload, bind to 0.0.0.0

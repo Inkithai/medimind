@@ -32,16 +32,18 @@ Env:
     export CHROMA_DIR=./chroma_db        (only for VECTOR_STORE=chroma)
 """
 
+import gc
 import os
 import re
 import json
 import hashlib
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterator, List, Optional
 
 from openai import OpenAI, OpenAIError
 
 from medical_extractor import client, MODEL, _completion_resilient, _chat_completion
+from memory_probe import log_rss
 import vector_store  # abstraction over Chroma (local) and Supabase (no volume)
 
 logger = logging.getLogger("retrieval")
@@ -50,7 +52,23 @@ EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL", "text-embedding-3-small")
 CHAT_MODEL = MODEL  # reuse the same chat model configured in medical_extractor.py
 
 CHROMA_DIR = os.environ.get("CHROMA_DIR", "./chroma_db")
-EMBEDDING_BATCH_SIZE = 100  # keep well under the API's per-request item limit
+
+
+def _embedding_batch_size() -> int:
+    """Chunks embedded (and upserted) per batch.
+
+    This bounds peak memory during indexing: a batch's texts + float vectors
+    are the only embedding data alive at any moment. The default of 16 keeps
+    an ONNX MiniLM batch small enough to survive a 512 MB container; raise
+    EMBEDDING_BATCH_SIZE on a bigger instance to trade memory for speed.
+    """
+    try:
+        return max(1, min(256, int(os.environ.get("EMBEDDING_BATCH_SIZE", "16"))))
+    except ValueError:
+        return 16
+
+
+EMBEDDING_BATCH_SIZE = _embedding_batch_size()
 # VECTOR_STORE is read inside vector_store.py; we keep CHROMA_DIR for backward compat
 
 # Groq has no embeddings endpoint. When an OpenAI key is available it
@@ -64,15 +82,80 @@ _openai_embedding_client = OpenAI(api_key=_OPENAI_API_KEY) if _OPENAI_API_KEY el
 _local_embedding_fn = None
 
 
+def _apply_onnx_cache_dir(model_cls) -> None:
+    """Point Chroma's ONNX model cache at ONNX_MODEL_CACHE_DIR when set.
+
+    Chroma hardcodes the cache to ``Path.home()/.cache/chroma/onnx_models``.
+    On a container with an ephemeral home that means every cold start
+    re-downloads the ~79 MB all-MiniLM-L6-v2 archive, extracts it, and holds
+    both in memory during the first upload — exactly when extraction results
+    are also resident. Baking the model into the image (see backend/Dockerfile)
+    and pointing here at that path removes the download from the request path.
+
+    Best effort only: an unknown chromadb layout must not break indexing.
+    """
+    cache_dir = os.environ.get("ONNX_MODEL_CACHE_DIR", "").strip()
+    if not cache_dir:
+        return
+    try:
+        from pathlib import Path
+
+        target = Path(cache_dir) / model_cls.MODEL_NAME
+        target.mkdir(parents=True, exist_ok=True)
+        model_cls.DOWNLOAD_PATH = target
+        logger.info("ONNX embedding model cache directory: %s", target)
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("Could not apply ONNX_MODEL_CACHE_DIR=%s: %s", cache_dir, exc)
+
+
 def _get_local_embedding_function():
     """Lazily initialise Chroma's default local embedding function
-    (all-MiniLM-L6-v2 via ONNX runtime). Weights download once on first
-    use, then everything runs in-process — no API key required."""
+    (all-MiniLM-L6-v2 via ONNX runtime), ONCE per process.
+
+    The model weights (~79 MB) download on first use and the ONNX session
+    itself costs tens of MB of RSS. Both are cached in the module-level
+    ``_local_embedding_fn`` so a second upload never pays for them again —
+    re-creating the session per upload was a large part of the memory
+    growth that got the container OOM-killed.
+
+    CPU execution is requested explicitly: containers have no GPU, and
+    letting onnxruntime probe for one both wastes memory on provider
+    initialisation and emits the noisy "GPU device discovery failed"
+    warning about /sys/class/drm/card0/device/vendor.
+    """
     global _local_embedding_fn
     if _local_embedding_fn is None:
         from chromadb.utils.embedding_functions import ONNXMiniLM_L6_V2
-        _local_embedding_fn = ONNXMiniLM_L6_V2()
+
+        _apply_onnx_cache_dir(ONNXMiniLM_L6_V2)
+        log_rss(logger, "embedding_model_load_start")
+        try:
+            _local_embedding_fn = ONNXMiniLM_L6_V2(
+                preferred_providers=["CPUExecutionProvider"]
+            )
+        except TypeError:
+            # Older chromadb builds don't accept preferred_providers.
+            _local_embedding_fn = ONNXMiniLM_L6_V2()
+        log_rss(logger, "embedding_model_load_done")
     return _local_embedding_fn
+
+
+def preload_embedding_model() -> bool:
+    """Warm the embedding backend at startup instead of mid-upload.
+
+    Returns True when a local model was loaded, False when embeddings are
+    served by OpenAI (nothing to preload) or the load failed. Failure is
+    never fatal: indexing retries lazily and uploads must not depend on it.
+    """
+    if _openai_embedding_client is not None:
+        logger.info("Embeddings use OpenAI (%s) — no local model to preload.", EMBEDDING_MODEL)
+        return False
+    try:
+        _get_local_embedding_function()
+        return True
+    except Exception as exc:
+        logger.warning("Local embedding model preload failed (will retry lazily): %s", exc)
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -229,10 +312,23 @@ def embed_texts(texts: List[str]) -> List[List[float]]:
             embeddings.extend(item.embedding for item in response.data)
         return embeddings
 
-    try:
-        return _get_local_embedding_function()(texts)
-    except Exception as e:
-        raise RuntimeError(f"Local embedding failed for {len(texts)} chunk(s): {e}") from e
+    # Local ONNX path: batch here too. Previously the whole corpus was sent
+    # to the model in ONE call, so peak memory scaled with the number of
+    # chunks (tokenised tensors + output vectors all alive at once).
+    embed = _get_local_embedding_function()
+    local_embeddings: List[List[float]] = []
+    for start in range(0, len(texts), EMBEDDING_BATCH_SIZE):
+        batch = texts[start:start + EMBEDDING_BATCH_SIZE]
+        try:
+            vectors = embed(batch)
+        except Exception as e:
+            raise RuntimeError(f"Local embedding failed for {len(batch)} chunk(s): {e}") from e
+        local_embeddings.extend(
+            vector.tolist() if hasattr(vector, "tolist") else list(vector)
+            for vector in vectors
+        )
+        del vectors
+    return local_embeddings
 
 
 def _sanitize_collection_name(patient_key: str) -> str:
@@ -275,6 +371,11 @@ def _get_patient_collection(patient_key: str, create: bool):
         return None
 
 
+def _iter_batches(chunks: List[Dict[str, Any]], size: int) -> Iterator[List[Dict[str, Any]]]:
+    for start in range(0, len(chunks), size):
+        yield chunks[start:start + size]
+
+
 def index_patient_timeline(patient_key: str, timeline: Dict[str, Any]) -> int:
     """
     Entry point for indexing: chunks a patient's timeline, embeds every
@@ -282,6 +383,15 @@ def index_patient_timeline(patient_key: str, timeline: Dict[str, Any]) -> int:
     (persisted under ./chroma_db). Safe to call repeatedly on the same
     timeline — chunk IDs are deterministic, so re-indexing overwrites
     existing entries rather than duplicating them.
+
+    Memory behaviour (this is why the work is batched): embedding is the
+    single largest allocation in the whole upload pipeline. Chunks are
+    therefore embedded and upserted in EMBEDDING_BATCH_SIZE-sized batches,
+    and each batch's texts/vectors are released before the next one is
+    built, so peak RSS is a function of the batch size rather than of how
+    many documents the patient has. RSS is sampled around each stage so a
+    container OOM kill can be attributed to a specific batch instead of
+    just ending the log.
 
     Returns the number of chunks indexed. Returns 0 — WITHOUT storing
     anything — when the timeline has no retrievable content (no
@@ -303,28 +413,55 @@ def index_patient_timeline(patient_key: str, timeline: Dict[str, Any]) -> int:
         )
         return 0
 
-    embeddings = embed_texts([c["text"] for c in chunks])
+    total = len(chunks)
+    store_name = vector_store.get_store_name()
+    batch_size = EMBEDDING_BATCH_SIZE
+    log_rss(logger, "indexing_start", chunks=total, batch_size=batch_size, store=store_name)
 
-    if vector_store.get_store_name() == "supabase":
-        vector_store.upsert(
-            patient_key,
-            ids=[c["id"] for c in chunks],
-            embeddings=embeddings,
-            documents=[c["text"] for c in chunks],
-            metadatas=[c["metadata"] for c in chunks],
-        )
-        logger.info("Indexed %d chunk(s) for patient '%s' into supabase (supabase).", len(chunks), patient_key)
-    else:
-        # Chroma path (kept for backward compat with tests that mock _get_patient_collection)
-        collection = _get_patient_collection(patient_key, create=True)
-        collection.upsert(
-            ids=[c["id"] for c in chunks],
-            embeddings=embeddings,
-            documents=[c["text"] for c in chunks],
-            metadatas=[c["metadata"] for c in chunks],
-        )
-        logger.info("Indexed %d chunk(s) for patient '%s' into Chroma (%s).", len(chunks), patient_key, CHROMA_DIR)
-    return len(chunks)
+    # One collection handle is resolved once and reused by every batch
+    # (the Chroma client itself is process-cached in vector_store).
+    collection = None if store_name == "supabase" else _get_patient_collection(patient_key, create=True)
+
+    indexed = 0
+    for batch_number, batch in enumerate(_iter_batches(chunks, batch_size), start=1):
+        ids = [c["id"] for c in batch]
+        texts = [c["text"] for c in batch]
+        metadatas = [c["metadata"] for c in batch]
+        embeddings = embed_texts(texts)
+
+        if collection is None:
+            vector_store.upsert(
+                patient_key,
+                ids=ids,
+                embeddings=embeddings,
+                documents=texts,
+                metadatas=metadatas,
+            )
+        else:
+            collection.upsert(
+                ids=ids,
+                embeddings=embeddings,
+                documents=texts,
+                metadatas=metadatas,
+            )
+
+        indexed += len(batch)
+        # Drop this batch's vectors before building the next one so peak
+        # memory stays flat across a large record.
+        del embeddings, ids, texts, metadatas, batch
+        log_rss(logger, "indexing_batch_done", batch=batch_number, indexed=indexed, total=total)
+
+    # The chunk list is the last large structure held by this function.
+    del chunks
+    gc.collect()
+    log_rss(logger, "indexing_done", chunks=indexed, store=store_name)
+    logger.info(
+        "Indexed %d chunk(s) for patient '%s' into %s.",
+        indexed,
+        patient_key,
+        "supabase" if store_name == "supabase" else f"Chroma ({CHROMA_DIR})",
+    )
+    return indexed
 
 
 # ---------------------------------------------------------------------------
