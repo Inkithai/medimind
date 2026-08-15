@@ -86,29 +86,43 @@ def get_chroma_client():
     return _get_chroma_client()
 
 def _sanitize_collection_name(patient_key: str) -> str:
-    """Chroma-safe collection name that is UNIQUE per patient.
+    """Chroma-safe collection name that is stable and UNIQUE per patient.
 
-    The sanitising itself is lossy — lowercasing and replacing punctuation
-    maps "Bob"/"bob" and "user@x.com"/"user_x.com" onto the same string, and
-    truncation collides any two keys sharing a long prefix. Two patients
-    sharing a collection would mean one seeing the other's records, so a
-    short hash of the ORIGINAL key is appended to keep them distinct.
+    Chroma requires 3-63 chars, start/end alphanumeric, only [a-zA-Z0-9._-].
+
+    Two separate correctness constraints are combined here:
+      * Truncate BEFORE the end-alphanumeric fixup, or a long key can be cut
+        mid-separator and leave a trailing '_'/'.'/'-' that Chroma rejects.
+      * Append a hash of the raw key, or lossy sanitising lets two different
+        patients collide onto one collection (a cross-patient record leak).
+
+    vector_store._sanitize_collection_name() and
+    retrieval._sanitize_collection_name() must stay byte-identical, or a
+    write and a subsequent read resolve to different collections.
     """
     name = re.sub(r"[^a-z0-9._-]+", "_", patient_key.strip().lower()).strip("_.-")
     if not name:
         name = "patient"
     if not name[0].isalnum():
         name = "p" + name
-
-    # Derived from the raw key, so case and punctuation still differentiate.
-    digest = hashlib.sha256(patient_key.encode("utf-8")).hexdigest()[:10]
-    # Keep the whole suffix within Chroma's 63-character limit.
-    name = f"{name[:52]}_{digest}"
+    # Truncate BEFORE the end-alphanumeric fixup. Cutting last can land on a
+    # separator (e.g. 62 'a's + space -> trailing '_') and Chroma rejects it.
+    # Reserve room for the 11-char disambiguating suffix appended below.
+    name = name[:52].rstrip("_.-")
+    if not name:
+        name = "patient"
+    # The sanitising above is lossy: it maps "Bob"/"bob" and
+    # "user@x.com"/"user_x.com" onto the same string, and truncation collides
+    # keys sharing a long prefix. Two patients sharing a collection would mean
+    # one seeing the other's records, so append a short hash of the ORIGINAL
+    # key to keep them distinct.
+    name = f"{name}_{hashlib.sha256(patient_key.encode('utf-8')).hexdigest()[:10]}"
     if not name[-1].isalnum():
         name = name + "0"
     while len(name) < 3:
         name += "0"
-    return name[:63]
+    return name
+
 
 def _chroma_upsert(patient_key: str, ids: List[str], embeddings: List[List[float]], documents: List[str], metadatas: List[Dict[str, Any]]):
     db = _get_chroma_client()

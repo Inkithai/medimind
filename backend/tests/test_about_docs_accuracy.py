@@ -33,10 +33,12 @@ _ABOUT_COPY_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
     "frontend",
     "src",
-    "i18n",
-    "about.ts",
+    "pages",
+    "AboutPage.tsx",
 )
 
+# The endpoint table lives in AboutPage.tsx (paths and HTTP verbs are code,
+# not translatable copy); the human descriptions live in the i18n catalogs.
 _ENDPOINT_RE = re.compile(
     r'\{\s*method:\s*"(?P<method>[A-Z]+)",\s*path:\s*"(?P<path>[^"]+)"'
 )
@@ -47,7 +49,7 @@ def _documented_endpoints():
     with open(_ABOUT_COPY_PATH, encoding="utf-8") as handle:
         source = handle.read()
     found = [(m.group("method"), m.group("path")) for m in _ENDPOINT_RE.finditer(source)]
-    assert found, "no endpoints parsed from about.ts — did the copy format change?"
+    assert found, "no endpoints parsed from AboutPage.tsx — did the table format change?"
     return found
 
 
@@ -88,7 +90,7 @@ def test_no_secrets_or_credentials_are_published():
     ]
     for pattern in forbidden_patterns:
         match = re.search(pattern, source)
-        assert match is None, f"possible secret published in about.ts: {match.group(0)!r}"
+        assert match is None, f"possible secret published on the About page: {match.group(0)!r}"
 
 
 def test_public_routes_really_are_public():

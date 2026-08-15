@@ -1,21 +1,12 @@
-/** The canonical Find Care categories. `other` keeps unclassified healthcare
- * listings visible under "All" instead of silently dropping them. */
-export const FACILITY_KINDS = [
-  "hospital",
-  "clinic",
-  "pharmacy",
-  "laboratory",
-  "doctor",
-  "other",
-] as const;
+export type FacilityKind =
+  | "hospital"
+  | "clinic"
+  | "pharmacy"
+  | "laboratory"
+  | "doctor"
+  | "healthcare";
 
-export type FacilityKind = (typeof FACILITY_KINDS)[number];
-
-/** Provider-neutral facility shape used by the Find Care page.
- *
- * Optional fields are `undefined` only when the directory did not publish
- * them. The UI must render a "not available" fallback instead of inventing a
- * value. */
+/** Provider-neutral facility shape used by the Find Care page. */
 export interface CareFacility {
   id: string;
   name: string;
@@ -31,10 +22,11 @@ export interface CareFacility {
   mapsUrl?: string;
   openingHours?: string[];
   openNow?: boolean;
-  /** Directory-provided specialty/primary-type label, e.g. "Dentist". */
   specialty?: string;
-  /** True/false only when the search requested a specialty. */
-  specialtyMatch?: boolean;
+  specialtyMatch?: number;
+  availabilityMatch?: boolean;
+  rankingScore?: number;
+  rankingReason?: string;
   source: string;
 }
 
@@ -42,7 +34,7 @@ export interface CareFacility {
 export interface CareFacilityResponse {
   id: string;
   name: string;
-  kind: string;
+  kind: FacilityKind;
   latitude: number;
   longitude: number;
   distance_km: number | null;
@@ -54,7 +46,24 @@ export interface CareFacilityResponse {
   maps_url: string | null;
   opening_hours: string[] | null;
   open_now: boolean | null;
-  specialty?: string | null;
-  specialty_match?: boolean | null;
+  specialty: string | null;
+  specialty_match: number | null;
+  availability_match: boolean | null;
+  ranking_score: number | null;
+  ranking_reason: string | null;
   source: string;
+}
+
+export type CareAvailability = "any" | "today" | "this_week" | "evening" | "weekend";
+
+export interface CareRecommendation {
+  triggered: boolean;
+  issue_type: string;
+  specialty: string;
+  specialty_query: string;
+  facility_kind: "hospital" | "clinic" | "pharmacy" | "laboratory" | "doctor";
+  urgency: "routine" | "prompt";
+  reason: string;
+  evidence: Array<{ date: string | null; source_file: string | null; page?: number | null }>;
+  disclaimer: string;
 }

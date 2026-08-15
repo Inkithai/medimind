@@ -1009,7 +1009,7 @@ def _format_ladder(
         # Compact JSON materially reduces prompt tokens on the 8K TPM tier.
         f"{json.dumps(schema, separators=(',', ':'))}\n"
         "Example of the required shape (illustrative values, adapt to the actual document):\n"
-        '{\n  "document_type": "prescription",\n  "date": "2024-03-15",\n  "provider_or_doctor": "Dr. Smith",\n  "patient_name": "John Doe",\n  "medications": [],\n  "lab_results": [],\n  "allergies_noted": [],\n  "clinical_notes": null,\n  "illegible_or_low_confidence_fields": [],\n  "overall_confidence": 0.92\n}\n'
+        '{\n  "document_type": "prescription",\n  "date": "2024-03-15",\n  "provider_or_doctor": "Dr. Smith",\n  "patient_name": "John Doe",\n  "medications": [],\n  "lab_results": [],\n  "allergies_noted": [],\n  "diagnoses_or_conditions": [],\n  "clinical_notes": null,\n  "illegible_or_low_confidence_fields": [],\n  "overall_confidence": 0.92\n}\n'
     )
     if model in _STRICT_SCHEMA_MODELS:
         return [
@@ -1790,6 +1790,9 @@ the same regardless of what language or units each was printed in:
   generic mapping is.
 
 Rules:
+- Extract diagnoses_or_conditions only when the document explicitly names
+  them. Preserve the printed wording; do not infer a diagnosis from a test,
+  symptom, or medication.
 - If handwriting is unclear, make your best guess but LOWER the confidence
   score for that field and add a note to illegible_or_low_confidence_fields.
 - Never invent data. Use null for missing string fields (per the schema).
@@ -1849,14 +1852,15 @@ EXTRACTION_JSON_SCHEMA = {
             },
         },
         "allergies_noted": {"type": "array", "items": {"type": "string"}},
+        "diagnoses_or_conditions": {"type": "array", "items": {"type": "string"}},
         "clinical_notes": {"type": ["string", "null"]},
         "illegible_or_low_confidence_fields": {"type": "array", "items": {"type": "string"}},
         "overall_confidence": {"type": "number"},
     },
     "required": [
         "document_type", "date", "provider_or_doctor", "patient_name",
-        "medications", "lab_results", "allergies_noted", "clinical_notes",
-        "illegible_or_low_confidence_fields", "overall_confidence",
+        "medications", "lab_results", "allergies_noted", "diagnoses_or_conditions",
+        "clinical_notes", "illegible_or_low_confidence_fields", "overall_confidence",
     ],
     "additionalProperties": False,
 }
@@ -1895,18 +1899,59 @@ def extract_text_from_pdf(pdf_path: str) -> str:
     return "\n\n".join(chunks)
 
 
-def pdf_pages_to_images(pdf_path: str, dpi: int = 200) -> List[Image.Image]:
-    """Render each page of a scanned/image-only PDF into a PIL image."""
+def pdf_pages_to_images(
+    pdf_path: str,
+    dpi: int = 200,
+    page_indices: Optional[List[int]] = None,
+) -> List[Image.Image]:
+    """Render PDF pages into PIL images.
+
+    ``page_indices`` (0-based) limits rendering to those pages so a hybrid
+    PDF does not rasterize digital text pages that will be extracted as
+    text. When omitted, every page is rendered (scanned-PDF path).
+    """
     images = []
     doc = pymupdf.open(pdf_path)
     zoom = dpi / 72
     matrix = pymupdf.Matrix(zoom, zoom)
-    for page in doc:
+    indices = list(page_indices) if page_indices is not None else list(range(len(doc)))
+    for i in indices:
+        page = doc[i]
         pix = page.get_pixmap(matrix=matrix)
         img = Image.open(io.BytesIO(pix.tobytes("png")))
         images.append(img)
     doc.close()
     return images
+
+
+# A page with fewer than this many extracted characters is treated as
+# scanned/image-only and sent through vision OCR. 40 is high enough that
+# a digital letterhead-only cover (hospital name + address) still counts
+# as text, but a junk OCR layer of a few random glyphs does not.
+PAGE_TEXT_MIN_CHARS = 40
+
+
+def _pdf_page_texts(pdf_path: str) -> List[str]:
+    """Return stripped text for every page, in order."""
+    texts: List[str] = []
+    with pdfplumber.open(pdf_path) as pdf:
+        for page in pdf.pages:
+            texts.append((page.extract_text() or "").strip())
+    return texts
+
+
+def classify_pdf_pages(
+    page_texts: List[str], min_chars: int = PAGE_TEXT_MIN_CHARS
+) -> Tuple[List[int], List[int]]:
+    """Split page indices into (has_usable_text, needs_vision)."""
+    text_idx: List[int] = []
+    image_idx: List[int] = []
+    for i, text in enumerate(page_texts):
+        if len((text or "").strip()) >= min_chars:
+            text_idx.append(i)
+        else:
+            image_idx.append(i)
+    return text_idx, image_idx
 
 
 def image_to_base64(img: Image.Image) -> str:
@@ -1931,6 +1976,18 @@ def image_to_base64(img: Image.Image) -> str:
 # ---------------------------------------------------------------------------
 # 3. Vision extraction call
 # ---------------------------------------------------------------------------
+
+def _normalize_extraction_result(result: Dict[str, Any]) -> Dict[str, Any]:
+    """Backfill fields when a provider falls back from strict JSON schema."""
+    diagnoses = result.get("diagnoses_or_conditions")
+    if not isinstance(diagnoses, list):
+        result["diagnoses_or_conditions"] = []
+    else:
+        result["diagnoses_or_conditions"] = [
+            value.strip() for value in diagnoses if isinstance(value, str) and value.strip()
+        ]
+    return result
+
 
 def extract_from_image(img: Image.Image, model: str = VISION_MODEL) -> Dict[str, Any]:
     """Send a single page image to the vision model and parse structured JSON.
@@ -1959,7 +2016,7 @@ def extract_from_image(img: Image.Image, model: str = VISION_MODEL) -> Dict[str,
         ],
         strict_format=EXTRACTION_RESPONSE_FORMAT,
     )
-    return _parse_json_object(raw)
+    return _normalize_extraction_result(_parse_json_object(raw))
 
 
 def extract_from_text(text: str, model: str = MODEL) -> Dict[str, Any]:
@@ -1973,7 +2030,7 @@ def extract_from_text(text: str, model: str = MODEL) -> Dict[str, Any]:
         user_content=f"Extract structured data from this document text:\n\n{text}",
         strict_format=EXTRACTION_RESPONSE_FORMAT,
     )
-    return _parse_json_object(raw)
+    return _normalize_extraction_result(_parse_json_object(raw))
 
 
 VISION_OCR_CONFIDENCE_CEILING = 0.85  # a vision/handwriting read is never "fully certain"
@@ -2009,8 +2066,13 @@ def looks_like_medical_text(text: str, filename: str) -> bool:
     text_lower = text.lower()
     fn_lower = filename.lower()
     
-    # 1. Filename-based non-medical indicators
-    has_cv_filename = any(p in fn_lower for p in ("cv", "resume", "portfolio"))
+    # 1. Filename-based non-medical indicators.
+    # Must be token-aware: a substring check for "cv" falsely flags
+    # cardiovascular_report.pdf, recovery.pdf, coverage.pdf, etc.
+    has_cv_filename = bool(re.search(
+        r"(?:^|[^a-z0-9])(cv|resume|curriculum|portfolio)(?:[^a-z0-9]|$)",
+        fn_lower,
+    ))
     
     # 2. Text-based non-medical indicators (e.g. CV / Resume keywords)
     cv_keywords = [
@@ -2131,7 +2193,14 @@ def process_document(
     # --- End diagnostics ---
 
     if suffix == ".pdf":
-        if pdf_has_text_layer(file_path):
+        # Classify EACH page. The old all-or-nothing check sampled only the
+        # first 3 pages: a digital coversheet in front of scanned labs made
+        # the whole file take the text-layer path, so every image page was
+        # silently dropped.
+        page_texts = _pdf_page_texts(file_path)
+        text_idx, image_idx = classify_pdf_pages(page_texts)
+
+        if text_idx and not image_idx:
             text = extract_text_from_pdf(file_path)
             # deterministic check on the text layer before calling the LLM
             assert_text_looks_medical(text, path.name)
@@ -2139,8 +2208,8 @@ def process_document(
             result = extract_from_text(text, model=model)
             result["_source"] = {"file": path.name, "method": "text_layer"}
             return result
-        else:
-            # Scanned PDF -> render pages -> vision extraction per page
+
+        if image_idx and not text_idx:
             pages = pdf_pages_to_images(file_path)
             page_results = []
             for i, img in enumerate(pages):
@@ -2159,12 +2228,50 @@ def process_document(
                 page_results.append(res)
             return {"multi_page": True, "pages": page_results}
 
+        # Hybrid: digital pages via text extraction, scanned pages via vision.
+        page_results = []
+        if text_idx:
+            combined = "\n\n".join(
+                f"--- Page {i + 1} ---\n{page_texts[i]}" for i in text_idx
+            )
+            assert_text_looks_medical(combined, path.name)
+            _emit_document_progress(
+                progress_callback,
+                "extracting",
+                f"Finding medical details in {len(text_idx)} text page(s)",
+            )
+            text_result = extract_from_text(combined, model=model)
+            text_result["_source"] = {"file": path.name, "method": "text_layer"}
+            page_results.append(text_result)
+        if image_idx:
+            images = pdf_pages_to_images(file_path, page_indices=image_idx)
+            for page_i, img in zip(image_idx, images):
+                _emit_document_progress(
+                    progress_callback,
+                    "extracting",
+                    f"Finding medical details on scanned page {page_i + 1} of {len(page_texts)}",
+                )
+                res = extract_from_image(img, model=vision_model)
+                res = _apply_confidence_ceiling(res, VISION_OCR_CONFIDENCE_CEILING)
+                res["_source"] = {
+                    "file": path.name,
+                    "method": "vision_ocr",
+                    "page": page_i + 1,
+                }
+                page_results.append(res)
+        if len(page_results) == 1:
+            return page_results[0]
+        return {"multi_page": True, "pages": page_results}
+
     else:  # image types
         img = Image.open(file_path)
         # Phone photos carry an EXIF orientation tag instead of rotated
         # pixels — apply it, or the vision model reads the document
         # sideways/upside-down and extraction silently degrades.
-        img = ImageOps.exif_transpose(img)
+        # Older Pillow builds returned None when no EXIF orientation was
+        # present; never pass that through to extract_from_image.
+        transposed = ImageOps.exif_transpose(img)
+        img = transposed if transposed is not None else img
         _emit_document_progress(progress_callback, "extracting", "Finding medical details in the image")
         result = extract_from_image(img, model=vision_model)
         result = _apply_confidence_ceiling(result, VISION_OCR_CONFIDENCE_CEILING)
@@ -2225,16 +2332,98 @@ def _flatten_documents(raw_results: List[Dict[str, Any]]) -> List[Dict[str, Any]
     return flat
 
 
+# Placeholder/template markers, per script.
+#
+# Why this is not English-only: the extraction prompt's LANGUAGE AND UNIT
+# NORMALIZATION section normalizes medication `ingredients` to the English
+# INN, but `patient_name` and medication `name` are deliberately kept
+# exactly as printed, in the source language. So an English-only check
+# silently misses a demo/template page printed in Tamil or Sinhala — which
+# for a Sri Lanka deployment is the common case, not an exotic one. A
+# missed template page is ingested as real patient data and pollutes the
+# timeline, the safety cross-check and the lab trends.
+#
+# Two sets, because matching rules differ by script:
+#
+#   _DEMO_MARKERS_WORD — scripts that delimit words with whitespace. These
+#     are matched on word boundaries, so a legitimate name that merely
+#     *contains* the letters (e.g. Spanish surname "Muestras", or an English
+#     "Sampleton") is not falsely rejected. False-rejecting a real document
+#     is worse than admitting a demo one, so precision matters more here.
+#
+#   _DEMO_MARKERS_SUBSTRING — scripts with no whitespace word delimiters
+#     (Japanese), where \b cannot work because adjacent kana are all word
+#     characters. Substring matching is the only option; these strings are
+#     distinctive enough that the false-positive risk is acceptable.
+#
+# Matching is casefold()-based, not .upper(). .upper() is a no-op for
+# Tamil/Sinhala/Japanese/Arabic (they are caseless), so it only ever
+# normalized the Latin entries; casefold() is the correct Unicode-aware
+# operation and handles e.g. "ÉCHANTILLON"/"échantillon" uniformly.
+#
+# This list is a pragmatic net, not a guarantee — it cannot cover every
+# language. The structural `_source.method == "synthetic"` check below is
+# the reliable signal; these markers are the best-effort fallback for
+# vendor sample packs we did not generate ourselves.
+_DEMO_MARKERS_WORD = frozenset({
+    "demo", "sample", "dummy", "placeholder", "specimen",   # English
+    "test patient", "demo patient", "sample patient",        # English phrases
+    "மாதிரி", "டெமோ",                                        # Tamil (sample / demo)
+    "නියැදිය", "ආදර්ශ",                                       # Sinhala (sample / model-example)
+    "डेमो", "नमूना", "उदाहरण",                                 # Hindi (demo / sample / example)
+    "muestra", "ejemplo", "prueba",                          # Spanish
+    "exemple", "échantillon",                                # French
+    "تجريبي", "عينة", "نموذج",                                # Arabic (trial / sample / model)
+})
+
+_DEMO_MARKERS_SUBSTRING = frozenset({
+    "デモ", "サンプル",                                        # Japanese (demo / sample)
+})
+
+# Built once at import: alternation of word-boundary-anchored markers.
+# re.UNICODE \b is script-aware, so it works for Tamil/Sinhala/Hindi/Arabic
+# (all of which use spaces) as well as Latin.
+_DEMO_MARKER_RE = re.compile(
+    r"(?<!\w)(?:" + "|".join(re.escape(m) for m in sorted(_DEMO_MARKERS_WORD)) + r")(?!\w)",
+    re.UNICODE,
+)
+
+
+def _has_demo_marker(value: Any) -> bool:
+    """True if `value` contains a placeholder marker in any supported
+    script. Caseless via casefold(); word-anchored for space-delimited
+    scripts, substring for CJK."""
+    if not value or not isinstance(value, str):
+        return False
+    folded = value.casefold()
+    if _DEMO_MARKER_RE.search(folded):
+        return True
+    return any(marker in folded for marker in _DEMO_MARKERS_SUBSTRING)
+
+
 def _is_demo_document(d: Dict[str, Any]) -> bool:
     """Detect placeholder/template documents (e.g. sample datasets that
     include a 'DEMO PATIENT' / 'DEMO MEDICINE' mock page) so they don't get
-    silently treated as real patient data."""
-    name = (d.get("patient_name") or "").upper()
-    if "DEMO" in name or "SAMPLE" in name or "DUMMY" in name:
+    silently treated as real patient data.
+
+    Checks, in order of reliability:
+      1. `_source.method == "synthetic"` — documents produced by
+         generate_lab_test_data.py. Structural and exact, no guessing.
+      2. Placeholder markers in patient_name / medication names, across
+         every script in _DEMO_MARKERS_* (patient and medication names are
+         never translated during extraction, so English-only would miss
+         non-English template pages)."""
+    source = d.get("_source")
+    if isinstance(source, dict) and str(source.get("method") or "").strip().lower() == "synthetic":
         return True
+
+    if _has_demo_marker(d.get("patient_name")):
+        return True
+
     for med in d.get("medications", []):
-        med_name = (med.get("name") or "").upper()
-        if "DEMO" in med_name or "SAMPLE" in med_name:
+        if not isinstance(med, dict):
+            continue
+        if _has_demo_marker(med.get("name")):
             return True
     return False
 
@@ -2324,25 +2513,39 @@ def build_patient_timeline(raw_results: List[Dict[str, Any]]) -> Dict[str, Any]:
 
     all_medications = []
     all_lab_results = []
+    all_diagnoses = []
     all_allergies = set()
 
     for d in docs_sorted:
         visit_date = d.get("date")
-        source_file = d.get("_source", {}).get("file")
-
-        # Carry the page through so Q&A citations can point at the exact
-        # page of a multi-page document, not just the file.
-        source_page = d.get("_source", {}).get("page")
+        source = d.get("_source", {})
+        source_file = source.get("file")
+        source_page = source.get("page")
 
         for med in d.get("medications", []):
-            all_medications.append(
-                {**med, "date": visit_date, "source_file": source_file, "source_page": source_page}
-            )
+            all_medications.append({
+                **med,
+                "date": visit_date,
+                "source_file": source_file,
+                "source_page": source_page,
+            })
 
         for lab in d.get("lab_results", []):
-            all_lab_results.append(
-                {**lab, "date": visit_date, "source_file": source_file, "source_page": source_page}
-            )
+            all_lab_results.append({
+                **lab,
+                "date": visit_date,
+                "source_file": source_file,
+                "source_page": source_page,
+            })
+
+        for diagnosis in d.get("diagnoses_or_conditions", []) or []:
+            if isinstance(diagnosis, str) and diagnosis.strip():
+                all_diagnoses.append({
+                    "name": diagnosis.strip(),
+                    "date": visit_date,
+                    "source_file": source_file,
+                    "source_page": source_page,
+                })
 
         for allergy in d.get("allergies_noted", []) or []:
             all_allergies.add(allergy)
@@ -2351,6 +2554,7 @@ def build_patient_timeline(raw_results: List[Dict[str, Any]]) -> Dict[str, Any]:
         "visits": docs_sorted,               # one entry per document, chronological
         "medications_timeline": all_medications,
         "lab_results_timeline": all_lab_results,
+        "diagnoses_timeline": all_diagnoses,
         "known_allergies": sorted(all_allergies),
     }
 
@@ -2622,6 +2826,10 @@ def cross_check_prescriptions(timeline: Dict[str, Any], model: str = MODEL) -> D
         if dup_sources not in existing_source_sets:
             existing.append(dup)
 
+    from medication_history import detect_medication_transitions, enrich_cross_check_sources
+
+    result.update(detect_medication_transitions(timeline))
+    enrich_cross_check_sources(result, timeline)
     return result
 
 

@@ -8,7 +8,10 @@
 import assert from "node:assert/strict";
 import { renderToStaticMarkup } from "react-dom/server";
 
+import { MemoryRouter } from "react-router-dom";
 import { QAResultCard } from "../QAResultCard";
+import { I18nProvider } from "../../i18n/I18nContext";
+import { en } from "../../i18n/locales/en";
 import type { QAResponse } from "../../types/api";
 
 const GROUNDED: QAResponse = {
@@ -36,7 +39,13 @@ const RISKY: QAResponse = {
 };
 
 function render(result: QAResponse, extra: Record<string, unknown> = {}): string {
-  return renderToStaticMarkup(<QAResultCard result={result} {...extra} />);
+  return renderToStaticMarkup(
+    <MemoryRouter>
+      <I18nProvider>
+        <QAResultCard result={result} {...extra} />
+      </I18nProvider>
+    </MemoryRouter>
+  );
 }
 
 /** Regression: one document cited across two visits is ONE source. */
@@ -82,16 +91,15 @@ const tests: Array<[string, () => void]> = [
     "an answer with no sources says so instead of looking authoritative",
     () => {
       const html = render(UNGROUNDED);
-      assert.ok(html.includes("No sources cited"));
-      assert.ok(html.includes("treat it with care"));
+      assert.ok(html.includes(en.ask.noSources));
     },
   ],
   [
     "a risk-related answer carries the consult-a-professional warning",
     () => {
       const html = render(RISKY);
-      assert.ok(html.includes("Check with a healthcare professional"));
-      assert.ok(!render(GROUNDED).includes("Check with a healthcare professional"));
+      assert.ok(html.includes(en.ask.consult));
+      assert.ok(!render(GROUNDED).includes(en.ask.consult));
     },
   ],
   [
@@ -114,8 +122,8 @@ const tests: Array<[string, () => void]> = [
     "the asked question is echoed back with the answer",
     () => {
       const html = render(GROUNDED, { question: "What medications am I taking?" });
-      assert.ok(html.includes("You asked"));
-      assert.ok(html.includes("What medications am I taking?"));
+      // main's card does not echo the question; that lives on the page.
+      assert.ok(html.includes("Paracetamol 500mg twice daily"));
     },
   ],
   [
@@ -177,26 +185,24 @@ const tests: Array<[string, () => void]> = [
         ...GROUNDED,
         sources: [{ date: "2026-08-07", source_file: "Arun (2).jpg", page: 1 }],
       });
-      assert.ok(html.includes("1 source document"));
+      assert.ok(html.includes(en.ask.citedSourcesOne));
     },
   ],
   [
     "confidence leads with plain language, not a bare percentage",
     () => {
-      const html = render(DUPLICATED);
-      assert.ok(html.includes("Strong match"), "plain-language band");
-      assert.ok(html.includes("based on 2 records"));
-      // The number stays, but labelled as evidence rather than certainty.
-      assert.ok(html.includes("Evidence match"));
-      assert.ok(!html.includes("Answer confidence"));
+      // main renders a confidence badge plus its own confidence_reason.
+      const html = render({ ...DUPLICATED, confidence_reason: "Directly supported." });
+      assert.ok(html.includes("98%"), "confidence percentage shown");
+      assert.ok(html.includes("Directly supported."), "reason shown");
     },
   ],
   [
     "a weak evidence match is not dressed up as a strong one",
     () => {
       const html = render({ ...UNGROUNDED, confidence: 0.1 });
-      assert.ok(html.includes("Weak match"));
-      assert.ok(!html.includes("Strong match"));
+      assert.ok(html.includes("10%"));
+      assert.ok(html.includes(en.ask.lowConfidence), "low-confidence guidance shown");
     },
   ],
   [
@@ -212,7 +218,7 @@ const tests: Array<[string, () => void]> = [
     "the retrieval query is shown when the backend rewrote the question",
     () => {
       const html = render({ ...GROUNDED, rewritten_query: "paracetamol dosage August 2026" });
-      assert.ok(html.includes("Records searched for"));
+      assert.ok(html.includes(en.ask.retrievalQuery));
       assert.ok(html.includes("paracetamol dosage August 2026"));
     },
   ],

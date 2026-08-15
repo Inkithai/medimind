@@ -99,13 +99,66 @@ Deterministic, no LLM:
 - CORS `*` by default, overridable via `CORS_ORIGINS`.
 - `POST /anonymous/session` public → issues JWT server-side.
 - `POST /documents` — validates extensions, extracts all first (no Cloudinary write until all pass to avoid orphans), filters demo + non-medical, archives to Cloudinary once per file, merges with Supabase existing docs, builds timeline, cross-check, trends, re-indexes, saves snapshot. `indexed` is false (with `index_error`) if indexing produced 0 retrievable chunks — the log line "No indexable content ... skipping indexing" is no longer followed by a misleading `indexed=True`.
+- `GET /documents` — every document page persisted for the user, read straight from Supabase (`{user_id, count, documents}`). This is the authoritative answer to "did my records survive the restart?": it touches no vector index and no in-process state, and returns **200 with an empty list** rather than 404 when the user genuinely has nothing. Diagnostic contract: 200+N rows ⇒ any empty dashboard is a frontend bug; 200+[] ⇒ persistence/identity bug; 500 ⇒ backend; connection failure ⇒ the host is down.
 - `GET /timeline, /cross-check, /lab-trends` — individual slices, 404 if no snapshot (kept for per-page use + backward compat).
-- `GET /patient-snapshot` — the whole record (`patient_timeline`, `cross_check_report`, `lab_trends`, `updated_at`) in ONE request so the dashboard never fans out three calls; 404 if no snapshot (frontend treats that as first-run empty state). `lab_trends` recomputed on the fly for pre-trends snapshots.
+- `GET /patient-snapshot` — the whole record (`patient_timeline`, `cross_check_report`, `lab_trends`, `updated_at`) in ONE request so the dashboard never fans out three calls. `lab_trends` recomputed on the fly for pre-trends snapshots. If the `patient_snapshots` cache row is missing but `documents` rows exist, the snapshot is **rebuilt on the fly** from those documents (timeline merge + lab trends are pure functions; the cross-check is returned empty and refreshed on the next upload rather than firing an LLM call from a GET). Only a user with genuinely zero documents gets a 404 → first-run empty state. Same rebuild path backs `/timeline`, `/cross-check` and `/lab-trends`.
+
+#### Persistence vs. indexing ordering
+
+`_execute_upload_pipeline` writes documents + snapshot to Supabase **before**
+it indexes. Indexing is derived data and is wrapped so that *no* failure can
+lose the record: `MemoryError` → `index_error_code="memory_limit"`, any other
+exception → `"indexing_failed"`, 0 chunks → `"no_indexable_content"`. The
+upload still returns 201 with `indexed=false`. A container restart therefore
+has zero effect on existing records — the dashboard always reconstructs from
+Supabase.
+
+#### Job states — `GET /jobs/{job_id}`
+
+Explicit, failure-aware progress instead of hanging in `processing/indexing`:
+
+```
+queued → reading → extracting → saving → indexing → ready
+                                   │         │
+                                   │         └── partial   (records saved, index degraded)
+                                   └──────────── failed    (nothing saved)
+```
+
+| Field | Meaning |
+|---|---|
+| `progress.step` | `queued`/`reading`/`extracting`/`saving`/`safety`/`indexing`/`ready`/`partial`/`failed` |
+| `progress.records_saved` | true once the Supabase write committed — set **before** indexing starts |
+| `progress.indexing_completed` | false in `partial` |
+| `progress.stage`, `progress.error` | e.g. `{"stage":"indexing","error":"memory_limit"}` |
+| `progress.files_completed` / `files_total` | per-file counters |
+
+`partial` is a **terminal success** state: job `status == "completed"`. The
+frontend polls this endpoint on mount, so job state survives a backend restart,
+a browser refresh, or a dropped network connection — React state is never the
+only copy. When polling itself fails the client raises `job_status_unavailable`,
+which the UI renders as "Uploaded — we lost the progress connection", never as
+a failed upload.
 - `POST /qa` and `POST /sessions/{id}/messages` — 400 empty, 502 LLM/embedding failure.
 
 ### 8. CLI wiring (medical_extractor __main__)
 
 For local dev: `python medical_extractor.py <files|folder> --chat` → group → timeline → cross-check → trends → index → write local JSON reports. `--chat` drops into interactive loop with session `cli`.
+
+### Memory
+
+The Render web service was OOM-killed during `indexing`. Mitigations, all
+documented in `retrieval.md`:
+
+- embedding model loaded **once** per process (`preload_embedding_model()` in
+  the lifespan), CPU execution provider only;
+- the ~79 MB ONNX model baked into the image at build time
+  (`prefetch_embedding_model.py` + `ONNX_MODEL_CACHE_DIR`) instead of
+  downloaded during the first upload;
+- one cached Chroma client + one collection handle per index run;
+- chunks embedded/upserted in `EMBEDDING_BATCH_SIZE` (default 16) batches with
+  each batch's texts and vectors released before the next;
+- `memory_probe.log_rss()` RSS samples around every heavy stage, because a
+  platform OOM kill leaves no traceback.
 
 ### Dependencies
 

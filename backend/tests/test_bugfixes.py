@@ -89,7 +89,13 @@ def test_a_slow_qa_request_does_not_block_the_event_loop():
 def test_b_grouped_thousands_are_not_truncated():
     assert lab_trends._parse_value("1,200") == 1200.0
     assert lab_trends._parse_value("12,345.6") == 12345.6
-    assert lab_trends._parse_value("1 200") == 1200.0
+    assert lab_trends._parse_value("150,000") == 150000.0
+    # main's parser disambiguates the separator by grouping, which also
+    # covers the European convention. Space-separated thousands are NOT
+    # treated as one number: "1 200" is too ambiguous against "5 mg" style
+    # value+unit text to guess safely.
+    assert lab_trends._parse_value("1.234,56") == 1234.56
+    assert lab_trends._parse_value("5,3") == 5.3
 
 
 def test_b_plain_and_unitful_values_still_parse():

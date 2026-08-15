@@ -10,60 +10,71 @@ import {
   PillIcon,
   ShieldIcon,
 } from "../components/icons";
-import { useAboutCopy } from "../i18n";
+import { useI18n } from "../i18n/I18nContext";
 import { classNames } from "../utils/format";
 
 /**
  * About / technical overview.
  *
  * Reachable from the sidebar footer, deliberately outside the nine
- * patient-workflow items. All copy comes from the i18n dictionary; this file
- * holds layout only, so translating the page never means editing components.
+ * patient-workflow items. Every visible string comes from the `about.*`
+ * i18n namespace (en/si/ta), so this file holds layout only.
+ *
+ * Content is verified against the repository — endpoints against
+ * backend/api.py, pipeline stages against medical_extractor.py and
+ * retrieval.py. A backend test asserts the documented routes exist.
  */
 export function AboutPage() {
-  const copy = useAboutCopy();
+  const { t } = useI18n();
 
   const sections = [
-    copy.overview,
-    copy.features,
-    copy.architecture,
-    copy.pipeline,
-    copy.dataFlow,
-    copy.security,
-    copy.api,
-  ].map((section) => ({ id: section.id, title: section.title }));
-
+    { id: "overview", title: t("about.overviewTitle") },
+    { id: "features", title: t("about.featuresTitle") },
+    { id: "architecture", title: t("about.archTitle") },
+    { id: "pipeline", title: t("about.pipeTitle") },
+    { id: "data-flow", title: t("about.flowTitle") },
+    { id: "security", title: t("about.secTitle") },
+    { id: "api", title: t("about.apiTitle") },
+  ];
   const activeId = useActiveSection(sections.map((section) => section.id));
 
   return (
     <div className="space-y-8">
-      <Header copy={copy} />
+      <header>
+        <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-brand-200 bg-brand-50 px-3 py-1 text-xs font-bold uppercase tracking-wider text-brand-700">
+          <InfoIcon className="h-3.5 w-3.5" /> {t("about.eyebrow")}
+        </div>
+        <h1 className="page-title">{t("about.title")}</h1>
+        <p className="mt-3 max-w-3xl text-base leading-relaxed text-slate-600">
+          {t("about.lede")}
+        </p>
+        <Link to="/dashboard" className="btn-secondary mt-5 inline-flex">
+          {t("about.backToDashboard")}
+        </Link>
+      </header>
 
       <div className="lg:grid lg:grid-cols-[15rem_minmax(0,1fr)] lg:gap-10">
-        <TableOfContents sections={sections} activeId={activeId} label={copy.onThisPage} />
+        <TableOfContents sections={sections} activeId={activeId} label={t("about.onThisPage")} />
 
-        {/* min-w-0 stops a long <pre>/path from widening the grid column. */}
+        {/* min-w-0 stops a long endpoint path widening the grid column. */}
         <div className="min-w-0 space-y-10">
-          <Overview copy={copy} />
-          <Features copy={copy} />
-          <Architecture copy={copy} />
-          <Pipeline copy={copy} />
-          <DataFlow copy={copy} />
-          <Security copy={copy} />
-          <ApiOverview copy={copy} />
-          <Disclaimer copy={copy} />
+          <Overview />
+          <Features />
+          <Architecture />
+          <Pipeline />
+          <DataFlow />
+          <Security />
+          <ApiOverview />
+          <Disclaimer />
         </div>
       </div>
     </div>
   );
 }
 
-type Copy = ReturnType<typeof useAboutCopy>;
-
 /** Tracks which section is in view, to highlight the contents list. */
 function useActiveSection(ids: string[]): string | null {
   const [activeId, setActiveId] = useState<string | null>(ids[0] ?? null);
-  // Read ids without making them an effect dependency (the array is new each render).
   const idsRef = useRef(ids);
   idsRef.current = ids;
 
@@ -76,7 +87,6 @@ function useActiveSection(ids: string[]): string | null {
           .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
         if (visible[0]) setActiveId(visible[0].target.id);
       },
-      // Bias towards the top of the viewport so the heading you're reading wins.
       { rootMargin: "-80px 0px -70% 0px", threshold: 0 }
     );
     for (const id of idsRef.current) {
@@ -87,21 +97,6 @@ function useActiveSection(ids: string[]): string | null {
   }, []);
 
   return activeId;
-}
-
-function Header({ copy }: { copy: Copy }) {
-  return (
-    <header>
-      <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-brand-200 bg-brand-50 px-3 py-1 text-xs font-bold uppercase tracking-wider text-brand-700">
-        <InfoIcon className="h-3.5 w-3.5" /> {copy.eyebrow}
-      </div>
-      <h1 className="page-title">{copy.title}</h1>
-      <p className="mt-3 max-w-3xl text-base leading-relaxed text-slate-600">{copy.lede}</p>
-      <Link to="/dashboard" className="btn-secondary mt-5 inline-flex">
-        {copy.backToDashboard}
-      </Link>
-    </header>
-  );
 }
 
 function TableOfContents({
@@ -130,7 +125,7 @@ function TableOfContents({
               )}
             >
               <span className="w-4 shrink-0 text-xs tabular-nums text-slate-400">{index + 1}</span>
-              <span className="min-w-0 truncate">{section.title}</span>
+              <span className="min-w-0 break-words">{section.title}</span>
             </a>
           </li>
         ))}
@@ -139,7 +134,6 @@ function TableOfContents({
   );
 }
 
-/** Section shell: consistent heading hierarchy and scroll offset. */
 function Section({
   id,
   title,
@@ -175,16 +169,18 @@ function Panel({ children, className }: { children: ReactNode; className?: strin
   );
 }
 
-function Overview({ copy }: { copy: Copy }) {
+function Overview() {
+  const { t } = useI18n();
+  const principles = ["p1", "p2", "p3", "p4", "p5"];
   return (
-    <Section id={copy.overview.id} title={copy.overview.title}>
+    <Section id="overview" title={t("about.overviewTitle")}>
       <Panel>
         <h3 className="text-sm font-bold uppercase tracking-wider text-slate-500">
-          {copy.overview.principlesTitle}
+          {t("about.overviewSubtitle")}
         </h3>
         <ul className="mt-4 grid gap-4 sm:grid-cols-2">
-          {copy.overview.principles.map((principle) => (
-            <li key={principle.title} className="flex gap-3">
+          {principles.map((key) => (
+            <li key={key} className="flex gap-3">
               <span
                 className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-brand-50 text-brand-600"
                 aria-hidden="true"
@@ -192,8 +188,10 @@ function Overview({ copy }: { copy: Copy }) {
                 <CheckIcon className="h-3.5 w-3.5" />
               </span>
               <div className="min-w-0">
-                <p className="text-sm font-semibold text-slate-900">{principle.title}</p>
-                <p className="mt-0.5 text-sm leading-relaxed text-slate-600">{principle.body}</p>
+                <p className="text-sm font-semibold text-slate-900">{t(`about.${key}Title`)}</p>
+                <p className="mt-0.5 text-sm leading-relaxed text-slate-600">
+                  {t(`about.${key}Body`)}
+                </p>
               </div>
             </li>
           ))}
@@ -203,95 +201,53 @@ function Overview({ copy }: { copy: Copy }) {
   );
 }
 
-const FEATURE_ICONS: Record<string, (p: { className?: string }) => ReactNode> = {
-  document: FileIcon,
-  pill: PillIcon,
-  beaker: BeakerIcon,
-  shield: ShieldIcon,
-  chat: ChatIcon,
-  location: LocationIcon,
-};
+const FEATURES: Array<{
+  key: string;
+  Icon: (p: { className?: string }) => ReactNode;
+  tone: string;
+}> = [
+  { key: "f1", Icon: FileIcon, tone: "bg-sky-50 text-sky-600" },
+  { key: "f2", Icon: PillIcon, tone: "bg-emerald-50 text-emerald-600" },
+  { key: "f3", Icon: BeakerIcon, tone: "bg-violet-50 text-violet-600" },
+  { key: "f4", Icon: ShieldIcon, tone: "bg-amber-50 text-amber-600" },
+  { key: "f5", Icon: ChatIcon, tone: "bg-brand-50 text-brand-600" },
+  { key: "f6", Icon: LocationIcon, tone: "bg-rose-50 text-rose-600" },
+];
 
-const FEATURE_TONES: Record<string, string> = {
-  document: "bg-sky-50 text-sky-600",
-  pill: "bg-emerald-50 text-emerald-600",
-  beaker: "bg-violet-50 text-violet-600",
-  shield: "bg-amber-50 text-amber-600",
-  chat: "bg-brand-50 text-brand-600",
-  location: "bg-rose-50 text-rose-600",
-};
-
-function Features({ copy }: { copy: Copy }) {
+function Features() {
+  const { t } = useI18n();
   return (
-    <Section id={copy.features.id} title={copy.features.title} subtitle={copy.features.subtitle}>
+    <Section id="features" title={t("about.featuresTitle")} subtitle={t("about.featuresSubtitle")}>
       <div className="grid gap-4 md:grid-cols-2">
-        {copy.features.items.map((feature) => {
-          const Icon = FEATURE_ICONS[feature.icon] || FileIcon;
-          return (
-            <article
-              key={feature.title}
-              className="flex flex-col rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+        {FEATURES.map(({ key, Icon, tone }) => (
+          <article
+            key={key}
+            className="flex flex-col rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+          >
+            <span
+              className={classNames("flex h-10 w-10 items-center justify-center rounded-xl", tone)}
+              aria-hidden="true"
             >
-              <span
-                className={classNames(
-                  "flex h-10 w-10 items-center justify-center rounded-xl",
-                  FEATURE_TONES[feature.icon] || "bg-slate-100 text-slate-500"
-                )}
-                aria-hidden="true"
-              >
-                <Icon className="h-5 w-5" />
-              </span>
-              <h3 className="mt-3.5 text-base font-bold text-slate-900">{feature.title}</h3>
-              <p className="mt-1.5 text-sm leading-relaxed text-slate-600">{feature.body}</p>
-              <ul className="mt-3.5 space-y-1.5 border-t border-slate-100 pt-3.5">
-                {feature.points.map((point) => (
-                  <li key={point} className="flex gap-2 text-sm text-slate-600">
-                    <span className="mt-2 h-1 w-1 shrink-0 rounded-full bg-slate-300" aria-hidden="true" />
-                    <span className="min-w-0">{point}</span>
-                  </li>
-                ))}
-              </ul>
-            </article>
-          );
-        })}
+              <Icon className="h-5 w-5" />
+            </span>
+            <h3 className="mt-3.5 text-base font-bold text-slate-900">{t(`about.${key}Title`)}</h3>
+            <p className="mt-1.5 text-sm leading-relaxed text-slate-600">{t(`about.${key}Body`)}</p>
+          </article>
+        ))}
       </div>
     </Section>
   );
 }
 
-const LAYER_TONES = ["brand", "sky", "violet", "emerald", "amber", "rose", "slate"] as const;
-
-function Architecture({ copy }: { copy: Copy }) {
-  return (
-    <Section
-      id={copy.architecture.id}
-      title={copy.architecture.title}
-      subtitle={copy.architecture.subtitle}
-    >
-      <Panel>
-        <Figure label={copy.architecture.diagramLabel}>
-          <Flow>
-            {copy.architecture.layers.map((layer, index) => (
-              <div
-                key={layer.name}
-                className={classNames(
-                  "rounded-xl border p-4",
-                  TONE_CLASSES[LAYER_TONES[index % LAYER_TONES.length]]
-                )}
-              >
-                <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-                  <p className="text-sm font-bold">{layer.name}</p>
-                  <p className="font-mono text-[11px] leading-relaxed opacity-75">{layer.tech}</p>
-                </div>
-                <p className="mt-1.5 text-sm leading-relaxed opacity-90">{layer.body}</p>
-              </div>
-            ))}
-          </Flow>
-        </Figure>
-      </Panel>
-    </Section>
-  );
-}
+const LAYERS = [
+  { key: "l1", tech: "React 18 · TypeScript · Vite · Tailwind · Leaflet", tone: "brand" },
+  { key: "l2", tech: "FastAPI · Uvicorn · JWT (HS256)", tone: "sky" },
+  { key: "l3", tech: "pdfplumber · PyMuPDF · Pillow · vision model", tone: "violet" },
+  { key: "l4", tech: "Supabase (PostgreSQL) · Cloudinary", tone: "emerald" },
+  { key: "l5", tech: "Chroma / Supabase chunks · MiniLM or OpenAI embeddings", tone: "amber" },
+  { key: "l6", tech: "OpenAI-compatible providers (Groq / Gemini)", tone: "rose" },
+  { key: "l7", tech: "Server-side citation validation", tone: "slate" },
+] as const;
 
 const TONE_CLASSES: Record<string, string> = {
   brand: "border-brand-200 bg-brand-50 text-brand-900",
@@ -303,19 +259,47 @@ const TONE_CLASSES: Record<string, string> = {
   slate: "border-slate-200 bg-slate-50 text-slate-800",
 };
 
-function Pipeline({ copy }: { copy: Copy }) {
-  const ingest = copy.pipeline.stages.filter((stage) => stage.phase === "ingest");
-  const answer = copy.pipeline.stages.filter((stage) => stage.phase === "answer");
-
+function Architecture() {
+  const { t } = useI18n();
   return (
-    <Section id={copy.pipeline.id} title={copy.pipeline.title} subtitle={copy.pipeline.subtitle}>
+    <Section id="architecture" title={t("about.archTitle")} subtitle={t("about.archSubtitle")}>
       <Panel>
-        <Figure label={copy.pipeline.diagramLabel}>
+        <Figure label={t("about.archDiagram")}>
+          <Flow>
+            {LAYERS.map((layer) => (
+              <div
+                key={layer.key}
+                className={classNames("rounded-xl border p-4", TONE_CLASSES[layer.tone])}
+              >
+                <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+                  <p className="text-sm font-bold">{t(`about.${layer.key}Name`)}</p>
+                  <p className="font-mono text-[11px] leading-relaxed opacity-75">{layer.tech}</p>
+                </div>
+                <p className="mt-1.5 text-sm leading-relaxed opacity-90">
+                  {t(`about.${layer.key}Body`)}
+                </p>
+              </div>
+            ))}
+          </Flow>
+        </Figure>
+      </Panel>
+    </Section>
+  );
+}
+
+function Pipeline() {
+  const { t } = useI18n();
+  const ingest = ["s1", "s2", "s3", "s4", "s5", "s6"];
+  const answer = ["s7", "s8", "s9"];
+  return (
+    <Section id="pipeline" title={t("about.pipeTitle")} subtitle={t("about.pipeSubtitle")}>
+      <Panel>
+        <Figure label={t("about.pipeDiagram")}>
           <div className="grid gap-6 lg:grid-cols-2">
-            <PipelineColumn title={copy.pipeline.ingestTitle} stages={ingest} tone="sky" startAt={1} />
+            <PipelineColumn title={t("about.pipeIngest")} keys={ingest} tone="sky" startAt={1} />
             <PipelineColumn
-              title={copy.pipeline.answerTitle}
-              stages={answer}
+              title={t("about.pipeAnswer")}
+              keys={answer}
               tone="brand"
               startAt={ingest.length + 1}
             />
@@ -323,8 +307,8 @@ function Pipeline({ copy }: { copy: Copy }) {
         </Figure>
 
         <div className="mt-6 rounded-xl border border-slate-200 bg-slate-50 p-4">
-          <h4 className="text-sm font-bold text-slate-900">{copy.pipeline.selfHealTitle}</h4>
-          <p className="mt-1 text-sm leading-relaxed text-slate-600">{copy.pipeline.selfHealBody}</p>
+          <h4 className="text-sm font-bold text-slate-900">{t("about.selfHealTitle")}</h4>
+          <p className="mt-1 text-sm leading-relaxed text-slate-600">{t("about.selfHealBody")}</p>
         </div>
       </Panel>
     </Section>
@@ -333,15 +317,16 @@ function Pipeline({ copy }: { copy: Copy }) {
 
 function PipelineColumn({
   title,
-  stages,
+  keys,
   tone,
   startAt,
 }: {
   title: string;
-  stages: ReadonlyArray<{ title: string; body: string }>;
+  keys: string[];
   tone: "sky" | "brand";
   startAt: number;
 }) {
+  const { t } = useI18n();
   return (
     <div>
       <h4
@@ -353,12 +338,12 @@ function PipelineColumn({
         {title}
       </h4>
       <Flow>
-        {stages.map((stage, index) => (
+        {keys.map((key, index) => (
           <Node
-            key={stage.title}
+            key={key}
             tone={tone}
-            title={`${startAt + index}. ${stage.title}`}
-            subtitle={stage.body}
+            title={`${startAt + index}. ${t(`about.${key}Title`)}`}
+            subtitle={t(`about.${key}Body`)}
           />
         ))}
       </Flow>
@@ -366,29 +351,39 @@ function PipelineColumn({
   );
 }
 
-function DataFlow({ copy }: { copy: Copy }) {
+const CONSUMER_KEYS = [
+  "nav.dashboard",
+  "nav.documents",
+  "nav.medicines",
+  "nav.labs",
+  "nav.history",
+  "nav.safety",
+  "nav.ask",
+];
+
+function DataFlow() {
+  const { t } = useI18n();
   return (
-    <Section id={copy.dataFlow.id} title={copy.dataFlow.title} subtitle={copy.dataFlow.subtitle}>
+    <Section id="data-flow" title={t("about.flowTitle")} subtitle={t("about.flowSubtitle")}>
       <Panel>
-        <Figure label={copy.dataFlow.diagramLabel}>
+        <Figure label={t("about.flowDiagram")}>
           <Flow>
-            <Node tone="brand" title={copy.dataFlow.youTitle} subtitle={copy.dataFlow.youBody} />
-            <Node tone="sky" title={copy.dataFlow.storeTitle} subtitle={copy.dataFlow.storeBody} />
+            <Node tone="brand" title={t("about.flowYouTitle")} subtitle={t("about.flowYouBody")} />
+            <Node tone="sky" title={t("about.flowStoreTitle")} subtitle={t("about.flowStoreBody")} />
             <div>
               <Node
                 tone="emerald"
-                title={copy.dataFlow.useTitle}
-                subtitle={copy.dataFlow.useBody}
+                title={t("about.flowUseTitle")}
+                subtitle={t("about.flowUseBody")}
               />
               {/* Fans out to each feature: a grid on desktop, a stack on mobile. */}
               <ul className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                {copy.dataFlow.consumers.map((consumer) => (
+                {CONSUMER_KEYS.map((key) => (
                   <li
-                    key={consumer.name}
-                    className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2"
+                    key={key}
+                    className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-800"
                   >
-                    <p className="text-sm font-semibold text-slate-800">{consumer.name}</p>
-                    <p className="mt-0.5 text-xs leading-relaxed text-slate-500">{consumer.body}</p>
+                    {t(key)}
                   </li>
                 ))}
               </ul>
@@ -397,9 +392,9 @@ function DataFlow({ copy }: { copy: Copy }) {
         </Figure>
 
         <div className="mt-6 rounded-xl border border-brand-200 bg-brand-50 p-4">
-          <h4 className="text-sm font-bold text-brand-900">{copy.dataFlow.groundingTitle}</h4>
+          <h4 className="text-sm font-bold text-brand-900">{t("about.groundingTitle")}</h4>
           <p className="mt-1 text-sm leading-relaxed text-brand-900/80">
-            {copy.dataFlow.groundingBody}
+            {t("about.groundingBody")}
           </p>
         </div>
       </Panel>
@@ -407,18 +402,22 @@ function DataFlow({ copy }: { copy: Copy }) {
   );
 }
 
-function Security({ copy }: { copy: Copy }) {
+function Security() {
+  const { t } = useI18n();
+  const implemented = ["i1", "i2", "i3", "i4", "i5", "i6"];
+  const notClaimed = ["n1", "n2", "n3", "n4"];
+  const planned = ["pl1", "pl2", "pl3"];
   return (
-    <Section id={copy.security.id} title={copy.security.title} subtitle={copy.security.subtitle}>
+    <Section id="security" title={t("about.secTitle")} subtitle={t("about.secSubtitle")}>
       <div className="space-y-4">
         <Panel>
           <h3 className="flex items-center gap-2 text-sm font-bold uppercase tracking-wider text-emerald-700">
             <ShieldIcon className="h-4 w-4" aria-hidden="true" />
-            {copy.security.implementedTitle}
+            {t("about.secImplemented")}
           </h3>
           <ul className="mt-4 grid gap-4 sm:grid-cols-2">
-            {copy.security.implemented.map((item) => (
-              <li key={item.title} className="flex gap-3">
+            {implemented.map((key) => (
+              <li key={key} className="flex gap-3">
                 <span
                   className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-emerald-600"
                   aria-hidden="true"
@@ -426,8 +425,10 @@ function Security({ copy }: { copy: Copy }) {
                   <CheckIcon className="h-3.5 w-3.5" />
                 </span>
                 <div className="min-w-0">
-                  <p className="text-sm font-semibold text-slate-900">{item.title}</p>
-                  <p className="mt-0.5 text-sm leading-relaxed text-slate-600">{item.body}</p>
+                  <p className="text-sm font-semibold text-slate-900">{t(`about.${key}Title`)}</p>
+                  <p className="mt-0.5 text-sm leading-relaxed text-slate-600">
+                    {t(`about.${key}Body`)}
+                  </p>
                 </div>
               </li>
             ))}
@@ -438,14 +439,14 @@ function Security({ copy }: { copy: Copy }) {
             more credible than an inflated feature list. */}
         <Panel className="border-amber-200 bg-amber-50/50">
           <h3 className="text-sm font-bold uppercase tracking-wider text-amber-800">
-            {copy.security.notYetTitle}
+            {t("about.secNotClaimed")}
           </h3>
-          <p className="mt-1 text-sm text-amber-900/80">{copy.security.notYetBody}</p>
+          <p className="mt-1 text-sm text-amber-900/80">{t("about.secNotClaimedBody")}</p>
           <ul className="mt-3 space-y-2">
-            {copy.security.notYet.map((item) => (
-              <li key={item} className="flex gap-2.5 text-sm leading-relaxed text-amber-900/90">
+            {notClaimed.map((key) => (
+              <li key={key} className="flex gap-2.5 text-sm leading-relaxed text-amber-900/90">
                 <span className="mt-2 h-1 w-1 shrink-0 rounded-full bg-amber-400" aria-hidden="true" />
-                <span className="min-w-0">{item}</span>
+                <span className="min-w-0">{t(`about.${key}`)}</span>
               </li>
             ))}
           </ul>
@@ -453,15 +454,15 @@ function Security({ copy }: { copy: Copy }) {
 
         <Panel>
           <h3 className="text-sm font-bold uppercase tracking-wider text-slate-500">
-            {copy.security.plannedTitle}
+            {t("about.secPlanned")}
           </h3>
           <ul className="mt-3 flex flex-wrap gap-2">
-            {copy.security.planned.map((item) => (
+            {planned.map((key) => (
               <li
-                key={item}
+                key={key}
                 className="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-3 py-1.5 text-sm text-slate-600"
               >
-                {item}
+                {t(`about.${key}`)}
               </li>
             ))}
           </ul>
@@ -471,29 +472,80 @@ function Security({ copy }: { copy: Copy }) {
   );
 }
 
+/** Verified against backend/api.py — see test_about_docs_accuracy.py. */
+const API_GROUPS: Array<{
+  titleKey: string;
+  endpoints: Array<{ method: string; path: string; bodyKey: string }>;
+}> = [
+  {
+    titleKey: "about.apiDocuments",
+    endpoints: [
+      { method: "POST", path: "/api/v1/documents", bodyKey: "about.e1" },
+      { method: "GET", path: "/api/v1/timeline", bodyKey: "about.e2" },
+      { method: "GET", path: "/api/v1/patient-snapshot", bodyKey: "about.e3" },
+    ],
+  },
+  {
+    titleKey: "about.apiJobs",
+    endpoints: [
+      { method: "GET", path: "/api/v1/jobs", bodyKey: "about.e4" },
+      { method: "GET", path: "/api/v1/jobs/{job_id}", bodyKey: "about.e5" },
+    ],
+  },
+  {
+    titleKey: "about.apiClinical",
+    endpoints: [
+      { method: "GET", path: "/api/v1/cross-check", bodyKey: "about.e6" },
+      { method: "GET", path: "/api/v1/lab-trends", bodyKey: "about.e7" },
+    ],
+  },
+  {
+    titleKey: "about.apiAsk",
+    endpoints: [
+      { method: "POST", path: "/api/v1/qa", bodyKey: "about.e8" },
+      { method: "POST", path: "/api/v1/sessions", bodyKey: "about.e9" },
+      { method: "POST", path: "/api/v1/sessions/{session_id}/messages", bodyKey: "about.e10" },
+      { method: "GET", path: "/api/v1/sessions/{session_id}", bodyKey: "about.e11" },
+      { method: "DELETE", path: "/api/v1/sessions/{session_id}", bodyKey: "about.e12" },
+    ],
+  },
+  {
+    titleKey: "about.apiCare",
+    endpoints: [{ method: "GET", path: "/api/v1/care/facilities", bodyKey: "about.e13" }],
+  },
+  {
+    titleKey: "about.apiWorkspace",
+    endpoints: [
+      { method: "POST", path: "/api/v1/anonymous/session", bodyKey: "about.e14" },
+      { method: "GET", path: "/api/v1/health", bodyKey: "about.e15" },
+    ],
+  },
+];
+
 const METHOD_TONES: Record<string, string> = {
   GET: "bg-sky-100 text-sky-800",
   POST: "bg-emerald-100 text-emerald-800",
   DELETE: "bg-rose-100 text-rose-800",
 };
 
-function ApiOverview({ copy }: { copy: Copy }) {
+function ApiOverview() {
+  const { t } = useI18n();
   return (
-    <Section id={copy.api.id} title={copy.api.title} subtitle={copy.api.subtitle}>
+    <Section id="api" title={t("about.apiTitle")} subtitle={t("about.apiSubtitle")}>
       <div className="space-y-4">
         <Panel className="bg-slate-50">
-          <h3 className="text-sm font-bold text-slate-900">{copy.api.authTitle}</h3>
-          <p className="mt-1 text-sm leading-relaxed text-slate-600">{copy.api.authBody}</p>
+          <h3 className="text-sm font-bold text-slate-900">{t("about.apiAuthTitle")}</h3>
+          <p className="mt-1 text-sm leading-relaxed text-slate-600">{t("about.apiAuthBody")}</p>
           <div className="mt-3 flex flex-wrap gap-2">
             <TechChip>Authorization: Bearer &lt;token&gt;</TechChip>
             <TechChip>X-User-Id: &lt;workspace id&gt;</TechChip>
           </div>
         </Panel>
 
-        {copy.api.groups.map((group) => (
-          <Panel key={group.name} className="p-0 sm:p-0">
+        {API_GROUPS.map((group) => (
+          <Panel key={group.titleKey} className="p-0 sm:p-0">
             <h3 className="border-b border-slate-100 px-5 py-3 text-sm font-bold text-slate-900">
-              {group.name}
+              {t(group.titleKey)}
             </h3>
             <ul className="divide-y divide-slate-100">
               {group.endpoints.map((endpoint) => (
@@ -512,7 +564,9 @@ function ApiOverview({ copy }: { copy: Copy }) {
                       {endpoint.path}
                     </code>
                   </div>
-                  <p className="mt-1.5 text-sm leading-relaxed text-slate-600">{endpoint.body}</p>
+                  <p className="mt-1.5 text-sm leading-relaxed text-slate-600">
+                    {t(endpoint.bodyKey)}
+                  </p>
                 </li>
               ))}
             </ul>
@@ -523,14 +577,15 @@ function ApiOverview({ copy }: { copy: Copy }) {
   );
 }
 
-function Disclaimer({ copy }: { copy: Copy }) {
+function Disclaimer() {
+  const { t } = useI18n();
   return (
     <aside
       className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-900"
       role="note"
     >
-      <p className="font-semibold">{copy.disclaimerTitle}</p>
-      <p className="mt-1 leading-relaxed text-amber-900/90">{copy.disclaimerBody}</p>
+      <p className="font-semibold">{t("about.disclaimerTitle")}</p>
+      <p className="mt-1 leading-relaxed text-amber-900/90">{t("about.disclaimerBody")}</p>
     </aside>
   );
 }

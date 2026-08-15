@@ -23,6 +23,7 @@ Env:
     export GEMINI_API_KEY="AIza..."  (or GROQ_API_KEY="gsk_..." for groq)
 """
 
+import logging
 import os
 import threading
 import time
@@ -30,10 +31,10 @@ from collections import OrderedDict
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
-from openai import OpenAIError
-
-from medical_extractor import client, MODEL, _chat_completion
+from medical_extractor import MODEL, _chat_completion
 import retrieval
+
+logger = logging.getLogger("conversation")
 
 # Cheap/fast model for query rewriting and summarization — these are short,
 # low-stakes generations, not the main answer synthesis.
@@ -256,8 +257,12 @@ def rewrite_query_with_context(question: str, history: List[Dict[str, str]]) -> 
         response = _chat_completion(model=REWRITE_MODEL, messages=messages)
         rewritten = (response.choices[0].message.content or "").strip()
         return rewritten if rewritten else question
-    except OpenAIError as e:
-        print(f"  Query rewrite failed, falling back to raw question for retrieval: {e}")
+    except Exception as e:
+        # _chat_completion raises ProviderRateLimitError (a RuntimeError),
+        # APIError, and connection errors — not just OpenAIError. Swallowing
+        # only OpenAIError let the common 429/quota path crash the whole turn
+        # instead of falling back to the raw question as documented.
+        logger.warning("Query rewrite failed, falling back to raw question for retrieval: %s", e)
         return question
 
 
@@ -305,8 +310,10 @@ def summarize_old_turns(turns: List[Dict[str, str]]) -> str:
     try:
         response = _chat_completion(model=REWRITE_MODEL, messages=messages)
         return (response.choices[0].message.content or "").strip()
-    except OpenAIError as e:
-        print(f"  Conversation summarization failed, using raw fallback: {e}")
+    except Exception as e:
+        # Same as rewrite_query_with_context: a hard quota / 429 must not
+        # take down get_history() (and therefore ask()) on a long session.
+        logger.warning("Conversation summarization failed, using raw fallback: %s", e)
         return transcript[:2000]
 
 

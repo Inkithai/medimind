@@ -1,168 +1,136 @@
-import { useCopy } from "../i18n";
+import { Link } from "react-router-dom";
 import type { QAResponse, QASource } from "../types/api";
+import { useI18n } from "../i18n/I18nContext";
 import { classNames, confidenceTone, formatConfidence, formatDate } from "../utils/format";
-import { Alert } from "./Alert";
-import { FileIcon } from "./icons";
+import { ConsiderProfessionalCare } from "./ConsiderProfessionalCare";
 
-/**
- * Renders one grounded answer.
- *
- * Citations are the point of this card, not decoration: each source is a
- * button that opens the document it came from, so a patient can verify the
- * claim against the original page. An answer with no verifiable source says
- * so explicitly rather than looking equally authoritative.
- */
 export function QAResultCard({
   result,
   embedded = false,
-  question,
   onOpenSource,
 }: {
   result: QAResponse;
   embedded?: boolean;
-  question?: string;
   /** Opens the cited document. Omit to render sources as plain text. */
   onOpenSource?: (source: QASource) => void;
 }) {
-  const copy = useCopy();
-  // Defensive dedupe: the server already returns one entry per document, but
-  // a cached or older response must never render the same file twice or
-  // inflate the source count.
+  const { t, formatNumber } = useI18n();
+  // One entry per DOCUMENT. A file cited for two visit dates is still one
+  // source the patient can open, so counting it twice overstated the
+  // evidence ("4 sources" for 2 documents).
   const sources = dedupeSources(result.sources);
-  const hasSources = sources.length > 0;
-
   return (
     <div
       className={
         embedded
-          ? "space-y-3 text-sm"
-          : "space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+          ? "space-y-2 text-sm"
+          : "space-y-3 rounded-lg border border-slate-200 bg-white p-4"
       }
     >
       {result.recommend_professional_consult && (
-        <Alert variant="warning" title={copy.askAi.consultTitle}>
-          {copy.askAi.consultBody}
-        </Alert>
+        <ConsiderProfessionalCare message={t("ask.consult")} />
       )}
 
-      {question && !embedded && (
-        <div className="rounded-xl bg-slate-50 px-4 py-3">
-          <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-            {copy.askAi.askedLabel}
-          </p>
-          <p className="mt-0.5 break-words text-sm text-slate-700">{question}</p>
-        </div>
-      )}
-
-      {/* `break-words` keeps a long unbroken token (a URL, a lab code) from
-          widening the card on mobile. */}
+      {/* break-words stops a long unbroken token (a URL or lab code) from
+          widening the card on a narrow screen. */}
       <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-slate-800">
         {result.answer}
       </p>
 
+      {result.confidence_reason && (
+        <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+          <span className="font-semibold text-slate-800">{t("ask.confidenceWhy")}:</span>{" "}
+          {result.confidence_reason}
+        </div>
+      )}
+
+      {result.confidence < 0.6 && (
+        <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          <p>{t("ask.lowConfidence")}</p>
+          <Link to="/find-care?from=low-confidence-answer" className="mt-1 inline-flex font-semibold text-brand-700 hover:underline">
+            {t("safety.findCare")} →
+          </Link>
+        </div>
+      )}
+
       <div className="flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3">
-        {/* Plain-language band leads; the percentage is supporting detail, so
-            "98%" cannot read as "98% medically certain". */}
         <span
           className={classNames(
             "inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium",
             confidenceTone(result.confidence)
           )}
-          title={copy.askAi.confidenceHelp}
         >
-          {copy.askAi.confidenceBand(confidenceBand(result.confidence, copy), sources.length)}
+          {t("common.confidence")} {formatConfidence(result.confidence)}
         </span>
-        <span className="text-xs text-slate-500">
-          {copy.askAi.confidenceLabel(formatConfidence(result.confidence))}
-        </span>
-        <span className="text-xs text-slate-500">
-          {hasSources ? copy.askAi.sourcesTitle(sources.length) : copy.askAi.noSourcesTitle}
-        </span>
+        {sources.length > 0 ? (
+          <span className="text-xs text-slate-500">
+            {sources.length === 1
+              ? t("ask.citedSourcesOne")
+              : t("ask.citedSources", { count: formatNumber(sources.length) })}
+          </span>
+        ) : (
+          <span className="text-xs text-slate-600">{t("ask.noSources")}</span>
+        )}
       </div>
 
-      {hasSources ? (
-        <div>
-          <ul className="space-y-1.5">
-            {sources.map((source) => (
-              <li key={source.source_file}>
-                <SourceRow source={source} onOpenSource={onOpenSource} />
+      {sources.length > 0 && (
+        <ul className="space-y-1">
+          {sources.map((src) => {
+            const label = (
+              <>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="h-3.5 w-3.5 shrink-0 text-slate-400" aria-hidden="true">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                  <polyline points="14 2 14 8 20 8" />
+                </svg>
+                <span className="min-w-0 flex-1 truncate font-medium text-slate-700">
+                  {src.source_file}
+                </span>
+                {sourceDates(src).length > 0 && (
+                  <span className="shrink-0 text-slate-400">
+                    {sourceDates(src).map((d) => formatDate(d)).join(" · ")}
+                  </span>
+                )}
+                {typeof src.page === "number" && (
+                  <span className="shrink-0 text-slate-400">
+                    {t("common.page")} {formatNumber(src.page)}
+                  </span>
+                )}
+              </>
+            );
+            return (
+              <li key={src.source_file}>
+                {onOpenSource ? (
+                  <button
+                    type="button"
+                    onClick={() => onOpenSource(src)}
+                    aria-label={t("ask.openSource", { file: src.source_file })}
+                    className="flex min-h-[44px] w-full items-center gap-2 rounded-md bg-slate-50 px-3 py-2 text-left text-xs text-slate-600 transition hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+                  >
+                    {label}
+                    <span className="shrink-0 text-brand-600" aria-hidden="true">→</span>
+                  </button>
+                ) : (
+                  <div className="flex items-center gap-2 rounded-md bg-slate-50 px-3 py-1.5 text-xs text-slate-600">
+                    {label}
+                  </div>
+                )}
               </li>
-            ))}
-          </ul>
-          {onOpenSource && (
-            <p className="mt-2 text-xs text-slate-400">{copy.askAi.sourceHint}</p>
-          )}
-        </div>
-      ) : (
-        <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800 ring-1 ring-amber-200">
-          {copy.askAi.noSourcesBody}
-        </p>
+            );
+          })}
+        </ul>
       )}
 
       {result.rewritten_query && (
-        <div className="rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-500">
-          <span className="font-semibold text-slate-600">
-            {copy.askAi.retrievalQueryLabel}:
-          </span>{" "}
-          <span className="break-words">{result.rewritten_query}</span>
+        <div className="rounded-md bg-slate-50 px-3 py-2 text-xs text-slate-500">
+          <span className="font-semibold text-slate-700">{t("ask.retrievalQuery")}:</span>{" "}
+          {result.rewritten_query}
         </div>
       )}
     </div>
   );
 }
 
-function SourceRow({
-  source,
-  onOpenSource,
-}: {
-  source: QASource;
-  onOpenSource?: (source: QASource) => void;
-}) {
-  const copy = useCopy();
-  const label = (
-    <>
-      <FileIcon className="h-3.5 w-3.5 shrink-0 text-slate-400" aria-hidden="true" />
-      <span className="min-w-0 flex-1 truncate font-medium text-slate-700">
-        {source.source_file}
-      </span>
-      {typeof source.page === "number" && (
-        <span className="shrink-0 rounded-full bg-white px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 ring-1 ring-slate-200">
-          {copy.askAi.pageLabel(source.page)}
-        </span>
-      )}
-      {/* Every date this document was cited for — one document, one row. */}
-      {sourceDates(source).length > 0 && (
-        <span className="shrink-0 text-slate-400">
-          {sourceDates(source).map(formatDate).join(" · ")}
-        </span>
-      )}
-    </>
-  );
-
-  if (!onOpenSource) {
-    return (
-      <div className="flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
-        {label}
-      </div>
-    );
-  }
-
-  return (
-    <button
-      type="button"
-      onClick={() => onOpenSource(source)}
-      aria-label={copy.askAi.openSource(source.source_file)}
-      className="flex min-h-[44px] w-full items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-left text-xs text-slate-600 transition hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
-    >
-      {label}
-      <span className="shrink-0 text-brand-600" aria-hidden="true">
-        →
-      </span>
-    </button>
-  );
-}
-
-/** All dates a source was cited for, newest-first, with `date` as fallback. */
+/** All dates a source was cited for, de-duplicated and sorted. */
 function sourceDates(source: QASource): string[] {
   const dates = source.dates?.length ? source.dates : source.date ? [source.date] : [];
   return [...new Set(dates.filter(Boolean))].sort();
@@ -171,9 +139,8 @@ function sourceDates(source: QASource): string[] {
 /**
  * Collapse citations to one entry per document.
  *
- * A file cited for two visit dates is still a single document the patient
- * can open, so it must count once. Dates from the duplicates are merged so
- * no evidence is lost.
+ * The server already returns one entry per document; this is defensive so a
+ * cached or older response cannot re-inflate the count.
  */
 function dedupeSources(sources: QASource[]): QASource[] {
   const byFile = new Map<string, QASource>();
@@ -186,15 +153,7 @@ function dedupeSources(sources: QASource[]): QASource[] {
       continue;
     }
     existing.dates = [...new Set([...(existing.dates || []), ...sourceDates(source)])].sort();
-    // Keep the first page we saw rather than dropping page information.
     if (existing.page == null && typeof source.page === "number") existing.page = source.page;
   }
   return [...byFile.values()];
-}
-
-/** Plain-language band for an evidence-match score. */
-function confidenceBand(confidence: number, copy: ReturnType<typeof useCopy>): string {
-  if (confidence >= 0.85) return copy.askAi.confidenceHigh;
-  if (confidence >= 0.6) return copy.askAi.confidenceMedium;
-  return copy.askAi.confidenceLow;
 }

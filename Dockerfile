@@ -24,8 +24,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy backend source code
 COPY backend/ ./
 
-# The container listens on 8000; the hosting platform maps this to its port
+# Honor $PORT (Railway/Render/Fly) and default to 8000 for local docker run.
 EXPOSE 8000
 
-# Production: no --reload, bind to 0.0.0.0
-CMD ["uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8000"]
+# Production: no --reload, bind to 0.0.0.0. Shell form so ${PORT} expands.
+CMD ["sh", "-c", "uvicorn api:app --host 0.0.0.0 --port ${PORT:-8000}"]

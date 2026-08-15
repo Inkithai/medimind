@@ -49,7 +49,7 @@ TIMELINE = {
 ANSWER_JSON = json.dumps({
     "answer": "You are taking Paracetamol 500 mg three times daily.",
     "confidence": 0.95,
-    "sources": [{"date": "2024-03-15", "source_file": "rx.jpg"}],
+    "sources": [{"date": "2024-03-15", "source_file": "rx.jpg", "page": 1}],
     "recommend_professional_consult": False,
 })
 
@@ -89,6 +89,9 @@ def _make_fake_chromadb():
             if name not in state["collections"]:
                 raise ValueError(f"Collection {name} does not exist")
             return state["collections"][name]
+
+        def delete_collection(self, name):
+            state["collections"].pop(name, None)
 
     fake_module = types.ModuleType("chromadb")
     fake_module.PersistentClient = FakeClient
@@ -152,16 +155,55 @@ def test_index_then_answer_over_chroma_path():
             out = retrieval.answer_question("anon_qa", "what medication am I on?")
         assert out["answer"].startswith("You are taking Paracetamol")
         assert out["confidence"] == 0.95
-        # answer_question() attaches the page from the retrieved chunk metadata
-        # (None here — the fixture timeline has no page numbers).
+        assert "directly" in out["confidence_reason"]
+        # `dates` carries every date a document was cited for; the page comes
+        # from the retrieved chunk metadata, never from the model.
         assert out["sources"] == [
             {
                 "date": "2024-03-15",
                 "dates": ["2024-03-15"],
                 "source_file": "rx.jpg",
+                # The fixture timeline has no _source.page, so the validator
+                # attaches None rather than trusting the model's "page": 1.
                 "page": None,
             }
         ]
+    finally:
+        vector_store._chroma_client = None
+        _restore_chromadb(saved)
+
+
+def test_reindex_does_not_leave_stale_chunks_after_order_shift():
+    """Re-indexing a longer, re-sorted timeline must replace the previous
+    collection rather than accumulating leftover index-based ids."""
+    fake, state = _make_fake_chromadb()
+    saved = sys.modules.get("chromadb")
+    sys.modules["chromadb"] = fake
+    vector_store._chroma_client = None
+    try:
+        with mock.patch.object(retrieval, "embed_texts",
+                               side_effect=lambda texts: [[0.1] * 384 for _ in texts]):
+            n1 = retrieval.index_patient_timeline("anon_shift", TIMELINE)
+            assert n1 == 3
+            older = {
+                **TIMELINE,
+                "medications_timeline": [
+                    {
+                        "name": "Aspirin", "ingredients": ["Aspirin"], "dosage": "75 mg",
+                        "frequency": "daily", "duration": None, "dosage_value": 75,
+                        "dosage_unit": "mg", "frequency_per_day": 1, "is_as_needed": False,
+                        "confidence": 0.9, "date": "2023-01-01", "source_file": "old.pdf",
+                    },
+                    *TIMELINE["medications_timeline"],
+                ],
+            }
+            n2 = retrieval.index_patient_timeline("anon_shift", older)
+        # 2 medications + 1 lab + 1 allergy
+        assert n2 == 4
+        shift_collection = vector_store._sanitize_collection_name("anon_shift")
+        assert state["collections"][shift_collection].count() == 4, (
+            "stale chunks from the previous index survived re-index"
+        )
     finally:
         vector_store._chroma_client = None
         _restore_chromadb(saved)

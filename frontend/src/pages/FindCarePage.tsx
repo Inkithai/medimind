@@ -1,47 +1,59 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api/client";
-import { FacilityCard, CareIcon, kindLabel } from "../components/care/FacilityCard";
-import { FacilityResultsMap } from "../components/care/FacilityResultsMap";
 import { LocationPicker } from "../components/location";
 import { LocationIcon, RefreshIcon } from "../components/icons";
 import { useAuth } from "../context/AuthContext";
-import { useCopy } from "../i18n";
-import type { PatientSnapshot } from "../types/api";
-import type { CareFacility, FacilityKind } from "../types/facility";
+import { useStrictEffect } from "../hooks/useStrictEffect";
+import { useI18n } from "../i18n/I18nContext";
+import type {
+  CareAvailability,
+  CareFacility,
+  CareRecommendation,
+  FacilityKind,
+} from "../types/facility";
 import type { ConfirmedLocation } from "../types/location";
 import { classNames } from "../utils/format";
-import {
-  countByFilter,
-  filterFacilities,
-  type FacilityFilter,
-} from "../utils/facilities";
-import {
-  SPECIALTY_OPTIONS,
-  specialtyLabel,
-  suggestSpecialty,
-  type SpecialtySuggestion,
-} from "../utils/specialty";
 
 const STORAGE_KEY = "medimind.find-care.location.v1";
-const RADIUS_OPTIONS_KM = [2, 5, 10, 25];
-const DEFAULT_RADIUS_KM = 5;
+const PREFERENCES_KEY = "medimind.find-care.preferences.v1";
+const SEARCH_RADII = [5, 10, 20, 50] as const;
 
 type SearchStatus = "idle" | "loading" | "success" | "error";
-type SearchKind = "all" | FacilityKind;
+type FacilityFilter = "all" | FacilityKind;
+type SearchKind = Exclude<FacilityFilter, "healthcare">;
 
-const FILTER_ORDER: FacilityFilter[] = [
-  "all",
-  "hospital",
-  "clinic",
-  "pharmacy",
-  "laboratory",
-  "doctor",
-  "other",
+const FILTERS: Array<{ value: SearchKind; labelKey: string }> = [
+  { value: "all", labelKey: "care.all" },
+  { value: "hospital", labelKey: "care.hospitals" },
+  { value: "clinic", labelKey: "care.clinics" },
+  { value: "pharmacy", labelKey: "care.pharmacies" },
+  { value: "laboratory", labelKey: "care.laboratories" },
+  { value: "doctor", labelKey: "care.doctors" },
 ];
 
-/** Facility types offered as a *search* narrowing (no "other" — it is a
- *  result bucket, not something a user asks for). */
-const SEARCH_KINDS: SearchKind[] = ["all", "hospital", "clinic", "pharmacy", "laboratory", "doctor"];
+function readPreferences(): { specialty: string; availability: CareAvailability; radiusKm: number } {
+  try {
+    const value = JSON.parse(localStorage.getItem(PREFERENCES_KEY) || "null") as {
+      specialty?: unknown;
+      availability?: unknown;
+      radiusKm?: unknown;
+    } | null;
+    const allowed = new Set<CareAvailability>(["any", "today", "this_week", "evening", "weekend"]);
+    const radius = typeof value?.radiusKm === "number" && SEARCH_RADII.includes(value.radiusKm as typeof SEARCH_RADII[number])
+      ? value.radiusKm
+      : 5;
+    return {
+      specialty: typeof value?.specialty === "string" ? value.specialty.slice(0, 80) : "",
+      availability:
+        typeof value?.availability === "string" && allowed.has(value.availability as CareAvailability)
+          ? (value.availability as CareAvailability)
+          : "any",
+      radiusKm: radius,
+    };
+  } catch {
+    return { specialty: "", availability: "any", radiusKm: 5 };
+  }
+}
 
 function readSavedLocation(): ConfirmedLocation | null {
   try {
@@ -57,8 +69,14 @@ function readSavedLocation(): ConfirmedLocation | null {
       typeof value.longitude === "number" &&
       Number.isFinite(value.latitude) &&
       Number.isFinite(value.longitude) &&
+      value.latitude >= -90 &&
+      value.latitude <= 90 &&
+      value.longitude >= -180 &&
+      value.longitude <= 180 &&
       typeof value.name === "string" &&
-      typeof value.displayName === "string"
+      value.name.trim().length > 0 &&
+      typeof value.displayName === "string" &&
+      value.displayName.trim().length > 0
     ) {
       return value as ConfirmedLocation;
     }
@@ -69,133 +87,105 @@ function readSavedLocation(): ConfirmedLocation | null {
 }
 
 export function FindCarePage() {
-  const copy = useCopy();
   const { credentials } = useAuth();
+  const { t, formatNumber } = useI18n();
+  const referralSource = new URLSearchParams(window.location.search).get("from") || "";
+  const lowConfidenceReferral = referralSource.startsWith("low-confidence");
   const [savedLocation, setSavedLocation] = useState<ConfirmedLocation | null>(readSavedLocation);
   const [pickerKey, setPickerKey] = useState(0);
   const [facilities, setFacilities] = useState<CareFacility[]>([]);
   const [status, setStatus] = useState<SearchStatus>("idle");
   const [error, setError] = useState<string | null>(null);
   const [searchKind, setSearchKind] = useState<SearchKind>("all");
-  const [radiusKm, setRadiusKm] = useState<number>(DEFAULT_RADIUS_KM);
-  const [specialty, setSpecialty] = useState<string>("");
-  const [specialtyTouched, setSpecialtyTouched] = useState(false);
-  const [suggestion, setSuggestion] = useState<SpecialtySuggestion | null>(null);
   const [filter, setFilter] = useState<FacilityFilter>("all");
-  const [activeFacilityId, setActiveFacilityId] = useState<string | null>(null);
+  const [specialty, setSpecialty] = useState(() => readPreferences().specialty);
+  const [availability, setAvailability] = useState<CareAvailability>(() => readPreferences().availability);
+  const [radiusKm, setRadiusKm] = useState(() => readPreferences().radiusKm);
+  const [recommendation, setRecommendation] = useState<CareRecommendation | null>(null);
   const requestRef = useRef<AbortController | null>(null);
   const resultsRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => () => requestRef.current?.abort(), []);
-
-  // Pull the specialty signal out of the already-extracted record. A failure
-  // here must never block the directory search.
   useEffect(() => {
-    let cancelled = false;
-    api
-      .getPatientSnapshot(credentials)
-      .then((snapshot: PatientSnapshot) => {
-        if (cancelled) return;
-        const next = suggestSpecialty(snapshot);
-        setSuggestion(next);
-        // Pre-select it so the user does not repeat information MediMind
-        // already extracted — they can still change or clear it.
-        setSpecialty((current) => (current || specialtyTouched ? current : next?.specialty || ""));
+    localStorage.setItem(PREFERENCES_KEY, JSON.stringify({ specialty, availability, radiusKm }));
+  }, [availability, radiusKm, specialty]);
+
+  useStrictEffect(() => {
+    api.getCareRecommendation(credentials)
+      .then((value) => {
+        setRecommendation(value);
+        if (!specialty.trim()) setSpecialty(value.specialty_query);
+        if (value.triggered) {
+          setSearchKind(value.facility_kind);
+          setFilter(value.facility_kind);
+        }
       })
       .catch(() => {
-        if (!cancelled) setSuggestion(null);
+        // No patient snapshot yet: manual care search remains fully available.
       });
-    return () => {
-      cancelled = true;
-    };
-    // Runs once per credential change; specialtyTouched is read, not tracked.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [credentials]);
 
-  /**
-   * BUG-001/002/003 fix: the counts and the rendered list are both derived
-   * from `facilities` through the same predicate, in the same render. They
-   * cannot disagree, and no stale array can survive a filter change.
-   */
   const visibleFacilities = useMemo(
-    () => filterFacilities(facilities, filter),
+    () => facilities.filter((facility) => filter === "all" || facility.kind === filter),
     [facilities, filter]
   );
-  const counts = useMemo(() => countByFilter(facilities, FILTER_ORDER), [facilities]);
 
-  const loadFacilities = useCallback(
-    async (
-      location: ConfirmedLocation,
-      requestedKind: SearchKind,
-      requestedRadiusKm: number,
-      requestedSpecialty: string
-    ) => {
-      requestRef.current?.abort();
-      const controller = new AbortController();
-      requestRef.current = controller;
-      setStatus("loading");
-      setError(null);
-      setFacilities([]);
-      setActiveFacilityId(null);
-
-      try {
-        const nearby = await api.getCareFacilities(credentials, {
-          location: location.displayName || location.name,
-          kind: requestedKind === "all" ? "any" : requestedKind,
-          radiusKm: requestedRadiusKm,
-          latitude: location.latitude,
-          longitude: location.longitude,
-          specialty: requestedSpecialty || undefined,
-          signal: controller.signal,
-        });
-        if (controller.signal.aborted) return;
-        setFacilities(nearby);
-        // Always land on a filter that has results, so "N found" and the list
-        // below it can never contradict each other.
-        setFilter(
-          requestedKind !== "all" && nearby.some((facility) => facility.kind === requestedKind)
-            ? requestedKind
-            : "all"
-        );
-        setStatus("success");
-      } catch (requestError) {
-        if (controller.signal.aborted) return;
-        setError(
-          requestError instanceof Error ? requestError.message : copy.findCare.errorFallback
-        );
-        setStatus("error");
-      }
-    },
-    [copy.findCare.errorFallback, credentials]
-  );
-
-  function handleConfirm(location: ConfirmedLocation) {
+  async function handleConfirm(location: ConfirmedLocation) {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(location));
     setSavedLocation(location);
-    void loadFacilities(location, searchKind, radiusKm, specialty);
+    setFilter(searchKind);
     window.setTimeout(
-      () => resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }),
+      () => resultsRef.current?.scrollIntoView({
+        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+        block: "start",
+      }),
       150
     );
+    // Let LocationPicker keep its action disabled until this search settles;
+    // otherwise repeated clicks abort and restart the same request.
+    await loadFacilities(location, searchKind);
   }
 
-  /** Re-run the search whenever a preference changes after a first search. */
-  function applyPreference(next: {
-    kind?: SearchKind;
-    radiusKm?: number;
-    specialty?: string;
-  }) {
-    const nextKind = next.kind ?? searchKind;
-    const nextRadius = next.radiusKm ?? radiusKm;
-    const nextSpecialty = next.specialty ?? specialty;
-    if (next.kind !== undefined) setSearchKind(next.kind);
-    if (next.radiusKm !== undefined) setRadiusKm(next.radiusKm);
-    if (next.specialty !== undefined) {
-      setSpecialty(next.specialty);
-      setSpecialtyTouched(true);
-    }
-    if (savedLocation && status !== "idle") {
-      void loadFacilities(savedLocation, nextKind, nextRadius, nextSpecialty);
+  async function loadFacilities(
+    location: ConfirmedLocation,
+    requestedKind: SearchKind,
+    requestedSpecialty = specialty,
+    requestedAvailability = availability,
+    requestedRadiusKm = radiusKm
+  ) {
+    requestRef.current?.abort();
+    const controller = new AbortController();
+    requestRef.current = controller;
+    // Keep the result chips aligned with the server-side category. Without
+    // this, retrying after changing the category could load pharmacies while
+    // the old hospital filter hid every returned result.
+    setFilter(requestedKind);
+    setStatus("loading");
+    setError(null);
+    setFacilities([]);
+
+    try {
+      const nearby = await api.getCareFacilities(credentials, {
+        location: location.displayName || location.name,
+        kind: requestedKind === "all" ? "any" : requestedKind,
+        radiusKm: requestedRadiusKm,
+        latitude: location.latitude,
+        longitude: location.longitude,
+        specialty: requestedSpecialty.trim() || undefined,
+        availability: requestedAvailability,
+        signal: controller.signal,
+      });
+      if (controller.signal.aborted) return;
+      setFacilities(nearby);
+      setStatus("success");
+    } catch (requestError) {
+      if (controller.signal.aborted) return;
+      setError(
+        requestError instanceof Error
+          ? requestError.message
+          : "We couldn't load nearby facilities. Please try again."
+      );
+      setStatus("error");
     }
   }
 
@@ -207,7 +197,6 @@ export function FindCarePage() {
     setStatus("idle");
     setError(null);
     setFilter("all");
-    setActiveFacilityId(null);
     setPickerKey((value) => value + 1);
   }
 
@@ -216,46 +205,140 @@ export function FindCarePage() {
       <header className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
         <div>
           <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-brand-200 bg-brand-50 px-3 py-1 text-xs font-bold uppercase tracking-wider text-brand-700">
-            <CareIcon className="h-3.5 w-3.5" /> {copy.findCare.eyebrow}
+            <CareIcon className="h-3.5 w-3.5" /> Find care
           </div>
-          <h1 className="page-title">{copy.findCare.title}</h1>
-          <p className="secondary-text mt-2 max-w-2xl leading-relaxed">{copy.findCare.subtitle}</p>
+          <h1 className="page-title">{t("care.title")}</h1>
+          <p className="secondary-text mt-2 max-w-2xl leading-relaxed">{t("care.subtitle")}</p>
         </div>
         {savedLocation && (
           <button type="button" onClick={clearLocation} className="btn-secondary shrink-0">
-            {copy.findCare.changeSearchArea}
+            {t("common.change")}
           </button>
         )}
       </header>
 
-      <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-900" role="note">
-        <p className="font-semibold">{copy.findCare.urgentTitle}</p>
-        <p className="mt-0.5 text-amber-800">{copy.findCare.urgentBody}</p>
+      <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-900">
+        <p className="font-semibold">{t("care.urgentTitle")}</p>
+        <p className="mt-0.5 text-amber-900">{t("care.urgentBody")}</p>
       </div>
 
-      {suggestion && (
-        <SuggestedSpecialty
-          suggestion={suggestion}
-          isApplied={specialty === suggestion.specialty}
-          onApply={() => applyPreference({ specialty: suggestion.specialty })}
-          onClear={() => applyPreference({ specialty: "" })}
-        />
+      {lowConfidenceReferral && (!recommendation || !recommendation.triggered) && (
+        <section className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-900">
+          <p className="font-semibold">{t("care.lowConfidence")}</p>
+          <p className="mt-1">
+            The previous result was uncertain. Use the location, availability, and specialty fields below to find a real professional who can check it against the original records.
+          </p>
+        </section>
       )}
 
-      <CarePreferences
-        searchKind={searchKind}
-        radiusKm={radiusKm}
-        specialty={specialty}
-        onChange={applyPreference}
-      />
+      {recommendation && (
+        <section className={classNames(
+          "rounded-2xl border px-5 py-4 text-sm",
+          recommendation.triggered ? "border-red-200 bg-red-50 text-red-900" : "border-sky-200 bg-sky-50 text-sky-900"
+        )}>
+          <p className="font-semibold">
+            {recommendation.triggered ? t("care.recommendation") : t("care.startingSpecialty")}: {recommendation.specialty}
+          </p>
+          <p className="mt-1">{recommendation.reason}</p>
+          <p className="mt-2 text-xs opacity-80">{recommendation.disclaimer}</p>
+          {recommendation.evidence.length > 0 && (
+            <p className="mt-2 text-xs font-medium">
+              Evidence: {recommendation.evidence.map((item) => `${item.source_file || "record"}${item.page ? ` p.${item.page}` : ""}`).join(", ")}
+            </p>
+          )}
+        </section>
+      )}
+
+      <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <h2 className="text-sm font-semibold text-slate-900">{t("care.preferences")}</h2>
+        <p className="mt-1 text-xs text-slate-600">{t("care.preferencesBody")}</p>
+        <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <label className="text-sm font-semibold text-slate-800">
+            {t("care.facilityType")}
+            <select
+              id="care-kind"
+              value={searchKind}
+              onChange={(event) => {
+                const nextKind = event.target.value as SearchKind;
+                setSearchKind(nextKind);
+                if (savedLocation) void loadFacilities(savedLocation, nextKind);
+              }}
+              className="mt-2 min-h-[48px] w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-800 outline-none focus:border-brand-500 focus:ring-4 focus:ring-brand-100"
+            >
+              {FILTERS.map((option) => (
+                <option key={option.value} value={option.value}>{t(option.labelKey)}</option>
+              ))}
+            </select>
+          </label>
+
+          <label className="text-sm font-semibold text-slate-800">
+            {t("care.specialty")}
+            <input
+              value={specialty}
+              onChange={(event) => setSpecialty(event.target.value.slice(0, 80))}
+              onBlur={() => {
+                if (savedLocation) void loadFacilities(savedLocation, searchKind, specialty, availability);
+              }}
+              list="care-specialties"
+              placeholder={t("care.specialtyPlaceholder")}
+              className="mt-2 min-h-[48px] w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-800 outline-none focus:border-brand-500 focus:ring-4 focus:ring-brand-100"
+            />
+            <datalist id="care-specialties">
+              <option value="cardiology" />
+              <option value="clinical pharmacist" />
+              <option value="dermatology" />
+              <option value="gastroenterology" />
+              <option value="hematology" />
+              <option value="general physician" />
+            </datalist>
+          </label>
+
+          <label className="text-sm font-semibold text-slate-800">
+            {t("care.availability")}
+            <select
+              value={availability}
+              onChange={(event) => {
+                const next = event.target.value as CareAvailability;
+                setAvailability(next);
+                if (savedLocation) void loadFacilities(savedLocation, searchKind, specialty, next);
+              }}
+              className="mt-2 min-h-[48px] w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-800 outline-none focus:border-brand-500 focus:ring-4 focus:ring-brand-100"
+            >
+              <option value="any">{t("care.anytime")}</option>
+              <option value="today">{t("care.today")}</option>
+              <option value="this_week">{t("care.thisWeek")}</option>
+              <option value="evening">{t("care.evening")}</option>
+              <option value="weekend">{t("care.weekend")}</option>
+            </select>
+          </label>
+
+          <label className="text-sm font-semibold text-slate-800">
+            {t("care.radius")}
+            <select
+              value={radiusKm}
+              onChange={(event) => {
+                const next = Number(event.target.value);
+                setRadiusKm(next);
+                if (savedLocation) void loadFacilities(savedLocation, searchKind, specialty, availability, next);
+              }}
+              className="mt-2 min-h-[48px] w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-800 outline-none focus:border-brand-500 focus:ring-4 focus:ring-brand-100"
+            >
+              {SEARCH_RADII.map((radius) => (
+                <option key={radius} value={radius}>{formatNumber(radius)} km</option>
+              ))}
+            </select>
+          </label>
+        </div>
+      </section>
 
       <LocationPicker
         key={pickerKey}
         initialValue={savedLocation}
         onConfirm={handleConfirm}
-        title={copy.findCare.locationTitle}
-        description={copy.findCare.locationDescription}
-        confirmLabel={copy.findCare.confirmLabel}
+        title={t("care.where")}
+        description={t("care.locationDescription")}
+        confirmLabel={t("care.find")}
+        confirmingLabel={t("care.finding")}
         showAddressDetails={false}
       />
 
@@ -265,28 +348,22 @@ export function FindCarePage() {
             <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-brand-50 text-brand-700">
               <CareIcon className="h-6 w-6" />
             </span>
-            <h2 className="mt-4 text-lg font-semibold text-slate-900">{copy.findCare.idleTitle}</h2>
-            <p className="mx-auto mt-1 max-w-md text-sm text-slate-500">{copy.findCare.idleBody}</p>
+            <h2 className="mt-4 text-lg font-semibold text-slate-900">{t("care.selectArea")}</h2>
+            <p className="mx-auto mt-1 max-w-md text-sm text-slate-600">{t("care.selectAreaBody")}</p>
           </section>
         ) : status === "loading" ? (
-          <FacilityLoading
-            locationName={savedLocation?.name || copy.location.selectedLocation}
-            radiusKm={radiusKm}
-          />
+          <FacilityLoading locationName={savedLocation?.name || "your location"} radiusKm={radiusKm} />
         ) : status === "error" ? (
-          <section className="rounded-2xl border border-red-200 bg-red-50 p-6 text-center" role="alert">
-            <h2 className="text-lg font-semibold text-red-900">{copy.findCare.errorTitle}</h2>
+          <section className="rounded-2xl border border-red-200 bg-red-50 p-6 text-center">
+            <h2 className="text-lg font-semibold text-red-900">{t("care.searchFailed")}</h2>
             <p className="mx-auto mt-1 max-w-lg text-sm text-red-700">{error}</p>
-            <p className="mx-auto mt-2 max-w-lg text-sm text-red-600">
-              {copy.findCare.errorDirectoryHint}
-            </p>
             {savedLocation && (
               <button
                 type="button"
-                onClick={() => void loadFacilities(savedLocation, searchKind, radiusKm, specialty)}
+                onClick={() => void loadFacilities(savedLocation, searchKind)}
                 className="btn-secondary mt-5"
               >
-                <RefreshIcon className="h-4 w-4" /> {copy.findCare.tryAgain}
+                <RefreshIcon className="h-4 w-4" /> Try again
               </button>
             )}
           </section>
@@ -294,13 +371,22 @@ export function FindCarePage() {
           <FacilityResults
             facilities={facilities}
             visibleFacilities={visibleFacilities}
-            counts={counts}
             filter={filter}
             onFilterChange={setFilter}
             location={savedLocation}
+            specialty={specialty}
             radiusKm={radiusKm}
-            activeFacilityId={activeFacilityId}
-            onFocusFacility={(facility) => setActiveFacilityId(facility.id)}
+            onExpandRadius={() => {
+              const nextRadius = SEARCH_RADII.find((radius) => radius > radiusKm);
+              if (nextRadius && savedLocation) {
+                setRadiusKm(nextRadius);
+                void loadFacilities(savedLocation, searchKind, specialty, availability, nextRadius);
+              }
+            }}
+            onBroadenSpecialty={() => {
+              setSpecialty("");
+              if (savedLocation) void loadFacilities(savedLocation, searchKind, "", availability);
+            }}
           />
         )}
       </div>
@@ -308,169 +394,15 @@ export function FindCarePage() {
   );
 }
 
-/**
- * BUG-004/005/006/007 fix: shows the already-extracted specialty as applied,
- * separates finding → reasoning → search, and never presents it as a
- * diagnosis.
- */
-function SuggestedSpecialty({
-  suggestion,
-  isApplied,
-  onApply,
-  onClear,
-}: {
-  suggestion: SpecialtySuggestion;
-  isApplied: boolean;
-  onApply: () => void;
-  onClear: () => void;
-}) {
-  const copy = useCopy();
-  return (
-    <section
-      className="rounded-2xl border border-brand-200 bg-brand-50/60 p-5"
-      aria-labelledby="suggested-specialty-title"
-    >
-      <h2 id="suggested-specialty-title" className="text-sm font-bold uppercase tracking-wider text-brand-700">
-        {copy.findCare.suggestedSpecialtyTitle}
-      </h2>
-      <div className="mt-2 flex flex-wrap items-center gap-3">
-        <p className="text-xl font-bold text-slate-900">{suggestion.label}</p>
-        {isApplied ? (
-          <>
-            <span className="rounded-full bg-brand-600 px-2.5 py-1 text-xs font-bold text-white">
-              {copy.findCare.suggestedSpecialtyApplied(suggestion.label)}
-            </span>
-            <button type="button" onClick={onClear} className="btn-ghost min-h-[40px] px-3 py-1.5 text-sm">
-              {copy.findCare.clearSpecialty}
-            </button>
-          </>
-        ) : (
-          <button type="button" onClick={onApply} className="btn-secondary min-h-[40px] px-3 py-1.5 text-sm">
-            {copy.findCare.useSuggested}
-          </button>
-        )}
-      </div>
-      <p className="mt-2 max-w-2xl text-sm text-slate-600">
-        {copy.findCare.suggestedSpecialtyDisclaimer}
-      </p>
-      <details className="mt-3">
-        <summary className="cursor-pointer text-sm font-semibold text-brand-700 hover:underline">
-          {copy.findCare.suggestedSpecialtyWhy}
-        </summary>
-        <p className="mt-2 max-w-2xl text-sm text-slate-600">
-          {copy.findCare.suggestedSpecialtyReason(suggestion.keyword, suggestion.label)}
-        </p>
-        {suggestion.evidence.length > 0 && (
-          <p className="mt-2 text-xs text-slate-500">
-            {copy.findCare.suggestedSpecialtyEvidence}: {suggestion.evidence.join(", ")}
-          </p>
-        )}
-        {suggestion.lowConfidenceCount > 0 && (
-          <p className="mt-1 text-xs text-slate-500">
-            {copy.findCare.lowConfidenceNote(suggestion.lowConfidenceCount)}
-          </p>
-        )}
-      </details>
-    </section>
-  );
-}
-
-function CarePreferences({
-  searchKind,
-  radiusKm,
-  specialty,
-  onChange,
-}: {
-  searchKind: SearchKind;
-  radiusKm: number;
-  specialty: string;
-  onChange: (next: { kind?: SearchKind; radiusKm?: number; specialty?: string }) => void;
-}) {
-  const copy = useCopy();
-  return (
-    <section
-      className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
-      aria-labelledby="care-preferences-title"
-    >
-      <h2 id="care-preferences-title" className="text-base font-bold text-slate-900">
-        {copy.findCare.preferencesTitle}
-      </h2>
-      <p className="mt-1 text-xs text-slate-500">{copy.findCare.preferencesSubtitle}</p>
-
-      <div className="mt-4 grid gap-4 sm:grid-cols-3">
-        <div>
-          <label htmlFor="care-kind" className="block text-sm font-semibold text-slate-800">
-            {copy.findCare.facilityTypeLabel}
-          </label>
-          <select
-            id="care-kind"
-            value={searchKind}
-            onChange={(event) => onChange({ kind: event.target.value as SearchKind })}
-            className="mt-2 min-h-[48px] w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-800 outline-none focus:border-brand-500 focus:ring-4 focus:ring-brand-100"
-          >
-            {SEARCH_KINDS.map((kind) => (
-              <option key={kind} value={kind}>
-                {kind === "all" ? copy.findCare.filterAll : filterLabel(kind, copy)}
-              </option>
-            ))}
-          </select>
-          <p className="mt-1 text-xs text-slate-500">{copy.findCare.facilityTypeHelp}</p>
-        </div>
-
-        <div>
-          <label htmlFor="care-specialty" className="block text-sm font-semibold text-slate-800">
-            {copy.findCare.specialtyLabel}
-          </label>
-          <select
-            id="care-specialty"
-            value={specialty}
-            onChange={(event) => onChange({ specialty: event.target.value })}
-            className="mt-2 min-h-[48px] w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-800 outline-none focus:border-brand-500 focus:ring-4 focus:ring-brand-100"
-          >
-            <option value="">{copy.findCare.specialtyNone}</option>
-            {SPECIALTY_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-            {specialty && !SPECIALTY_OPTIONS.some((option) => option.value === specialty) && (
-              <option value={specialty}>{specialtyLabel(specialty)}</option>
-            )}
-          </select>
-          <p className="mt-1 text-xs text-slate-500">{copy.findCare.specialtyHelp}</p>
-        </div>
-
-        <div>
-          <label htmlFor="care-radius" className="block text-sm font-semibold text-slate-800">
-            {copy.findCare.radiusLabel}
-          </label>
-          <select
-            id="care-radius"
-            value={radiusKm}
-            onChange={(event) => onChange({ radiusKm: Number(event.target.value) })}
-            className="mt-2 min-h-[48px] w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-800 outline-none focus:border-brand-500 focus:ring-4 focus:ring-brand-100"
-          >
-            {RADIUS_OPTIONS_KM.map((km) => (
-              <option key={km} value={km}>
-                {copy.findCare.radiusOption(km)}
-              </option>
-            ))}
-          </select>
-        </div>
-      </div>
-    </section>
-  );
-}
-
 function FacilityLoading({ locationName, radiusKm }: { locationName: string; radiusKm: number }) {
-  const copy = useCopy();
+  const { t, formatNumber } = useI18n();
   return (
     <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm" aria-live="polite">
       <div className="flex items-center gap-3">
         <span className="h-5 w-5 animate-spin rounded-full border-2 border-brand-200 border-t-brand-600" />
         <div>
-          <h2 className="font-semibold text-slate-900">{copy.findCare.loadingTitle(locationName)}</h2>
-          <p className="text-sm text-slate-500">{copy.findCare.loadingSubtitle(radiusKm)}</p>
+          <h2 className="font-semibold text-slate-900">{t("care.finding")} {locationName}</h2>
+          <p className="text-sm text-slate-600">{formatNumber(radiusKm)} km</p>
         </div>
       </div>
       <div className="mt-6 grid gap-4 md:grid-cols-2">
@@ -485,82 +417,66 @@ function FacilityLoading({ locationName, radiusKm }: { locationName: string; rad
 function FacilityResults({
   facilities,
   visibleFacilities,
-  counts,
   filter,
   onFilterChange,
   location,
+  specialty,
   radiusKm,
-  activeFacilityId,
-  onFocusFacility,
+  onExpandRadius,
+  onBroadenSpecialty,
 }: {
   facilities: CareFacility[];
   visibleFacilities: CareFacility[];
-  counts: Record<string, number>;
   filter: FacilityFilter;
   onFilterChange: (filter: FacilityFilter) => void;
   location: ConfirmedLocation | null;
+  specialty: string;
   radiusKm: number;
-  activeFacilityId: string | null;
-  onFocusFacility: (facility: CareFacility) => void;
+  onExpandRadius: () => void;
+  onBroadenSpecialty: () => void;
 }) {
-  const copy = useCopy();
+  const { t, formatNumber } = useI18n();
   const sources = [...new Set(facilities.map((facility) => facility.source))].join(", ");
-  // Only offer categories that this result set actually contains, so the chips
-  // can never advertise an empty view (plus the active one, to stay stable).
-  const availableFilters = FILTER_ORDER.filter(
-    (value) => value === "all" || counts[value] > 0 || value === filter
-  );
-  const nonEmptyLabels = FILTER_ORDER.filter((value) => value !== "all" && counts[value] > 0)
-    .map((value) => `${filterLabel(value as FacilityKind, copy)} (${counts[value]})`)
-    .join(", ");
-
   return (
     <section className="space-y-5" aria-live="polite">
       <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
         <div>
           <p className="text-sm font-medium text-brand-700">
-            <LocationIcon className="mr-1 inline h-4 w-4" aria-hidden="true" />{" "}
-            {copy.findCare.nearLocation(location?.name || copy.location.selectedLocation)}
+            <LocationIcon className="mr-1 inline h-4 w-4" /> Near {location?.name || "selected location"}
           </p>
           <h2 className="section-title mt-1">
             {facilities.length
-              ? copy.findCare.resultsCount(facilities.length)
-              : copy.findCare.noResultsTitle}
+              ? t("care.resultCount", { count: formatNumber(facilities.length) })
+              : t("care.noResults")}
           </h2>
         </div>
         {facilities.length > 0 && (
-          <p className="text-xs text-slate-400">
-            {copy.findCare.sortedByDistance} · {copy.findCare.sourcePrefix}:{" "}
-            {sources || "public directory listings"} · {copy.findCare.notARecommendation}
+          <p className="max-w-xl text-xs text-slate-400">
+            {t("care.ranked")} {t("common.source")}: {sources || t("common.notAvailable")} · {t("care.notRecommendation")}
           </p>
         )}
       </div>
 
       {facilities.length > 0 && (
-        <div
-          className="flex gap-2 overflow-x-auto pb-1 scroll-thin"
-          role="group"
-          aria-label={copy.findCare.filtersLabel}
-        >
-          {availableFilters.map((value) => {
-            const label = value === "all" ? copy.findCare.filterAll : filterLabel(value, copy);
-            const count = counts[value] ?? 0;
-            const isActive = filter === value;
+        <div className="flex gap-2 overflow-x-auto pb-1 scroll-thin" aria-label={t("care.filter")}>
+          {FILTERS.map((item) => {
+            const count =
+              item.value === "all"
+                ? facilities.length
+                : facilities.filter((facility) => facility.kind === item.value).length;
             return (
               <button
-                key={value}
+                key={item.value}
                 type="button"
-                onClick={() => onFilterChange(value)}
-                aria-pressed={isActive}
+                onClick={() => onFilterChange(item.value)}
                 className={classNames(
-                  "min-h-[44px] shrink-0 rounded-full px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2",
-                  isActive
+                  "min-h-[40px] shrink-0 rounded-full px-4 py-2 text-sm font-semibold transition",
+                  filter === item.value
                     ? "bg-slate-900 text-white"
                     : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
                 )}
               >
-                {label}{" "}
-                <span className={isActive ? "text-slate-300" : "text-slate-400"}>{count}</span>
+                {t(item.labelKey)} <span className={filter === item.value ? "text-slate-300" : "text-slate-400"}>{count}</span>
               </button>
             );
           })}
@@ -570,57 +486,219 @@ function FacilityResults({
       {!facilities.length ? (
         <div className="rounded-2xl border border-slate-200 bg-white px-6 py-10 text-center shadow-sm">
           <CareIcon className="mx-auto h-8 w-8 text-slate-300" />
-          <p className="mt-3 font-semibold text-slate-800">{copy.findCare.emptyAreaTitle}</p>
-          <p className="mt-1 text-sm text-slate-500">{copy.findCare.emptyAreaBody(radiusKm)}</p>
+          <p className="mt-3 font-semibold text-slate-900">{t("care.noResults")}</p>
+          <p className="mt-1 text-sm text-slate-600">
+            {t("care.noResultsBody", { radius: formatNumber(radiusKm) })}
+          </p>
+          <div className="mt-4 flex flex-wrap justify-center gap-2">
+            {radiusKm < SEARCH_RADII[SEARCH_RADII.length - 1] && (
+              <button type="button" onClick={onExpandRadius} className="btn-primary">
+                {t("care.expand")}
+              </button>
+            )}
+            {specialty && (
+              <button type="button" onClick={onBroadenSpecialty} className="btn-secondary">
+                {t("care.broaden")}
+              </button>
+            )}
+          </div>
         </div>
       ) : !visibleFacilities.length ? (
-        <div className="rounded-2xl border border-slate-200 bg-white px-6 py-8 text-center shadow-sm">
-          <p className="font-semibold text-slate-800">
-            {copy.findCare.emptyFilterTitle(
-              filter === "all" ? copy.findCare.filterAll : filterLabel(filter, copy)
-            )}
-          </p>
-          <p className="mt-1 text-sm text-slate-500">{copy.findCare.emptyFilterBody(nonEmptyLabels)}</p>
-          <button type="button" onClick={() => onFilterChange("all")} className="btn-secondary mt-4">
-            {copy.findCare.showAll}
-          </button>
+        <div className="rounded-2xl border border-slate-200 bg-white px-6 py-8 text-center text-sm text-slate-500">
+          No facilities match this filter. Choose another category to continue.
         </div>
       ) : (
-        <>
-          {location && (
-            <FacilityResultsMap
-              facilities={visibleFacilities}
-              center={location}
-              activeFacilityId={activeFacilityId}
-              className="h-64 sm:h-80"
-            />
-          )}
-          <div className="grid gap-4 md:grid-cols-2">
-            {visibleFacilities.map((facility) => (
-              <FacilityCard
-                key={facility.id}
-                facility={facility}
-                isActive={activeFacilityId === facility.id}
-                onFocusFacility={onFocusFacility}
-              />
-            ))}
-          </div>
-        </>
+        <div className="grid gap-4 md:grid-cols-2">
+          {visibleFacilities.map((facility) => (
+            <FacilityCard key={facility.id} facility={facility} />
+          ))}
+        </div>
       )}
     </section>
   );
 }
 
-function filterLabel(kind: FacilityKind, copy: ReturnType<typeof useCopy>): string {
-  const labels: Record<FacilityKind, string> = {
-    hospital: copy.findCare.filterHospital,
-    clinic: copy.findCare.filterClinic,
-    pharmacy: copy.findCare.filterPharmacy,
-    laboratory: copy.findCare.filterLaboratory,
-    doctor: copy.findCare.filterDoctor,
-    other: copy.findCare.filterOther,
-  };
-  return labels[kind];
+function FacilityCard({ facility }: { facility: CareFacility }) {
+  const { t, formatNumber } = useI18n();
+  // "Open in Google Maps" must open Google Maps, never OpenStreetMap. OSM
+  // remains the keyless DISCOVERY/tile layer, but navigation goes to Google:
+  // prefer a canonical Google URI, else build a Maps search from the real
+  // facility name + address, with coordinates as the last resort.
+  const mapUrl = googleMapsUrl(facility);
+  const callHref = telHref(facility.phone);
+  return (
+    <article className="flex flex-col rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
+      <div className="flex items-start gap-3">
+        <span className={classNames("flex h-11 w-11 shrink-0 items-center justify-center rounded-xl", kindTone(facility.kind))}>
+          <CareIcon className="h-5 w-5" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+              {kindLabel(facility.kind, t)}
+            </span>
+            {facility.openNow !== undefined && (
+              <span
+                className={classNames(
+                  "rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider",
+                  facility.openNow ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"
+                )}
+              >
+                {facility.openNow ? t("care.openNow") : t("care.closedNow")}
+              </span>
+            )}
+          </div>
+          <h3 className="mt-2 text-base font-bold text-slate-900">{facility.name}</h3>
+          {facility.specialty && (
+            <p className="mt-1 text-xs font-semibold text-violet-700">
+              {t("care.specialty")}: {facility.specialty} · {t("care.verifySpecialty")}
+            </p>
+          )}
+          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+            {facility.distanceKm !== null && (
+              <span className="font-semibold text-brand-700">{distanceLabel(facility.distanceKm, formatNumber)}</span>
+            )}
+            {facility.rating !== undefined && (
+              <span className="text-amber-700">
+                ★ {formatNumber(facility.rating, { maximumFractionDigits: 1 })}
+                {facility.userRatingCount !== undefined && (
+                  <span className="text-slate-400"> ({formatNumber(facility.userRatingCount)})</span>
+                )}
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-4 flex-1 space-y-2 border-t border-slate-100 pt-4 text-sm text-slate-500">
+        <p>{facility.address || t("care.addressMissing")}</p>
+        {Boolean(facility.openingHours?.length) && (
+          <details>
+            <summary className="cursor-pointer font-medium text-slate-800">{t("care.openingHours")}</summary>
+            <ul className="mt-1 space-y-0.5 text-xs">
+              {facility.openingHours?.map((hours) => <li key={hours}>{hours}</li>)}
+            </ul>
+          </details>
+        )}
+        {facility.phone && (
+          <p>
+            <a href={`tel:${facility.phone}`} className="font-medium text-brand-700 hover:underline">
+              {facility.phone}
+            </a>
+          </p>
+        )}
+        {facility.rankingReason && (
+          <p className="rounded-md bg-slate-50 px-2.5 py-2 text-xs text-slate-500">
+            <span className="font-semibold text-slate-800">{t("care.whyRanked")}:</span> {facility.rankingReason}
+          </p>
+        )}
+      </div>
+
+      <div className="mt-4 flex flex-wrap gap-2">
+        <a
+          href={mapUrl}
+          target="_blank"
+          rel="noreferrer"
+          aria-label={t("care.openInGoogleMapsAria", { name: facility.name })}
+          className="btn-secondary min-h-[44px] px-4 py-2 text-sm"
+        >
+          <LocationIcon className="h-4 w-4" aria-hidden="true" /> {t("care.openInGoogleMaps")}
+          <span className="sr-only"> ({t("common.opensNewWindow")})</span>
+        </a>
+        {callHref && (
+          <a
+            href={callHref}
+            aria-label={t("care.callAria", { name: facility.name })}
+            className="btn-secondary min-h-[44px] px-4 py-2 text-sm"
+          >
+            {t("care.call")}
+          </a>
+        )}
+        {facility.website && (
+          <a href={facility.website} target="_blank" rel="noreferrer" className="btn-ghost min-h-[40px] px-4 py-2 text-sm">
+            {t("care.website")}<span className="sr-only"> ({t("common.opensNewWindow")})</span>
+          </a>
+        )}
+      </div>
+    </article>
+  );
 }
 
-export { kindLabel };
+function kindLabel(kind: FacilityKind, t: (key: string) => string): string {
+  const keys: Record<FacilityKind, string> = {
+    hospital: "care.hospitals",
+    clinic: "care.clinics",
+    pharmacy: "care.pharmacies",
+    laboratory: "care.laboratories",
+    doctor: "care.doctors",
+    healthcare: "care.all",
+  };
+  return t(keys[kind]);
+}
+
+function kindTone(kind: FacilityKind): string {
+  if (kind === "hospital") return "bg-red-50 text-red-700";
+  if (kind === "pharmacy") return "bg-emerald-50 text-emerald-700";
+  if (kind === "laboratory") return "bg-amber-50 text-amber-700";
+  if (kind === "doctor") return "bg-violet-50 text-violet-700";
+  return "bg-sky-50 text-sky-700";
+}
+
+function distanceLabel(
+  distanceKm: number,
+  formatNumber: (value: number, options?: Intl.NumberFormatOptions) => string
+): string {
+  if (distanceKm < 1) return `${formatNumber(Math.max(1, Math.round(distanceKm * 1_000)))} m`;
+  return `${formatNumber(distanceKm, { maximumFractionDigits: distanceKm < 10 ? 1 : 0 })} km`;
+}
+
+function CareIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      <path d="M4 21V6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v15" />
+      <path d="M9 4V2h6v2M3 21h18M9 21v-4h6v4" />
+      <path d="M12 8v5M9.5 10.5h5" />
+    </svg>
+  );
+}
+
+/**
+ * Always a Google Maps deep link — never OpenStreetMap.
+ *
+ * Google's canonical URI is preferred; otherwise a Maps search is built from
+ * the facility's real name + address, with coordinates as a last resort so
+ * the pin still lands on the right building.
+ */
+function googleMapsUrl(facility: CareFacility): string {
+  const isGoogleHost = /^https?:\/\/([a-z0-9-]+\.)*(google\.[a-z.]+|goo\.gl)(\/|$)/i;
+  if (facility.mapsUrl && isGoogleHost.test(facility.mapsUrl)) return facility.mapsUrl;
+
+  const hasCoordinates =
+    Number.isFinite(facility.latitude) && Number.isFinite(facility.longitude);
+  const query = [facility.name, facility.address].filter(Boolean).join(", ");
+  if (!query && hasCoordinates) {
+    return `https://www.google.com/maps/search/?api=1&query=${facility.latitude},${facility.longitude}`;
+  }
+  const params = new URLSearchParams({
+    api: "1",
+    // Coordinates keep the map centred when several listings share a name.
+    query: hasCoordinates ? `${query} ${facility.latitude},${facility.longitude}` : query,
+  });
+  return `https://www.google.com/maps/search/?${params.toString()}`;
+}
+
+/** `tel:` target, or null when the directory published no usable number. */
+function telHref(phone: string | undefined): string | null {
+  if (!phone) return null;
+  const cleaned = phone.replace(/[^\d+]/g, "");
+  return cleaned.length >= 3 ? `tel:${cleaned}` : null;
+}

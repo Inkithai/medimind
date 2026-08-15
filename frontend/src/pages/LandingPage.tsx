@@ -1,11 +1,14 @@
 import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import { useI18n } from "../i18n/I18nContext";
+import { LanguageSelector } from "../components/LanguageSelector";
 import { Spinner } from "../components/Spinner";
 import { BeakerIcon, ChartIcon, PillIcon, ShieldIcon, UploadIcon, SparkleIcon } from "../components/icons";
 
 export function LandingPage() {
   const { isConfigured, isInitializing, initError, createNewWorkspace } = useAuth();
+  const { t } = useI18n();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -16,51 +19,51 @@ export function LandingPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-brand-50">
-      {/* Header */}
-      <header className="mx-auto flex max-w-6xl items-center justify-between px-6 py-5">
+      <a href="#landing-main" className="skip-link">{t("common.skipToContent")}</a>
+      <header className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-5 sm:px-6">
         <div className="flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-600 text-white shadow-sm">
             <span className="text-lg font-bold">M</span>
           </div>
-          <div>
+          <div className="hidden sm:block">
             <p className="text-lg font-bold leading-tight text-slate-900">MediMind</p>
-            <p className="text-xs text-slate-500">Your health, in one place</p>
+            <p className="text-xs text-slate-600">{t("common.tagline")}</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <LanguageSelector compact />
           <button
+            type="button"
             onClick={() => navigate("/find-care")}
-            className={`rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 ${isConfigured ? "hidden sm:block" : ""}`}
+            className="hidden min-h-[44px] rounded-full border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 sm:block"
           >
-            Find care
+            {t("landing.findCare")}
           </button>
           {isConfigured && (
             <button
               onClick={() => navigate("/dashboard")}
               className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
             >
-              Go to workspace
+              {t("landing.goWorkspace")}
             </button>
           )}
         </div>
       </header>
 
-      <main className="mx-auto max-w-6xl px-6 pb-20 pt-8">
+      <main id="landing-main" tabIndex={-1} className="mx-auto max-w-6xl px-4 pb-20 pt-8 sm:px-6">
         <div className="grid gap-12 lg:grid-cols-[1.2fr_0.8fr] lg:items-center">
           <div className="space-y-8">
             <div className="inline-flex items-center gap-2 rounded-full border border-brand-200 bg-brand-50 px-3 py-1 text-xs font-medium text-brand-700">
               <span className="h-2 w-2 animate-pulse rounded-full bg-brand-600" />
-              No sign-up • Private — lives in this browser
+              {t("landing.badge")}
             </div>
 
             <div className="space-y-4">
               <h1 className="text-4xl font-bold leading-tight tracking-tight text-slate-900 sm:text-5xl">
-                Understand your medical documents in one place.
+                {t("landing.title")}
               </h1>
               <p className="max-w-xl text-lg leading-relaxed text-slate-600">
-                Upload prescriptions, lab reports, and discharge summaries. MediMind finds the medicines,
-                test results, and allergies inside, builds your personal health history, watches for safety
-                issues, and answers your questions — all private to this browser.
+                {t("landing.intro")}
               </p>
             </div>
 
@@ -68,7 +71,7 @@ export function LandingPage() {
               {isInitializing ? (
                 <div className="flex items-center gap-2 rounded-xl bg-slate-100 px-5 py-3 text-sm font-medium text-slate-600">
                   <Spinner className="h-4 w-4" />
-                  Creating your private workspace…
+                  {t("landing.creating")}
                 </div>
               ) : initError ? (
                 <div className="space-y-3">
@@ -80,7 +83,7 @@ export function LandingPage() {
                     onClick={() => void createNewWorkspace()}
                     className="rounded-xl bg-slate-900 px-6 py-3 text-sm font-semibold text-white hover:bg-slate-800"
                   >
-                    Retry creating workspace
+                    {t("landing.retry")}
                   </button>
                 </div>
               ) : (
@@ -89,30 +92,30 @@ export function LandingPage() {
                   className="group inline-flex items-center gap-2 rounded-xl bg-brand-600 px-7 py-3.5 text-base font-semibold text-white shadow-lg shadow-brand-600/20 hover:bg-brand-700"
                 >
                   <UploadIcon className="h-5 w-5" />
-                  Start My Health Record
+                  {t("landing.start")}
                   <span className="ml-1 transition group-hover:translate-x-0.5">→</span>
                 </button>
               )}
               <p className="text-xs text-slate-500">
-                No email. No password. Your workspace ID stays in this browser only.
+                {t("landing.noCredentials")}
               </p>
             </div>
 
             <div className="grid gap-4 pt-4 sm:grid-cols-3">
               <Feature
                 icon={<UploadIcon className="h-5 w-5" />}
-                title="Upload reports"
-                desc="PDF, JPG, PNG, WebP — printed or scanned"
+                title={t("upload.title")}
+                desc={t("upload.subtitle")}
               />
               <Feature
                 icon={<PillIcon className="h-5 w-5" />}
-                title="See your history"
-                desc="Medicines, labs and visits in date order"
+                title={t("history.title")}
+                desc={t("history.subtitle")}
               />
               <Feature
                 icon={<SparkleIcon className="h-5 w-5" />}
-                title="Ask questions"
-                desc="Answers from your own documents, with sources"
+                title={t("ask.title")}
+                desc={t("ask.subtitle")}
               />
             </div>
           </div>
@@ -121,19 +124,19 @@ export function LandingPage() {
           <div className="relative">
             <div className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-xl shadow-slate-200/60">
               <div className="flex items-center justify-between">
-                <p className="text-sm font-semibold text-slate-800">Patient workspace</p>
+                <p className="text-sm font-semibold text-slate-900">{t("settings.workspace")}</p>
                 <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 ring-1 ring-emerald-200">
-                  Anonymous
+                  {t("nav.privateTitle")}
                 </span>
               </div>
 
               <div className="mt-5 space-y-3">
-                <Step done label="Open MediMind" sub="Nothing to install, nothing to sign up for" />
-                <Step done label="Your private workspace is ready" sub="Created automatically, only in this browser" />
-                <Step active label="Upload medical documents" sub="Prescriptions • Lab reports • Discharge summaries" />
-                <Step label="We read them for you" sub="Medicines, lab results, allergies, safety alerts" />
-                <Step label="Your health record comes together" />
-                <Step label="Browse history, track trends, ask questions" />
+                <Step done label={t("common.appName")} sub={t("landing.noCredentials")} />
+                <Step done label={t("settings.ready")} sub={t("nav.privateBody")} />
+                <Step active label={t("upload.title")} sub={`${t("common.prescription")} • ${t("common.labReport")} • ${t("common.dischargeSummary")}`} />
+                <Step label={t("upload.subtitle")} sub={`${t("common.medications")} • ${t("common.labResults")} • ${t("common.allergies")}`} />
+                <Step label={t("dashboard.title")} />
+                <Step label={`${t("history.title")} • ${t("labs.trendsTitle")} • ${t("ask.title")}`} />
               </div>
             </div>
 
@@ -146,23 +149,23 @@ export function LandingPage() {
         <div className="mt-20 grid gap-6 rounded-[20px] border border-slate-200 bg-white p-6 sm:grid-cols-2 lg:grid-cols-4">
           <Pillar
             icon={<PillIcon className="h-5 w-5" />}
-            title="My Medicines"
-            items={["Current & historical", "Source: file • page", "Traceability"]}
+            title={t("medicines.title")}
+            items={[t("medicines.current"), t("medicines.fullHistory"), t("common.sources")]}
           />
           <Pillar
             icon={<BeakerIcon className="h-5 w-5" />}
-            title="Test Results"
-            items={["Value, range, flag", "Trend across visits", "Approaching threshold"]}
+            title={t("labs.title")}
+            items={[t("common.value"), t("labs.trendsTitle"), t("labs.approaching")]}
           />
           <Pillar
             icon={<ShieldIcon className="h-5 w-5" />}
-            title="Safety Warnings"
-            items={["Interactions", "Duplicates", "Allergy conflicts"]}
+            title={t("safety.title")}
+            items={[t("safety.interactions"), t("safety.duplicates"), t("safety.allergy")]}
           />
           <Pillar
             icon={<ChartIcon className="h-5 w-5" />}
-            title="Ask"
-            items={["Answers from your records", "Source file & page cited", "Follow-up questions"]}
+            title={t("ask.title")}
+            items={[t("ask.answer"), t("common.sources"), t("conversation.title")]}
           />
         </div>
       </main>

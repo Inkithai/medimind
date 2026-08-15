@@ -1,3 +1,6 @@
+import { useId } from "react";
+import { Link } from "react-router-dom";
+import { useI18n } from "../i18n/I18nContext";
 import type { LabTrend, LabTrendsReport } from "../types/api";
 import { classNames, flagTone, formatConfidence } from "../utils/format";
 import { Alert } from "./Alert";
@@ -7,27 +10,28 @@ import { ChartIcon } from "./icons";
 import { StatusBadge } from "./StatusBadge";
 
 export function LabTrendsView({ report }: { report: LabTrendsReport }) {
+  const { t, formatNumber } = useI18n();
   const hasTrends = report.trends.length > 0;
   const hasInsufficient = report.insufficient_data.length > 0;
 
   return (
     <Card>
       <CardHeader
-        title="Lab result trends"
-        description="How each test has moved across your visits — and whether it's nearing or crossing its healthy range."
+        title={t("labs.trendsTitle")}
+        description={t("labs.trendsDescription")}
         icon={<ChartIcon className="h-5 w-5" />}
       />
       <CardBody className="space-y-5">
         {report.note && (
-          <Alert variant="info" title="Not a diagnosis">
+          <Alert variant="info" title={t("common.notDiagnosis")}>
             {report.note}
           </Alert>
         )}
 
         {!hasTrends && !hasInsufficient && (
           <EmptyState
-            title="No lab results to trend"
-            description="Upload lab reports to track how values move across visits."
+            title={t("labs.noTrends")}
+            description={t("labs.noTrendsBody")}
           />
         )}
 
@@ -42,7 +46,7 @@ export function LabTrendsView({ report }: { report: LabTrendsReport }) {
         {hasInsufficient && (
           <div>
             <h3 className="mb-2 text-sm font-semibold text-slate-700">
-              Tests with insufficient data ({report.insufficient_data.length})
+              {t("labs.insufficient", { count: formatNumber(report.insufficient_data.length) })}
             </h3>
             <div className="space-y-2">
               {report.insufficient_data.map((item, idx) => (
@@ -59,9 +63,23 @@ export function LabTrendsView({ report }: { report: LabTrendsReport }) {
   );
 }
 
+function lastFlag(trend: LabTrend): string {
+  const points = trend.data_points || [];
+  return points.length ? points[points.length - 1].flag : "";
+}
+
+function recovered(trend: LabTrend): boolean {
+  if (typeof trend.returned_to_normal === "boolean") return trend.returned_to_normal;
+  // Old snapshots omit the field — a last-reading "normal" after a recorded
+  // crossing is a recovery, not an ongoing alarm.
+  return Boolean(trend.crossed_into_abnormal_at) && lastFlag(trend) === "normal";
+}
+
 function TrendCard({ trend }: { trend: LabTrend }) {
+  const { t } = useI18n();
   const crossed = trend.crossed_into_abnormal_at;
   const approaching = trend.approaching_threshold;
+  const isRecovered = recovered(trend);
 
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-4">
@@ -70,19 +88,29 @@ function TrendCard({ trend }: { trend: LabTrend }) {
           <div className="flex flex-wrap items-center gap-2">
             <h4 className="text-base font-semibold text-slate-900">{trend.test_name}</h4>
             <StatusBadge tone={directionBadgeTone(trend.direction)}>{trend.direction}</StatusBadge>
-            {crossed && (
+            {crossed && isRecovered && (
+              <StatusBadge tone="success">
+                returned to normal (was {crossed.flag} on {crossed.date || "unknown date"})
+              </StatusBadge>
+            )}
+            {crossed && !isRecovered && (
               <StatusBadge tone="danger">
                 crossed to {crossed.flag} on {crossed.date || "unknown date"}
               </StatusBadge>
             )}
-            {approaching && !crossed && <StatusBadge tone="warning">approaching threshold</StatusBadge>}
+            {approaching && !crossed && <StatusBadge tone="warning">{t("labs.approaching")}</StatusBadge>}
+            {trend.risk_level && trend.risk_level !== "none" && (
+              <StatusBadge tone={trend.risk_level === "high" ? "danger" : "warning"}>
+                {t("labs.risk", { level: trend.risk_level })}
+              </StatusBadge>
+            )}
           </div>
           <p className="mt-1 text-xs text-slate-500">
             {trend.unit && <span>unit: {trend.unit} · </span>}
             {trend.reference_range ? (
               <span>reference range: {trend.reference_range}</span>
             ) : (
-              <span>no reference range provided</span>
+              <span>{t("labs.noRange")}</span>
             )}{" "}
             · confidence {formatConfidence(trend.confidence)}
           </p>
@@ -91,15 +119,34 @@ function TrendCard({ trend }: { trend: LabTrend }) {
       </div>
 
       <p className="mt-3 text-sm text-slate-600">{trend.explanation}</p>
+      {trend.risk_reason && trend.risk_level !== "none" && (
+        <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          <p><span className="font-semibold">{t("labs.safetyObservation")}:</span> {trend.risk_reason}</p>
+          {trend.professional_review_recommended && (
+            <Link to="/find-care?from=lab-trend" className="mt-2 inline-flex font-semibold text-brand-700 hover:underline">
+              {t("safety.findCare")} →
+            </Link>
+          )}
+        </div>
+      )}
+      {trend.confidence < 0.6 && (
+        <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          <p><span className="font-semibold">{t("labs.lowConfidence")}:</span> {t("common.medicalDisclaimer")}</p>
+          <Link to="/find-care?from=low-confidence-lab" className="mt-2 inline-flex font-semibold text-brand-700 hover:underline">
+            {t("labs.verify")} →
+          </Link>
+        </div>
+      )}
 
       <div className="mt-3 overflow-x-auto">
         <table className="min-w-full text-xs">
+          <caption className="sr-only">{t("labs.tableCaption", { test: trend.test_name })}</caption>
           <thead>
             <tr className="text-left text-slate-400">
-              <th className="py-1 pr-4 font-medium">Date</th>
-              <th className="py-1 pr-4 font-medium">Value</th>
-              <th className="py-1 pr-4 font-medium">Flag</th>
-              <th className="py-1 font-medium">Source</th>
+              <th scope="col" className="py-1 pr-4 font-medium">{t("common.date")}</th>
+              <th scope="col" className="py-1 pr-4 font-medium">{t("common.value")}</th>
+              <th scope="col" className="py-1 pr-4 font-medium">{t("common.flag")}</th>
+              <th scope="col" className="py-1 font-medium">{t("common.source")}</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
@@ -123,23 +170,48 @@ function TrendCard({ trend }: { trend: LabTrend }) {
 }
 
 function directionBadgeTone(direction: string): "danger" | "info" | "success" | "warning" {
-  if (direction.startsWith("increasing")) return "danger";
-  if (direction.startsWith("decreasing")) return "info";
+  if (direction.includes("increasing")) return "danger";
+  if (direction.includes("decreasing")) return "info";
   if (direction === "stable") return "success";
   return "warning";
 }
 
+function parseLabNumber(value: string): number | null {
+  // Consume thousands separators so "150,000" is 150000, not 150.
+  const match = /-?\d[\d,.]*/.exec(String(value ?? ""));
+  if (!match) return null;
+  let token = match[0].replace(/[.,]+$/, "");
+  if (!token || token === "-") return null;
+  const hasComma = token.includes(",");
+  const hasDot = token.includes(".");
+  if (hasComma && hasDot) {
+    token = token.lastIndexOf(",") > token.lastIndexOf(".")
+      ? token.replace(/\./g, "").replace(",", ".")
+      : token.replace(/,/g, "");
+  } else if (hasComma) {
+    const parts = token.replace(/^-/, "").split(",");
+    token = parts.length > 1 && parts.slice(1).every((p) => p.length === 3 && /^\d+$/.test(p))
+      ? token.replace(/,/g, "")
+      : token.replace(",", ".").replace(/,/g, "");
+  }
+  const n = Number(token);
+  return Number.isFinite(n) ? n : null;
+}
+
 function Sparkline({ trend }: { trend: LabTrend }) {
+  const { t, formatNumber } = useI18n();
+  const titleId = useId();
+  const descriptionId = useId();
   const W = 160;
   const H = 48;
   const PAD = 4;
 
   const numericPoints = trend.data_points
-    .map((p) => parseLabValue(p.value))
-    .filter((v) => !Number.isNaN(v));
+    .map((p) => parseLabNumber(p.value))
+    .filter((v): v is number => v !== null);
 
   if (numericPoints.length < 2) {
-    return <div className="h-12 w-40 text-xs text-slate-400">Not enough numeric values to plot</div>;
+    return <div className="h-12 w-40 text-xs text-slate-600">{t("labs.plotUnavailable")}</div>;
   }
 
   let min = Math.min(...numericPoints);
@@ -190,7 +262,13 @@ function Sparkline({ trend }: { trend: LabTrend }) {
   const path = points.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(" ");
 
   return (
-    <svg width={W} height={H} className="shrink-0" role="img" aria-label="Lab trend sparkline">
+    <svg width={W} height={H} className="shrink-0" role="img" aria-labelledby={`${titleId} ${descriptionId}`}>
+      <title id={titleId}>{t("labs.chartLabel", { test: trend.test_name })}</title>
+      <desc id={descriptionId}>{t("labs.chartDescription", {
+        count: formatNumber(numericPoints.length),
+        direction: trend.direction,
+        range: trend.reference_range || t("common.notAvailable"),
+      })}</desc>
       {!Number.isNaN(refLow) && !Number.isNaN(refHigh) && (
         <rect
           x={PAD}
@@ -213,17 +291,4 @@ function Sparkline({ trend }: { trend: LabTrend }) {
       ))}
     </svg>
   );
-}
-
-/**
- * Numeric value from a lab result string, tolerating grouped thousands.
- *
- * Lab reports print counts as "1,200"; a plain `\d+` match reads that as 1
- * and would plot the point three orders of magnitude too low. Mirrors
- * `_parse_value()` in backend/lab_trends.py.
- */
-function parseLabValue(value: string): number {
-  const match = /-?\d{1,3}(?:[,\u00a0\u202f ]\d{3})+(?:\.\d+)?|-?\d+(?:\.\d+)?/.exec(value || "");
-  if (!match) return NaN;
-  return parseFloat(match[0].replace(/[,\u00a0\u202f ]/g, ""));
 }
