@@ -74,7 +74,7 @@ export function Layout() {
             <Logo />
             <div className="min-w-0 flex-1">
               <p className="text-lg font-bold leading-tight text-slate-900">MediMind</p>
-              <p className="truncate text-sm text-slate-500">Your health, in one place</p>
+              <p className="text-sm leading-tight text-slate-500">Your health, in one place</p>
             </div>
           </div>
 

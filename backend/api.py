@@ -60,6 +60,7 @@ import db
 import jobs
 import storage
 from care import CareConfigurationError, CareProviderError, get_care_provider
+from care.taxonomy import SPECIALTY_CATALOG, SPECIALTY_KEYS
 from auth import get_current_user, issue_anonymous_token
 from document_filter import NonMedicalDocumentError, assert_medical_document
 from lab_trends import track_lab_trends
@@ -986,11 +987,23 @@ async def get_patient_snapshot(user_id: str = Depends(get_current_user)) -> Dict
 # Care navigation (optional, provider-neutral public directory)
 # ---------------------------------------------------------------------------
 
+@app.get("/api/v1/care/specialties")
+async def get_care_specialties(user_id: str = Depends(get_current_user)) -> List[Dict[str, Any]]:
+    """List the clinical specialties Find Care can explicitly match against.
+
+    A specialty match requires the specialty to appear in the listing's own
+    name or Google type; MediMind never infers it from a query.
+    """
+    del user_id
+    return SPECIALTY_CATALOG
+
+
 @app.get("/api/v1/care/facilities")
 async def get_care_facilities(
     location: str = Query(default="", max_length=200),
     kind: str = Query(default="any", max_length=30),
     radius_km: float = Query(default=8.0, ge=1.0, le=50.0),
+    specialty: Optional[str] = Query(default=None, max_length=40),
     latitude: Optional[float] = Query(default=None, ge=-90.0, le=90.0),
     longitude: Optional[float] = Query(default=None, ge=-180.0, le=180.0),
     user_id: str = Depends(get_current_user),
@@ -998,9 +1011,10 @@ async def get_care_facilities(
     """Return normalized public healthcare listings near an area or point.
 
     The Google key stays server-side. Supplying coordinates uses Places API
-    (New) Nearby Search and gives distance ordering; legacy clients that send
-    only ``location=Jaffna`` use Places Text Search. Results are directory
-    listings, not clinical referrals or a claim that a facility is "best".
+    (New) Nearby Search; when a ``specialty`` is provided a complementary
+    Text Search is merged in and results are ranked by explicit specialty
+    relevance before distance. Results are directory listings, not clinical
+    referrals or a claim that a facility is "best".
     """
     del user_id  # Authentication protects the optional directory from abuse.
     if not location.strip() and (latitude is None or longitude is None):
@@ -1013,6 +1027,10 @@ async def get_care_facilities(
     if normalized_kind not in allowed_kinds:
         raise HTTPException(400, "Unsupported facility type.")
 
+    normalized_specialty = specialty.strip().lower() if specialty else None
+    if normalized_specialty is not None and normalized_specialty not in SPECIALTY_KEYS:
+        raise HTTPException(400, "Unsupported specialty.")
+
     try:
         provider = get_care_provider()
         facilities = await asyncio.to_thread(
@@ -1022,13 +1040,17 @@ async def get_care_facilities(
             radius_km,
             latitude=latitude,
             longitude=longitude,
+            specialty=normalized_specialty,
         )
+        exact = sum(1 for f in facilities if f.match_level == "exact")
         logger.info(
-            "care navigation: provider=%s kind=%s coordinate_search=%s results=%d",
+            "care navigation: provider=%s kind=%s specialty=%s coordinate_search=%s results=%d exact=%d",
             provider.name,
             normalized_kind,
+            normalized_specialty,
             latitude is not None,
             len(facilities),
+            exact,
         )
         return [facility.to_dict() for facility in facilities]
     except ValueError as error:

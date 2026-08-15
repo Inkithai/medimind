@@ -16,6 +16,12 @@ class CareProvider(Protocol):
         *,
         latitude: Optional[float] = None,
         longitude: Optional[float] = None,
+        specialty: Optional[str] = None,
     ) -> List[Facility]:
-        """Return normalized public facility listings near a place or point."""
+        """Return normalized public facility listings near a place or point.
+
+        When ``specialty`` is supplied, results are scored by explicit
+        specialty relevance (gastroenterology, cardiology, ...) before
+        distance; matches are never inferred from the query alone.
+        """
         ...

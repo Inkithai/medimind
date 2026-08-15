@@ -1,4 +1,9 @@
-import type { CareFacility, CareFacilityResponse, FacilityKind } from "../types/facility";
+import type {
+  CareFacility,
+  CareFacilityResponse,
+  CareSpecialty,
+  FacilityKind,
+} from "../types/facility";
 import type {
   CrossCheckReport,
   HealthResponse,
@@ -186,6 +191,10 @@ function normalizeCareFacility(facility: CareFacilityResponse): CareFacility {
     openingHours: facility.opening_hours || undefined,
     openNow: facility.open_now ?? undefined,
     source: facility.source || "Public listing",
+    entityType: facility.entity_type || "facility",
+    specialties: Array.isArray(facility.specialties) ? facility.specialties : [],
+    matchLevel: facility.match_level ?? undefined,
+    matchReason: facility.match_reason || undefined,
   };
 }
 
@@ -337,6 +346,10 @@ export const api = {
     return request<LabTrendsReport>(credentials, "/api/v1/lab-trends");
   },
 
+  getCareSpecialties(credentials: Credentials): Promise<CareSpecialty[]> {
+    return request<CareSpecialty[]>(credentials, "/api/v1/care/specialties");
+  },
+
   async getCareFacilities(
     credentials: Credentials,
     options: {
@@ -345,6 +358,7 @@ export const api = {
       radiusKm?: number;
       latitude?: number;
       longitude?: number;
+      specialty?: string;
       signal?: AbortSignal;
     }
   ): Promise<CareFacility[]> {
@@ -355,6 +369,7 @@ export const api = {
     });
     if (options.latitude !== undefined) params.set("latitude", String(options.latitude));
     if (options.longitude !== undefined) params.set("longitude", String(options.longitude));
+    if (options.specialty) params.set("specialty", options.specialty);
     const facilities = await request<CareFacilityResponse[]>(
       credentials,
       `/api/v1/care/facilities?${params.toString()}`,
