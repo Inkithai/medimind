@@ -140,6 +140,12 @@ export const en = {
     processing: "Processing…",
     retryLater: "Try again later",
     readingTitle: "Hang tight — we're reading your documents",
+    resumedTitle: "Picking up where you left off",
+    resumedBody:
+      "This upload was already running on our servers, so we reconnected to it instead of starting over. Nothing needs to be uploaded again.",
+    reconnectingTitle: "Your files are safe — reconnecting",
+    reconnectingBody:
+      "Your documents finished uploading and the server is still processing them. We briefly lost the status connection and are retrying. Please don't upload the same files again.",
     readingBody: "Scanned pages and photos take longer than digital PDFs. You can leave this page; progress is saved automatically.",
     success: "All done — your record is up to date",
     partial: "Finished — some files need your attention",
