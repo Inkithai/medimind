@@ -22,6 +22,9 @@ class Facility:
     maps_url: Optional[str] = None
     opening_hours: Optional[List[str]] = None
     open_now: Optional[bool] = None
+    # Structured specialty tags from the source directory (e.g. OSM
+    # healthcare:speciality). Display-only; never inferred from the name.
+    specialties: Optional[List[str]] = None
     source: str = "public listings"
 
     def to_dict(self) -> Dict[str, Any]:

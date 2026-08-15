@@ -22,6 +22,8 @@ export interface CareFacility {
   mapsUrl?: string;
   openingHours?: string[];
   openNow?: boolean;
+  /** Structured specialty tags from the source directory, when listed. */
+  specialties?: string[];
   source: string;
 }
 
@@ -41,5 +43,17 @@ export interface CareFacilityResponse {
   maps_url: string | null;
   opening_hours: string[] | null;
   open_now: boolean | null;
+  specialties: string[] | null;
   source: string;
+}
+
+/** Evidence-graded specialty suggestion from GET /api/v1/care/specialty-suggestion. */
+export interface SpecialtySuggestion {
+  evidence_level: "none" | "weak" | "moderate" | "strong";
+  specialty: string | null;
+  headline: string;
+  explanation: string;
+  search_options: string[];
+  hint: string | null;
+  disclaimer: string;
 }

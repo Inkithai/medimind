@@ -14,6 +14,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from care.errors import CareConfigurationError, CareProviderError
+from care.geo import distance_km as _distance_km
 from care.models import Facility
 
 
@@ -272,6 +273,14 @@ class GoogleProvider:
 
 
 def _normalized_kind(primary_type: Any, google_types: List[Any], fallback: str) -> str:
+    """Categorize from the source's structured types only.
+
+    When the structured types don't identify a supported category the
+    listing is surfaced as generic "healthcare" (Other) — it is NOT forced
+    into the requested kind, which previously mislabelled hospitals and
+    labs as clinics during clinic searches.
+    """
+    del fallback  # The requested kind must never overwrite source metadata.
     values = [primary_type, *google_types]
     if "hospital" in values or "general_hospital" in values:
         return "hospital"
@@ -283,9 +292,7 @@ def _normalized_kind(primary_type: Any, google_types: List[Any], fallback: str) 
         return "laboratory"
     if "doctor" in values:
         return "doctor"
-    if fallback == "lab":
-        return "laboratory"
-    return fallback if fallback != "any" else "healthcare"
+    return "healthcare"
 
 
 def _optional_string(value: Any) -> Optional[str]:
@@ -314,15 +321,4 @@ def _google_error_detail(raw: bytes) -> str:
     return "request rejected; verify Places API (New), billing, key restrictions, and quota"
 
 
-def _distance_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    radius = 6371.0
-    to_radians = math.pi / 180
-    delta_lat = (lat2 - lat1) * to_radians
-    delta_lon = (lon2 - lon1) * to_radians
-    value = (
-        math.sin(delta_lat / 2) ** 2
-        + math.cos(lat1 * to_radians)
-        * math.cos(lat2 * to_radians)
-        * math.sin(delta_lon / 2) ** 2
-    )
-    return radius * 2 * math.atan2(math.sqrt(value), math.sqrt(1 - value))
+

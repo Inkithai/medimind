@@ -59,7 +59,13 @@ import conversation
 import db
 import jobs
 import storage
-from care import CareConfigurationError, CareProviderError, get_care_provider
+from care import (
+    CareConfigurationError,
+    CareProviderError,
+    finalize_facilities,
+    get_care_provider,
+    suggest_specialty,
+)
 from auth import get_current_user, issue_anonymous_token
 from document_filter import NonMedicalDocumentError, assert_medical_document
 from lab_trends import track_lab_trends
@@ -1023,6 +1029,17 @@ async def get_care_facilities(
             latitude=latitude,
             longitude=longitude,
         )
+        # Enforce the kind and radius promises and remove duplicate
+        # listings on the server, regardless of which provider produced the
+        # results. A selected 5 km radius must never return a 17 km
+        # facility, and a hospital search must never return a laboratory.
+        facilities = finalize_facilities(
+            facilities,
+            radius_km=radius_km,
+            latitude=latitude,
+            longitude=longitude,
+            kind=normalized_kind,
+        )
         logger.info(
             "care navigation: provider=%s kind=%s coordinate_search=%s results=%d",
             provider.name,
@@ -1051,6 +1068,39 @@ async def get_care_facilities(
             503,
             "The facility directory is temporarily unavailable. Please try again shortly.",
         ) from error
+
+
+@app.get("/api/v1/care/specialty-suggestion")
+async def get_specialty_suggestion(user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
+    """Evidence-graded specialty suggestion from the user's own records.
+
+    Safety contract: low-confidence or ambiguous evidence NEVER yields a
+    specific specialty. A weak isolated term ("digest") produces
+    "No specific specialty identified" plus broad search options starting
+    with General Medicine. Only explicit, high-confidence documented
+    evidence (diagnosis or referral) can surface a possible specialty —
+    always labelled a directory-search category, never a recommendation.
+    """
+    visits: List[Dict[str, Any]] = []
+    try:
+        snapshot = db.load_patient_snapshot(user_id)
+        if snapshot:
+            timeline = snapshot.get("patient_timeline") or {}
+            candidate = timeline.get("visits")
+            if isinstance(candidate, list):
+                visits = [visit for visit in candidate if isinstance(visit, dict)]
+    except Exception as error:  # Snapshot access must not break Find Care.
+        logger.warning("specialty suggestion: snapshot unavailable for user=%s: %s", user_id, error)
+
+    suggestion = suggest_specialty(visits)
+    logger.info(
+        "specialty suggestion: user=%s visits=%d evidence=%s specialty=%s",
+        user_id,
+        len(visits),
+        suggestion.evidence_level,
+        suggestion.specialty,
+    )
+    return suggestion.to_dict()
 
 
 # ---------------------------------------------------------------------------

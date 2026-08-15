@@ -304,7 +304,7 @@ export function LocationPicker({
         <div className="flex items-start justify-between gap-4">
           <div>
             <p className="mb-2 text-xs font-bold uppercase tracking-[0.14em] text-brand-600">
-              {step === "search" ? "Step 1 of 2 · Search" : "Step 2 of 2 · Confirm"}
+              {step === "search" ? "Step 1 of 2 · Search" : "Step 2 of 2 · Confirm location"}
             </p>
             <h2 id={`${listboxId}-title`} className="text-2xl font-bold tracking-tight text-slate-900">
               {step === "search" ? title : "Confirm your location"}
@@ -504,12 +504,17 @@ export function LocationPicker({
                     onClick={returnToSearch}
                     className="rounded-lg px-2.5 py-1.5 text-sm font-semibold text-brand-700 hover:bg-brand-50"
                   >
-                    Change
+                    Change location
                   </button>
                 </div>
-                <p className="mt-2 font-mono text-xs text-slate-400" aria-label="Selected coordinates">
-                  {coordinatesLabel(selectedPlace)}
-                </p>
+                <details className="mt-2">
+                  <summary className="cursor-pointer text-xs text-slate-400 hover:text-slate-500">
+                    Location details
+                  </summary>
+                  <p className="mt-1 font-mono text-xs text-slate-400" aria-label="Selected coordinates">
+                    {coordinatesLabel(selectedPlace)}
+                  </p>
+                </details>
               </div>
             </div>
 

@@ -1,4 +1,9 @@
-import type { CareFacility, CareFacilityResponse, FacilityKind } from "../types/facility";
+import type {
+  CareFacility,
+  CareFacilityResponse,
+  FacilityKind,
+  SpecialtySuggestion,
+} from "../types/facility";
 import type {
   CrossCheckReport,
   HealthResponse,
@@ -185,6 +190,7 @@ function normalizeCareFacility(facility: CareFacilityResponse): CareFacility {
     mapsUrl: facility.maps_url || undefined,
     openingHours: facility.opening_hours || undefined,
     openNow: facility.open_now ?? undefined,
+    specialties: facility.specialties || undefined,
     source: facility.source || "Public listing",
   };
 }
@@ -361,6 +367,15 @@ export const api = {
       { signal: options.signal }
     );
     return facilities.map(normalizeCareFacility);
+  },
+
+  getSpecialtySuggestion(
+    credentials: Credentials,
+    options: { signal?: AbortSignal } = {}
+  ): Promise<SpecialtySuggestion> {
+    return request<SpecialtySuggestion>(credentials, "/api/v1/care/specialty-suggestion", {
+      signal: options.signal,
+    });
   },
 
   ask(credentials: Credentials, question: string, topK = 8): Promise<QAResponse> {

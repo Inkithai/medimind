@@ -248,9 +248,12 @@ Frontend `UploadPage` always uses async jobs so even a small file has truthful p
 `GET /api/v1/care/facilities?location=Jaffna&kind=hospital&radius_km=8` returns normalized public `Facility[]` listings. Map-confirmed clients should also send `latitude` and `longitude` to use distance-ranked Nearby Search. Supported kinds: `any`, `hospital`, `clinic`, `pharmacy`, `laboratory`, and `doctor`.
 
 ```ini
-CARE_PROVIDER=google
-GOOGLE_MAPS_API_KEY=AIza...  # Places API (New) enabled; billing attached
+CARE_PROVIDER=osm            # default: OpenStreetMap (Overpass), no API key
+# CARE_PROVIDER=google
+# GOOGLE_MAPS_API_KEY=AIza...  # Places API (New) enabled; billing attached
 ```
+
+The backend enforces the search contract regardless of provider: results are classified from structured source metadata only (OSM `healthcare=*` / `amenity=*` tags, Google place types — never the display name), duplicates are removed by source id + normalized name + proximity, the requested `kind` and `radius_km` are enforced server-side, and every listing carries its `source`. `GET /api/v1/care/specialty-suggestion` returns an evidence-graded, non-diagnostic specialty search suggestion derived from the user's records (weak or ambiguous evidence never yields a specific specialty — it falls back to General Medicine as a broad search option).
 
 The key stays server-side. A 503 logs the specific provider/configuration reason on the backend while returning a neutral directory error to the browser. Common Google 403 causes are an invalid or truncated key, Places API (New) not enabled, billing not attached, or key restrictions that reject requests from the backend.
 

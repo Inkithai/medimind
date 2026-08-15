@@ -85,8 +85,11 @@ UPLOAD_FILE_CONCURRENCY=1
 CORS_ORIGINS=https://your-project.vercel.app
 
 # ── Optional Find Care directory ─────────────────────
-CARE_PROVIDER=google
-GOOGLE_MAPS_API_KEY=AIza...your-server-key...
+# Default is OpenStreetMap (no key needed). Set to google + a key to use
+# Google Places instead.
+CARE_PROVIDER=osm
+# CARE_PROVIDER=google
+# GOOGLE_MAPS_API_KEY=AIza...your-server-key...
 ```
 
 #### How to generate JWT_SECRET:
@@ -202,8 +205,8 @@ Then **redeploy** the backend (SnapDeploy usually auto-redeploys on env var chan
 | `UPLOAD_FILE_CONCURRENCY` | ✅ | `1` | Max simultaneous LLM calls |
 | `CORS_ORIGINS` | ✅ | `https://xxx.vercel.app` | Your frontend URL |
 | `OPENAI_API_KEY` | ❌ | `sk-...` | Only for better embeddings (optional) |
-| `CARE_PROVIDER` | ❌ | `google` | Enables the optional Find Care directory |
-| `GOOGLE_MAPS_API_KEY` | ❌ | `AIza...` | Server-only key with Places API (New) enabled and billing attached |
+| `CARE_PROVIDER` | ❌ | `osm` | Find Care directory source: `osm` (default, keyless OpenStreetMap/Overpass) or `google` |
+| `GOOGLE_MAPS_API_KEY` | ❌ | `AIza...` | Only when `CARE_PROVIDER=google`: server-only key with Places API (New) enabled and billing attached |
 
 ### Frontend (Vercel)
 
