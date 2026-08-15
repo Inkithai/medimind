@@ -41,7 +41,7 @@ from typing import Any, Dict, List, Optional
 
 from openai import OpenAI, OpenAIError
 
-from medical_extractor import client, MODEL, _completion_resilient, _chat_completion
+from medical_extractor import MODEL, _completion_resilient
 import vector_store  # abstraction over Chroma (local) and Supabase (no volume)
 
 logger = logging.getLogger("retrieval")
@@ -79,10 +79,16 @@ def _get_local_embedding_function():
 # 1. Chunking — turn a patient timeline into retrievable text chunks
 # ---------------------------------------------------------------------------
 
-def _chunk_id(patient_key: str, source_file: Optional[str], chunk_type: str, index: int) -> str:
-    """Stable, deterministic chunk ID so re-indexing the same documents
-    upserts in place instead of creating duplicates."""
-    raw = f"{patient_key}|{source_file or 'unknown'}|{chunk_type}|{index}"
+def _chunk_id(patient_key: str, source_file: Optional[str], chunk_type: str, payload: str) -> str:
+    """Stable, content-addressed chunk ID so re-indexing the same documents
+    upserts in place instead of creating duplicates.
+
+    IDs must NOT include the item's position in the timeline list. That list
+    is rebuilt and re-sorted on every upload, so an index-based id (``…|0``,
+    ``…|1``) shifts whenever an older document is added and leaves the
+    previous id behind as a stale duplicate the next Q&A still retrieves.
+    """
+    raw = f"{patient_key}|{source_file or 'unknown'}|{chunk_type}|{payload}"
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
@@ -137,6 +143,14 @@ def _allergy_chunk_text(allergies: List[str]) -> str:
     return "Known allergies: " + ", ".join(allergies) + "."
 
 
+def _diagnosis_chunk_text(diagnosis: Dict[str, Any]) -> str:
+    return (
+        f"Diagnosis or condition explicitly mentioned: {diagnosis.get('name', 'unknown')} "
+        f"on {diagnosis.get('date') or 'an unknown date'} "
+        f"(source: {diagnosis.get('source_file') or 'unknown file'})."
+    )
+
+
 def build_chunks_from_timeline(patient_key: str, timeline: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
     Converts a patient timeline (the dict returned by build_patient_timeline())
@@ -150,50 +164,70 @@ def build_chunks_from_timeline(patient_key: str, timeline: Dict[str, Any]) -> Li
     """
     chunks: List[Dict[str, Any]] = []
 
-    for i, med in enumerate(timeline.get("medications_timeline", [])):
+    for med in timeline.get("medications_timeline", []):
+        text = _medication_chunk_text(med)
         chunks.append({
-            "id": _chunk_id(patient_key, med.get("source_file"), "medication", i),
-            "text": _medication_chunk_text(med),
+            "id": _chunk_id(patient_key, med.get("source_file"), "medication", text),
+            "text": text,
             "metadata": {
                 "patient_key": patient_key,
                 "date": med.get("date") or "",
                 "source_file": med.get("source_file") or "",
+                "source_page": med.get("source_page") or 0,
                 "chunk_type": "medication",
             },
         })
 
-    for i, lab in enumerate(timeline.get("lab_results_timeline", [])):
+    for lab in timeline.get("lab_results_timeline", []):
+        text = _lab_result_chunk_text(lab)
         chunks.append({
-            "id": _chunk_id(patient_key, lab.get("source_file"), "lab_result", i),
-            "text": _lab_result_chunk_text(lab),
+            "id": _chunk_id(patient_key, lab.get("source_file"), "lab_result", text),
+            "text": text,
             "metadata": {
                 "patient_key": patient_key,
                 "date": lab.get("date") or "",
                 "source_file": lab.get("source_file") or "",
+                "source_page": lab.get("source_page") or 0,
                 "chunk_type": "lab_result",
             },
         })
 
-    for i, visit in enumerate(timeline.get("visits", [])):
+    for visit in timeline.get("visits", []):
         if not visit.get("clinical_notes"):
             continue
         source_file = visit.get("_source", {}).get("file")
+        text = _clinical_note_chunk_text(visit)
         chunks.append({
-            "id": _chunk_id(patient_key, source_file, "clinical_note", i),
-            "text": _clinical_note_chunk_text(visit),
+            "id": _chunk_id(patient_key, source_file, "clinical_note", text),
+            "text": text,
             "metadata": {
                 "patient_key": patient_key,
                 "date": visit.get("date") or "",
                 "source_file": source_file or "",
+                "source_page": visit.get("_source", {}).get("page") or 0,
                 "chunk_type": "clinical_note",
+            },
+        })
+
+    for i, diagnosis in enumerate(timeline.get("diagnoses_timeline", []) or []):
+        chunks.append({
+            "id": _chunk_id(patient_key, diagnosis.get("source_file"), "diagnosis", i),
+            "text": _diagnosis_chunk_text(diagnosis),
+            "metadata": {
+                "patient_key": patient_key,
+                "date": diagnosis.get("date") or "",
+                "source_file": diagnosis.get("source_file") or "",
+                "source_page": diagnosis.get("source_page") or 0,
+                "chunk_type": "diagnosis",
             },
         })
 
     allergies = timeline.get("known_allergies") or []
     if allergies:
+        text = _allergy_chunk_text(allergies)
         chunks.append({
-            "id": _chunk_id(patient_key, None, "allergy", 0),
-            "text": _allergy_chunk_text(allergies),
+            "id": _chunk_id(patient_key, None, "allergy", text),
+            "text": text,
             "metadata": {
                 "patient_key": patient_key,
                 "date": "",
@@ -238,17 +272,33 @@ def embed_texts(texts: List[str]) -> List[List[float]]:
 def _sanitize_collection_name(patient_key: str) -> str:
     """Chroma collection names must be 3-63 chars, start/end alphanumeric,
     and contain only [a-zA-Z0-9._-]. This maps an arbitrary patient_key
-    (e.g. 'amit sharma') into a safe, stable collection name."""
+    (e.g. 'amit sharma') into a safe, stable collection name.
+
+    Truncation to 63 chars happens BEFORE the end-alphanumeric fixup, not
+    after. Truncating last can slice a long key mid-separator (e.g. right
+    after a '_'), leaving a trailing non-alphanumeric character that
+    violates Chroma's naming rule — and it can also undo the minimum-length
+    padding below. Trimming trailing separators post-truncation and then
+    re-applying the alnum-ending fix closes both gaps.
+
+    Kept byte-identical to vector_store._sanitize_collection_name(); both
+    must agree or the Chroma path would read from a different collection
+    than it wrote to."""
     name = re.sub(r"[^a-z0-9._-]+", "_", patient_key.strip().lower()).strip("_.-")
     if not name:
         name = "patient"
     if not name[0].isalnum():
         name = "p" + name
+    # Truncate BEFORE the end-alphanumeric fixup. Cutting last can land on a
+    # separator (e.g. 62 'a's + space → trailing '_') and Chroma rejects it.
+    name = name[:63].rstrip("_.-")
+    if not name:
+        name = "patient"
     if not name[-1].isalnum():
         name = name + "0"
     while len(name) < 3:
         name += "0"
-    return name[:63]
+    return name
 
 
 def _get_chroma_client():
@@ -346,7 +396,10 @@ Rules:
   conflicts, or changing/adjusting a dosage, explicitly recommend the
   patient consult a doctor or pharmacist, and set
   recommend_professional_consult to true.
-- Cite the date and source_file of every chunk you rely on in "sources".
+- Cite the date, source_file, and page (null when unavailable) of every chunk you rely on in "sources".
+- Give a concise confidence_reason that says whether the evidence was direct,
+  combined across records, partial, or insufficient. Never use model internals
+  or hidden reasoning in this explanation.
 - Respond with STRICT JSON only, matching the required schema.
 
 CONFIDENCE SCORING — "confidence" reflects how directly the retrieved
@@ -363,6 +416,7 @@ ANSWER_JSON_SCHEMA = {
     "properties": {
         "answer": {"type": "string"},
         "confidence": {"type": "number"},
+        "confidence_reason": {"type": "string"},
         "sources": {
             "type": "array",
             "items": {
@@ -370,14 +424,18 @@ ANSWER_JSON_SCHEMA = {
                 "properties": {
                     "date": {"type": "string"},
                     "source_file": {"type": "string"},
+                    "page": {"type": ["integer", "null"]},
                 },
-                "required": ["date", "source_file"],
+                "required": ["date", "source_file", "page"],
                 "additionalProperties": False,
             },
         },
         "recommend_professional_consult": {"type": "boolean"},
     },
-    "required": ["answer", "confidence", "sources", "recommend_professional_consult"],
+    "required": [
+        "answer", "confidence", "confidence_reason", "sources",
+        "recommend_professional_consult",
+    ],
     "additionalProperties": False,
 }
 
@@ -393,6 +451,7 @@ ANSWER_RESPONSE_FORMAT = {
 _NO_INFO_ANSWER = {
     "answer": "I don't have enough information — no indexed records were found for this patient yet.",
     "confidence": 0.0,
+    "confidence_reason": "No indexed patient records were available to support an answer.",
     "sources": [],
     "recommend_professional_consult": False,
 }
@@ -405,10 +464,11 @@ _NO_INFO_ANSWER = {
 _NO_INDEXABLE_CONTENT_ANSWER = {
     "answer": (
         "I don't have enough information — your records were found, but they "
-        "contain no medications, lab results, clinical notes, or allergies for "
+        "contain no medications, lab results, clinical notes, diagnoses, or allergies for "
         "Q&A to search."
     ),
     "confidence": 0.0,
+    "confidence_reason": "The uploaded records contain no medications, lab results, clinical notes, diagnoses, or allergies that Q&A can retrieve.",
     "sources": [],
     "recommend_professional_consult": False,
 }
@@ -546,49 +606,53 @@ def answer_question(
 
     context_blocks = [
         f"[date: {meta.get('date') or 'unknown'} | source_file: {meta.get('source_file') or 'unknown'} "
-        f"| type: {meta.get('chunk_type') or 'unknown'}]\n{text}"
+        f"| page: {meta.get('source_page') or 'unknown'} | type: {meta.get('chunk_type') or 'unknown'}]\n{text}"
         for text, meta in zip(docs, metadatas)
     ]
     context_str = "\n\n".join(context_blocks)
 
-    user_content = (
-        f"Retrieved patient records:\n\n{context_str}\n\nQuestion: {question}"
-    )
-    # Reuse the resilient completion runner so reasoning models'
-    # <think>...</think> blocks get stripped client-side and transient
-    # server-side JSON-validation rejections are retried, matching the
-    # behaviour of the extraction and cross-check paths.
+    # Fold prior turns into the single user message so follow-ups go through
+    # the same resilient ladder as first-shot Q&A. The previous split path
+    # called _chat_completion() directly, so a json_validate_failed / 429 on
+    # turn 2 crashed the conversation instead of retrying.
+    history_block = ""
     if chat_history:
-        # _completion_resilient takes a single user turn; if there's chat
-        # history we do one direct call with the strict response format and
-        # let any retryable error surface — history is only passed on
-        # follow-up turns in the same session and reasoning-tag leaks are
-        # still covered by the tolerant parse below.
-        messages = [{"role": "system", "content": QA_SYSTEM_PROMPT}]
-        messages.extend(chat_history)
-        messages.append({"role": "user", "content": user_content})
-        try:
-            response = _chat_completion(
-                model=CHAT_MODEL,
-                messages=messages,
-                response_format=ANSWER_RESPONSE_FORMAT,
-            )
-        except OpenAIError as e:
-            raise RuntimeError(f"Chat completion failed while answering question: {e}") from e
-        raw = response.choices[0].message.content or ""
-    else:
-        raw = _completion_resilient(
-            model=CHAT_MODEL,
-            system_prompt=QA_SYSTEM_PROMPT,
-            user_content=user_content,
-            strict_format=ANSWER_RESPONSE_FORMAT,
+        transcript = "\n".join(
+            f"{(turn.get('role') or 'user').upper()}: {turn.get('content') or ''}"
+            for turn in chat_history
         )
+        history_block = (
+            "Prior conversation (context only — not retrieved records):\n"
+            f"{transcript}\n\n"
+        )
+    user_content = (
+        f"{history_block}Retrieved patient records:\n\n{context_str}\n\nQuestion: {question}"
+    )
+    raw = _completion_resilient(
+        model=CHAT_MODEL,
+        system_prompt=QA_SYSTEM_PROMPT,
+        user_content=user_content,
+        strict_format=ANSWER_RESPONSE_FORMAT,
+    )
 
     # Tolerant parse: reuse the same think-stripping logic the extractor
     # uses, so a model that still emits <think> tags (e.g. under fallback
     # to plain-text mode) doesn't blow up the Q&A endpoint.
     from medical_extractor import _parse_json_object
     try:
-        return _parse_json_object(raw)
+        result = _parse_json_object(raw)
+        for source in result.get("sources", []) or []:
+            if isinstance(source, dict):
+                source.setdefault("page", None)
+        if not result.get("confidence_reason"):
+            confidence = result.get("confidence")
+            if isinstance(confidence, (int, float)) and confidence >= 0.9:
+                reason = "The retrieved records directly and consistently support this answer."
+            elif isinstance(confidence, (int, float)) and confidence >= 0.6:
+                reason = "The answer combines relevant records, but some supporting detail is incomplete."
+            else:
+                reason = "The retrieved evidence is partial or insufficient, so this answer has low confidence."
+            result["confidence_reason"] = reason
+        return result
     except ValueError as e:
         raise RuntimeError(f"Chat model returned unparseable output: {e}") from e

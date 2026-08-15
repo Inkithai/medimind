@@ -1,9 +1,13 @@
-// Formatting helpers shared across pages.
+// Locale-aware formatting helpers shared across pages.
+import { translate } from "../i18n/I18nContext";
+import { getRuntimeLanguage, getRuntimeLocale } from "../i18n/runtime";
 
 export function formatConfidence(value: number | null | undefined): string {
   if (value === null || value === undefined || Number.isNaN(value)) return "—";
-  const pct = Math.round(value * 100);
-  return `${pct}%`;
+  return new Intl.NumberFormat(getRuntimeLocale(), {
+    style: "percent",
+    maximumFractionDigits: 0,
+  }).format(value);
 }
 
 export function confidenceTone(value: number | null | undefined): string {
@@ -59,7 +63,7 @@ export function formatDate(date: string | null | undefined): string {
   if (/^\d{4}-\d{2}-\d{2}/.test(trimmed)) {
     const d = new Date(trimmed);
     if (!Number.isNaN(d.getTime())) {
-      return d.toLocaleDateString(undefined, {
+      return d.toLocaleDateString(getRuntimeLocale(), {
         year: "numeric",
         month: "short",
         day: "numeric",
@@ -72,7 +76,7 @@ export function formatDate(date: string | null | undefined): string {
 export function formatTimestamp(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleString(undefined, {
+  return d.toLocaleString(getRuntimeLocale(), {
     year: "numeric",
     month: "short",
     day: "numeric",
@@ -85,8 +89,30 @@ export function classNames(...parts: Array<string | false | null | undefined>): 
   return parts.filter(Boolean).join(" ");
 }
 
+// Best-effort epoch ms for the mixed date strings the extractor produces
+// ("05 Jan 2026", "2024-03-15", ISO timestamps). null if unparseable.
+export function parseFlexibleDate(date: string | null | undefined): number | null {
+  if (!date) return null;
+  const trimmed = date.trim();
+  if (!trimmed) return null;
+  const ms = Date.parse(trimmed);
+  return Number.isNaN(ms) ? null : ms;
+}
+
+// Chronological compare. Dated values sort before undated ones; two
+// unparseable strings fall back to localeCompare so the order is stable.
+export function compareDates(a: string | null | undefined, b: string | null | undefined): number {
+  const ta = parseFlexibleDate(a);
+  const tb = parseFlexibleDate(b);
+  if (ta != null && tb != null) return ta - tb;
+  if (ta != null) return -1;
+  if (tb != null) return 1;
+  return (a || "").localeCompare(b || "");
+}
+
 // Relative recency for lists, e.g. "Yesterday", "3 days ago", "Last week".
-// Falls back to formatDate for anything older than a month or unparseable.
+// Falls back to formatDate for anything older than a month, in the future,
+// or unparseable. (Previously any future date rendered as "Today".)
 export function relativeTime(date: string | null | undefined): string {
   if (!date) return "—";
   const trimmed = date.trim();
@@ -94,31 +120,32 @@ export function relativeTime(date: string | null | undefined): string {
   const d = new Date(trimmed);
   if (Number.isNaN(d.getTime())) return trimmed;
   const days = Math.floor((Date.now() - d.getTime()) / 86_400_000);
-  if (days <= 0) return "Today";
-  if (days === 1) return "Yesterday";
-  if (days < 7) return `${days} days ago`;
-  if (days < 14) return "Last week";
-  if (days < 31) return `${Math.floor(days / 7)} weeks ago`;
+  if (days < 0) return formatDate(trimmed);
+  const relative = new Intl.RelativeTimeFormat(getRuntimeLocale(), { numeric: "auto" });
+  if (days < 7) return relative.format(-days, "day");
+  if (days < 31) return relative.format(-Math.max(1, Math.floor(days / 7)), "week");
   return formatDate(trimmed);
 }
 
 // Human file size: "1.2 MB", "340 KB".
 export function fileSizeLabel(bytes: number): string {
-  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  const formatter = new Intl.NumberFormat(getRuntimeLocale(), { maximumFractionDigits: 1 });
+  if (bytes >= 1024 * 1024) return `${formatter.format(bytes / (1024 * 1024))} MB`;
+  return `${formatter.format(Math.max(1, Math.round(bytes / 1024)))} KB`;
 }
 
 // Human-readable label for the backend's document_type enum.
 export function documentTypeLabel(type: string): string {
+  const language = getRuntimeLanguage();
   switch (type) {
     case "prescription":
-      return "Prescription";
+      return translate(language, "common.prescription");
     case "lab_report":
-      return "Lab report";
+      return translate(language, "common.labReport");
     case "discharge_summary":
-      return "Discharge summary";
+      return translate(language, "common.dischargeSummary");
     default:
-      return "Other";
+      return translate(language, "common.other");
   }
 }
 

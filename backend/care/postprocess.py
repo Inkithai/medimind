@@ -9,7 +9,7 @@ radius promise is actually enforced ("5 km" must mean no result beyond
 import re
 from typing import List, Optional
 
-from care.geo import distance_km
+from care.models import haversine_km as distance_km
 from care.models import Facility
 
 # Two listings with the same normalized name within this distance are
@@ -36,7 +36,7 @@ def _richness(facility: Facility) -> int:
             facility.phone,
             facility.website,
             facility.opening_hours,
-            facility.specialties,
+            facility.specialty,
             facility.rating,
         )
         if value
@@ -97,8 +97,14 @@ def finalize(
     normalized_kind = (kind or "any").strip().lower()
     if normalized_kind == "lab":
         normalized_kind = "laboratory"
-    if normalized_kind not in ("", "any"):
-        facilities = [f for f in facilities if f.kind == normalized_kind]
+    if normalized_kind not in ("", "any", "healthcare"):
+        # The OpenStreetMap normalizer folds doctor practices into "clinic",
+        # so a doctor search accepts both categories rather than returning
+        # an empty list for OSM-backed results.
+        accepted = {normalized_kind}
+        if normalized_kind == "doctor":
+            accepted.add("clinic")
+        facilities = [f for f in facilities if f.kind in accepted]
 
     if latitude is not None and longitude is not None:
         with_distance: List[Facility] = []
@@ -108,7 +114,7 @@ def finalize(
                 distance = round(
                     distance_km(latitude, longitude, facility.latitude, facility.longitude), 3
                 )
-                facility = Facility(**{**facility.to_dict(), "distance_km": distance})
+                facility.distance_km = distance
             if distance <= radius_km:
                 with_distance.append(facility)
         facilities = with_distance

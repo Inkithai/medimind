@@ -47,21 +47,23 @@ Vision+text use the same Gemini model; Groq needs two. All three are OpenAI-comp
 |---|---|
 | `medical_extractor.py` | `LLM_PROVIDER` layer, vision / text extraction, patient grouping, timeline creation, safety LLM call plus deterministic duplicate detection, local CLI persistence |
 | `document_filter.py` | Fast post-extraction filter for non-medical files (no extra LLM call, reuses `document_type` + clinical fields) |
-| `lab_trends.py` | Pure Python trend engine — parses dates/values, computes direction, detects range crossings, flags approaching thresholds |
+| `lab_trends.py` | Pure Python trend engine — direction, crossings, recovery (`returned_to_normal`), unit-clash decline, thousands-aware parse |
 | `retrieval.py` | Chunks timeline into Medication / Lab / ClinicalNote / Allergy texts, embeds (OpenAI `text-embedding-3-small` if set else local ONNX MiniLM), indexes via `vector_store` abstraction, single-shot Q&A |
 | `vector_store.py` | Abstraction over Chroma (`VECTOR_STORE=chroma`, local `CHROMA_DIR`) and Supabase `chunks` table (`VECTOR_STORE=supabase`, no volume, brute-force cosine) |
 | `jobs.py` | Thread-safe parent jobs with independent per-file progress (`queued → reading → extracting → saving → ready/failed`) and optional Supabase persistence |
 | `conversation.py` | In-memory conversation store, rewrites follow-ups like “was that safe?” into self-contained retrieval queries, summarizes older turns to keep context bounded |
 | `api.py` | FastAPI wrapper — lifespan startup, CORS (fixed `*` + credentials handling), all `/api/v1/` routes, multipart upload handling (sync 201 or async 202 via `USE_BACKGROUND_JOBS`/`?async=true`), merges new docs with old, fixes `_source.file` to original filename |
+| `care_finder.py` | Find Care — specialty suggestion from the record; Geoapify geocode + Places primary, OpenStreetMap Nominatim + Overpass fallback; opening-hours match, ranking. Leaflet map |
 | `auth.py` | Validates `Authorization: Bearer <jwt>` + `X-User-Id`, plus issues anonymous JWTs via `issue_anonymous_token()` |
 | `care/` | Provider-neutral `Facility` model/factory plus the server-side Google Places API (New) adapter for Find Care |
 | `db.py` | Supabase Postgres persistence (documents append-only + patient snapshot upsert), chained `.order("uploaded_at").order("id")` |
 | `storage.py` | Uploads original file to Cloudinary `mediscan/<user_id>/...` |
 | `supabase_schema.sql` | One-time table creation with RLS enabled/no policies (only service_role key can access) |
+| `care/` | Optional Care Navigation: provider-agnostic facility search. Does not read the patient record. |
 | `inspect_chroma.py` | Read-only CLI to list collections / inspect chunks |
 | `requirements.txt` / `Procfile` | Railway Nixpacks deployment |
 
-Deep dives live in `backend/docs/`.
+Deep dives live in [`backend/docs/`](backend/docs/README.md). Freeze [01-end-to-end-pipeline.md](backend/docs/01-end-to-end-pipeline.md) for the deck: Understand → Detect → Explain → Protect. No `/care` on this branch.
 
 ### Setup
 
@@ -136,7 +138,9 @@ Base URL `http://127.0.0.1:8000`, all routes under `/api/v1/`.
 
 ### Frontend — MediMind workspace
 
-`frontend/` is React + TS + Vite + Tailwind. Zero-login anonymous model:
+`frontend/` is React + TS + Vite + Tailwind. It includes a reusable translation provider and catalogs for English, Sinhala, and Tamil; browser/saved language detection; locale-aware formatting; and WCAG-oriented landmarks, keyboard interaction, live regions, focus handling, reduced-motion support, and semantic medical-data views. See [`frontend/ACCESSIBILITY_I18N.md`](frontend/ACCESSIBILITY_I18N.md).
+
+Zero-login anonymous model:
 
 - **Landing** `/` — hero, anonymous session explanation, Start My Health Record → auto-creates workspace via `POST /anonymous/session` (token stored in `localStorage.medimind.session.v1`).
 - **Overview / Dashboard** `/dashboard` — documents / medicines / labs / safety counts, latest safety warnings, recent history, pipeline hint.
@@ -144,10 +148,11 @@ Base URL `http://127.0.0.1:8000`, all routes under `/api/v1/`.
 - **My Documents** `/documents` — list + `DocumentViewer` with Original (iframe/img via Cloudinary, `split("?")[0]` fixes PDF query-param urls) vs Structured tabs.
 - **My History** `/history` — year-grouped timeline (2026 → Jul 20 🧪 Blood Test etc.) + full `TimelineView`.
 - **My Medicines** `/medicines` — current per ingredient (most recent) + historical log table, filterable, source file traceable (now fixed to original filename, not temp sanitized path).
-- **Test Results / Lab Trends** `/labs` — per-test direction, flag sequence, crossing point, approaching-threshold badge, SVG sparkline with reference band (robust parsing for `70-99 mg/dL`).
+- **Test Results / Lab Trends** `/labs` — per-test direction, flag sequence, crossing / recovery badge (green when the latest reading is back to normal), approaching-threshold, SVG sparkline with reference band. Thousands-aware values; mixed units (`mg/dL` vs `mmol/L`) are declined rather than trended.
 - **Safety** `/safety` — allergy conflicts (danger), interactions with severity, dosage conflicts, duplicates, overall recommendation.
 - **Ask** `/ask` — single-shot RAG, configurable `top_k`, confidence, sources, `recommend_professional_consult`.
 - **Conversations** `/conversations` — multi-turn, query rewriting (`rewritten_query`), session resume by ID, 404 handling when in-memory session expired after restart.
+- **Find Local Care** `/care` — evidence-to-care pathway: clinical flags → specialty → live directory (**Geoapify** primary, **OpenStreetMap** fallback) → ranked provider cards → consultation pack.
 - **Find Care** `/find-care` — search-as-you-type or current location → map confirmation → provider-neutral hospitals, clinics, pharmacies, laboratories, and doctors within the selected radius.
 
 States distinguished: loading, empty 404 (no record), 401 auth, 422 validation/non-medical, 502 ML pipeline, network/CORS.
@@ -158,6 +163,9 @@ States distinguished: loading, empty 404 (no record), 401 auth, 422 validation/n
 cd frontend
 npm install
 npm run dev       # http://localhost:5173, proxies /api → http://127.0.0.1:8000
+npm run lint      # TypeScript verification
+npm run test      # auth, i18n, axe accessibility, keyboard, geolocation, and care regressions
+npm run build     # production bundle
 ```
 
 #### Find nearby care and reusable location picker
@@ -172,6 +180,10 @@ import { LocationPicker, type ConfirmedLocation } from "./components/location";
   countryCodes={["lk"]} // optional; omit for worldwide search
 />;
 ```
+
+**"Use my current location" accuracy.** The picker calls `getAccuratePosition()` (`src/services/geolocation.ts`) rather than a bare `getCurrentPosition()`. It requests `enableHighAccuracy` with `maximumAge: 0`, then *watches* the position and keeps the most precise reading, resolving as soon as the fix is within 30 m (or returning the best reading at the 15 s deadline). This avoids locking onto the coarse Wi-Fi/IP estimate that arrives first, which is often off by hundreds of metres. Reverse geocoding only supplies the place *name*: the device's own latitude/longitude are preserved, so a nearby street or suburb centroid can never move the pin. The confirm step shows the GPS accuracy radius as a badge and a map circle, and prompts the user to drag the pin when the fix is coarser than 150 m. Run `npm run test:geolocation` for the 9 regression tests covering this.
+
+The location picker combines Photon/OpenStreetMap landmark search with Open-Meteo/GeoNames city prefix matching and Leaflet/OpenStreetMap tiles. Confirmed coordinates are sent to the authenticated backend, which normalizes every provider's response to `Facility[]`. By default the backend queries OpenStreetMap/Overpass, which needs no API key. Optionally set `CARE_PROVIDER=google` to prefer Google Places API (New) Nearby Search (city/area-only requests use Places Text Search), with OpenStreetMap as an automatic fallback. Configure `GOOGLE_MAPS_API_KEY` only on the backend—never as a `VITE_*` variable—and enable **Places API (New)** plus billing for the key's Google Cloud project.
 
 The location picker combines Photon/OpenStreetMap landmark search with Open-Meteo/GeoNames city prefix matching and Leaflet/OpenStreetMap tiles. Confirmed coordinates are sent to the authenticated backend, where `CARE_PROVIDER=google` uses Google Places API (New) Nearby Search and normalizes results to `Facility[]`; city/area-only legacy requests fall back to Places Text Search. Configure `GOOGLE_MAPS_API_KEY` only on the backend—never as a `VITE_*` variable. Enable **Places API (New)** and billing for the key's Google Cloud project.
 
@@ -206,6 +218,16 @@ Open App → Create Anonymous Session (UUID) → Store in localStorage → Patie
 3. Set `USE_BACKGROUND_JOBS=true` and keep `UPLOAD_FILE_CONCURRENCY=1` for constrained quotas. Uploads return 202 immediately, while a shared bounded worker pool load-balances files and the frontend polls per-file progress.
 4. Deploy — `$PORT` assigned automatically.
 
+### Live local care recommendations (Round 2)
+
+`/care` activates only when the saved Round 1 snapshot contains an existing high-risk medication-safety signal or a low-confidence extraction/trend/safety result. The user selects the flagged evidence, enters a city/area and consultation preference, and the backend searches a **live provider directory**. Provider data is never seeded, mocked, hard-coded, or sent from the frontend.
+
+- `GET /api/v1/care-recommendations` returns the authenticated user’s qualifying flags and transparent specialty rationale. It does not call a directory.
+- `POST /api/v1/care-recommendations/search` accepts `{flag_id, location, availability}` and returns only source-provided provider fields, calculated distance, and explainable ranking.
+- Set `PROVIDER_DIRECTORY_SOURCE=google_places` + `GOOGLE_PLACES_API_KEY` for Google Places, or `PROVIDER_DIRECTORY_SOURCE=openstreetmap` + the required identifying `OSM_NOMINATIM_USER_AGENT` for the public Nominatim/Overpass alternative. Full source, ranking, and failure contract: [`backend/docs/care_recommendations.md`](backend/docs/care_recommendations.md).
+- Results visibly state `Live provider data — <source>`. A zero-result response is an empty list with a widening-search suggestion, never fabricated clinicians.
+- MediMind does not diagnose. This navigation aid helps find an appropriate professional to review existing potential issues or uncertain extractions.
+
 ### Auth contract
 
 - `GET /api/v1/health` + `POST /api/v1/anonymous/session` → public.
@@ -232,9 +254,9 @@ X-User-Id: <user_id>
 Q&A self-heals: if the patient's vector index is empty but their documents are saved in the DB (e.g. a local `chroma_db` wiped by a redeploy with no volume, or a Supabase `chunks` table migrated after the last upload), the index is rebuilt from those saved documents on the next question, so it answers normally instead of reporting "no indexed records". If `VECTOR_STORE=supabase` and the `chunks` table is missing entirely, Q&A returns 502 with instructions to run `supabase_schema.sql` rather than a misleading empty answer.
 
 #### Conversations
-`POST /api/v1/sessions` → `{user_id, session_id}`  
-`POST /api/v1/sessions/{id}/messages {question, top_k}` → same as Q&A + `rewritten_query`  
-`GET /api/v1/sessions/{id}` → full transcript  
+`POST /api/v1/sessions` → `{user_id, session_id}`
+`POST /api/v1/sessions/{id}/messages {question, top_k}` → same as Q&A + `rewritten_query`
+`GET /api/v1/sessions/{id}` → full transcript
 `DELETE /api/v1/sessions/{id}` → 204
 
 #### Jobs (async uploads)
@@ -247,20 +269,26 @@ Frontend `UploadPage` always uses async jobs so even a small file has truthful p
 #### Care navigation
 `GET /api/v1/care/facilities?location=Jaffna&kind=hospital&radius_km=8` returns normalized public `Facility[]` listings. Map-confirmed clients should also send `latitude` and `longitude` to use distance-ranked Nearby Search. Supported kinds: `any`, `hospital`, `clinic`, `pharmacy`, `laboratory`, and `doctor`.
 
+It works with **no configuration and no API key**. Unset `CARE_PROVIDER` (or `CARE_PROVIDER=osm`) uses OpenStreetMap via the Overpass API — no key, no billing, no Google Cloud project:
+
 ```ini
-CARE_PROVIDER=osm            # default: OpenStreetMap (Overpass), no API key
-# CARE_PROVIDER=google
-# GOOGLE_MAPS_API_KEY=AIza...  # Places API (New) enabled; billing attached
+# Nothing required. Optionally, prefer Google and keep OSM as a safety net:
+CARE_PROVIDER=google
+GOOGLE_MAPS_API_KEY=AIza...  # Places API (New) enabled; billing attached
+CARE_FALLBACK=on             # default; set "off" to disable the OSM fallback
 ```
 
-The backend enforces the search contract regardless of provider: results are classified from structured source metadata only (OSM `healthcare=*` / `amenity=*` tags, Google place types — never the display name), duplicates are removed by source id + normalized name + proximity, the requested `kind` and `radius_km` are enforced server-side, and every listing carries its `source`. `GET /api/v1/care/specialty-suggestion` returns an evidence-graded, non-diagnostic specialty search suggestion derived from the user's records (weak or ambiguous evidence never yields a specific specialty — it falls back to General Medicine as a broad search option).
-
-The key stays server-side. A 503 logs the specific provider/configuration reason on the backend while returning a neutral directory error to the browser. Common Google 403 causes are an invalid or truncated key, Places API (New) not enabled, billing not attached, or key restrictions that reject requests from the backend.
+Keys stay server-side. With `CARE_PROVIDER=google`, a Google rejection (invalid/truncated key, Places API (New) not enabled, billing not attached, restrictive key rules) or an empty Google result set transparently falls back to OpenStreetMap, so the page keeps working; the specific provider reason is logged for operators only. A 503 now means every provider failed — typically blocked outbound network egress; point `OVERPASS_API_URL` at a reachable mirror if needed.
 
 #### Vector Store
 `VECTOR_STORE=chroma` (default, local `CHROMA_DIR`) or `supabase` (Supabase `chunks` table, no volume). `inspect_chroma.py` works with both (`VECTOR_STORE=supabase python inspect_chroma.py`). After switching backends, delete `chroma_db` or clear `chunks` table and re-upload.
 
-Errors: 400 empty question, 401 auth, 404 unknown session/no record, 422 non-medical, 502 embedding/LLM failure (provider-aware: `Provider 'gemini' ...` / `Provider 'groq' ...`).
+#### Find care
+`GET /api/v1/care/suggestion` — specialty suggestion from the caller's saved records (general practice if none).
+`GET /api/v1/care/specialties` — same payload (catalogue + suggestion).
+`POST /api/v1/care/search {city, specialty?, days?, time_of_day?, radius_km?}` — **Geoapify** geocodes and lists nearby clinics/doctors/hospitals when `GEOAPIFY_API_KEY` is set; **OpenStreetMap** (Nominatim + Overpass) is the automatic fallback. Ranked by specialty match + opening hours + distance. The frontend map is **Leaflet**. Response `source.name` is `Geoapify` or `OpenStreetMap` — the UI never says a provider failed. 422 `city_not_found` if the city is unknown; 502 `directory_unavailable` (retryable) if both directories are down.
+
+Errors: 400 empty question, 401 auth, 404 unknown session/no record, 422 non-medical / unknown city, 502 embedding/LLM / directory failure (provider-aware: `Provider 'gemini' ...` / `Provider 'groq' ...`).
 
 ### Inspecting vector store
 
@@ -275,6 +303,11 @@ VECTOR_STORE=supabase python backend/inspect_chroma.py "anon_ab12cd34ef56"
 
 ### What changed
 
+- **Sticky sidebar** — the desktop sidebar is now `lg:sticky lg:top-0 lg:h-screen lg:self-start` instead of a flex child stretched by its sibling, so it stays fixed in the viewport on long pages rather than scrolling away and growing to the content height.
+- **Accurate current location** — "Use my current location" now refines the GPS fix instead of accepting the first coarse estimate, never lets reverse geocoding move the confirmed coordinates, and surfaces the accuracy radius so the user can correct a poor fix.
+- **Find Care no longer needs an API key** — the directory defaults to a keyless OpenStreetMap/Overpass adapter, and `CARE_PROVIDER=google` now falls back to it whenever Google is unconfigured, rejects the call (e.g. `PERMISSION_DENIED` from a project without Places API (New)/billing), or returns nothing. This removes the "Nearby search didn't load" 503 that a missing/invalid Google key used to cause. Set `CARE_FALLBACK=off` to restore strict Google-only behaviour.
+- **Google care-directory adapter** — `CARE_PROVIDER=google` calls Places API (New) instead of returning a stubbed empty list. Coordinate searches use Nearby Search; legacy city/area searches use Text Search. Responses are normalized and API keys remain backend-only.
+- **Find care** — `/care` searches real clinics with **Geoapify first** (geocoding + Places, free key, no card) and **OpenStreetMap / Overpass as fallback**. Leaflet draws the map. The UI labels the provider source (`Geoapify` or `OpenStreetMap`) without saying a directory failed. Specialty is suggested from the record; results rank by specialty match, opening hours vs the requested window, and distance.
 - **Google care-directory adapter** — `CARE_PROVIDER=google` now calls Places API (New) instead of returning a stubbed empty list. Coordinate searches use Nearby Search; legacy city/area searches use Text Search. Responses are normalized and API keys remain backend-only.
 - **Current Gemini model** — the Gemini default is `gemini-3.6-flash` for text and vision, with `gemini-3.5-flash-lite` fallback. The retired `gemini-2.0-flash` default (shut down 2026-06-01) was the source of misleading HTTP 429 `limit: 0` failures.
 - **Vector store abstraction** — `vector_store.py` with `VECTOR_STORE=chroma` (local `CHROMA_DIR`, needs volume) or `supabase` (Supabase `chunks` table, no volume, brute-force cosine). `retrieval.py` now delegates, `inspect_chroma.py` supports both, `supabase_schema.sql` adds `chunks` table. Recommended for Railway: `VECTOR_STORE=supabase`.
@@ -284,7 +317,7 @@ VECTOR_STORE=supabase python backend/inspect_chroma.py "anon_ab12cd34ef56"
 - **`GROQ_API_KEY` placeholder handling** — legacy var now treats `your-groq-api-key` / `your-*` as missing, not valid.
 - **AuthContext** — `clearCredentials`/`createNewWorkspace` reset `provisioningStarted` so erasing workspace no longer stalls auto-provision after StrictMode guard.
 - **DocumentViewer** — PDF detection now strips query params (`split("?")[0]`) so Cloudinary `...pdf?dl=0` renders as iframe, not broken image.
-- **Docs** — `backend/docs/*.md` and `retrieval.py`/`conversation.py`/`api.py` docstrings now provider-aware.
+- **Docs** — `backend/docs/` is the current architecture source of truth: three presentation layers (pipeline, intelligence, isolation). No `/care` on this branch.
 - Earlier: Supabase chained `.order("uploaded_at").order("id")`, lifespan, dateutil sorting, `_parse_range` robust to `70-99 mg/dL`, upload dedup fix, anonymous session flow.
 
 ### Limitations

@@ -1,11 +1,16 @@
 import type {
+  CareAvailability,
   CareFacility,
   CareFacilityResponse,
-  FacilityKind,
-  SpecialtySuggestion,
+  CareRecommendation,
+  FacilityKind as DirectoryFacilityKind,
 } from "../types/facility";
 import type {
+  CareFacilitiesResponse,
+  CareRecommendationContext,
+  CareProviderSearchResponse,
   CrossCheckReport,
+  FacilityKind,
   HealthResponse,
   LabTrendsReport,
   PatientSnapshot,
@@ -14,6 +19,10 @@ import type {
   SessionInfo,
   Timeline,
   UploadResponse,
+  CareSuggestion,
+  CareSearchResponse,
+  CareDay,
+  CareTimeOfDay,
 } from "../types/api";
 
 export type JobFileStatus = "queued" | "processing" | "completed" | "failed";
@@ -174,6 +183,16 @@ async function publicRequest<T>(
   return data as T;
 }
 
+function safeExternalUrl(value: string | null): string | undefined {
+  if (!value) return undefined;
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "https:" || parsed.protocol === "http:" ? parsed.toString() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function normalizeCareFacility(facility: CareFacilityResponse): CareFacility {
   return {
     id: facility.id,
@@ -186,11 +205,17 @@ function normalizeCareFacility(facility: CareFacilityResponse): CareFacility {
     rating: facility.rating ?? undefined,
     userRatingCount: facility.user_rating_count ?? undefined,
     phone: facility.phone || undefined,
-    website: facility.website || undefined,
-    mapsUrl: facility.maps_url || undefined,
+    // URLs originate in an external directory. Never pass non-web schemes
+    // (for example javascript:) through to rendered links.
+    website: safeExternalUrl(facility.website),
+    mapsUrl: safeExternalUrl(facility.maps_url),
     openingHours: facility.opening_hours || undefined,
     openNow: facility.open_now ?? undefined,
-    specialties: facility.specialties || undefined,
+    specialty: facility.specialty || undefined,
+    specialtyMatch: facility.specialty_match ?? undefined,
+    availabilityMatch: facility.availability_match ?? undefined,
+    rankingScore: facility.ranking_score ?? undefined,
+    rankingReason: facility.ranking_reason || undefined,
     source: facility.source || "Public listing",
   };
 }
@@ -343,14 +368,35 @@ export const api = {
     return request<LabTrendsReport>(credentials, "/api/v1/lab-trends");
   },
 
+  getCareRecommendation(credentials: Credentials): Promise<CareRecommendation> {
+    return request<CareRecommendation>(credentials, "/api/v1/care/recommendation");
+  },
+
+  getCareRecommendationContext(credentials: Credentials): Promise<CareRecommendationContext> {
+    return request<CareRecommendationContext>(credentials, "/api/v1/care-recommendations");
+  },
+
+  searchCareProviders(
+    credentials: Credentials,
+    body: { flag_id: string; location: string; availability: "any" | "today" | "this_week" | "evenings" | "weekends" }
+  ): Promise<CareProviderSearchResponse> {
+    return request<CareProviderSearchResponse>(credentials, "/api/v1/care-recommendations/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  },
+
   async getCareFacilities(
     credentials: Credentials,
     options: {
       location: string;
-      kind?: "any" | FacilityKind;
+      kind?: "any" | DirectoryFacilityKind;
       radiusKm?: number;
       latitude?: number;
       longitude?: number;
+      specialty?: string;
+      availability?: CareAvailability;
       signal?: AbortSignal;
     }
   ): Promise<CareFacility[]> {
@@ -361,21 +407,16 @@ export const api = {
     });
     if (options.latitude !== undefined) params.set("latitude", String(options.latitude));
     if (options.longitude !== undefined) params.set("longitude", String(options.longitude));
+    if (options.specialty?.trim()) params.set("specialty", options.specialty.trim());
+    if (options.availability && options.availability !== "any") {
+      params.set("availability", options.availability);
+    }
     const facilities = await request<CareFacilityResponse[]>(
       credentials,
       `/api/v1/care/facilities?${params.toString()}`,
       { signal: options.signal }
     );
     return facilities.map(normalizeCareFacility);
-  },
-
-  getSpecialtySuggestion(
-    credentials: Credentials,
-    options: { signal?: AbortSignal } = {}
-  ): Promise<SpecialtySuggestion> {
-    return request<SpecialtySuggestion>(credentials, "/api/v1/care/specialty-suggestion", {
-      signal: options.signal,
-    });
   },
 
   ask(credentials: Credentials, question: string, topK = 8): Promise<QAResponse> {
@@ -420,5 +461,40 @@ export const api = {
       `/api/v1/sessions/${encodeURIComponent(sessionId)}`,
       { method: "DELETE" }
     );
+  },
+
+  searchFacilities(
+    credentials: Credentials,
+    location: string,
+    kind: FacilityKind = "any",
+    radiusKm = 8
+  ): Promise<CareFacilitiesResponse> {
+    const params = new URLSearchParams({
+      location,
+      kind,
+      radius_km: String(radiusKm),
+    });
+    return request<CareFacilitiesResponse>(credentials, `/api/v1/care/facilities?${params}`);
+  },
+
+  getCareSuggestion(credentials: Credentials): Promise<CareSuggestion> {
+    return request<CareSuggestion>(credentials, "/api/v1/care/suggestion");
+  },
+
+  searchCare(
+    credentials: Credentials,
+    body: {
+      city: string;
+      specialty?: string;
+      days?: CareDay[];
+      time_of_day?: CareTimeOfDay;
+      radius_km?: number;
+    }
+  ): Promise<CareSearchResponse> {
+    return request<CareSearchResponse>(credentials, "/api/v1/care/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
   },
 };

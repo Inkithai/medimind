@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import type { Timeline } from "../types/api";
+import { useI18n } from "../i18n/I18nContext";
 import { BeakerIcon, ChatIcon, FileIcon, PillIcon, ShieldIcon, TimelineIcon } from "./icons";
 import { classNames } from "../utils/format";
 
@@ -9,6 +10,7 @@ import { classNames } from "../utils/format";
  * neither page ever shows empty white space.
  */
 export function HealthSummaryCard({ timeline }: { timeline: Timeline }) {
+  const { t, formatNumber } = useI18n();
   const doctors = new Set(
     timeline.visits
       .map((v) => (v.provider_or_doctor || "").trim().toLowerCase())
@@ -17,28 +19,28 @@ export function HealthSummaryCard({ timeline }: { timeline: Timeline }) {
 
   const stats = [
     {
-      label: "Documents",
+      label: t("common.documents"),
       value: timeline.visits.length,
       to: "/documents",
       icon: FileIcon,
       chip: "bg-sky-50 text-sky-600",
     },
     {
-      label: "Medicines",
+      label: t("common.medications"),
       value: timeline.medications_timeline.length,
       to: "/medicines",
       icon: PillIcon,
       chip: "bg-emerald-50 text-emerald-600",
     },
     {
-      label: "Lab Tests",
+      label: t("common.labResults"),
       value: timeline.lab_results_timeline.length,
       to: "/labs",
       icon: BeakerIcon,
       chip: "bg-violet-50 text-violet-600",
     },
     {
-      label: "Allergies",
+      label: t("common.allergies"),
       value: timeline.known_allergies.length,
       to: "/history",
       icon: ShieldIcon,
@@ -48,7 +50,7 @@ export function HealthSummaryCard({ timeline }: { timeline: Timeline }) {
           : "bg-slate-100 text-slate-500",
     },
     {
-      label: "Doctors",
+      label: t("care.doctors"),
       value: doctors,
       to: "/history",
       icon: TimelineIcon,
@@ -58,7 +60,7 @@ export function HealthSummaryCard({ timeline }: { timeline: Timeline }) {
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-      <h3 className="card-title">Health Summary</h3>
+      <h2 className="card-title">{t("dashboard.healthSummary")}</h2>
       <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
         {stats.map((s) => {
           const Icon = s.icon;
@@ -76,7 +78,7 @@ export function HealthSummaryCard({ timeline }: { timeline: Timeline }) {
               >
                 <Icon className="h-5 w-5" />
               </span>
-              <p className="mt-3 text-2xl font-bold leading-none text-slate-900">{s.value}</p>
+              <p className="mt-3 text-2xl font-bold leading-none text-slate-900">{formatNumber(s.value)}</p>
               <p className="mt-1 text-sm font-medium text-slate-600">{s.label}</p>
             </Link>
           );
@@ -89,9 +91,9 @@ export function HealthSummaryCard({ timeline }: { timeline: Timeline }) {
           <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-white text-brand-600 ring-1 ring-brand-100 transition group-hover:scale-105">
             <ChatIcon className="h-5 w-5" />
           </span>
-          <p className="mt-3 text-sm font-semibold text-brand-900">Ask AI</p>
+          <p className="mt-3 text-sm font-semibold text-brand-900">{t("ask.title")}</p>
           <p className="mt-1 text-xs leading-relaxed text-brand-800/80">
-            Question about your records?
+            {t("ask.question")}
           </p>
         </Link>
       </div>
