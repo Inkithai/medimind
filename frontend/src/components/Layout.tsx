@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { classNames } from "../utils/format";
@@ -8,9 +8,11 @@ import {
   FileIcon,
   PillIcon,
   LocationIcon,
+  PlusIcon,
   SettingsIcon,
   ShieldIcon,
   TimelineIcon,
+  TrashIcon,
   UploadIcon,
 } from "./icons";
 
@@ -38,10 +40,20 @@ export function Layout() {
   const { isConfigured, credentials, createNewWorkspace, clearCredentials } = useAuth();
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [aboutOpen, setAboutOpen] = useState(false);
+  const [language, setLanguage] = useState(() => localStorage.getItem("medimind-language") || "en");
+
+  useEffect(() => {
+    document.documentElement.lang = language;
+    localStorage.setItem("medimind-language", language);
+  }, [language]);
+
+  const desktopLabel = sidebarCollapsed ? "lg:sr-only" : "";
 
   return (
     <div className="min-h-full lg:flex">
-      {/* Mobile header */}
+      {/* Mobile header remains independent of the desktop sidebar treatment. */}
       <div className="flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3 lg:hidden">
         <div className="flex items-center gap-2">
           <Logo small />
@@ -53,45 +65,63 @@ export function Layout() {
           aria-label="Toggle navigation menu"
           aria-expanded={sidebarOpen}
         >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-6 w-6">
-            <line x1="3" y1="6" x2="21" y2="6" />
-            <line x1="3" y1="12" x2="21" y2="12" />
-            <line x1="3" y1="18" x2="21" y2="18" />
-          </svg>
+          <MenuIcon className="h-6 w-6" />
         </button>
       </div>
 
-      {/* Sidebar */}
+      {/* One compact, viewport-height desktop sidebar; no internal scrollbar. */}
       <aside
         className={classNames(
-          "fixed inset-y-0 left-0 z-30 w-72 transform border-r border-slate-200 bg-white transition-transform lg:static lg:translate-x-0",
+          "fixed inset-y-0 left-0 z-30 h-dvh w-72 transform border-r border-slate-200 bg-white transition-[transform,width] duration-200 lg:sticky lg:top-0 lg:translate-x-0",
+          sidebarCollapsed ? "lg:w-[76px]" : "lg:w-64",
           sidebarOpen ? "translate-x-0" : "-translate-x-full"
         )}
         aria-label="Main navigation"
       >
-        <div className="flex h-full flex-col">
-          <div className="flex items-center gap-3 px-6 pb-5 pt-6">
+        <div className="flex h-full min-h-0 flex-col">
+          <header className={classNames("flex h-14 shrink-0 items-center gap-3 px-4", sidebarCollapsed && "lg:justify-center lg:px-2")}>
             <Logo />
-            <div className="min-w-0 flex-1">
-              <p className="text-lg font-bold leading-tight text-slate-900">MediMind</p>
-              <p className="truncate text-sm text-slate-500">Your health, in one place</p>
+            <div className={classNames("min-w-0 flex-1", desktopLabel)}>
+              <p className="text-base font-bold leading-tight text-slate-900">MediMind</p>
+              <p className="truncate text-xs text-slate-500">Your health, in one place</p>
             </div>
+          </header>
+
+          <div className={classNames("shrink-0 px-3 pb-1", sidebarCollapsed && "lg:px-2")}>
+            <button
+              type="button"
+              onClick={() => setSidebarCollapsed((value) => !value)}
+              className={classNames(
+                "group flex h-8 w-full items-center gap-2 rounded-lg px-2 text-xs font-medium text-slate-500 transition hover:bg-slate-50 hover:text-slate-800",
+                sidebarCollapsed && "lg:justify-center lg:px-0"
+              )}
+              aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+              aria-expanded={!sidebarCollapsed}
+              title={sidebarCollapsed ? "Expand sidebar" : undefined}
+            >
+              <CollapseIcon className={classNames("h-4 w-4 shrink-0 transition-transform", sidebarCollapsed && "lg:rotate-180")} />
+              <span className={desktopLabel}>Collapse sidebar</span>
+            </button>
           </div>
 
           {isConfigured && (
-            <div className="px-4 pb-3">
+            <div className={classNames("shrink-0 px-3 pb-2", sidebarCollapsed && "lg:px-2")}>
               <NavLink
                 to="/upload"
                 onClick={() => setSidebarOpen(false)}
-                className="btn-primary w-full"
+                className={classNames(
+                  "flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-brand-600 px-3 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-700 focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2",
+                  sidebarCollapsed && "lg:px-0"
+                )}
+                title={sidebarCollapsed ? "Upload Document" : undefined}
               >
-                <UploadIcon className="h-5 w-5" />
-                Upload Document
+                <UploadIcon className="h-[18px] w-[18px] shrink-0" />
+                <span className={desktopLabel}>Upload Document</span>
               </NavLink>
             </div>
           )}
 
-          <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-2 scroll-thin">
+          <nav className={classNames("min-h-0 flex-1 space-y-0.5 px-3 py-1", sidebarCollapsed && "lg:px-2")} aria-label="Health workspace">
             {NAV.map((item) => {
               const Icon = item.icon;
               const worksWithoutWorkspace = item.to === "/settings";
@@ -100,21 +130,23 @@ export function Layout() {
                 <NavLink
                   key={item.to}
                   to={disabled ? "#" : item.to}
-                  onClick={(e) => {
+                  onClick={(event) => {
                     if (disabled) {
-                      e.preventDefault();
+                      event.preventDefault();
                       return;
                     }
                     setSidebarOpen(false);
                   }}
                   aria-disabled={disabled}
+                  title={sidebarCollapsed ? item.label : undefined}
                   className={({ isActive }) =>
                     classNames(
-                      "group flex min-h-[48px] items-center gap-3 rounded-xl px-3 py-2.5 text-base transition",
+                      "group flex h-9 items-center gap-2.5 rounded-lg px-2 text-sm transition",
+                      sidebarCollapsed && "lg:justify-center lg:px-0",
                       disabled
                         ? "pointer-events-none cursor-not-allowed text-slate-300"
                         : isActive
-                        ? "bg-brand-50 font-semibold text-brand-700"
+                        ? "bg-brand-50 font-semibold text-brand-700 ring-1 ring-inset ring-brand-100"
                         : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
                     )
                   }
@@ -123,14 +155,14 @@ export function Layout() {
                     <>
                       <span
                         className={classNames(
-                          "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition",
+                          "flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition",
                           item.chip,
                           !isActive && "opacity-80 group-hover:opacity-100"
                         )}
                       >
-                        <Icon className="h-[18px] w-[18px]" />
+                        <Icon className="h-4 w-4" />
                       </span>
-                      <span className="truncate">{item.label}</span>
+                      <span className={classNames("truncate", desktopLabel)}>{item.label}</span>
                     </>
                   )}
                 </NavLink>
@@ -138,33 +170,85 @@ export function Layout() {
             })}
           </nav>
 
+          <div className={classNames("shrink-0 border-t border-slate-100 px-3 py-1", sidebarCollapsed && "lg:px-2")}>
+            <button
+              type="button"
+              onClick={() => setAboutOpen(true)}
+              className={classNames(
+                "flex h-9 w-full items-center gap-2.5 rounded-lg px-2 text-sm font-medium text-slate-500 transition hover:bg-slate-50 hover:text-slate-800",
+                sidebarCollapsed && "lg:justify-center lg:px-0"
+              )}
+              title={sidebarCollapsed ? "About MediMind" : undefined}
+            >
+              <InfoIcon className="h-4 w-4 shrink-0" />
+              <span className={desktopLabel}>About MediMind</span>
+            </button>
+          </div>
+
           {isConfigured && (
-            <div className="border-t border-slate-100 p-4">
-              <div className="rounded-xl bg-brand-50 p-4 ring-1 ring-brand-100">
-                <p className="text-sm font-semibold text-brand-900">Private — no account needed</p>
-                <p className="mt-1 text-xs leading-relaxed text-brand-800/80">
-                  Your records are tied to this browser only. Nothing to sign up for.
-                </p>
+            <section
+              className={classNames("shrink-0 border-t border-slate-100 px-3 py-2", sidebarCollapsed && "lg:px-2")}
+              aria-label="Language, privacy and workspace controls"
+            >
+              <div className={classNames("flex items-center gap-2", sidebarCollapsed && "lg:justify-center")}>
+                <label htmlFor="sidebar-language" className={classNames("shrink-0 text-xs font-semibold text-slate-600", desktopLabel)}>
+                  Language
+                </label>
+                <select
+                  id="sidebar-language"
+                  value={language}
+                  onChange={(event) => setLanguage(event.target.value)}
+                  className={classNames(
+                    "h-9 min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2 text-xs text-slate-700 outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100",
+                    sidebarCollapsed && "lg:w-11 lg:flex-none lg:px-1 lg:text-[10px]"
+                  )}
+                  aria-label="Language"
+                  title={sidebarCollapsed ? "Language: English" : undefined}
+                >
+                  <option value="en">English</option>
+                </select>
               </div>
-              <div className="mt-3 grid grid-cols-2 gap-2">
+
+              <div
+                className={classNames(
+                  "mt-1.5 rounded-lg bg-brand-50 px-2.5 py-2 ring-1 ring-inset ring-brand-100",
+                  sidebarCollapsed && "lg:flex lg:h-9 lg:items-center lg:justify-center lg:p-0"
+                )}
+                title={sidebarCollapsed ? "Private — no account needed. Your records are tied to this browser only. Nothing to sign up for." : undefined}
+              >
+                <ShieldIcon className={classNames("hidden h-4 w-4 text-brand-700", sidebarCollapsed && "lg:block")} />
+                <div className={desktopLabel}>
+                  <p className="text-xs font-semibold leading-4 text-brand-900">Private — no account needed</p>
+                  <p className="text-[11px] leading-4 text-brand-800/80">
+                    Your records are tied to this browser only. Nothing to sign up for.
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-1.5 grid grid-cols-2 gap-1.5">
                 <button
+                  type="button"
                   onClick={() => void createNewWorkspace()}
-                  className="flex min-h-[44px] items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
+                  className="flex h-9 items-center justify-center gap-1 rounded-lg border border-slate-200 bg-white px-1.5 text-xs font-medium text-slate-600 transition hover:bg-slate-50"
                   title={`Start a fresh workspace (current: ${credentials.userId})`}
                 >
-                  New workspace
+                  <PlusIcon className={classNames("hidden h-4 w-4 shrink-0", sidebarCollapsed && "lg:block")} />
+                  <span className={desktopLabel}>New workspace</span>
                 </button>
                 <button
+                  type="button"
                   onClick={() => {
                     clearCredentials();
                     navigate("/");
                   }}
-                  className="flex min-h-[44px] items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
+                  className="flex h-9 items-center justify-center gap-1 rounded-lg border border-slate-200 bg-white px-1.5 text-xs font-medium text-slate-600 transition hover:border-red-200 hover:bg-red-50 hover:text-red-700"
+                  title={sidebarCollapsed ? "Reset data" : undefined}
                 >
-                  Reset data
+                  <TrashIcon className={classNames("hidden h-4 w-4 shrink-0", sidebarCollapsed && "lg:block")} />
+                  <span className={desktopLabel}>Reset data</span>
                 </button>
               </div>
-            </div>
+            </section>
           )}
         </div>
       </aside>
@@ -177,12 +261,39 @@ export function Layout() {
         />
       )}
 
-      {/* Main content */}
       <main className="min-w-0 flex-1 bg-slate-50">
         <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
           <Outlet />
         </div>
       </main>
+
+      {aboutOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 p-4" role="presentation" onMouseDown={() => setAboutOpen(false)}>
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="about-title"
+            className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-xl"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start gap-3">
+              <Logo />
+              <div className="min-w-0 flex-1">
+                <h2 id="about-title" className="text-lg font-bold text-slate-900">About MediMind</h2>
+                <p className="mt-1 text-sm leading-6 text-slate-600">
+                  MediMind helps you organize medical documents, understand health records, and find information from your private workspace.
+                </p>
+              </div>
+              <button type="button" onClick={() => setAboutOpen(false)} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100" aria-label="Close About MediMind">
+                <span aria-hidden="true" className="text-xl leading-none">×</span>
+              </button>
+            </div>
+            <p className="mt-4 rounded-lg bg-brand-50 px-3 py-2 text-xs leading-5 text-brand-900">
+              Your records are tied to this browser only. MediMind is an informational tool and does not replace professional medical advice.
+            </p>
+          </section>
+        </div>
+      )}
     </div>
   );
 }
@@ -191,11 +302,24 @@ function Logo({ small }: { small?: boolean }) {
   return (
     <div
       className={classNames(
-        "flex items-center justify-center rounded-xl bg-brand-600 text-white shadow-sm",
-        small ? "h-8 w-8" : "h-10 w-10"
+        "flex shrink-0 items-center justify-center rounded-xl bg-brand-600 text-white shadow-sm",
+        small ? "h-8 w-8" : "h-9 w-9"
       )}
+      aria-hidden="true"
     >
-      <span className={classNames("font-black tracking-tight", small ? "text-sm" : "text-[18px]")}>M</span>
+      <span className={classNames("font-black tracking-tight", small ? "text-sm" : "text-base")}>M</span>
     </div>
   );
+}
+
+function MenuIcon({ className }: { className?: string }) {
+  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className={className} aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" /></svg>;
+}
+
+function CollapseIcon({ className }: { className?: string }) {
+  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className={className} aria-hidden="true"><path d="M9 4 4 9l5 5M4 9h10a6 6 0 0 1 6 6v5" strokeLinecap="round" strokeLinejoin="round" /></svg>;
+}
+
+function InfoIcon({ className }: { className?: string }) {
+  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className={className} aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 11v6M12 7.5h.01" strokeLinecap="round" /></svg>;
 }
