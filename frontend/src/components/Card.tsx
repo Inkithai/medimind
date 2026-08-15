@@ -9,14 +9,14 @@ export function Card({
   className?: string;
 }) {
   return (
-    <section
+    <div
       className={classNames(
         "min-w-0 rounded-xl border border-slate-200 bg-white shadow-sm",
         className
       )}
     >
       {children}
-    </section>
+    </div>
   );
 }
 

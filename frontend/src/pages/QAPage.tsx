@@ -1,37 +1,64 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import { Alert } from "../components/Alert";
 import { ErrorState } from "../components/ErrorState";
 import { Card, CardBody, CardHeader } from "../components/Card";
+import { DocumentViewer } from "../components/DocumentViewer";
 import { QAResultCard } from "../components/QAResultCard";
 import { Spinner } from "../components/Spinner";
 import { ChatIcon, SendIcon } from "../components/icons";
 import { useAuth } from "../context/AuthContext";
-import type { QAResponse } from "../types/api";
+import { useI18n } from "../i18n/I18nContext";
+import type { QAResponse, QASource, Timeline, Visit } from "../types/api";
+import { findVisitForSource } from "../utils/sources";
 
-const SUGGESTIONS = [
-  "What medications am I currently taking?",
-  "What were my most recent lab results?",
-  "Are there any allergies documented in my records?",
-  "What did my doctor note at my last visit?",
-];
+const SUGGESTION_KEYS = ["ask.suggestion1", "ask.suggestion2", "ask.suggestion3", "ask.suggestion4"] as const;
 
 export function QAPage() {
   const { credentials } = useAuth();
+  const { t } = useI18n();
   const [question, setQuestion] = useState("");
   const [topK, setTopK] = useState(8);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<QAResponse | null>(null);
   const [error, setError] = useState<unknown>(null);
+  const [openSource, setOpenSource] = useState<{ source: QASource; visit: Visit | null } | null>(
+    null
+  );
+  const inFlightRef = useRef(false);
+  const timelineRef = useRef<Timeline | null>(null);
+
+  // Loaded lazily so a citation can resolve to its document. A failure here
+  // must never break asking questions — citations stay non-clickable.
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getTimeline(credentials)
+      .then((timeline) => {
+        if (!cancelled) timelineRef.current = timeline;
+      })
+      .catch(() => {
+        if (!cancelled) timelineRef.current = null;
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [credentials]);
 
   async function ask(q?: string) {
     const text = (q ?? question).trim();
     if (!text) return;
+    // A ref, not `loading`: it must block a second submit within the same
+    // tick, before React has re-rendered. Guards Ask -> Ask -> Ask from
+    // firing three concurrent LLM requests.
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
     setLoading(true);
     setError(null);
     setResult(null);
     setQuestion(text);
+    setOpenSource(null);
     try {
       const res = await api.ask(credentials, text, topK);
       setResult(res);
@@ -39,28 +66,39 @@ export function QAPage() {
       setError(err);
     } finally {
       setLoading(false);
+      inFlightRef.current = false;
     }
+  }
+
+  function handleOpenSource(source: QASource) {
+    setOpenSource({ source, visit: findVisitForSource(timelineRef.current, source) });
   }
 
   return (
     <div className="space-y-6">
       <header>
-        <h1 className="page-title">Ask AI</h1>
-        <p className="secondary-text mt-2 max-w-2xl">
-          Ask anything about your records. Answers come only from your own documents — never from the
-          open internet — with the source file and page cited.
-        </p>
+        <h1 className="page-title">{t("ask.title")}</h1>
+        <p className="secondary-text mt-2 max-w-2xl">{t("ask.subtitle")}</p>
       </header>
 
       <Card>
         <CardHeader
-          title="Your question"
-          description="MediMind reads your records to answer. It never replaces a doctor."
+          title={t("ask.question")}
+          description={t("ask.description")}
           icon={<ChatIcon className="h-5 w-5" />}
         />
         <CardBody className="space-y-4">
-          <div className="flex min-w-0 flex-col gap-2 sm:flex-row">
+          <form
+            className="flex min-w-0 flex-col gap-2 sm:flex-row"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void ask();
+            }}
+          >
+            <label htmlFor="record-question" className="sr-only">{t("ask.inputLabel")}</label>
             <input
+              id="record-question"
+              name="question"
               type="text"
               value={question}
               onChange={(e) => setQuestion(e.target.value)}
@@ -70,24 +108,26 @@ export function QAPage() {
                   void ask();
                 }
               }}
-              placeholder="e.g. What was I prescribed for my sinus infection?"
+              placeholder={t("ask.placeholder")}
+              aria-describedby="question-help"
               className="block min-w-0 w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
               disabled={loading}
             />
             <button
-              onClick={() => void ask()}
+              type="submit"
               disabled={loading || !question.trim()}
               className="inline-flex items-center gap-2 rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 disabled:opacity-60"
             >
               {loading ? <Spinner className="h-4 w-4" /> : <SendIcon className="h-4 w-4" />}
-              Ask
+              {t("ask.ask")}
             </button>
-          </div>
+          </form>
+          <p id="question-help" className="sr-only">{t("ask.description")}</p>
 
           <details className="text-xs text-slate-500">
-            <summary className="cursor-pointer font-medium text-slate-600">Advanced</summary>
+            <summary className="cursor-pointer font-medium text-slate-700">{t("ask.advanced")}</summary>
             <div className="mt-2 flex flex-wrap items-center gap-2">
-              <label htmlFor="topk">How much of your record to read per answer:</label>
+              <label htmlFor="topk">{t("ask.amount")}:</label>
               <input
                 id="topk"
                 type="range"
@@ -101,27 +141,34 @@ export function QAPage() {
             </div>
           </details>
 
-          <div className="flex flex-wrap gap-2">
-            {SUGGESTIONS.map((s) => (
+          <fieldset>
+            <legend className="mb-2 text-xs font-semibold text-slate-700">{t("ask.suggestions")}</legend>
+            <div className="flex flex-wrap gap-2">
+            {SUGGESTION_KEYS.map((key) => {
+              const suggestion = t(key);
+              return (
               <button
-                key={s}
+                type="button"
+                key={key}
                 onClick={() => {
-                  setQuestion(s);
-                  void ask(s);
+                  setQuestion(suggestion);
+                  void ask(suggestion);
                 }}
                 disabled={loading}
                 className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-50"
               >
-                {s}
+                {suggestion}
               </button>
-            ))}
-          </div>
+              );
+            })}
+            </div>
+          </fieldset>
         </CardBody>
       </Card>
 
       {loading && (
-        <Alert variant="info" title="Reading your records…">
-          Looking through your documents for the most relevant passages, then writing the answer.
+        <Alert variant="info" title={t("ask.reading")}>
+          {t("ask.readingBody")}
         </Alert>
       )}
 
@@ -129,8 +176,24 @@ export function QAPage() {
 
       {!loading && result && (
         <div className="space-y-3">
-          <h2 className="section-title">Answer</h2>
-          <QAResultCard result={result} />
+          <h2 className="section-title">{t("ask.answer")}</h2>
+          <QAResultCard
+            result={result}
+            onOpenSource={timelineRef.current ? handleOpenSource : undefined}
+          />
+        </div>
+      )}
+
+      {openSource && (
+        <div className="space-y-3">
+          <h2 className="section-title">{openSource.source.source_file}</h2>
+          {openSource.visit ? (
+            <DocumentViewer visit={openSource.visit} onClose={() => setOpenSource(null)} />
+          ) : (
+            <Alert variant="info" title={t("ask.sourceUnavailable")}>
+              {t("ask.sourceUnavailableBody", { file: openSource.source.source_file })}
+            </Alert>
+          )}
         </div>
       )}
 

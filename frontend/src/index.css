@@ -13,8 +13,38 @@ body,
 }
 
 body {
-  /* Calm, soft-gray canvas (#F8FAFC) with 16px base text */
+  /* Unicode-first stack keeps Sinhala and Tamil readable without a web-font dependency. */
+  font-family: Inter, "Noto Sans Sinhala", "Noto Sans Tamil", "Iskoola Pota", Latha,
+    ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   @apply bg-slate-50 text-base text-slate-800 antialiased;
+}
+
+button,
+a,
+label,
+summary {
+  overflow-wrap: anywhere;
+}
+
+/* Visible only to keyboard users; first focus target on every routed screen. */
+.skip-link {
+  @apply fixed left-4 top-3 z-[2000] -translate-y-24 rounded-lg bg-slate-950 px-4 py-3 font-semibold text-white shadow-xl transition-transform;
+}
+.skip-link:focus {
+  @apply translate-y-0;
+}
+
+/* Utility is explicit because several accessibility-only labels use it. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 @layer components {
@@ -28,7 +58,7 @@ body {
     @apply text-[18px] leading-[1.35] font-semibold text-slate-900;
   }
   .secondary-text {
-    @apply text-sm text-slate-500;
+    @apply text-sm text-slate-600;
   }
 
   /* Keep responsive grids and cards from forcing narrow text into one-letter columns. */
@@ -60,10 +90,40 @@ body {
   }
 }
 
-/* Keyboard navigation must always be visible */
+/* Keyboard navigation must always be visible and must not be clipped by cards. */
 :focus-visible {
-  outline: 2px solid #0f766e;
-  outline-offset: 2px;
+  outline: 3px solid #0f766e;
+  outline-offset: 3px;
+}
+
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* Slate 400 text is below AA for normal-size copy on white; retain the visual hierarchy with AA contrast. */
+.text-slate-400 {
+  color: #475569 !important;
+}
+
+@media (forced-colors: active) {
+  button,
+  a,
+  input,
+  select,
+  summary {
+    forced-color-adjust: auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 /* Leaflet uses a lightweight custom pin so no image assets need to be copied by Vite. */
@@ -92,6 +152,27 @@ body {
   height: 12px;
   border-radius: 9999px;
   background: white;
+}
+
+/* Numbered pins on the Find Care results map, matching the card order. */
+.care-map-pin-wrapper {
+  background: transparent;
+  border: 0;
+}
+
+.care-map-pin {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 2px solid white;
+  border-radius: 9999px;
+  background: #0f766e;
+  color: white;
+  font-size: 12px;
+  font-weight: 700;
+  box-shadow: 0 4px 10px rgb(15 23 42 / 30%);
 }
 
 .leaflet-container {
