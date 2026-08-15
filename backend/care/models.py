@@ -1,10 +1,39 @@
-"""Normalized care-navigation response models."""
+"""Provider-neutral shapes. Adapters must convert into these."""
 
-from dataclasses import dataclass, field
+from __future__ import annotations
+
+import math
+from dataclasses import asdict, dataclass
 from typing import Any, Dict, List, Optional
 
 
+def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    radius = 6371.0
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlambda = math.radians(lon2 - lon1)
+    a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
+    return 2 * radius * math.asin(math.sqrt(min(1.0, a)))
+
+
+FACILITY_KINDS = ("hospital", "clinic", "pharmacy", "laboratory", "doctor", "healthcare", "any")
+
+DISCLAIMER = (
+    "This is a public directory lookup, not a medical referral and not a "
+    "recommendation of the best place to go. Listings may be incomplete. "
+    "Confirm details with the facility and a licensed clinician."
+)
+
+
 @dataclass(frozen=True)
+class GeoPoint:
+    latitude: float
+    longitude: float
+    label: str
+    provider: str
+
+
+@dataclass
 class Facility:
     """Provider-neutral public facility listing returned by every adapter."""
 
@@ -14,44 +43,61 @@ class Facility:
     latitude: float
     longitude: float
     address: Optional[str] = None
-    distance_km: Optional[float] = None
-    rating: Optional[float] = None
-    user_rating_count: Optional[int] = None
     phone: Optional[str] = None
     website: Optional[str] = None
+    distance_km: Optional[float] = None
+    source_url: Optional[str] = None
+    provider: str = ""
+    rating: Optional[float] = None
+    user_rating_count: Optional[int] = None
     maps_url: Optional[str] = None
     opening_hours: Optional[List[str]] = None
     open_now: Optional[bool] = None
+    specialty: Optional[str] = None
+    specialty_match: Optional[float] = None
+    availability_match: Optional[bool] = None
+    ranking_score: Optional[float] = None
+    ranking_reason: Optional[str] = None
     source: str = "public listings"
-    # Provider/patient-context enrichment (populated by the provider layer):
-    entity_type: str = "facility"  # practitioner | facility | organization
-    specialties: List[str] = field(default_factory=list)
-    # Match against the requested specialty (None when none was requested):
-    match_tier: Optional[int] = None
-    match_level: Optional[str] = None  # exact | related | other
-    match_reason: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """JSON-ready dictionary while retaining explicit nulls as a stable API."""
+        return asdict(self)
+
+
+@dataclass
+class RouteEstimate:
+    origin: GeoPoint
+    destination: GeoPoint
+    distance_km: float
+    mode: str
+    provider: str
+    note: str
+
+    def to_dict(self) -> Dict[str, Any]:
         return {
-            "id": self.id,
-            "name": self.name,
-            "kind": self.kind,
-            "latitude": self.latitude,
-            "longitude": self.longitude,
-            "address": self.address,
+            "origin": asdict(self.origin),
+            "destination": asdict(self.destination),
             "distance_km": self.distance_km,
-            "rating": self.rating,
-            "user_rating_count": self.user_rating_count,
-            "phone": self.phone,
-            "website": self.website,
-            "maps_url": self.maps_url,
-            "opening_hours": self.opening_hours,
-            "open_now": self.open_now,
-            "source": self.source,
-            "entity_type": self.entity_type,
-            "specialties": self.specialties,
-            "match_tier": self.match_tier,
-            "match_level": self.match_level,
-            "match_reason": self.match_reason,
+            "mode": self.mode,
+            "provider": self.provider,
+            "note": self.note,
         }
+
+
+def pack_facilities(
+    *,
+    query: str,
+    kind: str,
+    origin: Optional[GeoPoint],
+    facilities: List[Facility],
+    provider: str,
+) -> Dict[str, Any]:
+    return {
+        "query": {"location": query, "kind": kind},
+        "origin": asdict(origin) if origin else None,
+        "facilities": [item.to_dict() for item in facilities],
+        "result_count": len(facilities),
+        "provider": provider,
+        "disclaimer": DISCLAIMER,
+    }
