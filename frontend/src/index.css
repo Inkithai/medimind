@@ -30,6 +30,21 @@ body {
   .secondary-text {
     @apply text-sm text-slate-500;
   }
+
+  /* Keep responsive grids and cards from forcing narrow text into one-letter columns. */
+  .app-content,
+  .app-content > *,
+  .app-content :where(section, article),
+  .app-content :where(.grid) > * {
+    min-width: 0;
+  }
+
+  .app-content :where(h1, h2, h3, h4, p, li, dd, dt) {
+    overflow-wrap: break-word;
+    word-break: normal;
+    hyphens: none;
+  }
+
   /* Interactive controls never shrink below the 44px accessibility target */
   .btn {
     @apply inline-flex min-h-[44px] items-center justify-center gap-2 rounded-xl px-5 py-3 text-base font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 disabled:opacity-60;

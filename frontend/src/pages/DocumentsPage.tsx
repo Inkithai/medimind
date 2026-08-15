@@ -39,8 +39,8 @@ export function DocumentsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
+      <div className="flex min-w-0 flex-col items-start justify-between gap-4 sm:flex-row">
+        <div className="min-w-0">
           <h1 className="page-title">Medical Records</h1>
           <p className="secondary-text mt-2">
             Every document you've uploaded — and what we found inside each one.
@@ -96,8 +96,8 @@ export function DocumentsPage() {
                         }`}
                       >
                         <div className="flex items-start justify-between gap-2">
-                          <div className="flex items-center gap-2">
-                            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-50 text-slate-500">
+                          <div className="flex min-w-0 items-center gap-2">
+                            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-50 text-slate-500">
                               <FileIcon className="h-5 w-5" />
                             </div>
                             <div className="min-w-0">

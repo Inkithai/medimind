@@ -152,16 +152,19 @@ export function FindCarePage() {
           What type of facility do you need?
         </label>
         <p className="mt-1 text-xs text-slate-500">Choose a category or search all public healthcare listings.</p>
-        <select
-          id="care-kind"
-          value={searchKind}
-          onChange={(event) => setSearchKind(event.target.value as SearchKind)}
-          className="mt-3 min-h-[48px] w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-800 outline-none focus:border-brand-500 focus:ring-4 focus:ring-brand-100 sm:max-w-xs"
-        >
-          {FILTERS.map((option) => (
-            <option key={option.value} value={option.value}>{option.label}</option>
-          ))}
-        </select>
+        <div className="relative mt-3 w-full sm:max-w-xs">
+          <select
+            id="care-kind"
+            value={searchKind}
+            onChange={(event) => setSearchKind(event.target.value as SearchKind)}
+            className="h-11 w-full appearance-none rounded-xl border border-slate-200 bg-white py-2 pl-3.5 pr-10 text-sm font-medium text-slate-800 shadow-sm outline-none transition hover:border-slate-300 focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
+          >
+            {FILTERS.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+          <SelectChevron className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+        </div>
       </section>
 
       <LocationPicker
@@ -328,7 +331,7 @@ function FacilityCard({ facility }: { facility: CareFacility }) {
           <CareIcon className="h-5 w-5" />
         </span>
         <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
             <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-slate-500">
               {kindLabel(facility.kind)}
             </span>
@@ -416,6 +419,14 @@ function kindTone(kind: FacilityKind): string {
 function distanceLabel(distanceKm: number): string {
   if (distanceKm < 1) return `${Math.max(1, Math.round(distanceKm * 1_000))} m`;
   return `${distanceKm.toFixed(distanceKm < 10 ? 1 : 0)} km`;
+}
+
+function SelectChevron({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.8} className={className} aria-hidden="true">
+      <path d="m6 8 4 4 4-4" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
 }
 
 function CareIcon({ className }: { className?: string }) {

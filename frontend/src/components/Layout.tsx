@@ -49,6 +49,20 @@ export function Layout() {
     localStorage.setItem("medimind-language", language);
   }, [language]);
 
+  useEffect(() => {
+    if (!aboutOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setAboutOpen(false);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [aboutOpen]);
+
   const desktopLabel = sidebarCollapsed ? "lg:sr-only" : "";
 
   return (
@@ -261,19 +275,23 @@ export function Layout() {
         />
       )}
 
-      <main className="min-w-0 flex-1 bg-slate-50">
-        <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+      <main className="min-w-0 flex-1 overflow-x-hidden bg-slate-50">
+        <div className="app-content mx-auto min-w-0 max-w-6xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
           <Outlet />
         </div>
       </main>
 
       {aboutOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 p-4" role="presentation" onMouseDown={() => setAboutOpen(false)}>
+        <div
+          className="fixed inset-0 z-50 flex overflow-y-auto overscroll-contain bg-slate-900/30 p-4 sm:items-center sm:justify-center"
+          role="presentation"
+          onMouseDown={() => setAboutOpen(false)}
+        >
           <section
             role="dialog"
             aria-modal="true"
             aria-labelledby="about-title"
-            className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-xl"
+            className="my-auto max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto overscroll-contain rounded-2xl border border-slate-200 bg-white p-5 shadow-xl sm:p-6"
             onMouseDown={(event) => event.stopPropagation()}
           >
             <div className="flex items-start gap-3">
@@ -284,7 +302,7 @@ export function Layout() {
                   MediMind helps you organize medical documents, understand health records, and find information from your private workspace.
                 </p>
               </div>
-              <button type="button" onClick={() => setAboutOpen(false)} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100" aria-label="Close About MediMind">
+              <button type="button" autoFocus onClick={() => setAboutOpen(false)} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100" aria-label="Close About MediMind">
                 <span aria-hidden="true" className="text-xl leading-none">×</span>
               </button>
             </div>

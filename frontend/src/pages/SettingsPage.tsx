@@ -111,7 +111,7 @@ export function SettingsPage() {
                 <div className="mt-3 space-y-1 text-sm text-slate-600">
                   <p>
                     <span className="font-medium text-slate-700">Workspace code:</span>{" "}
-                    <code className="rounded bg-white px-1.5 py-0.5 ring-1 ring-slate-200">
+                    <code className="break-words rounded bg-white px-1.5 py-0.5 ring-1 ring-slate-200">
                       {credentials.userId}
                     </code>
                   </p>
