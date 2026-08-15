@@ -119,7 +119,12 @@ def test_endpoint_returns_normalized_facility_list_and_forwards_coordinates():
         assert response.status_code == 200, response.text
         assert response.json()[0]["name"] == "Jaffna Teaching Hospital"
         assert provider.calls[0][1] == "hospital"
-        assert provider.calls[0][3] == {"latitude": 9.668, "longitude": 80.015}
+        # specialty/availability are only forwarded when the caller supplies
+        # them, so a plain coordinate search passes just the coordinates.
+        assert provider.calls[0][3] == {
+            "latitude": 9.668,
+            "longitude": 80.015,
+        }
     finally:
         api.app.dependency_overrides.clear()
 

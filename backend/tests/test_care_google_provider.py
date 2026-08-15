@@ -193,6 +193,43 @@ def test_malformed_provider_coordinates_are_skipped_without_breaking_results():
     assert [facility.id for facility in results] == ["ChIJ-care-1"]
 
 
+def test_eye_clinic_with_doctor_type_is_not_classified_as_doctor():
+    # Google returns "doctor" inside types for many businesses, but the
+    # authoritative primaryType is eye_care. It must not be a "Doctor".
+    eye_clinic = {
+        **GOOGLE_PLACE,
+        "id": "child-eye",
+        "displayName": {"text": "Child Eye (Pvt) Ltd"},
+        "types": ["doctor", "health", "eye_care"],
+        "primaryType": "eye_care",
+    }
+    provider = GoogleProvider(api_key="AIza-test-key")
+    provider._request_json = mock.Mock(return_value={"places": [eye_clinic]})
+
+    results = provider.search("Rajagiriya", "any", 5)
+
+    assert len(results) == 1
+    assert results[0].kind != "doctor"
+
+
+def test_non_healthcare_entity_is_dropped_instead_of_becoming_doctor():
+    # A students' committee / government office with no recognized
+    # healthcare type must not reach the UI at all.
+    committee = {
+        **GOOGLE_PLACE,
+        "id": "committee",
+        "displayName": {"text": "Indigenous Medical Students' Committee"},
+        "types": ["university", "point_of_interest", "establishment"],
+        "primaryType": None,
+    }
+    provider = GoogleProvider(api_key="AIza-test-key")
+    provider._request_json = mock.Mock(return_value={"places": [committee, GOOGLE_PLACE]})
+
+    results = provider.search("Rajagiriya", "any", 5)
+
+    assert [facility.id for facility in results] == ["ChIJ-care-1"]
+
+
 if __name__ == "__main__":
     tests = [value for name, value in sorted(globals().items()) if name.startswith("test_")]
     for test in tests:

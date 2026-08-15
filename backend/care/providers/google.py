@@ -320,6 +320,10 @@ class GoogleProvider:
         google_types = place.get("types") if isinstance(place.get("types"), list) else []
         primary_type = place.get("primaryType")
         kind = _normalized_kind(primary_type, google_types, requested_kind)
+        if kind is None:
+            # Not a recognized healthcare entity (committee, government
+            # office, etc.) — do not surface it as a doctor or clinic.
+            return None
         distance = None
         if origin is not None:
             distance = round(_distance_km(origin[0], origin[1], latitude, longitude), 3)
@@ -372,21 +376,95 @@ class GoogleProvider:
         )
 
 
-def _normalized_kind(primary_type: Any, google_types: List[Any], fallback: str) -> str:
-    values = [primary_type, *google_types]
-    if "hospital" in values or "general_hospital" in values:
-        return "hospital"
-    if "medical_clinic" in values or "medical_center" in values:
-        return "clinic"
-    if "pharmacy" in values:
-        return "pharmacy"
-    if "medical_lab" in values:
-        return "laboratory"
-    if "doctor" in values:
-        return "doctor"
+def _normalized_kind(primary_type: Any, google_types: List[Any], fallback: str) -> Optional[str]:
+    """Map a Google Place to the MediMind taxonomy.
+
+    The listing's ``primaryType`` is authoritative when it is recognized.
+    We never let a generic ``doctor`` entry in ``types`` override a more
+    specific primary type such as an eye clinic or dental clinic, and we
+    drop listings that are not recognized healthcare entities at all (e.g.
+    student committees or government departments).
+    """
+    # Facility / practitioner kinds take priority over the bare "doctor" type.
+    facilities = {
+        "hospital": "hospital",
+        "general_hospital": "hospital",
+        "specialized_hospital": "hospital",
+        "medical_clinic": "clinic",
+        "medical_center": "clinic",
+        "clinic": "clinic",
+        "urgent_care": "clinic",
+        "walk_in_clinic": "clinic",
+        "pharmacy": "pharmacy",
+        "drugstore": "pharmacy",
+        "medical_lab": "laboratory",
+        "diagnostic_center": "laboratory",
+    }
+    # Licensed healthcare that is neither a doctor nor a hospital/clinic/
+    # pharmacy/lab. These must not be presented as "Doctor".
+    other_healthcare = {
+        "eye_care",
+        "optician",
+        "optical",
+        "optometrist",
+        "dentist",
+        "dental_clinic",
+        "physical_therapist",
+        "physiotherapist",
+        "occupational_therapist",
+        "speech_pathologist",
+        "audiologist",
+        "psychologist",
+        "nutritionist",
+        "dietitian",
+        "chiropractor",
+        "acupuncturist",
+        "midwife",
+        "podiatrist",
+        "dialysis_center",
+        "rehabilitation_center",
+        "addiction_treatment_center",
+        "wellness_center",
+        "nursing_agency",
+        "home_health_care_service",
+    }
+    doctor_types = {
+        "doctor",
+        "family_practice_physician",
+        "general_practitioner",
+        "internist",
+        "physician_assistant",
+        "nurse_practitioner",
+    }
+
+    # primaryType is the most specific signal and must win.
+    if isinstance(primary_type, str) and primary_type:
+        if primary_type in facilities:
+            return facilities[primary_type]
+        if primary_type in doctor_types:
+            return "doctor"
+        if primary_type in other_healthcare:
+            return "healthcare"
+
+    # Fall back across the listed types, but still resolve facilities and
+    # other healthcare before the generic "doctor" type.
+    values = [value for value in google_types if isinstance(value, str)]
+    for gtype in values:
+        if gtype in facilities:
+            return facilities[gtype]
+    for gtype in values:
+        if gtype in other_healthcare:
+            return "healthcare"
+    for gtype in values:
+        if gtype in doctor_types:
+            return "doctor"
+
     if fallback == "lab":
         return "laboratory"
-    return fallback if fallback != "any" else "healthcare"
+    if fallback and fallback != "any":
+        return fallback
+    # No recognized healthcare type at all — drop this listing.
+    return None
 
 
 def _optional_string(value: Any) -> Optional[str]:
