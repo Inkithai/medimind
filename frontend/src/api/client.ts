@@ -355,7 +355,7 @@ export const api = {
     credentials: Credentials,
     jobId: string,
     onProgress?: (job: Job) => void,
-    intervalMs = 1500,
+    intervalMs = 4000,
     timeoutMs = 10 * 60 * 1000,
     options: {
       onUnreachable?: (info: { consecutiveFailures: number; error: ApiError }) => void;
@@ -367,10 +367,16 @@ export const api = {
     const graceMs = options.unreachableGraceMs ?? 90 * 1000;
     let firstFailureAt: number | null = null;
     let consecutiveFailures = 0;
+    // Exponential backoff on transient failures (4s -> 8s -> 16s -> ...
+    // capped at 30s) so a redeploy or a slow server doesn't get hammered
+    // with hundreds of /api/v1/jobs/{id} requests in a few seconds. Reset
+    // to the base interval after any successful poll.
+    let pollInterval = intervalMs;
 
     while (Date.now() - start < timeoutMs) {
       try {
         const job = await api.getJob(credentials, jobId);
+        pollInterval = intervalMs; // backoff reset after a successful poll
         if (firstFailureAt !== null) {
           firstFailureAt = null;
           consecutiveFailures = 0;
@@ -394,6 +400,10 @@ export const api = {
         if (firstFailureAt === null) firstFailureAt = Date.now();
         options.onUnreachable?.({ consecutiveFailures, error: apiError });
 
+        // Back off harder as failures pile up so a sustained outage isn't
+        // turned into a request flood.
+        pollInterval = Math.min(pollInterval * 2, 30000);
+
         if (Date.now() - firstFailureAt > graceMs) {
           throw new ApiError(
             apiError.status,
@@ -403,7 +413,7 @@ export const api = {
           );
         }
       }
-      await new Promise((r) => setTimeout(r, intervalMs));
+      await new Promise((r) => setTimeout(r, pollInterval));
     }
     throw new ApiError(
       408,

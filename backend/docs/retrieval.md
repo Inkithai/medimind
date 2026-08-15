@@ -16,6 +16,7 @@ Different dimensionalities → after switching backend delete `./chroma_db` and 
 - `CHAT_MODEL = MODEL` — alias to `openai/gpt-oss-120b`; change this not extractor's MODEL if Q&A model should diverge.
 - `CHROMA_DIR` = `CHROMA_DIR` env or `./chroma_db` (Railway volume override `/data/chroma_db`). Note: previously not gitignored — now listed.
 - `EMBEDDING_BATCH_SIZE` = env `EMBEDDING_BATCH_SIZE` or **16**, clamped to 1..256 — the main knob bounding peak indexing memory (only one batch of texts + float vectors is alive at a time). Tuned for a 512 MB container; raise it on a bigger instance to trade memory for speed.
+- `LOCAL_EMBEDDING_BATCH_SIZE` = env `LOCAL_EMBEDDING_BATCH_SIZE` or **2** — the batch the in-process ONNX MiniLM path embeds per call inside `embed_texts`. Far smaller than `EMBEDDING_BATCH_SIZE` because the ONNX session allocates intermediate tensors for every chunk it receives at once; a `gc.collect()` runs between batches so peak RSS stays flat.
 - `ONNX_MODEL_CACHE_DIR` (env, optional) — overrides Chroma's hardcoded `~/.cache/chroma/onnx_models` download path. `backend/Dockerfile` sets it to `/app/.cache/chroma` and runs `prefetch_embedding_model.py` at build time so the ~79 MB archive is baked into the image instead of downloaded during the first upload.
 - `PRELOAD_EMBEDDING_MODEL` (env, default true) — warm the embedder in the API lifespan.
 
@@ -60,7 +61,8 @@ IDs deterministic: `sha256(f"{patient_key}|{source_file}|{chunk_type}|{index}")`
 
 - Empty → `[]`.
 - OpenAI path batches by `EMBEDDING_BATCH_SIZE`.
-- Raises `RuntimeError` wrapped around `OpenAIError` with batch size context — used both for indexing and question embedding.
+- Local ONNX path batches by `LOCAL_EMBEDDING_BATCH_SIZE` (default 2) with `gc.collect()` between batches so intermediate tensor memory is released instead of accumulating across a large record.
+- Raises `RuntimeError` wrapped around `OpenAIError`/embedding error with batch size context — used both for indexing and question embedding.
 
 ### Storage
 

@@ -54,6 +54,16 @@ CHAT_MODEL = MODEL  # reuse the same chat model configured in medical_extractor.
 CHROMA_DIR = os.environ.get("CHROMA_DIR", "./chroma_db")
 
 
+def _batch_size_from_env(name: str, default: int) -> int:
+    """Reads an embedding batch size from the environment, clamped to a
+    sane positive range. Falls back to `default` on missing/garbage input
+    so a bad Render env var can't crash indexing."""
+    try:
+        return max(1, min(256, int(os.environ.get(name, str(default)))))
+    except (TypeError, ValueError):
+        return default
+
+
 def _embedding_batch_size() -> int:
     """Chunks embedded (and upserted) per batch.
 
@@ -62,13 +72,17 @@ def _embedding_batch_size() -> int:
     an ONNX MiniLM batch small enough to survive a 512 MB container; raise
     EMBEDDING_BATCH_SIZE on a bigger instance to trade memory for speed.
     """
-    try:
-        return max(1, min(256, int(os.environ.get("EMBEDDING_BATCH_SIZE", "16"))))
-    except ValueError:
-        return 16
+    return _batch_size_from_env("EMBEDDING_BATCH_SIZE", 16)
 
 
 EMBEDDING_BATCH_SIZE = _embedding_batch_size()
+# The in-process ONNX MiniLM path batches by LOCAL_EMBEDDING_BATCH_SIZE,
+# which defaults much smaller than EMBEDDING_BATCH_SIZE (2 vs 16). The ONNX
+# session allocates intermediate tensors for every chunk it receives at
+# once, so a large local batch is a ~200+ MB spike on the free tier.
+# Keeping it small keeps peak RSS flat regardless of how many chunks a
+# patient has. Override with LOCAL_EMBEDDING_BATCH_SIZE.
+LOCAL_EMBEDDING_BATCH_SIZE = _batch_size_from_env("LOCAL_EMBEDDING_BATCH_SIZE", 2)
 # VECTOR_STORE is read inside vector_store.py; we keep CHROMA_DIR for backward compat
 
 # Groq has no embeddings endpoint. When an OpenAI key is available it
@@ -125,6 +139,14 @@ def _get_local_embedding_function():
     """
     global _local_embedding_fn
     if _local_embedding_fn is None:
+        # Constrain ONNX Runtime threading BEFORE the model loads so it
+        # won't auto-spawn one thread per CPU core. Single-threaded
+        # inference dramatically cuts intermediate-tensor memory (each
+        # extra thread allocates its own workspace), keeping peak RSS
+        # well within the free tier.
+        os.environ.setdefault("OMP_NUM_THREADS", "1")
+        os.environ.setdefault("ONNX_CPU_THREADS", "1")
+        os.environ.setdefault("ORT_NUM_THREADS", "1")
         from chromadb.utils.embedding_functions import ONNXMiniLM_L6_V2
 
         _apply_onnx_cache_dir(ONNXMiniLM_L6_V2)
@@ -337,9 +359,10 @@ def embed_texts(texts: List[str]) -> List[List[float]]:
         return []
 
     if _openai_embedding_client is not None:
+        batch_size = _batch_size_from_env("EMBEDDING_BATCH_SIZE", EMBEDDING_BATCH_SIZE)
         embeddings: List[List[float]] = []
-        for start in range(0, len(texts), EMBEDDING_BATCH_SIZE):
-            batch = texts[start:start + EMBEDDING_BATCH_SIZE]
+        for start in range(0, len(texts), batch_size):
+            batch = texts[start:start + batch_size]
             try:
                 response = _openai_embedding_client.embeddings.create(model=EMBEDDING_MODEL, input=batch)
             except OpenAIError as e:
@@ -349,11 +372,16 @@ def embed_texts(texts: List[str]) -> List[List[float]]:
 
     # Local ONNX path: batch here too. Previously the whole corpus was sent
     # to the model in ONE call, so peak memory scaled with the number of
-    # chunks (tokenised tensors + output vectors all alive at once).
+    # chunks (tokenised tensors + output vectors all alive at once). This
+    # path batches by LOCAL_EMBEDDING_BATCH_SIZE (default 2 — far smaller
+    # than the OpenAI API batch) so ONNX only holds a couple chunks' worth
+    # of intermediate tensors at a time, and forces a garbage collection
+    # between batches so freed tensor memory is handed back instead of
+    # accumulating across a large record.
     embed = _get_local_embedding_function()
     local_embeddings: List[List[float]] = []
-    for start in range(0, len(texts), EMBEDDING_BATCH_SIZE):
-        batch = texts[start:start + EMBEDDING_BATCH_SIZE]
+    for start in range(0, len(texts), LOCAL_EMBEDDING_BATCH_SIZE):
+        batch = texts[start:start + LOCAL_EMBEDDING_BATCH_SIZE]
         try:
             vectors = embed(batch)
         except Exception as e:
@@ -362,7 +390,8 @@ def embed_texts(texts: List[str]) -> List[List[float]]:
             vector.tolist() if hasattr(vector, "tolist") else list(vector)
             for vector in vectors
         )
-        del vectors
+        del vectors, batch
+        gc.collect()
     return local_embeddings
 
 
