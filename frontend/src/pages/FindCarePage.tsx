@@ -273,16 +273,19 @@ export function FindCarePage() {
 
           <label className="text-sm font-semibold text-slate-800">
             {t("care.specialty")}
-            <input
-              value={specialty}
-              onChange={(event) => setSpecialty(event.target.value.slice(0, 80))}
-              onBlur={() => {
-                if (savedLocation) void loadFacilities(savedLocation, searchKind, specialty, availability);
-              }}
-              list="care-specialties"
-              placeholder={t("care.specialtyPlaceholder")}
-              className="mt-2 min-h-[48px] w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-800 outline-none focus:border-brand-500 focus:ring-4 focus:ring-brand-100"
-            />
+            <span className="relative mt-2 block">
+              <input
+                value={specialty}
+                onChange={(event) => setSpecialty(event.target.value.slice(0, 80))}
+                onBlur={() => {
+                  if (savedLocation) void loadFacilities(savedLocation, searchKind, specialty, availability);
+                }}
+                list="care-specialties"
+                placeholder={t("care.specialtyPlaceholder")}
+                className="min-h-[48px] w-full appearance-none rounded-xl border border-slate-300 bg-white py-2.5 pl-4 pr-10 text-sm font-medium text-slate-800 outline-none focus:border-brand-500 focus:ring-4 focus:ring-brand-100"
+              />
+              <SelectChevron className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            </span>
             <datalist id="care-specialties">
               <option value="cardiology" />
               <option value="clinical pharmacist" />
@@ -650,6 +653,14 @@ function distanceLabel(
 ): string {
   if (distanceKm < 1) return `${formatNumber(Math.max(1, Math.round(distanceKm * 1_000)))} m`;
   return `${formatNumber(distanceKm, { maximumFractionDigits: distanceKm < 10 ? 1 : 0 })} km`;
+}
+
+function SelectChevron({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.8} className={className} aria-hidden="true">
+      <path d="m6 8 4 4 4-4" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
 }
 
 function CareIcon({ className }: { className?: string }) {

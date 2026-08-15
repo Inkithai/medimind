@@ -89,7 +89,7 @@ export function QAPage() {
         />
         <CardBody className="space-y-4">
           <form
-            className="flex gap-2"
+            className="flex min-w-0 flex-col gap-2 sm:flex-row"
             onSubmit={(event) => {
               event.preventDefault();
               void ask();
@@ -110,7 +110,7 @@ export function QAPage() {
               }}
               placeholder={t("ask.placeholder")}
               aria-describedby="question-help"
-              className="block w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+              className="block min-w-0 w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
               disabled={loading}
             />
             <button

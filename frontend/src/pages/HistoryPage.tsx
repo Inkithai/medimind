@@ -141,7 +141,7 @@ export function HistoryPage() {
                                     : "No extracted summary")}
                               </p>
                             </div>
-                            <span className="rounded-full bg-slate-50 px-2 py-0.5 text-[11px] text-slate-500 ring-1 ring-slate-200">
+                            <span className="max-w-full shrink-0 truncate rounded-full bg-slate-50 px-2 py-0.5 text-[11px] text-slate-500 ring-1 ring-slate-200 sm:max-w-[45%]" title={visit._source.file}>
                               {visit._source.file}
                             </span>
                           </div>

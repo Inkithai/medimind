@@ -154,22 +154,21 @@ export function Layout() {
         ref={sidebarRef}
         id="primary-sidebar"
         className={classNames(
-          "fixed bottom-0 left-0 top-0 z-30 w-72 transform border-r border-slate-200 bg-white transition-all duration-200",
-          // `self-start` stops the flex row from stretching the sidebar to the
-          // full content height, which would defeat sticky positioning.
-          "lg:sticky lg:bottom-auto lg:top-0 lg:h-screen lg:shrink-0 lg:self-start lg:translate-x-0",
+          "fixed bottom-0 left-0 top-0 z-30 h-dvh w-72 transform border-r border-slate-200 bg-white transition-all duration-200",
+          // Keep the desktop sidebar pinned to the viewport rather than stretching with page content.
+          "lg:sticky lg:bottom-auto lg:top-0 lg:h-dvh lg:shrink-0 lg:self-start lg:translate-x-0",
           sidebarOpen ? "translate-x-0" : "-translate-x-full",
-          collapsed ? "lg:w-[84px]" : "lg:w-72"
+          collapsed ? "lg:w-[76px]" : "lg:w-64"
         )}
         aria-label={t("nav.main")}
         aria-modal={!desktop && sidebarOpen ? true : undefined}
         role={!desktop && sidebarOpen ? "dialog" : undefined}
       >
-        <div className="flex h-full flex-col">
+        <div className="flex h-full min-h-0 flex-col">
           <div
             className={classNames(
-              "flex items-center gap-3 pb-5 pt-6",
-              collapsed ? "px-6 lg:justify-center lg:px-0" : "px-6"
+              "flex h-14 shrink-0 items-center gap-3 px-4",
+              collapsed && "lg:justify-center lg:px-2"
             )}
           >
             <Logo />
@@ -186,11 +185,11 @@ export function Layout() {
 
           {/* Desktop collapse toggle */}
           {desktop && (
-            <div className="hidden px-4 pb-2 lg:block">
+            <div className="hidden shrink-0 px-3 pb-1 lg:block">
               <button
                 type="button"
                 onClick={() => setCollapsed((value) => !value)}
-                className="flex min-h-[40px] w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-500 transition hover:bg-slate-50 hover:text-slate-700"
+                className="flex h-8 w-full items-center justify-center gap-2 rounded-lg px-2 text-xs font-medium text-slate-500 transition hover:bg-slate-50 hover:text-slate-700"
                 aria-label={collapsed ? t("nav.expandSidebar") : t("nav.collapseSidebar")}
                 aria-expanded={!collapsed}
                 title={collapsed ? t("nav.expandSidebar") : t("nav.collapseSidebar")}
@@ -214,12 +213,12 @@ export function Layout() {
           )}
 
           {isConfigured && (
-            <div className="px-4 pb-3">
+            <div className="shrink-0 px-3 pb-2">
               <NavLink
                 to="/upload"
                 onClick={closeSidebar}
                 tabIndex={navInteractive ? undefined : -1}
-                className={classNames("btn-primary w-full", collapsed && "lg:min-w-0 lg:px-0")}
+                className={classNames("btn-primary h-10 min-h-0 w-full px-3 py-0 text-sm", collapsed && "lg:min-w-0 lg:px-0")}
                 title={collapsed ? t("nav.upload") : undefined}
               >
                 <UploadIcon className="h-5 w-5 shrink-0" />
@@ -228,7 +227,7 @@ export function Layout() {
             </div>
           )}
 
-          <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-2 scroll-thin" aria-label={t("nav.main")}>
+          <nav className="min-h-0 flex-1 space-y-0.5 px-3 py-1" aria-label={t("nav.main")}>
             {NAV.map((item, index) => {
               const Icon = item.icon;
               const worksWithoutWorkspace = item.to === "/settings";
@@ -250,7 +249,7 @@ export function Layout() {
                   title={collapsed ? t(item.labelKey) : undefined}
                   className={({ isActive }) =>
                     classNames(
-                      "group flex min-h-[48px] items-center gap-3 rounded-xl px-3 py-2.5 text-base transition",
+                      "group flex h-9 items-center gap-2.5 rounded-lg px-2 text-sm transition",
                       collapsed && "lg:justify-center lg:px-0",
                       disabled
                         ? "cursor-not-allowed text-slate-400"
@@ -262,8 +261,8 @@ export function Layout() {
                 >
                   {({ isActive }) => (
                     <>
-                      <span className={classNames("flex h-8 w-8 shrink-0 items-center justify-center rounded-lg", item.chip, !isActive && "opacity-90")}>
-                        <Icon className="h-[18px] w-[18px]" />
+                      <span className={classNames("flex h-7 w-7 shrink-0 items-center justify-center rounded-md", item.chip, !isActive && "opacity-90")}>
+                        <Icon className="h-4 w-4" />
                       </span>
                       <span className={classNames("min-w-0 flex-1 break-words", collapsed && "lg:hidden")}>{t(item.labelKey)}</span>
                       {isActive && <span className="sr-only">({t("nav.currentPage")})</span>}
@@ -277,14 +276,14 @@ export function Layout() {
           {/* Secondary and informational — deliberately outside the workflow
               nav above, and available with or without a workspace. Collapses
               to an icon on the desktop rail like the other nav items. */}
-          <div className="border-t border-slate-100 px-3 py-2">
+          <div className="shrink-0 border-t border-slate-100 px-3 py-1">
             <NavLink
               to="/about"
               onClick={closeSidebar}
               title={t("about.nav")}
               className={({ isActive }) =>
                 classNames(
-                  "flex min-h-[44px] items-center gap-2.5 rounded-xl px-3 py-2 text-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500",
+                  "flex min-h-[44px] items-center gap-2.5 rounded-lg px-2 text-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500",
                   collapsed && "lg:justify-center lg:px-0",
                   isActive
                     ? "bg-slate-100 font-semibold text-slate-900"
@@ -304,19 +303,19 @@ export function Layout() {
             </NavLink>
           </div>
 
-          <div className={classNames("border-t border-slate-100 p-4", collapsed && "lg:hidden")}>
-            <LanguageSelector className="mb-3 hidden lg:block" />
+          <div className={classNames("shrink-0 border-t border-slate-100 px-3 py-2", collapsed && "lg:hidden")}>
+            <LanguageSelector className="mb-1.5 hidden lg:block" />
             {isConfigured && (
               <>
-                <div className="rounded-xl bg-brand-50 p-4 ring-1 ring-brand-200">
-                  <p className="text-sm font-semibold text-brand-900">{t("nav.privateTitle")}</p>
-                  <p className="mt-1 text-xs leading-relaxed text-brand-900">{t("nav.privateBody")}</p>
+                <div className="rounded-lg bg-brand-50 px-2.5 py-2 ring-1 ring-brand-200">
+                  <p className="text-xs font-semibold leading-4 text-brand-900">{t("nav.privateTitle")}</p>
+                  <p className="text-[11px] leading-4 text-brand-900">{t("nav.privateBody")}</p>
                 </div>
-                <div className="mt-3 grid grid-cols-2 gap-2">
+                <div className="mt-1.5 grid grid-cols-2 gap-1.5">
                   <button
                     type="button"
                     onClick={() => void createNewWorkspace()}
-                    className="min-h-[44px] rounded-xl border border-slate-300 bg-white px-2 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                    className="h-9 rounded-lg border border-slate-300 bg-white px-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
                     title={`${t("nav.newWorkspace")} (${credentials.userId})`}
                   >
                     {t("nav.newWorkspace")}
@@ -327,7 +326,7 @@ export function Layout() {
                       clearCredentials();
                       navigate("/");
                     }}
-                    className="min-h-[44px] rounded-xl border border-slate-300 bg-white px-2 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                    className="h-9 rounded-lg border border-slate-300 bg-white px-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
                   >
                     {t("nav.resetData")}
                   </button>
@@ -351,8 +350,8 @@ export function Layout() {
         />
       )}
 
-      <main id="main-content" tabIndex={-1} className="min-w-0 flex-1 bg-slate-50">
-        <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+      <main id="main-content" tabIndex={-1} className="min-w-0 flex-1 overflow-x-hidden bg-slate-50">
+        <div className="app-content mx-auto min-w-0 max-w-6xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
           <Outlet />
         </div>
       </main>

@@ -40,8 +40,8 @@ export function LabTrendsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
+      <div className="flex min-w-0 flex-col items-start justify-between gap-4 sm:flex-row">
+        <div className="min-w-0">
           <h1 className="page-title">{t("labs.title")}</h1>
           <p className="secondary-text mt-2 max-w-2xl">{t("labs.subtitle")}</p>
         </div>

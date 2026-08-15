@@ -94,7 +94,7 @@ export function MedicinesPage() {
             <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand-50 text-brand-600">
               <PillIcon className="h-5 w-5" />
             </div>
-            <div>
+            <div className="min-w-0">
               <p className="text-sm font-semibold text-slate-900">{t("medicines.title")}</p>
               <p className="text-xs text-slate-600">{t("medicines.description")}</p>
             </div>

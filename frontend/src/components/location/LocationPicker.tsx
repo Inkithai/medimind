@@ -339,8 +339,8 @@ export function LocationPicker({
       aria-labelledby={`${listboxId}-title`}
     >
       <div className="border-b border-slate-100 px-5 py-5 sm:px-7 sm:py-6">
-        <div className="flex items-start justify-between gap-4">
-          <div>
+        <div className="flex min-w-0 items-start justify-between gap-4">
+          <div className="min-w-0">
             <p className="mb-2 text-xs font-bold uppercase tracking-[0.14em] text-brand-600">
               {step === "search" ? t("location.stepSearch") : t("location.stepConfirm")}
             </p>
