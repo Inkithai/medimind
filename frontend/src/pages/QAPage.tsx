@@ -11,8 +11,8 @@ import { useAuth } from "../context/AuthContext";
 import type { QAResponse } from "../types/api";
 
 const SUGGESTIONS = [
-  "What medications am I currently taking?",
-  "What were my most recent lab results?",
+  "Which medications are listed in my latest record?",
+  "Has my glucose changed over time?",
   "Are there any allergies documented in my records?",
   "What did my doctor note at my last visit?",
 ];

@@ -42,6 +42,7 @@ from typing import Any, Dict, List, Optional
 from openai import OpenAI, OpenAIError
 
 from medical_extractor import client, MODEL, _completion_resilient, _chat_completion
+from question_routing import assess_evidence, classify_question, route_chunks
 import vector_store  # abstraction over Chroma (local) and Supabase (no volume)
 
 logger = logging.getLogger("retrieval")
@@ -144,9 +145,10 @@ def build_chunks_from_timeline(patient_key: str, timeline: Dict[str, Any]) -> Li
         {"id": str, "text": str, "metadata": {...}}
 
     One chunk is produced per medication entry, per lab result, per visit's
-    clinical_notes (when present), and one chunk lists all known_allergies
-    together. Chunk IDs are deterministic hashes so re-running this on the
-    same documents upserts instead of duplicating.
+    clinical_notes (when present), and per visit with documented allergies.
+    Keeping allergy chunks visit-scoped preserves source provenance. Chunk
+    IDs are deterministic hashes so re-running this on the same documents
+    upserts instead of duplicating.
     """
     chunks: List[Dict[str, Any]] = []
 
@@ -189,11 +191,42 @@ def build_chunks_from_timeline(patient_key: str, timeline: Dict[str, Any]) -> Li
             },
         })
 
-    allergies = timeline.get("known_allergies") or []
-    if allergies:
+    # Preserve allergy provenance per visit instead of creating one global
+    # source-less chunk. This lets Q&A validate and display a real citation.
+    allergy_chunk_count = 0
+    represented_allergies = set()
+    for visit in timeline.get("visits", []):
+        allergies = visit.get("allergies_noted") or []
+        if not allergies:
+            continue
+        represented_allergies.update(allergy.lower() for allergy in allergies if isinstance(allergy, str))
+        source_file = visit.get("_source", {}).get("file")
         chunks.append({
-            "id": _chunk_id(patient_key, None, "allergy", 0),
-            "text": _allergy_chunk_text(allergies),
+            "id": _chunk_id(patient_key, source_file, "allergy", allergy_chunk_count),
+            "text": (
+                _allergy_chunk_text(allergies)
+                + f" Recorded on {visit.get('date') or 'an unknown date'} "
+                + f"(source: {source_file or 'unknown file'})."
+            ),
+            "metadata": {
+                "patient_key": patient_key,
+                "date": visit.get("date") or "",
+                "source_file": source_file or "",
+                "chunk_type": "allergy",
+            },
+        })
+        allergy_chunk_count += 1
+
+    # Backward compatibility for older/synthetic timelines that have only
+    # the aggregate known_allergies field and no visit-level provenance.
+    unrepresented = [
+        allergy for allergy in (timeline.get("known_allergies") or [])
+        if isinstance(allergy, str) and allergy.lower() not in represented_allergies
+    ]
+    if unrepresented:
+        chunks.append({
+            "id": _chunk_id(patient_key, None, "allergy", allergy_chunk_count),
+            "text": _allergy_chunk_text(unrepresented),
             "metadata": {
                 "patient_key": patient_key,
                 "date": "",
@@ -347,6 +380,13 @@ Rules:
   patient consult a doctor or pharmacist, and set
   recommend_professional_consult to true.
 - Cite the date and source_file of every chunk you rely on in "sources".
+- The prompt includes an evidence-coverage assessment. If it is "limited" or
+  "insufficient", state the limitation plainly and do not fill gaps with
+  general medical knowledge. A trend/change question with only one dated
+  result cannot establish a trend.
+- A historical medication mention is not proof that the patient currently
+  takes it. Use wording such as "the record dated ... lists" unless the
+  provided context explicitly establishes current use.
 - Respond with STRICT JSON only, matching the required schema.
 
 CONFIDENCE SCORING — "confidence" reflects how directly the retrieved
@@ -414,6 +454,84 @@ _NO_INDEXABLE_CONTENT_ANSWER = {
 }
 
 
+def _with_evidence_metadata(
+    answer: Dict[str, Any], intent: Dict[str, Any], evidence: Dict[str, Any]
+) -> Dict[str, Any]:
+    result = dict(answer)
+    result["question_intent"] = {
+        "key": intent["key"],
+        "label": intent["label"],
+        "retrieval_types": intent["chunk_types"],
+        "safety_sensitive": bool(intent.get("safety_sensitive")),
+    }
+    result["evidence_sufficiency"] = evidence
+    return result
+
+
+def _no_matching_evidence_answer(intent: Dict[str, Any]) -> Dict[str, Any]:
+    evidence = assess_evidence(intent, [])
+    return _with_evidence_metadata({
+        "answer": (
+            f"I don't have enough information — I couldn't find any "
+            f"{intent['label'].lower()} evidence in the uploaded records."
+        ),
+        "confidence": 0.0,
+        "sources": [],
+        "recommend_professional_consult": bool(intent.get("safety_sensitive")),
+    }, intent, evidence)
+
+
+def _finalize_answer(
+    answer: Dict[str, Any],
+    intent: Dict[str, Any],
+    evidence: Dict[str, Any],
+    metadatas: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Validate citations and cap confidence when evidence coverage is thin."""
+    valid_sources = {
+        (str(meta.get("date") or ""), str(meta.get("source_file") or ""))
+        for meta in metadatas
+    }
+    sources_by_file: Dict[str, List[tuple]] = {}
+    for marker in valid_sources:
+        if marker[1]:
+            sources_by_file.setdefault(marker[1], []).append(marker)
+    cited = []
+    seen = set()
+    for source in answer.get("sources", []) if isinstance(answer.get("sources"), list) else []:
+        if not isinstance(source, dict):
+            continue
+        marker = (str(source.get("date") or ""), str(source.get("source_file") or ""))
+        # Exact match is ideal. If the model reformatted a date, accept a
+        # uniquely retrieved source_file and restore the canonical metadata
+        # date rather than discarding an otherwise valid citation.
+        if marker not in valid_sources and marker[1] and len(sources_by_file.get(marker[1], [])) == 1:
+            marker = sources_by_file[marker[1]][0]
+        if marker in valid_sources and marker not in seen:
+            cited.append({"date": marker[0], "source_file": marker[1]})
+            seen.add(marker)
+    answer = dict(answer)
+    answer["sources"] = cited
+
+    evidence = dict(evidence)
+    if cited:
+        evidence["citation_validation"] = "passed"
+    else:
+        evidence["citation_validation"] = "no_valid_citations"
+        if evidence["level"] == "sufficient":
+            evidence["level"] = "limited"
+        evidence["reason"] += " The generated answer did not include a valid retrieved-source citation."
+
+    confidence = answer.get("confidence", 0.0)
+    confidence = float(confidence) if isinstance(confidence, (int, float)) else 0.0
+    cap = {"insufficient": 0.35, "limited": 0.65, "sufficient": 1.0}.get(evidence["level"], 0.65)
+    answer["confidence"] = round(max(0.0, min(confidence, cap)), 2)
+    answer["recommend_professional_consult"] = bool(
+        answer.get("recommend_professional_consult") or intent.get("safety_sensitive")
+    )
+    return _with_evidence_metadata(answer, intent, evidence)
+
+
 def _persisted_documents(patient_key: str) -> Optional[List[Dict[str, Any]]]:
     """Returns the patient's extracted documents from the persistent DB, or
     None if they can't be confirmed (unconfigured Supabase, offline test
@@ -476,9 +594,10 @@ def answer_question(
         the answering LLM as "the question asked". Defaults to `question`
         when omitted, so existing single-shot callers are unaffected.
 
-    Returns the parsed JSON:
+    Returns the parsed JSON plus server-verified retrieval metadata:
         {"answer": str, "confidence": float, "sources": [{"date", "source_file"}],
-         "recommend_professional_consult": bool}
+         "recommend_professional_consult": bool, "question_intent": {...},
+         "evidence_sufficiency": {...}}
 
     Raises ValueError for a missing patient_key/question, RuntimeError if
     the embedding or chat call fails (including VectorStoreSchemaError when
@@ -501,37 +620,48 @@ def answer_question(
     effective_retrieval_query = (
         retrieval_query if retrieval_query and retrieval_query.strip() else question
     )
+    intent = classify_question(effective_retrieval_query)
+
+    # Specialized intents over-fetch before filtering by structured chunk
+    # type. This keeps vector rank within the relevant evidence category
+    # while preventing an allergy/lab question from being answered using a
+    # semantically nearby but unrelated medication/note chunk.
+    requested_top_k = max(1, top_k)
 
     # Use vector_store abstraction when supabase, else Chroma directly (for test mocks)
     if vector_store.get_store_name() == "supabase":
-        if vector_store.count(patient_key) == 0:
+        store_count = vector_store.count(patient_key)
+        if store_count == 0:
             # Empty index + persisted documents => the index is stale/missing
             # (ephemeral Chroma dir wiped by a redeploy, chunks table freshly
             # created, background job crashed before indexing). Rebuild it from
             # the patient's saved records so the question can still be answered.
             reindexed = _reindex_from_persisted_documents(patient_key)
             if reindexed is None:
-                return dict(_NO_INFO_ANSWER)
+                return _with_evidence_metadata(dict(_NO_INFO_ANSWER), intent, assess_evidence(intent, []))
             if reindexed == 0:
-                return dict(_NO_INDEXABLE_CONTENT_ANSWER)
+                return _with_evidence_metadata(dict(_NO_INDEXABLE_CONTENT_ANSWER), intent, assess_evidence(intent, []))
+            store_count = reindexed
         query_embedding = embed_texts([effective_retrieval_query])[0]
-        _, docs, metadatas = vector_store.query(patient_key, query_embedding, top_k)
+        fetch_count = min(store_count, max(requested_top_k * 4, requested_top_k))
+        _, docs, metadatas = vector_store.query(patient_key, query_embedding, fetch_count)
     else:
         collection = _get_patient_collection(patient_key, create=False)
         if collection is None or collection.count() == 0:
             reindexed = _reindex_from_persisted_documents(patient_key)
             if reindexed is None:
-                return dict(_NO_INFO_ANSWER)
+                return _with_evidence_metadata(dict(_NO_INFO_ANSWER), intent, assess_evidence(intent, []))
             if reindexed == 0:
-                return dict(_NO_INDEXABLE_CONTENT_ANSWER)
+                return _with_evidence_metadata(dict(_NO_INDEXABLE_CONTENT_ANSWER), intent, assess_evidence(intent, []))
             # Re-fetch now that the re-index has populated the store.
             collection = _get_patient_collection(patient_key, create=False)
             if collection is None or collection.count() == 0:
-                return dict(_NO_INFO_ANSWER)
+                return _with_evidence_metadata(dict(_NO_INFO_ANSWER), intent, assess_evidence(intent, []))
         query_embedding = embed_texts([effective_retrieval_query])[0]
+        fetch_count = min(collection.count(), max(requested_top_k * 4, requested_top_k))
         results = collection.query(
             query_embeddings=[query_embedding],
-            n_results=min(top_k, collection.count()),
+            n_results=fetch_count,
         )
         docs = (results.get("documents") or [[]])[0]
         metadatas = (results.get("metadatas") or [[]])[0]
@@ -541,8 +671,13 @@ def answer_question(
         # graceful fallback that does not lie: distinguish "no records were
         # ever uploaded" from "records exist but nothing was retrieved".
         if _persisted_documents(patient_key):
-            return dict(_NO_INDEXABLE_CONTENT_ANSWER)
-        return dict(_NO_INFO_ANSWER)
+            return _with_evidence_metadata(dict(_NO_INDEXABLE_CONTENT_ANSWER), intent, assess_evidence(intent, []))
+        return _with_evidence_metadata(dict(_NO_INFO_ANSWER), intent, assess_evidence(intent, []))
+
+    docs, metadatas = route_chunks(docs, metadatas, intent, requested_top_k)
+    if not docs:
+        return _no_matching_evidence_answer(intent)
+    evidence = assess_evidence(intent, metadatas)
 
     context_blocks = [
         f"[date: {meta.get('date') or 'unknown'} | source_file: {meta.get('source_file') or 'unknown'} "
@@ -552,6 +687,8 @@ def answer_question(
     context_str = "\n\n".join(context_blocks)
 
     user_content = (
+        f"Question intent: {intent['label']} ({intent['key']})\n"
+        f"Evidence coverage: {evidence['level']} — {evidence['reason']}\n\n"
         f"Retrieved patient records:\n\n{context_str}\n\nQuestion: {question}"
     )
     # Reuse the resilient completion runner so reasoning models'
@@ -589,6 +726,7 @@ def answer_question(
     # to plain-text mode) doesn't blow up the Q&A endpoint.
     from medical_extractor import _parse_json_object
     try:
-        return _parse_json_object(raw)
+        parsed = _parse_json_object(raw)
+        return _finalize_answer(parsed, intent, evidence, metadatas)
     except ValueError as e:
         raise RuntimeError(f"Chat model returned unparseable output: {e}") from e

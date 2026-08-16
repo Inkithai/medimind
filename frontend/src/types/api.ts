@@ -293,6 +293,21 @@ export interface QAResponse {
   confidence: number;
   sources: QASource[];
   recommend_professional_consult: boolean;
+  question_intent?: {
+    key: string;
+    label: string;
+    retrieval_types: string[];
+    safety_sensitive: boolean;
+  };
+  evidence_sufficiency?: {
+    level: "sufficient" | "limited" | "insufficient";
+    reason: string;
+    retrieved_chunks: number;
+    distinct_sources: number;
+    expected_minimum: number;
+    evidence_types: string[];
+    citation_validation?: "passed" | "no_valid_citations";
+  };
   rewritten_query?: string;
 }
 

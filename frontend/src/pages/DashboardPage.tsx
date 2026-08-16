@@ -351,8 +351,8 @@ export function DashboardPage() {
               <h3 className="card-title text-white">Ask about your records</h3>
             </div>
             <p className="mt-3 text-sm leading-relaxed text-brand-100">
-              “What medications am I currently taking?” — answers come only from your documents,
-              with the source file and page cited.
+              “Has my glucose changed over time?” — MediMind routes the question to matching evidence,
+              checks whether enough dated results exist, and cites each source.
             </p>
             <Link
               to="/ask"

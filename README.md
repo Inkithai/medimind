@@ -48,7 +48,7 @@ Vision+text use the same Gemini model; Groq needs two. All three are OpenAI-comp
 | `medical_extractor.py` | `LLM_PROVIDER` layer, vision / text extraction, patient grouping, timeline creation, safety LLM call plus deterministic duplicate detection, local CLI persistence |
 | `document_filter.py` | Fast post-extraction filter for non-medical files (no extra LLM call, reuses `document_type` + clinical fields) |
 | `lab_trends.py` | Pure Python trend engine — parses dates/values, computes direction, detects range crossings, flags approaching thresholds |
-| `retrieval.py` | Chunks timeline into Medication / Lab / ClinicalNote / Allergy texts, embeds (OpenAI `text-embedding-3-small` if set else local ONNX MiniLM), indexes via `vector_store` abstraction, single-shot Q&A |
+| `retrieval.py` | Chunks timelines into source-linked structured evidence, embeds and indexes through `vector_store`, then runs intent-routed Q&A with evidence-sufficiency gates and citation validation |
 | `vector_store.py` | Abstraction over Chroma (`VECTOR_STORE=chroma`, local `CHROMA_DIR`) and Supabase `chunks` table (`VECTOR_STORE=supabase`, no volume, brute-force cosine) |
 | `jobs.py` | Thread-safe parent jobs with independent per-file progress (`queued → reading → extracting → saving → ready/failed`) and optional Supabase persistence |
 | `conversation.py` | In-memory conversation store, rewrites follow-ups like “was that safe?” into self-contained retrieval queries, summarizes older turns to keep context bounded |
@@ -229,7 +229,9 @@ X-User-Id: <user_id>
 #### Single-shot Q&A
 `POST /api/v1/qa {question, chat_history?, top_k}` → `{answer, confidence, sources[], recommend_professional_consult}`
 
-Q&A self-heals: if the patient's vector index is empty but their documents are saved in the DB (e.g. a local `chroma_db` wiped by a redeploy with no volume, or a Supabase `chunks` table migrated after the last upload), the index is rebuilt from those saved documents on the next question, so it answers normally instead of reporting "no indexed records". If `VECTOR_STORE=supabase` and the `chunks` table is missing entirely, Q&A returns 502 with instructions to run `supabase_schema.sql` rather than a misleading empty answer.
+Q&A classifies each question as medication, medication safety, lab result, lab trend, allergy, timeline, record change, or general. Vector candidates are filtered to compatible structured evidence; trend/change questions require at least two distinct dated source entries. With no matching evidence, MediMind responds without calling the answer model. Returned citations are validated against retrieved metadata, and limited/uncited answers have confidence capped.
+
+Q&A also self-heals: if the patient's vector index is empty but their documents are saved in the DB (e.g. a local `chroma_db` wiped by a redeploy with no volume, or a Supabase `chunks` table migrated after the last upload), the index is rebuilt from those saved documents on the next question, so it answers normally instead of reporting "no indexed records". If `VECTOR_STORE=supabase` and the `chunks` table is missing entirely, Q&A returns 502 with instructions to run `supabase_schema.sql` rather than a misleading empty answer.
 
 #### Conversations
 `POST /api/v1/sessions` → `{user_id, session_id}`  
