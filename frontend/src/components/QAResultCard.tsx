@@ -138,22 +138,36 @@ export function QAResultCard({
                 )}
               </>
             );
+            const sourceTarget = `/documents?document=${encodeURIComponent(src.document_id || "")}${src.evidence_id ? `&evidence=${encodeURIComponent(src.evidence_id)}` : ""}`;
+            const rowClass = "flex min-h-[44px] w-full items-center gap-2 rounded-md bg-slate-50 px-3 py-2 text-left text-xs text-slate-600 transition hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500";
             return (
-              <li key={src.source_file}>
+              <li key={src.source_file} className="rounded-md bg-slate-50">
                 {onOpenSource ? (
                   <button
                     type="button"
                     onClick={() => onOpenSource(src)}
                     aria-label={t("ask.openSource", { file: src.source_file })}
-                    className="flex min-h-[44px] w-full items-center gap-2 rounded-md bg-slate-50 px-3 py-2 text-left text-xs text-slate-600 transition hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+                    className={rowClass}
                   >
                     {label}
                     <span className="shrink-0 text-brand-600" aria-hidden="true">→</span>
                   </button>
+                ) : src.document_id ? (
+                  <Link to={sourceTarget} className={rowClass}>
+                    {label}
+                    <span className="shrink-0 font-semibold text-brand-700">
+                      {src.evidence_id ? "Open highlight →" : "Open source →"}
+                    </span>
+                  </Link>
                 ) : (
-                  <div className="flex items-center gap-2 rounded-md bg-slate-50 px-3 py-1.5 text-xs text-slate-600">
+                  <div className="flex items-center gap-2 rounded-md px-3 py-2 text-xs text-slate-600">
                     {label}
                   </div>
+                )}
+                {src.quote && (
+                  <blockquote className="mx-3 mb-2 border-l-2 border-amber-400 pl-2 text-xs text-slate-600">
+                    “{src.quote}”
+                  </blockquote>
                 )}
               </li>
             );

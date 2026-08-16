@@ -52,6 +52,8 @@ from openai import (
 from dotenv import load_dotenv
 import logging
 
+from evidence import first_evidence, locate_pdf_text_evidence, normalize_document_evidence
+
 load_dotenv(override=True)
 
 logger = logging.getLogger("medical_extractor")
@@ -1010,7 +1012,7 @@ def _format_ladder(
         # Compact JSON materially reduces prompt tokens on the 8K TPM tier.
         f"{json.dumps(schema, separators=(',', ':'))}\n"
         "Example of the required shape (illustrative values, adapt to the actual document):\n"
-        '{\n  "document_type": "prescription",\n  "date": "2024-03-15",\n  "provider_or_doctor": "Dr. Smith",\n  "patient_name": "John Doe",\n  "medications": [],\n  "lab_results": [],\n  "allergies_noted": [],\n  "diagnoses_or_conditions": [],\n  "clinical_notes": null,\n  "illegible_or_low_confidence_fields": [],\n  "overall_confidence": 0.92\n}\n'
+        '{\n  "document_type": "prescription",\n  "date": "2024-03-15",\n  "provider_or_doctor": "Dr. Smith",\n  "patient_name": "John Doe",\n  "medications": [],\n  "lab_results": [],\n  "allergies_noted": [],\n  "diagnoses_or_conditions": [],\n  "clinical_notes": null,\n  "field_evidence": {"date": [], "provider_or_doctor": [], "patient_name": [], "allergies_noted": [], "clinical_notes": []},\n  "illegible_or_low_confidence_fields": [],\n  "overall_confidence": 0.92\n}\n'
     )
     if model in _STRICT_SCHEMA_MODELS:
         return [
@@ -1790,6 +1792,19 @@ the same regardless of what language or units each was printed in:
   into the medication's confidence the same way an inferred brand-to-
   generic mapping is.
 
+PAGE-LEVEL EVIDENCE — every extracted fact must point back to the document:
+- Include a short VERBATIM quote for every date, identity, provider, allergy,
+  clinical note, medication, and lab result. Never paraphrase the quote.
+- `page` is 1-based. Text PDFs contain explicit `--- Page N ---` markers;
+  use that N. For a single image use page 1.
+- For image input, return `bbox` as [left, top, right, bottom] in a 0..1000
+  coordinate frame around the smallest readable line/row supporting the
+  fact. For text input, set bbox to null; deterministic PDF text search will
+  calculate the exact rectangle after extraction.
+- If a fact is inferred rather than printed (for example a generic ingredient
+  inferred from a brand), cite the printed brand line and lower evidence
+  confidence. If no supporting text exists, use an empty evidence array.
+
 Rules:
 - Extract diagnoses_or_conditions only when the document explicitly names
   them. Preserve the printed wording; do not infer a diagnosis from a test,
@@ -1800,8 +1815,33 @@ Rules:
 - Do not provide medical advice or diagnosis — extraction only.
 """
 
+# One supporting region. Vision returns 0..1000 coordinates which are
+# normalized to 0..1 after parsing; digital PDFs return null and are resolved
+# exactly with PyMuPDF text search against the original page.
+EVIDENCE_REGION_JSON_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "page": {"type": "integer", "minimum": 1},
+        "quote": {"type": "string"},
+        "bbox": {
+            "type": ["array", "null"],
+            "items": {"type": "number", "minimum": 0, "maximum": 1000},
+            "minItems": 4,
+            "maxItems": 4,
+        },
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+    },
+    "required": ["page", "quote", "bbox", "confidence"],
+    "additionalProperties": False,
+}
+
+EVIDENCE_LIST_JSON_SCHEMA = {
+    "type": "array",
+    "items": EVIDENCE_REGION_JSON_SCHEMA,
+}
+
 # Strict JSON Schema (OpenAI Structured Outputs) — guarantees every field,
-# including "ingredients", is always present in the response.
+# including evidence links, is always present in the response.
 EXTRACTION_JSON_SCHEMA = {
     "type": "object",
     "properties": {
@@ -1827,11 +1867,12 @@ EXTRACTION_JSON_SCHEMA = {
                     "frequency_per_day": {"type": ["number", "null"]},
                     "is_as_needed": {"type": "boolean"},
                     "confidence": {"type": "number"},
+                    "evidence": EVIDENCE_LIST_JSON_SCHEMA,
                 },
                 "required": [
                     "name", "ingredients", "dosage", "frequency", "duration",
                     "dosage_value", "dosage_unit", "frequency_per_day", "is_as_needed",
-                    "confidence",
+                    "confidence", "evidence",
                 ],
                 "additionalProperties": False,
             },
@@ -1847,21 +1888,37 @@ EXTRACTION_JSON_SCHEMA = {
                     "reference_range": {"type": ["string", "null"]},
                     "flag": {"type": "string", "enum": ["normal", "high", "low", "unknown"]},
                     "confidence": {"type": "number"},
+                    "evidence": EVIDENCE_LIST_JSON_SCHEMA,
                 },
-                "required": ["test_name", "value", "unit", "reference_range", "flag", "confidence"],
+                "required": ["test_name", "value", "unit", "reference_range", "flag", "confidence", "evidence"],
                 "additionalProperties": False,
             },
         },
         "allergies_noted": {"type": "array", "items": {"type": "string"}},
         "diagnoses_or_conditions": {"type": "array", "items": {"type": "string"}},
         "clinical_notes": {"type": ["string", "null"]},
+        "field_evidence": {
+            "type": "object",
+            "properties": {
+                "date": EVIDENCE_LIST_JSON_SCHEMA,
+                "provider_or_doctor": EVIDENCE_LIST_JSON_SCHEMA,
+                "patient_name": EVIDENCE_LIST_JSON_SCHEMA,
+                "allergies_noted": EVIDENCE_LIST_JSON_SCHEMA,
+                "clinical_notes": EVIDENCE_LIST_JSON_SCHEMA,
+            },
+            "required": [
+                "date", "provider_or_doctor", "patient_name",
+                "allergies_noted", "clinical_notes",
+            ],
+            "additionalProperties": False,
+        },
         "illegible_or_low_confidence_fields": {"type": "array", "items": {"type": "string"}},
         "overall_confidence": {"type": "number"},
     },
     "required": [
         "document_type", "date", "provider_or_doctor", "patient_name",
         "medications", "lab_results", "allergies_noted", "diagnoses_or_conditions",
-        "clinical_notes", "illegible_or_low_confidence_fields", "overall_confidence",
+        "clinical_notes", "field_evidence", "illegible_or_low_confidence_fields", "overall_confidence",
     ],
     "additionalProperties": False,
 }
@@ -2207,6 +2264,14 @@ def process_document(
             assert_text_looks_medical(text, path.name)
             _emit_document_progress(progress_callback, "extracting", "Finding medical details in the text")
             result = extract_from_text(text, model=model)
+            result = normalize_document_evidence(result, default_page=1, vision=False)
+            try:
+                result = locate_pdf_text_evidence(file_path, result)
+            except Exception as exc:
+                # Evidence enrichment must never discard an otherwise valid
+                # extraction. Keep its page/quote fallback if PDF geometry
+                # cannot be resolved (encrypted/irregular PDFs, etc.).
+                logger.warning("Could not locate PDF evidence rectangles for '%s': %s", path.name, exc)
             result["_source"] = {"file": path.name, "method": "text_layer"}
             return result
 
@@ -2221,6 +2286,7 @@ def process_document(
                 )
                 res = extract_from_image(img, model=vision_model)
                 res = _apply_confidence_ceiling(res, VISION_OCR_CONFIDENCE_CEILING)
+                res = normalize_document_evidence(res, default_page=i + 1, vision=True)
                 res["_source"] = {
                     "file": path.name,
                     "method": "vision_ocr",
@@ -2276,7 +2342,8 @@ def process_document(
         _emit_document_progress(progress_callback, "extracting", "Finding medical details in the image")
         result = extract_from_image(img, model=vision_model)
         result = _apply_confidence_ceiling(result, VISION_OCR_CONFIDENCE_CEILING)
-        result["_source"] = {"file": path.name, "method": "vision_ocr"}
+        result = normalize_document_evidence(result, default_page=1, vision=True)
+        result["_source"] = {"file": path.name, "method": "vision_ocr", "page": 1}
         return result
 
 
@@ -2516,6 +2583,7 @@ def build_patient_timeline(raw_results: List[Dict[str, Any]]) -> Dict[str, Any]:
     all_lab_results = []
     all_diagnoses = []
     all_allergies = set()
+    allergy_evidence = []
     trusted_visits = []
 
     for d in docs_sorted:
@@ -2538,11 +2606,12 @@ def build_patient_timeline(raw_results: List[Dict[str, Any]]) -> Dict[str, Any]:
         for index, med in enumerate(d.get("medications", [])):
             if not isinstance(med, dict) or (med.get("_trust") or {}).get("quarantined"):
                 continue
+            medication_evidence = first_evidence(med) or {}
             all_medications.append({
                 **med,
                 "date": visit_date,
                 "source_file": source_file,
-                "source_page": source_page,
+                "source_page": medication_evidence.get("page") or source_page,
                 "source_method": source.get("method"),
                 "document_id": doc_id,
                 "fact_path": f"/medications/{index}",
@@ -2552,11 +2621,12 @@ def build_patient_timeline(raw_results: List[Dict[str, Any]]) -> Dict[str, Any]:
         for index, lab in enumerate(d.get("lab_results", [])):
             if not isinstance(lab, dict) or (lab.get("_trust") or {}).get("quarantined"):
                 continue
+            lab_evidence = first_evidence(lab) or {}
             all_lab_results.append({
                 **lab,
                 "date": visit_date,
                 "source_file": source_file,
-                "source_page": source_page,
+                "source_page": lab_evidence.get("page") or source_page,
                 "source_method": source.get("method"),
                 "document_id": doc_id,
                 "fact_path": f"/lab_results/{index}",
@@ -2573,8 +2643,20 @@ def build_patient_timeline(raw_results: List[Dict[str, Any]]) -> Dict[str, Any]:
                     "document_id": doc_id,
                 })
 
+        allergy_regions = (d.get("field_evidence") or {}).get("allergies_noted") or []
         for allergy in d.get("allergies_noted", []) or []:
             all_allergies.add(allergy)
+            allergy_evidence.append({
+                "allergy": allergy,
+                "document_id": doc_id,
+                "date": visit_date,
+                "source_file": source_file,
+                "source_method": source.get("method"),
+                "document_type": d.get("document_type"),
+                "confidence": d.get("overall_confidence"),
+                "evidence": copy.deepcopy(allergy_regions),
+                "_trust": copy.deepcopy(d.get("_trust")),
+            })
 
     return {
         "visits": trusted_visits,
@@ -2583,6 +2665,7 @@ def build_patient_timeline(raw_results: List[Dict[str, Any]]) -> Dict[str, Any]:
         "lab_results_timeline": all_lab_results,
         "diagnoses_timeline": all_diagnoses,
         "known_allergies": sorted(all_allergies),
+        "allergy_evidence": allergy_evidence,
     }
 
 

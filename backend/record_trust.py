@@ -123,6 +123,19 @@ def set_path(document: Dict[str, Any], path: str, value: Any) -> None:
     values[index][field] = copy.deepcopy(value)
 
 
+def _evidence_for_path(document: Dict[str, Any], path: str) -> List[Dict[str, Any]]:
+    if path.startswith("/medications/") or path.startswith("/lab_results/"):
+        parts = path.strip("/").split("/")
+        try:
+            item = document[parts[0]][int(parts[1])]
+        except (KeyError, IndexError, TypeError, ValueError):
+            return []
+        return [region for region in (item.get("evidence") or []) if isinstance(region, dict)]
+    key = path.strip("/").split("/")[0]
+    fields = document.get("field_evidence") or {}
+    return [region for region in (fields.get(key) or []) if isinstance(region, dict)]
+
+
 def _base_trust(status: str = "extracted") -> Dict[str, Any]:
     return {
         "status": status,
@@ -173,6 +186,10 @@ def apply_correction_events(
             correction_info["event_ids"].append(event_id)
         correction_info["last_corrected_at"] = event.get("created_at")
         _merge_trust(doc, status="user_corrected")
+        for region in _evidence_for_path(doc, path):
+            region["verification_status"] = "user_corrected"
+            region["original_extracted_value"] = copy.deepcopy(event.get("original_value"))
+            region["corrected_value"] = copy.deepcopy(event.get("corrected_value"))
 
         collection, index, _field = validate_correction_path(path)
         if index is not None:
@@ -446,6 +463,9 @@ def _mark_fact(doc: Dict[str, Any], path: str, conflict: Dict[str, Any], quarant
             conflict_ids=[conflict_id],
             reasons=[reason],
         )
+    for region in _evidence_for_path(doc, path):
+        region["verification_status"] = "quarantined" if quarantined else "source_confirmed"
+        region["conflict_id"] = conflict_id
 
 
 def apply_conflict_quarantine(

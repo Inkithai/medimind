@@ -35,6 +35,7 @@ from typing import Any, Dict, List, Optional, Sequence
 
 from supabase import Client, create_client
 
+from evidence import normalize_document_evidence
 from record_trust import apply_correction_events
 
 _client: Optional[Client] = None
@@ -154,6 +155,12 @@ def load_documents(user_id: str, include_corrections: bool = True) -> List[Dict[
     for row in response.data or []:
         data = dict(row["data"] or {})
         data.setdefault("_document_id", f"db:{row['id']}")
+        source = data.get("_source") if isinstance(data.get("_source"), dict) else {}
+        data = normalize_document_evidence(
+            data,
+            default_page=int(source.get("page") or 1),
+            vision=source.get("method") == "vision_ocr",
+        )
         docs.append({**data, "user_id": row["user_id"], "uploaded_at": row["uploaded_at"]})
     if include_corrections and docs:
         docs = apply_correction_events(docs, load_correction_events(user_id))

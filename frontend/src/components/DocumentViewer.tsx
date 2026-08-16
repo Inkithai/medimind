@@ -1,22 +1,26 @@
-import { forwardRef, useId, useRef, useState, type KeyboardEvent } from "react";
+import { forwardRef, useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import { useI18n } from "../i18n/I18nContext";
-import type { Visit } from "../types/api";
+import type { EvidenceRegion, Visit } from "../types/api";
 import { documentTypeLabel, formatConfidence, formatDate } from "../utils/format";
 import { StatusBadge } from "./StatusBadge";
 import { BeakerIcon, FileIcon, LinkIcon, PillIcon } from "./icons";
 import { CorrectionEditor } from "./CorrectionEditor";
+import { EvidenceViewer } from "./EvidenceViewer";
 
 export function DocumentViewer({
   visit,
   onClose,
   onUpdated,
+  initialEvidenceId,
 }: {
   visit: Visit;
   onClose?: () => void;
   onUpdated?: () => void;
+  initialEvidenceId?: string | null;
 }) {
   const { t } = useI18n();
   const [tab, setTab] = useState<"original" | "structured" | "correct">("structured");
+  const [selectedEvidence, setSelectedEvidence] = useState<EvidenceRegion | null>(null);
   const titleId = useId();
   const originalTabId = useId();
   const structuredTabId = useId();
@@ -25,6 +29,18 @@ export function DocumentViewer({
   const structuredPanelId = useId();
   const correctPanelId = useId();
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
+
+  useEffect(() => {
+    const linkedEvidence = initialEvidenceId ? findEvidence(visit, initialEvidenceId) : null;
+    setSelectedEvidence(linkedEvidence);
+    setTab(linkedEvidence ? "original" : "structured");
+  }, [visit, initialEvidenceId]);
+
+  function showEvidence(evidence?: EvidenceRegion) {
+    if (!evidence) return;
+    setSelectedEvidence(evidence);
+    setTab("original");
+  }
 
   const onTabKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight" && event.key !== "Home" && event.key !== "End") return;
@@ -101,19 +117,7 @@ export function DocumentViewer({
 
       {tab === "original" ? (
         <div id={originalPanelId} role="tabpanel" aria-labelledby={originalTabId} tabIndex={0} className="p-4">
-          {visit.document_url ? (
-            <div className="overflow-hidden rounded-lg border border-slate-200 bg-slate-50">
-              {visit._source.method === "text_layer" || visit.document_url.toLowerCase().split("?")[0].endsWith(".pdf") ? (
-                <iframe src={visit.document_url} title={t("viewer.originalDocument")} className="h-[600px] w-full bg-white" />
-              ) : (
-                <img src={visit.document_url} alt={t("viewer.originalDocument")} className="max-h-[600px] w-full object-contain bg-white" />
-              )}
-            </div>
-          ) : (
-            <p className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-8 text-center text-sm text-slate-500">
-              {t("viewer.unavailable")}
-            </p>
-          )}
+          <EvidenceViewer visit={visit} evidence={selectedEvidence} />
           <div className="mt-3 flex items-center gap-2 text-xs text-slate-500">
             <FileIcon className="h-4 w-4" />
             {visit._source.file} • {visit._source.method === "text_layer" ? "Digital PDF" : "Scanned or photo"}
@@ -126,11 +130,32 @@ export function DocumentViewer({
         </div>
       ) : (
         <div id={structuredPanelId} role="tabpanel" aria-labelledby={structuredTabId} tabIndex={0} className="space-y-5 p-5">
-          {visit.patient_name && (
-            <Section title={t("viewer.patient")}>
-              <p className="text-sm text-slate-700">{visit.patient_name}</p>
-            </Section>
-          )}
+          <Section title="Document facts">
+            <div className="grid gap-2 sm:grid-cols-2">
+              <FactRow
+                label={t("common.date")}
+                value={formatDate(visit.date)}
+                evidence={visit.field_evidence?.date?.[0]}
+                onEvidence={showEvidence}
+              />
+              {visit.patient_name && (
+                <FactRow
+                  label={t("viewer.patient")}
+                  value={visit.patient_name}
+                  evidence={visit.field_evidence?.patient_name?.[0]}
+                  onEvidence={showEvidence}
+                />
+              )}
+              {visit.provider_or_doctor && (
+                <FactRow
+                  label="Provider"
+                  value={visit.provider_or_doctor}
+                  evidence={visit.field_evidence?.provider_or_doctor?.[0]}
+                  onEvidence={showEvidence}
+                />
+              )}
+            </div>
+          </Section>
 
           {visit.medications.length > 0 && (
             <Section title={`${t("common.medications")} (${visit.medications.length})`} icon={<PillIcon className="h-4 w-4" />}>
@@ -157,6 +182,7 @@ export function DocumentViewer({
                         {med.is_as_needed ? " • PRN" : ""}
                       </p>
                     )}
+                    <EvidenceButton evidence={med.evidence?.[0]} onClick={showEvidence} />
                   </div>
                 ))}
               </div>
@@ -174,6 +200,7 @@ export function DocumentViewer({
                       <th scope="col" className="px-3 py-2 font-medium">{t("common.value")}</th>
                       <th scope="col" className="px-3 py-2 font-medium">{t("common.range")}</th>
                       <th scope="col" className="px-3 py-2 font-medium">{t("common.flag")}</th>
+                      <th scope="col" className="px-3 py-2 font-medium">Evidence</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -194,6 +221,9 @@ export function DocumentViewer({
                             {lab.flag}
                           </StatusBadge>
                         </td>
+                        <td className="px-3 py-2">
+                          <EvidenceButton evidence={lab.evidence?.[0]} onClick={showEvidence} compact />
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -204,12 +234,13 @@ export function DocumentViewer({
 
           {visit.allergies_noted.length > 0 && (
             <Section title={t("common.allergies")}>
-              <div className="flex flex-wrap gap-1.5">
+              <div className="flex flex-wrap items-center gap-1.5">
                 {visit.allergies_noted.map((a) => (
                   <StatusBadge key={a} tone="danger">
                     {a}
                   </StatusBadge>
                 ))}
+                <EvidenceButton evidence={visit.field_evidence?.allergies_noted?.[0]} onClick={showEvidence} compact />
               </div>
             </Section>
           )}
@@ -217,6 +248,7 @@ export function DocumentViewer({
           {visit.clinical_notes && (
             <Section title={t("common.clinicalNotes")}>
               <p className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-700">{visit.clinical_notes}</p>
+              <EvidenceButton evidence={visit.field_evidence?.clinical_notes?.[0]} onClick={showEvidence} />
             </Section>
           )}
 
@@ -228,6 +260,57 @@ export function DocumentViewer({
         </div>
       )}
     </section>
+  );
+}
+
+function findEvidence(visit: Visit, evidenceId: string): EvidenceRegion | null {
+  const regions: EvidenceRegion[] = [
+    ...Object.values(visit.field_evidence || {}).flat(),
+    ...visit.medications.flatMap((med) => med.evidence || []),
+    ...visit.lab_results.flatMap((lab) => lab.evidence || []),
+  ];
+  return regions.find((region) => region.evidence_id === evidenceId) || null;
+}
+
+function FactRow({
+  label,
+  value,
+  evidence,
+  onEvidence,
+}: {
+  label: string;
+  value: string;
+  evidence?: EvidenceRegion;
+  onEvidence: (evidence?: EvidenceRegion) => void;
+}) {
+  return (
+    <div className="rounded-lg border border-slate-200 bg-slate-50/60 px-3 py-2">
+      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{label}</p>
+      <p className="mt-0.5 text-sm text-slate-700">{value}</p>
+      <EvidenceButton evidence={evidence} onClick={onEvidence} />
+    </div>
+  );
+}
+
+function EvidenceButton({
+  evidence,
+  onClick,
+  compact = false,
+}: {
+  evidence?: EvidenceRegion;
+  onClick: (evidence?: EvidenceRegion) => void;
+  compact?: boolean;
+}) {
+  if (!evidence) return null;
+  return (
+    <button
+      type="button"
+      onClick={() => onClick(evidence)}
+      className={`${compact ? "mt-0" : "mt-2"} inline-flex min-h-[36px] items-center gap-1 rounded-md bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-900 ring-1 ring-amber-300 hover:bg-amber-100`}
+      title={evidence.quote || `Open page ${evidence.page}`}
+    >
+      <LinkIcon className="h-3 w-3" /> Page {evidence.page} · View evidence
+    </button>
   );
 }
 

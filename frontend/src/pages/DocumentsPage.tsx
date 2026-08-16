@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
 import { Card, CardBody } from "../components/Card";
 import { DocumentViewer } from "../components/DocumentViewer";
@@ -16,6 +16,9 @@ import { documentTypeLabel, formatDate } from "../utils/format";
 export function DocumentsPage() {
   const { credentials } = useAuth();
   const { t, formatNumber } = useI18n();
+  const [searchParams] = useSearchParams();
+  const requestedDocumentId = searchParams.get("document");
+  const requestedEvidenceId = searchParams.get("evidence");
   const [timeline, setTimeline] = useState<Timeline | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
@@ -27,18 +30,18 @@ export function DocumentsPage() {
     try {
       const data = await api.getTimeline(credentials);
       setTimeline(data);
-      setSelected((current) =>
-        current
-          ? (data.documents || data.visits).find((visit) => visit._document_id === current._document_id) || null
-          : null
-      );
+      setSelected((current) => {
+        const documents = data.documents || data.visits;
+        const targetId = requestedDocumentId || current?._document_id;
+        return targetId ? documents.find((visit) => visit._document_id === targetId) || null : null;
+      });
     } catch (err) {
       setTimeline(null);
       setError(err);
     } finally {
       setLoading(false);
     }
-  }, [credentials]);
+  }, [credentials, requestedDocumentId]);
 
   useStrictEffect(() => {
     void load();
@@ -168,6 +171,7 @@ export function DocumentsPage() {
                     visit={selected}
                     onClose={() => setSelected(null)}
                     onUpdated={() => void load()}
+                    initialEvidenceId={requestedEvidenceId}
                   />
                 ) : (
                   <Card>

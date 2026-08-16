@@ -36,6 +36,21 @@ export interface CorrectionMarker {
   last_corrected_at?: string | null;
 }
 
+export interface EvidenceRegion {
+  evidence_id: string;
+  field_path: string;
+  page: number;
+  quote: string;
+  /** [left, top, right, bottom], normalized to 0..1. */
+  bbox: [number, number, number, number] | null;
+  confidence: number;
+  locator: "pdf_text_search" | "vision_model" | "model_quote" | "page_quote" | "page_only" | string;
+  verification_status?: string;
+  conflict_id?: string;
+  original_extracted_value?: unknown;
+  corrected_value?: unknown;
+}
+
 export interface Medication {
   name: string;
   ingredients: string[];
@@ -47,6 +62,7 @@ export interface Medication {
   frequency_per_day: number | null;
   is_as_needed: boolean;
   confidence: number;
+  evidence?: EvidenceRegion[];
   _trust?: TrustMetadata;
 }
 
@@ -57,6 +73,7 @@ export interface LabResult {
   reference_range: string | null;
   flag: "normal" | "high" | "low" | "unknown";
   confidence: number;
+  evidence?: EvidenceRegion[];
   _trust?: TrustMetadata;
 }
 
@@ -78,6 +95,13 @@ export interface Visit {
   allergies_noted: string[];
   diagnoses_or_conditions?: string[];
   clinical_notes: string | null;
+  field_evidence?: {
+    date: EvidenceRegion[];
+    provider_or_doctor: EvidenceRegion[];
+    patient_name: EvidenceRegion[];
+    allergies_noted: EvidenceRegion[];
+    clinical_notes: EvidenceRegion[];
+  };
   illegible_or_low_confidence_fields: string[];
   overall_confidence: number;
   _source: DocumentSource;
@@ -154,6 +178,12 @@ export interface Timeline {
   lab_results_timeline: LabResultTimelineEntry[];
   diagnoses_timeline?: DiagnosisTimelineEntry[];
   known_allergies: string[];
+  allergy_evidence?: Array<{
+    allergy: string;
+    document_id: string;
+    source_file: string;
+    evidence: EvidenceRegion[];
+  }>;
   trust_summary?: TrustSummary;
   conflicts?: RecordConflict[];
 }
@@ -446,6 +476,9 @@ export interface QASource {
    *  Attached server-side from chunk metadata — never guessed by the model. */
   page?: number | null;
   document_id?: string;
+  evidence_id?: string;
+  quote?: string;
+  bbox?: [number, number, number, number] | null;
   verification_status?: string;
   evidence_tier?: "A" | "B" | "C";
 }

@@ -18,6 +18,10 @@
 - Fail-closed evidence quarantine across RAG, timelines, lab trends, safety, and care analytics
 - Source-confirmed rebuilds of snapshots, trends, safety checks, and vector indexes
 - Evidence hierarchy using verification, source type/method, confidence, recency, and semantic relevance
+- Page-level “View evidence” links for document facts, medicines, labs, allergies, and clinical notes
+- Exact normalized highlight overlays for matched digital-PDF text and vision-extracted image regions
+- Evidence-rich Q&A citations with verbatim quotes and deep links to the source highlight
+- Truthful page/quote or page-only fallback when exact geometry cannot be established
 - English, Sinhala, and Tamil UI with persisted/browser-detected language and locale-aware formatting
 - WCAG-oriented keyboard, screen-reader, focus, contrast, reduced-motion, table, chart, form, and responsive-navigation support
 - Care Navigation with search-as-you-type, current location, map confirmation, and nearby facility results — works with no API key or billing account
@@ -127,6 +131,18 @@
 - [x] Replace stale vector chunks after corrections and source decisions
 - [x] Fingerprint indexes so Q&A self-heals rather than searching stale evidence
 - [x] Rank retrieved context by semantic relevance and evidence quality
+
+## Round 4 (Page-level Evidence — Added)
+
+- [x] Extract a source page, verbatim quote, confidence, and optional region for each supported fact
+- [x] Normalize all public boxes to `[left, top, right, bottom]` coordinates in the `0..1` range
+- [x] Deterministically locate digital-PDF quotes with PyMuPDF rather than trusting model geometry
+- [x] Remap per-page vision boxes to original scanned-PDF page numbers
+- [x] Preserve stable evidence IDs and correction/conflict annotations through persistence reloads
+- [x] Carry evidence IDs, pages, quotes, and serialized boxes through vector metadata
+- [x] Server-normalize Q&A source locations against retrieved chunks
+- [x] Link Q&A citations and structured facts to the original document highlight
+- [x] Fall back to a quote/page or page-only locator without fabricating a rectangle
 
 ## Round 2 (Care Navigation — Added)
 

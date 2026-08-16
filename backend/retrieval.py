@@ -43,6 +43,7 @@ from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from openai import OpenAI, OpenAIError
 
+from evidence import first_evidence
 from medical_extractor import MODEL, _completion_resilient
 from memory_probe import log_rss
 from question_routing import assess_evidence, classify_question, route_chunks
@@ -216,6 +217,7 @@ def timeline_fingerprint(timeline: Dict[str, Any]) -> str:
         "labs": timeline.get("lab_results_timeline", []),
         "diagnoses": timeline.get("diagnoses_timeline", []),
         "allergies": timeline.get("known_allergies", []),
+        "allergy_evidence": timeline.get("allergy_evidence", []),
         "notes": notes,
         "trust_summary": timeline.get("trust_summary", {}),
     }
@@ -243,12 +245,18 @@ def _evidence_metadata(fact: Dict[str, Any], *, document_type: str = "other") ->
         0.35 * verification_weight + 0.25 * source_weight + 0.25 * type_weight + 0.15 * float(confidence),
         4,
     )
+    region = first_evidence(fact) or {}
     return {
-        "verification_status": trust_status,
+        "verification_status": str(region.get("verification_status") or trust_status),
         "source_method": source_method,
         "extraction_confidence": float(confidence),
         "evidence_score": score,
         "evidence_tier": "A" if score >= 0.9 else "B" if score >= 0.78 else "C",
+        "evidence_id": str(region.get("evidence_id") or ""),
+        "evidence_quote": str(region.get("quote") or ""),
+        # Chroma metadata values must be scalar; serialize the normalized box.
+        "evidence_bbox": json.dumps(region.get("bbox")) if region.get("bbox") else "",
+        "evidence_locator": str(region.get("locator") or ""),
     }
 
 
@@ -368,6 +376,12 @@ def build_chunks_from_timeline(patient_key: str, timeline: Dict[str, Any]) -> Li
         source = visit.get("_source", {}) if isinstance(visit.get("_source"), dict) else {}
         source_file = source.get("file")
         text = _clinical_note_chunk_text(visit)
+        note_fact = {
+            "confidence": visit.get("overall_confidence"),
+            "source_method": source.get("method"),
+            "_trust": visit.get("_trust"),
+            "evidence": (visit.get("field_evidence") or {}).get("clinical_notes") or [],
+        }
         chunks.append({
             "id": _chunk_id(patient_key, source_file, "clinical_note", text),
             "text": text,
@@ -375,17 +389,13 @@ def build_chunks_from_timeline(patient_key: str, timeline: Dict[str, Any]) -> Li
                 "patient_key": patient_key,
                 "date": visit.get("date") or "",
                 "source_file": source_file or "",
-                "source_page": source.get("page") or 0,
+                "source_page": (first_evidence(note_fact) or {}).get("page") or source.get("page") or 0,
                 "document_id": visit.get("_document_id") or "",
                 "fact_path": "/clinical_notes",
                 "chunk_type": "clinical_note",
                 "record_fingerprint": fingerprint,
                 **_evidence_metadata(
-                    {
-                        "confidence": visit.get("overall_confidence"),
-                        "source_method": source.get("method"),
-                        "_trust": visit.get("_trust"),
-                    },
+                    note_fact,
                     document_type=str(visit.get("document_type") or "other"),
                 ),
             },
@@ -412,7 +422,44 @@ def build_chunks_from_timeline(patient_key: str, timeline: Dict[str, Any]) -> Li
     # Preserve allergy provenance per visit so Q&A can validate a real
     # source citation. Keep an aggregate fallback for legacy timelines.
     represented_allergies = set()
-    for visit in timeline.get("visits", []):
+    allergy_facts = [
+        fact for fact in (timeline.get("allergy_evidence") or [])
+        if isinstance(fact, dict) and fact.get("allergy")
+    ]
+    for allergy_fact in allergy_facts:
+        allergy = allergy_fact.get("allergy")
+        fact_allergies = allergy if isinstance(allergy, list) else [str(allergy)]
+        represented_allergies.update(
+            item.lower() for item in fact_allergies if isinstance(item, str)
+        )
+        region = first_evidence(allergy_fact) or {}
+        text = (
+            _allergy_chunk_text(fact_allergies)
+            + f" Recorded on {allergy_fact.get('date') or 'an unknown date'} "
+            + f"(source: {allergy_fact.get('source_file') or 'unknown file'})."
+        )
+        chunks.append({
+            "id": _chunk_id(patient_key, allergy_fact.get("source_file"), "allergy", text),
+            "text": text,
+            "metadata": {
+                "patient_key": patient_key,
+                "date": allergy_fact.get("date") or "",
+                "source_file": allergy_fact.get("source_file") or "",
+                "source_page": region.get("page") or 0,
+                "document_id": allergy_fact.get("document_id") or "",
+                "fact_path": "/allergies_noted",
+                "chunk_type": "allergy",
+                "record_fingerprint": fingerprint,
+                **_evidence_metadata(
+                    allergy_fact,
+                    document_type=str(allergy_fact.get("document_type") or "other"),
+                ),
+            },
+        })
+
+    # Legacy timelines predate allergy_evidence; their visit still carries
+    # enough provenance for a truthful page/file citation.
+    for visit in timeline.get("visits", []) if not allergy_facts else []:
         allergies = visit.get("allergies_noted") or []
         if not allergies:
             continue
@@ -420,6 +467,12 @@ def build_chunks_from_timeline(patient_key: str, timeline: Dict[str, Any]) -> Li
             allergy.lower() for allergy in allergies if isinstance(allergy, str)
         )
         source_file = visit.get("_source", {}).get("file")
+        allergy_fact = {
+            "confidence": visit.get("overall_confidence"),
+            "source_method": (visit.get("_source") or {}).get("method"),
+            "_trust": visit.get("_trust"),
+            "evidence": (visit.get("field_evidence") or {}).get("allergies_noted") or [],
+        }
         text = (
             _allergy_chunk_text(allergies)
             + f" Recorded on {visit.get('date') or 'an unknown date'} "
@@ -432,17 +485,13 @@ def build_chunks_from_timeline(patient_key: str, timeline: Dict[str, Any]) -> Li
                 "patient_key": patient_key,
                 "date": visit.get("date") or "",
                 "source_file": source_file or "",
-                "source_page": visit.get("_source", {}).get("page") or 0,
+                "source_page": (first_evidence(allergy_fact) or {}).get("page") or visit.get("_source", {}).get("page") or 0,
                 "document_id": visit.get("_document_id") or "",
                 "fact_path": "/allergies_noted",
                 "chunk_type": "allergy",
                 "record_fingerprint": fingerprint,
                 **_evidence_metadata(
-                    {
-                        "confidence": visit.get("overall_confidence"),
-                        "source_method": (visit.get("_source") or {}).get("method"),
-                        "_trust": visit.get("_trust"),
-                    },
+                    allergy_fact,
                     document_type=str(visit.get("document_type") or "other"),
                 ),
             },
@@ -732,9 +781,11 @@ Rules:
   recommend_professional_consult to true.
 - Distinguish clearly between what the records DOCUMENT and any general
   observation you make. Never present an inference as a documented fact.
-- Cite the date, source_file, and page (null when unavailable) of every chunk you rely on in "sources".
-  Only cite a source_file that appears verbatim in the retrieved context.
-  Never invent, guess, or reformat a filename.
+- Cite the date, source_file, page, document_id, evidence_id, verbatim quote,
+  bounding box, verification_status, and evidence_tier of every chunk you rely
+  on in "sources". Copy these values exactly from the context header. Only
+  cite source_file/evidence_id values that appear verbatim in that context;
+  never invent, guess, or reformat them.
 - If the question names a specific document, answer only from chunks whose
   source_file matches that document, and say so if it holds no relevant
   information.
@@ -783,8 +834,22 @@ ANSWER_JSON_SCHEMA = {
                     "date": {"type": "string"},
                     "source_file": {"type": "string"},
                     "page": {"type": ["integer", "null"]},
+                    "document_id": {"type": "string"},
+                    "evidence_id": {"type": "string"},
+                    "quote": {"type": "string"},
+                    "bbox": {
+                        "type": ["array", "null"],
+                        "items": {"type": "number"},
+                        "minItems": 4,
+                        "maxItems": 4,
+                    },
+                    "verification_status": {"type": "string"},
+                    "evidence_tier": {"type": "string", "enum": ["A", "B", "C"]},
                 },
-                "required": ["date", "source_file", "page"],
+                "required": [
+                    "date", "source_file", "page", "document_id", "evidence_id",
+                    "quote", "bbox", "verification_status", "evidence_tier",
+                ],
                 "additionalProperties": False,
             },
         },
@@ -1150,7 +1215,13 @@ def answer_question(
 
     context_blocks = [
         f"[date: {meta.get('date') or 'unknown'} | source_file: {meta.get('source_file') or 'unknown'} "
-        f"| page: {meta.get('source_page') or 'unknown'} | type: {meta.get('chunk_type') or 'unknown'}]"
+        f"| page: {meta.get('source_page') or 0} | document_id: {meta.get('document_id') or ''} "
+        f"| type: {meta.get('chunk_type') or 'unknown'} "
+        f"| evidence_id: {meta.get('evidence_id') or ''} "
+        f"| quote: {json.dumps(meta.get('evidence_quote') or '')} "
+        f"| bbox: {meta.get('evidence_bbox') or 'null'} "
+        f"| verification_status: {meta.get('verification_status') or 'extracted'} "
+        f"| evidence_tier: {meta.get('evidence_tier') or 'C'}]"
         f"\n{_neutralize_injection(text)}"
         for text, meta in zip(docs, metadatas)
     ]
@@ -1270,18 +1341,21 @@ def _validate_answer(
     if not isinstance(answer, str) or not answer.strip():
         raise RuntimeError("Chat model returned an empty answer.")
 
-    # Map every retrieved file to the pages/dates actually retrieved.
+    # Map every retrieved file to the pages/dates and exact evidence metadata
+    # actually retrieved. Model-provided locators are never trusted directly.
     retrieved: Dict[str, Dict[str, Any]] = {}
-    for meta in metadatas:
-        source_file = (meta.get("source_file") or "").strip()
+    for raw_meta in metadatas:
+        meta = dict(raw_meta or {})
+        source_file = str(meta.get("source_file") or "").strip()
         if not source_file:
             continue
-        entry = retrieved.setdefault(source_file, {"pages": set(), "dates": set()})
+        entry = retrieved.setdefault(source_file, {"pages": set(), "dates": set(), "metas": []})
+        entry["metas"].append(meta)
         page = meta.get("source_page")
         # main writes 0 (not "") when a chunk has no page — both mean absent.
         if page not in (None, "", 0):
             entry["pages"].add(page)
-        date = (meta.get("date") or "").strip()
+        date = str(meta.get("date") or "").strip()
         if date:
             entry["dates"].add(date)
 
@@ -1300,9 +1374,35 @@ def _validate_answer(
         if source_file not in retrieved:
             dropped.append(source_file)
             continue
+        requested_evidence_id = str(source.get("evidence_id") or "").strip()
+        requested_document_id = str(source.get("document_id") or "").strip()
+        candidates = list(retrieved[source_file]["metas"])
+        if requested_document_id:
+            candidates = [
+                meta for meta in candidates
+                if str(meta.get("document_id") or "") == requested_document_id
+            ]
+        if requested_evidence_id:
+            candidates = [
+                meta for meta in candidates
+                if str(meta.get("evidence_id") or "") == requested_evidence_id
+            ]
+            # A concrete but unknown evidence ID must fail closed rather than
+            # deep-linking the claim to another fact in the same file.
+            if not candidates:
+                dropped.append(f"{source_file}#{requested_evidence_id}")
+                continue
+        if not candidates:
+            candidates = list(retrieved[source_file]["metas"])
+        selected_meta = candidates[0] if candidates else {}
+
         if source_file not in by_file:
-            by_file[source_file] = {"dates": set()}
+            by_file[source_file] = {"dates": set(), "meta": selected_meta}
             order.append(source_file)
+        elif requested_evidence_id:
+            # Prefer a citation whose exact evidence ID the model supplied
+            # over a filename-only citation encountered earlier.
+            by_file[source_file]["meta"] = selected_meta
         date = str(source.get("date") or "").strip()
         # Keep the model's date only when it matches what was retrieved.
         if date and date in retrieved[source_file]["dates"]:
@@ -1315,16 +1415,37 @@ def _validate_answer(
             # The model gave no usable date: fall back to what was retrieved.
             dates = sorted(retrieved[source_file]["dates"])
         pages = sorted(retrieved[source_file]["pages"], key=lambda value: str(value))
-        validated_sources.append(
-            {
-                # `date` stays the earliest for backward compatibility; `dates`
-                # carries the full set so the UI can show every occurrence.
-                "date": dates[0] if dates else "",
-                "dates": dates,
-                "source_file": source_file,
-                "page": pages[0] if len(pages) == 1 else None,
-            }
-        )
+        meta = by_file[source_file].get("meta") or {}
+        try:
+            evidence_bbox = json.loads(str(meta.get("evidence_bbox") or "null"))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            evidence_bbox = None
+        evidence_page = meta.get("source_page")
+        normalized_source = {
+            # `date` stays the earliest for backward compatibility; `dates`
+            # carries the full set so the UI can show every occurrence.
+            "date": dates[0] if dates else "",
+            "dates": dates,
+            "source_file": source_file,
+            "page": (
+                evidence_page
+                if evidence_page not in (None, "", 0)
+                else pages[0] if len(pages) == 1 else None
+            ),
+        }
+        # Preserve the compact legacy citation shape when a record predates
+        # source regions. Empty locator fields look authoritative but cannot
+        # deep-link anywhere, so expose them only with a real evidence ID.
+        if meta.get("evidence_id"):
+            normalized_source.update({
+                "document_id": str(meta.get("document_id") or ""),
+                "evidence_id": str(meta.get("evidence_id") or ""),
+                "quote": str(meta.get("evidence_quote") or ""),
+                "bbox": evidence_bbox,
+                "verification_status": str(meta.get("verification_status") or "extracted"),
+                "evidence_tier": str(meta.get("evidence_tier") or "C"),
+            })
+        validated_sources.append(normalized_source)
 
     if dropped:
         logger.warning(
