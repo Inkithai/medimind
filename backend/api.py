@@ -63,6 +63,7 @@ import storage
 from care import CareConfigurationError, CareProviderError, get_care_provider
 from care.postprocess import finalize as finalize_facilities
 from care.recommendation import recommend_care
+from care.recommendations import generate_care_recommendations
 from care_recommendations import ProviderSearchError, recommendation_context, search_live_providers
 from auth import get_current_user, issue_anonymous_token
 from document_filter import NonMedicalDocumentError, assert_medical_document
@@ -1261,6 +1262,39 @@ async def get_care_recommendation(
         _enhanced_cross_check(snapshot),
         _lab_trends_for_snapshot(snapshot),
     )
+
+
+@app.get("/api/v1/care/recommendations")
+async def get_scored_care_recommendations(user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
+    """Analyze patient records and return ranked, scored care recommendations.
+
+    Each recommendation carries a transparent 0-100 relevance_score assembled
+    from explicit score_factors (medication/allergy conflicts, drug
+    interactions, lab trends, polypharmacy, visit history), plus a
+    has_safety_signal flag when a safety finding drives the suggestion.
+
+    Pure rule-based analysis of the patient's structured data — no LLM.
+    The score is an informational ranking, not a medical probability.
+    """
+    snapshot = db.load_patient_snapshot(user_id)
+    if snapshot is None:
+        return {
+            "recommendations": [],
+            "note": "No patient records found. Upload documents to get personalised care recommendations.",
+        }
+    try:
+        recs = generate_care_recommendations(
+            snapshot["patient_timeline"],
+            _enhanced_cross_check(snapshot),
+            _lab_trends_for_snapshot(snapshot),
+        )
+    except Exception as exc:
+        logger.error("care recommendations failed for user=%s: %s", user_id, exc, exc_info=True)
+        raise HTTPException(500, "Failed to generate care recommendations.")
+    return {
+        "recommendations": recs,
+        "note": "These suggestions are derived from your medical records and are not a diagnosis or referral.",
+    }
 
 @app.get("/api/v1/care-recommendations")
 async def get_care_recommendations(user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
