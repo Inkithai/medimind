@@ -147,8 +147,17 @@ def test_index_lost_but_documents_exist_self_heals_and_answers():
                 # The fixture timeline has no _source.page, so the validator
                 # attaches None rather than trusting the model's "page": 1.
                 "page": None,
+                # Sources are also enriched in code with document_type from
+                # the timeline (no document_url on this fixture document).
+                "document_type": "prescription",
             }
         ]
+        # New contract fields: a benign, high-confidence, non-risk question
+        # must not be escalated.
+        assert out["cross_document"] is False
+        assert out["low_confidence"] is False
+        assert out["recommend_professional_consult"] is False
+        assert "consult_reason" not in out
         # The store must now actually contain the rebuilt index.
         heal_collection = vector_store._sanitize_collection_name("anon_self_heal")
         assert state["collections"][heal_collection].count() == 3  # med + lab + allergy

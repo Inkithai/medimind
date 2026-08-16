@@ -67,6 +67,7 @@ export const ta = {
     actionCenter: "செயல் மையம்",
     recordCheck: "பதிவு சரிபார்ப்பு",
     safety: "பாதுகாப்பு எச்சரிக்கைகள்",
+    riskTimeline: "அபாய காலவரிசை",
     ask: "AI-யிடம் கேளுங்கள்",
     care: "சிகிச்சையைத் தேடுங்கள்",
     settings: "அமைப்புகள்",

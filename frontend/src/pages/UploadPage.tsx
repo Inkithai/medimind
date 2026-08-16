@@ -677,6 +677,29 @@ export function UploadPage() {
                   contains <strong>{result.documents_total}</strong>{" "}
                   {result.documents_total === 1 ? "document page" : "document pages"} in total.
                 </p>
+                {result.duplicate_files_skipped && result.duplicate_files_skipped.length > 0 && (
+                  <div className="mt-2 rounded-lg bg-sky-100/70 px-3 py-2 text-sm text-sky-900">
+                    <p className="font-medium">
+                      {result.duplicate_files_skipped.length === 1
+                        ? "1 file was already in your records and was not added again:"
+                        : `${result.duplicate_files_skipped.length} files were already in your records and were not added again:`}
+                    </p>
+                    <ul className="mt-1 list-disc space-y-1 pl-5">
+                      {result.duplicate_files_skipped.map((d, i) => (
+                        <li key={`${d.filename}-${i}`}>
+                          <strong>{d.filename}</strong>
+                          {d.previously_uploaded_as && d.previously_uploaded_as !== d.filename && (
+                            <span> — identical to “{d.previously_uploaded_as}”</span>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                    <p className="mt-1 text-xs text-sky-800">
+                      Nothing was lost — the existing copies are still there, and your safety
+                      checks won't count the same prescription twice.
+                    </p>
+                  </div>
+                )}
                 {!result.indexed && result.index_error && (
                   <p className="mt-2 rounded-lg bg-amber-100/70 px-3 py-2 text-sm text-amber-900">
                     {result.index_error_code === "memory_limit"

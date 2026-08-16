@@ -188,7 +188,7 @@ const tests: Array<[string, () => void]> = [
         layoutSource.indexOf("export function Layout")
       );
       assert.ok(!navArray.includes("/about"), "About must not be in the workflow NAV array");
-      assert.equal((navArray.match(/to: "/g) || []).length, 14, "all 14 workflow items are present");
+      assert.equal((navArray.match(/to: "/g) || []).length, 15, "all 15 workflow items are present");
     },
   ],
   [

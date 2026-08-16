@@ -6,6 +6,10 @@
 - Multilingual document extraction (Tamil/Arabic/etc., INN normalization)
 - Non-medical document filter (early rejection before LLM/Chroma)
 - Patient timeline + longitudinal lab trends (threshold approach detection)
+- Patient-grounded RAG / Ask AI with conversational focus carry-over
+- Risk Timeline page — when each safety finding was actually live, graded by evidence strength
+- Duplicate re-upload detection — the same file or prescription is never counted twice
+
 - Evidence-linked longitudinal diagnoses, symptoms, procedures, vital signs, and imaging results
 - Event-specific chronology that separates a historical event date from the source document date
 - “What Changed?” comparison across consecutive records, with before/after values and source evidence
@@ -158,6 +162,13 @@
 - [x] Quarantine conflicting vital values at the same explicitly recorded time
 - [x] Keep legacy documents API-compatible with dynamically added empty event arrays
 - [x] Avoid claiming validated terminology or unit normalization; retain source wording and units
+
+## Round 3 (Intelligence hardening — Added)
+
+- [x] Entity focus carry-over — deterministic per-session `focus` (medications/labs/documents under discussion) matched against the patient's own record vocabulary, so "what if I take it with this?" stays anchored even if the LLM rewrite fails
+- [x] Richer QA response contract — `cross_document`, `low_confidence`, `consult_reason` flags; deterministic guard forces `recommend_professional_consult=true` on risk/allergy/dosage questions; `sources` enriched in code with `document_type` + `document_url`
+- [x] Document deduplication — byte-for-byte re-uploads (`CBC_Report.pdf` / `CBC_Report (1).pdf`) skipped before extraction via `content_sha256`; same-prescription grouping (`prescription_group`) keeps duplicate detection counting prescriptions, not files
+- [x] Risk timeline + evidence grading — chronological risk view (`GET /api/v1/risk-timeline`) separating live risks from courses that never overlapped; every finding graded `deterministic` vs `model_knowledge` with ungrounded confidence capped at 0.6
 
 ## Round 2 (Care Navigation — Added)
 

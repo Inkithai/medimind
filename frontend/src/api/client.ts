@@ -19,6 +19,7 @@ import type {
   LabTrendsReport,
   PatientSnapshot,
   QAResponse,
+  RiskTimelineReport,
   RecordChangesReport,
   RecordIntegrityReport,
   RecordRebuildResponse,
@@ -525,6 +526,10 @@ export const api = {
 
   getLabTrends(credentials: Credentials): Promise<LabTrendsReport> {
     return request<LabTrendsReport>(credentials, "/api/v1/lab-trends");
+  },
+
+  getRiskTimeline(credentials: Credentials): Promise<RiskTimelineReport> {
+    return request<RiskTimelineReport>(credentials, "/api/v1/risk-timeline");
   },
 
   getRecordChanges(credentials: Credentials): Promise<RecordChangesReport> {

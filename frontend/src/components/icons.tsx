@@ -42,6 +42,13 @@ export const ShieldIcon = (p: IconProps) => (
   </svg>
 );
 
+export const ClockIcon = (p: IconProps) => (
+  <svg {...base(p)}>
+    <circle cx="12" cy="12" r="10" />
+    <polyline points="12 6 12 12 16 14" />
+  </svg>
+);
+
 export const ChartIcon = (p: IconProps) => (
   <svg {...base(p)}>
     <path d="M3 3v18h18" />

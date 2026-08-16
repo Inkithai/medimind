@@ -67,6 +67,7 @@ export const en = {
     actionCenter: "Action Center",
     recordCheck: "Record Check",
     safety: "Safety Alerts",
+    riskTimeline: "Risk Timeline",
     ask: "Ask AI",
     care: "Find Care",
     settings: "Settings",

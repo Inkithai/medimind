@@ -15,6 +15,7 @@ import { UploadPage } from "./pages/UploadPage";
 import { DocumentsPage } from "./pages/DocumentsPage";
 import { MedicinesPage } from "./pages/MedicinesPage";
 import { HistoryPage } from "./pages/HistoryPage";
+import { RiskTimelinePage } from "./pages/RiskTimelinePage";
 import { ChangesPage } from "./pages/ChangesPage";
 import { AppointmentPrepPage } from "./pages/AppointmentPrepPage";
 import { RecordIntegrityPage } from "./pages/RecordIntegrityPage";
@@ -201,6 +202,14 @@ export default function App() {
           element={
             <RequireAuth>
               <LabTrendsPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/risk-timeline"
+          element={
+            <RequireAuth>
+              <RiskTimelinePage />
             </RequireAuth>
           }
         />

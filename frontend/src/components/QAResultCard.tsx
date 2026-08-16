@@ -38,7 +38,7 @@ export function QAResultCard({
       )}
 
       {result.recommend_professional_consult && (
-        <ConsiderProfessionalCare message={t("ask.consult")} />
+        <ConsiderProfessionalCare message={result.consult_reason || t("ask.consult")} />
       )}
 
       {result.evidence_sufficiency && result.evidence_sufficiency.level !== "sufficient" && (
@@ -98,6 +98,22 @@ export function QAResultCard({
         >
           {t("common.confidence")} {formatConfidence(result.confidence)}
         </span>
+        {(result.low_confidence || result.confidence < 0.6) && (
+          <span
+            className="inline-flex items-center rounded-full bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-700"
+            title="Confidence at or below 0.6 — a professional consult is always recommended"
+          >
+            Low confidence
+          </span>
+        )}
+        {result.cross_document && (
+          <span
+            className="inline-flex items-center rounded-full bg-sky-50 px-2.5 py-0.5 text-xs font-medium text-sky-700"
+            title="This answer combined facts from more than one document"
+          >
+            Cross-document
+          </span>
+        )}
         {sources.length > 0 ? (
           <span className="text-xs text-slate-500">
             {sources.length === 1
@@ -121,6 +137,11 @@ export function QAResultCard({
                 <span className="min-w-0 flex-1 truncate font-medium text-slate-700">
                   {src.source_file}
                 </span>
+                {src.document_type && (
+                  <span className="shrink-0 text-slate-400">
+                    {String(src.document_type).replace(/_/g, " ")}
+                  </span>
+                )}
                 {sourceDates(src).length > 0 && (
                   <span className="shrink-0 text-slate-400">
                     {sourceDates(src).map((d) => formatDate(d)).join(" · ")}

@@ -67,6 +67,7 @@ export const si = {
     actionCenter: "ක්‍රියා මධ්‍යස්ථානය",
     recordCheck: "වාර්තා පරීක්ෂාව",
     safety: "ආරක්ෂක අනතුරු ඇඟවීම්",
+    riskTimeline: "අවදානම් කාලරේඛාව",
     ask: "AI වෙතින් අසන්න",
     care: "ප්‍රතිකාර සොයන්න",
     settings: "සැකසුම්",
