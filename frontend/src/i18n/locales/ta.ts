@@ -58,6 +58,7 @@ export const ta = {
     close: "வழிசெலுத்தல் பட்டியை மூடவும்",
     dashboard: "முகப்பு",
     records: "மருத்துவ பதிவுகள்",
+    trustReview: "ஆதார நம்பகத்தன்மை மதிப்பாய்வு",
     medications: "மருந்துகள்",
     labs: "ஆய்வக முடிவுகள்",
     timeline: "காலவரிசை",

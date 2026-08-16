@@ -161,7 +161,7 @@ def test_user_with_no_documents_still_gets_404():
     assert timeline.status_code == 404, timeline.text
 
 
-def test_cached_snapshot_wins_and_is_not_marked_rebuilt():
+def test_cached_snapshot_is_replayed_against_durable_documents_before_use():
     snapshot = {
         "patient_timeline": {"visits": [], "medications_timeline": [],
                              "lab_results_timeline": [], "known_allergies": []},
@@ -191,9 +191,10 @@ def test_cached_snapshot_wins_and_is_not_marked_rebuilt():
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert "rebuilt_from_documents" not in body
-    assert body["cross_check_report"]["overall_recommendation"] == "All good."
-    # No wasted documents query when the cache row is present.
-    load_documents.assert_not_called()
+    assert "withheld" in body["cross_check_report"]["overall_recommendation"].lower()
+    # Durable extraction/correction rows are authoritative; a legacy snapshot
+    # with no matching trust fingerprint must not bypass replay.
+    load_documents.assert_called_once_with("anon_test_user")
 
 
 if __name__ == "__main__":

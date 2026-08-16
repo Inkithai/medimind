@@ -6,6 +6,8 @@
 - Multilingual document extraction (Tamil/Arabic/etc., INN normalization)
 - Non-medical document filter (early rejection before LLM/Chroma)
 - Patient timeline + longitudinal lab trends (threshold approach detection)
+- Evidence-linked longitudinal diagnoses, symptoms, procedures, vital signs, and imaging results
+- Event-specific chronology that separates a historical event date from the source document date
 - “What Changed?” comparison across consecutive records, with before/after values and source evidence
 - Conservative medication change semantics: newly documented is never mislabeled as started, and omission is never treated as stopped
 - Appointment Prep: printable clinician handoff, prioritized questions, source evidence, and visit checklist
@@ -13,6 +15,15 @@
 - Intent-routed Ask AI with category-targeted retrieval, citation validation, and explicit evidence sufficiency
 - Action Center with grounded follow-up tasks, user-chosen browser reminders, completion tracking, and calendar export
 - Patient-grounded RAG / Ask AI
+- Persistent field-level extraction corrections with immutable original values and audit history
+- Conflict review workflow for identity, medication instructions, lab values, and document dates
+- Fail-closed evidence quarantine across RAG, timelines, lab trends, safety, and care analytics
+- Source-confirmed rebuilds of snapshots, trends, safety checks, and vector indexes
+- Evidence hierarchy using verification, source type/method, confidence, recency, and semantic relevance
+- Page-level “View evidence” links for document facts, medicines, labs, allergies, and clinical notes
+- Exact normalized highlight overlays for matched digital-PDF text and vision-extracted image regions
+- Evidence-rich Q&A citations with verbatim quotes and deep links to the source highlight
+- Truthful page/quote or page-only fallback when exact geometry cannot be established
 - English, Sinhala, and Tamil UI with persisted/browser-detected language and locale-aware formatting
 - WCAG-oriented keyboard, screen-reader, focus, contrast, reduced-motion, table, chart, form, and responsive-navigation support
 - Care Navigation with search-as-you-type, current location, map confirmation, and nearby facility results — works with no API key or billing account
@@ -110,6 +121,43 @@
 - [x] Double-submit guard — rapid Ask clicks issue exactly one request
 - [x] Friendly error copy for 401/422/429/500/502/offline, with technical detail collapsible
 - [x] Suggested questions fill the box for editing instead of auto-sending
+
+## Round 3 (Trust and Correction — Added)
+
+- [x] Keep source extraction rows immutable
+- [x] Append field-level correction events with original, previous, and corrected values
+- [x] Correct patient/provider identity, date, medication, and lab fields in the document UI
+- [x] Detect deterministic identity, same-date medication/lab, and same-file date conflicts
+- [x] Select and audit an authoritative source; reopen decisions when needed
+- [x] Quarantine unresolved/non-authoritative facts from all derived clinical views
+- [x] Replace stale vector chunks after corrections and source decisions
+- [x] Fingerprint indexes so Q&A self-heals rather than searching stale evidence
+- [x] Rank retrieved context by semantic relevance and evidence quality
+
+## Round 4 (Page-level Evidence — Added)
+
+- [x] Extract a source page, verbatim quote, confidence, and optional region for each supported fact
+- [x] Normalize all public boxes to `[left, top, right, bottom]` coordinates in the `0..1` range
+- [x] Deterministically locate digital-PDF quotes with PyMuPDF rather than trusting model geometry
+- [x] Remap per-page vision boxes to original scanned-PDF page numbers
+- [x] Preserve stable evidence IDs and correction/conflict annotations through persistence reloads
+- [x] Carry evidence IDs, pages, quotes, and serialized boxes through vector metadata
+- [x] Server-normalize Q&A source locations against retrieved chunks
+- [x] Link Q&A citations and structured facts to the original document highlight
+- [x] Fall back to a quote/page or page-only locator without fabricating a rectangle
+
+## Round 5 (Longitudinal Clinical Events — Added)
+
+- [x] Extract documented diagnoses without inferring them from symptoms, medicines, labs, vitals, or imaging
+- [x] Extract symptoms/signs, procedures, raw vital measurements, and imaging findings/impressions
+- [x] Preserve event-specific dates independently from the enclosing document date
+- [x] Build trusted chronological rollups for all five clinical event classes
+- [x] Attach page-level evidence to every event and deep-link timeline rows to the highlight
+- [x] Index each event as a separate evidence-ranked Q&A chunk
+- [x] Extend append-only correction/audit workflows to all supported event fields
+- [x] Quarantine conflicting vital values at the same explicitly recorded time
+- [x] Keep legacy documents API-compatible with dynamically added empty event arrays
+- [x] Avoid claiming validated terminology or unit normalization; retain source wording and units
 
 ## Round 2 (Care Navigation — Added)
 

@@ -21,7 +21,42 @@ export type {
 // CROSS_CHECK_JSON_SCHEMA), lab_trends.py, retrieval.py, conversation.py,
 // and api.py response shapes.
 
-export type DocumentType = "prescription" | "lab_report" | "discharge_summary" | "other";
+export type DocumentType =
+  | "prescription"
+  | "lab_report"
+  | "discharge_summary"
+  | "imaging_report"
+  | "consultation_note"
+  | "procedure_report"
+  | "other";
+
+export interface TrustMetadata {
+  status: "extracted" | "user_corrected" | "source_confirmed" | "quarantined" | string;
+  quarantined: boolean;
+  conflict_ids: string[];
+  reasons: string[];
+}
+
+export interface CorrectionMarker {
+  paths: string[];
+  event_ids: string[];
+  last_corrected_at?: string | null;
+}
+
+export interface EvidenceRegion {
+  evidence_id: string;
+  field_path: string;
+  page: number;
+  quote: string;
+  /** [left, top, right, bottom], normalized to 0..1. */
+  bbox: [number, number, number, number] | null;
+  confidence: number;
+  locator: "pdf_text_search" | "vision_model" | "model_quote" | "page_quote" | "page_only" | string;
+  verification_status?: string;
+  conflict_id?: string;
+  original_extracted_value?: unknown;
+  corrected_value?: unknown;
+}
 
 export interface Medication {
   name: string;
@@ -34,6 +69,8 @@ export interface Medication {
   frequency_per_day: number | null;
   is_as_needed: boolean;
   confidence: number;
+  evidence?: EvidenceRegion[];
+  _trust?: TrustMetadata;
 }
 
 export interface LabResult {
@@ -43,6 +80,60 @@ export interface LabResult {
   reference_range: string | null;
   flag: "normal" | "high" | "low" | "unknown";
   confidence: number;
+  evidence?: EvidenceRegion[];
+  _trust?: TrustMetadata;
+}
+
+export interface Diagnosis {
+  name: string;
+  code: string | null;
+  status: "active" | "confirmed" | "suspected" | "history" | "resolved" | "unknown";
+  onset_date: string | null;
+  confidence: number;
+  evidence?: EvidenceRegion[];
+  _trust?: TrustMetadata;
+}
+
+export interface Symptom {
+  name: string;
+  severity: "mild" | "moderate" | "severe" | "unknown";
+  status: "current" | "resolved" | "intermittent" | "historical" | "unknown";
+  onset_date: string | null;
+  confidence: number;
+  evidence?: EvidenceRegion[];
+  _trust?: TrustMetadata;
+}
+
+export interface Procedure {
+  name: string;
+  procedure_date: string | null;
+  body_site: string | null;
+  status: "completed" | "planned" | "cancelled" | "historical" | "unknown";
+  outcome: string | null;
+  confidence: number;
+  evidence?: EvidenceRegion[];
+  _trust?: TrustMetadata;
+}
+
+export interface VitalSign {
+  name: string;
+  value: string;
+  unit: string | null;
+  measured_at: string | null;
+  confidence: number;
+  evidence?: EvidenceRegion[];
+  _trust?: TrustMetadata;
+}
+
+export interface ImagingResult {
+  study_type: string;
+  body_site: string | null;
+  study_date: string | null;
+  findings: string;
+  impression: string | null;
+  confidence: number;
+  evidence?: EvidenceRegion[];
+  _trust?: TrustMetadata;
 }
 
 export interface DocumentSource {
@@ -53,20 +144,35 @@ export interface DocumentSource {
 
 // A single extracted page/document (one entry in timeline.visits).
 export interface Visit {
+  _document_id: string;
   document_type: DocumentType;
   date: string | null;
   provider_or_doctor: string | null;
   patient_name: string | null;
   medications: Medication[];
   lab_results: LabResult[];
+  diagnoses: Diagnosis[];
+  symptoms: Symptom[];
+  procedures: Procedure[];
+  vital_signs: VitalSign[];
+  imaging_results: ImagingResult[];
   allergies_noted: string[];
   diagnoses_or_conditions?: string[];
   clinical_notes: string | null;
+  field_evidence?: {
+    date: EvidenceRegion[];
+    provider_or_doctor: EvidenceRegion[];
+    patient_name: EvidenceRegion[];
+    allergies_noted: EvidenceRegion[];
+    clinical_notes: EvidenceRegion[];
+  };
   illegible_or_low_confidence_fields: string[];
   overall_confidence: number;
   _source: DocumentSource;
   document_url?: string;
   cloudinary_public_id?: string;
+  _trust?: TrustMetadata;
+  _corrections?: CorrectionMarker;
 }
 
 export interface SourceReference {
@@ -87,19 +193,77 @@ export interface LabResultTimelineEntry extends LabResult {
   source_page?: number | null;
 }
 
-export interface DiagnosisTimelineEntry {
-  name: string;
+export interface ClinicalTimelineProvenance {
   date: string | null;
+  document_date: string | null;
   source_file: string | null;
   source_page?: number | null;
+  source_method?: DocumentSource["method"];
+  document_id: string;
+  fact_path: string;
+  document_type: DocumentType;
+}
+
+export type DiagnosisTimelineEntry = Diagnosis & ClinicalTimelineProvenance;
+export type SymptomTimelineEntry = Symptom & ClinicalTimelineProvenance;
+export type ProcedureTimelineEntry = Procedure & ClinicalTimelineProvenance;
+export type VitalSignTimelineEntry = VitalSign & ClinicalTimelineProvenance;
+export type ImagingResultTimelineEntry = ImagingResult & ClinicalTimelineProvenance;
+
+export interface TrustSummary {
+  unresolved_conflicts: number;
+  resolved_conflicts: number;
+  quarantined_documents: number;
+  quarantined_facts: number;
+  corrected_fields: number;
+  retrieval_policy: string;
+}
+
+export interface ConflictSource {
+  document_id: string;
+  field_path: string;
+  value: unknown;
+  source_file: string;
+  page?: number | null;
+  confidence?: number | null;
+}
+
+export interface RecordConflict {
+  conflict_id: string;
+  kind: "identity" | "document_date" | "medication" | "lab_result" | string;
+  field_type: string;
+  fact_key: string;
+  severity: "critical" | "high" | string;
+  summary: string;
+  items: ConflictSource[];
+  status: "unresolved" | "resolved" | "superseded";
+  authoritative_document_id: string | null;
+  resolution_note?: string | null;
+  detected_at?: string | null;
+  updated_at?: string | null;
+  resolved_at?: string | null;
 }
 
 export interface Timeline {
   visits: Visit[];
+  /** Complete source list for correction/audit; visits is trusted-only. */
+  documents?: Visit[];
   medications_timeline: MedicationTimelineEntry[];
   lab_results_timeline: LabResultTimelineEntry[];
   diagnoses_timeline?: DiagnosisTimelineEntry[];
+  symptoms_timeline?: SymptomTimelineEntry[];
+  procedures_timeline?: ProcedureTimelineEntry[];
+  vital_signs_timeline?: VitalSignTimelineEntry[];
+  imaging_results_timeline?: ImagingResultTimelineEntry[];
   known_allergies: string[];
+  allergy_evidence?: Array<{
+    allergy: string;
+    document_id: string;
+    source_file: string;
+    evidence: EvidenceRegion[];
+  }>;
+  trust_summary?: TrustSummary;
+  conflicts?: RecordConflict[];
 }
 
 // ---- Cross-check (medical_extractor.py CROSS_CHECK_JSON_SCHEMA) ----------
@@ -389,6 +553,12 @@ export interface QASource {
   /** Page within a multi-page document, when the retrieved chunk had one.
    *  Attached server-side from chunk metadata — never guessed by the model. */
   page?: number | null;
+  document_id?: string;
+  evidence_id?: string;
+  quote?: string;
+  bbox?: [number, number, number, number] | null;
+  verification_status?: string;
+  evidence_tier?: "A" | "B" | "C";
 }
 
 export interface QAResponse {
@@ -413,11 +583,63 @@ export interface QAResponse {
     citation_validation?: "passed" | "no_valid_citations";
   };
   rewritten_query?: string;
+  trust_notice?: string;
+  quarantined_conflict_count?: number;
 }
 
 export interface ChatHistoryEntry {
   role: "user" | "assistant" | "system";
   content: string;
+}
+
+// ---- Trust corrections and conflict review -------------------------------
+
+export interface CorrectionEvent {
+  id: string;
+  correction_batch_id: string;
+  user_id: string;
+  document_id: string;
+  field_path: string;
+  original_value: unknown;
+  previous_value: unknown;
+  corrected_value: unknown;
+  reason: string;
+  created_at: string;
+}
+
+export interface DocumentCorrectionsResponse {
+  document_id: string;
+  original_extraction: Visit;
+  effective_extraction: Visit;
+  corrections: CorrectionEvent[];
+}
+
+export interface ConflictsResponse {
+  conflicts: RecordConflict[];
+  resolution_events: Array<{
+    id: string;
+    conflict_id: string;
+    old_status: string;
+    new_status: string;
+    authoritative_document_id?: string | null;
+    note?: string | null;
+    created_at: string;
+  }>;
+  trust_summary: TrustSummary;
+}
+
+export interface RecordRebuildResponse {
+  timeline: Timeline;
+  cross_check_report: CrossCheckReport;
+  lab_trends: LabTrendsReport;
+  conflicts?: RecordConflict[];
+  trust_summary: TrustSummary;
+  indexed: boolean;
+  chunks_indexed: number;
+  index_error?: string | null;
+  correction_batch_id?: string;
+  events?: CorrectionEvent[];
+  conflict?: RecordConflict;
 }
 
 // ---- Patient snapshot (api.py GET /api/v1/patient-snapshot) --------------
@@ -429,6 +651,7 @@ export interface PatientSnapshot {
   patient_timeline: Timeline;
   cross_check_report: CrossCheckReport;
   lab_trends: LabTrendsReport;
+  trust_summary?: TrustSummary;
   updated_at: string | null;
   // True when the server reconstructed this view from the durable documents
   // table because the cached snapshot row was missing. The record is intact;
@@ -466,6 +689,8 @@ export interface UploadResponse {
   timeline: Timeline;
   cross_check_report: CrossCheckReport;
   lab_trends: LabTrendsReport;
+  trust_summary?: TrustSummary;
+  conflicts?: RecordConflict[];
   indexed: boolean;
   index_error?: string;
   // Machine-readable reason indexing did not complete:

@@ -5,6 +5,7 @@ import { Card, CardBody } from "../components/Card";
 import { ErrorState } from "../components/ErrorState";
 import { LoadingState } from "../components/Spinner";
 import { TimelineView } from "../components/TimelineView";
+import { ClinicalEventsTimeline } from "../components/ClinicalEventsTimeline";
 import { DocumentViewer } from "../components/DocumentViewer";
 import { UploadIcon } from "../components/icons";
 import { useAuth } from "../context/AuthContext";
@@ -88,19 +89,28 @@ export function HistoryPage() {
           {timeline.visits.length === 0 ? (
             <Card>
               <CardBody className="py-12 text-center">
-                <p className="text-sm font-semibold text-slate-800">{t("history.empty")}</p>
-                <p className="mt-1 text-xs text-slate-600">{t("history.emptyBody")}</p>
+                <p className="text-sm font-semibold text-slate-800">
+                  {timeline.trust_summary?.unresolved_conflicts ? "History withheld pending source review" : t("history.empty")}
+                </p>
+                <p className="mt-1 text-xs text-slate-600">
+                  {timeline.trust_summary?.unresolved_conflicts
+                    ? "Conflicting records are available for review but are not shown as settled history."
+                    : t("history.emptyBody")}
+                </p>
                 <Link
-                  to="/upload"
+                  to={timeline.trust_summary?.unresolved_conflicts ? "/review" : "/upload"}
                   className="mt-4 inline-flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700"
                 >
-                  <UploadIcon className="h-4 w-4" /> Upload
+                  <UploadIcon className="h-4 w-4" />
+                  {timeline.trust_summary?.unresolved_conflicts ? "Review sources" : "Upload"}
                 </Link>
               </CardBody>
             </Card>
           ) : (
-            <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
-              <div className="space-y-8">
+            <div className="space-y-6">
+              <ClinicalEventsTimeline timeline={timeline} />
+              <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
+                <div className="space-y-8">
                 {grouped.map((g) => (
                   <div key={g.year}>
                     <div className="flex items-center gap-3">
@@ -133,12 +143,7 @@ export function HistoryPage() {
                                 <p className="text-xs text-slate-500">{visit.provider_or_doctor}</p>
                               )}
                               <p className="mt-1 line-clamp-2 text-xs text-slate-600">
-                                {visit.clinical_notes ||
-                                  (visit.medications.length
-                                    ? visit.medications.map((m) => m.name).join(", ")
-                                    : visit.lab_results.length
-                                    ? visit.lab_results.map((l) => l.test_name).join(", ")
-                                    : "No extracted summary")}
+                                {visitSummary(visit)}
                               </p>
                             </div>
                             <span className="max-w-full shrink-0 truncate rounded-full bg-slate-50 px-2 py-0.5 text-[11px] text-slate-500 ring-1 ring-slate-200 sm:max-w-[45%]" title={visit._source.file}>
@@ -172,11 +177,24 @@ export function HistoryPage() {
                 )}
               </div>
             </div>
+            </div>
           )}
         </>
       )}
     </div>
   );
+}
+
+function visitSummary(visit: Visit): string {
+  if (visit.clinical_notes) return visit.clinical_notes;
+  if (visit.diagnoses?.length) return `Diagnoses: ${visit.diagnoses.map((item) => item.name).join(", ")}`;
+  if (visit.procedures?.length) return `Procedures: ${visit.procedures.map((item) => item.name).join(", ")}`;
+  if (visit.imaging_results?.length) return `Imaging: ${visit.imaging_results.map((item) => item.study_type).join(", ")}`;
+  if (visit.symptoms?.length) return `Symptoms: ${visit.symptoms.map((item) => item.name).join(", ")}`;
+  if (visit.vital_signs?.length) return `Vitals: ${visit.vital_signs.map((item) => `${item.name} ${item.value}`).join(", ")}`;
+  if (visit.medications.length) return visit.medications.map((item) => item.name).join(", ");
+  if (visit.lab_results.length) return visit.lab_results.map((item) => item.test_name).join(", ");
+  return "No extracted summary";
 }
 
 function iconForDoc(type: string) {
@@ -187,6 +205,12 @@ function iconForDoc(type: string) {
       return "🧪";
     case "discharge_summary":
       return "🏥";
+    case "imaging_report":
+      return "🩻";
+    case "procedure_report":
+      return "🩺";
+    case "consultation_note":
+      return "📋";
     default:
       return "📄";
   }

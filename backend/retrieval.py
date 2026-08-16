@@ -6,8 +6,9 @@ medical_extractor.py — specifically the per-patient timeline returned by
 build_patient_timeline(). It does NOT re-read raw documents.
 
 Pipeline:
-    patient timeline -> chunks (one per medication / lab result / clinical
-    note / allergy list) -> embed each chunk's text -> store in a
+    patient timeline -> chunks (one per medication / lab / diagnosis /
+    symptom / procedure / vital / imaging result / note / allergy source)
+    -> embed each chunk's text -> store in a
     per-patient local Chroma collection -> at query time, embed the
     question, retrieve the top_k most similar chunks, and ask a chat
     model to answer strictly from that retrieved context.
@@ -38,10 +39,12 @@ import re
 import json
 import hashlib
 import logging
-from typing import Any, Dict, Iterator, List, Optional
+from datetime import datetime
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from openai import OpenAI, OpenAIError
 
+from evidence import first_evidence
 from medical_extractor import MODEL, _completion_resilient
 from memory_probe import log_rss
 from question_routing import assess_evidence, classify_question, route_chunks
@@ -198,6 +201,73 @@ def _chunk_id(patient_key: str, source_file: Optional[str], chunk_type: str, pay
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
+def timeline_fingerprint(timeline: Dict[str, Any]) -> str:
+    """Fingerprint trusted content so stale indexes can be replaced safely."""
+    notes = [
+        {
+            "document_id": visit.get("_document_id"),
+            "date": visit.get("date"),
+            "note": visit.get("clinical_notes"),
+            "trust": visit.get("_trust"),
+        }
+        for visit in timeline.get("visits", [])
+        if visit.get("clinical_notes") and not (visit.get("_trust") or {}).get("quarantined")
+    ]
+    payload = {
+        "medications": timeline.get("medications_timeline", []),
+        "labs": timeline.get("lab_results_timeline", []),
+        "diagnoses": timeline.get("diagnoses_timeline", []),
+        "symptoms": timeline.get("symptoms_timeline", []),
+        "procedures": timeline.get("procedures_timeline", []),
+        "vital_signs": timeline.get("vital_signs_timeline", []),
+        "imaging_results": timeline.get("imaging_results_timeline", []),
+        "allergies": timeline.get("known_allergies", []),
+        "allergy_evidence": timeline.get("allergy_evidence", []),
+        "notes": notes,
+        "trust_summary": timeline.get("trust_summary", {}),
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _evidence_metadata(fact: Dict[str, Any], *, document_type: str = "other") -> Dict[str, Any]:
+    trust_status = str((fact.get("_trust") or {}).get("status") or "extracted")
+    verification_weight = {"source_confirmed": 1.0, "user_corrected": 0.98, "extracted": 0.72}.get(
+        trust_status, 0.5
+    )
+    source_method = str(fact.get("source_method") or "")
+    source_weight = 0.9 if source_method == "text_layer" else 0.72 if source_method == "vision_ocr" else 0.65
+    type_weight = {
+        "lab_report": 0.96,
+        "imaging_report": 0.95,
+        "prescription": 0.94,
+        "procedure_report": 0.92,
+        "discharge_summary": 0.86,
+        "consultation_note": 0.84,
+        "other": 0.65,
+    }.get(document_type or "other", 0.65)
+    confidence = fact.get("confidence")
+    if not isinstance(confidence, (int, float)):
+        confidence = 0.65
+    score = round(
+        0.35 * verification_weight + 0.25 * source_weight + 0.25 * type_weight + 0.15 * float(confidence),
+        4,
+    )
+    region = first_evidence(fact) or {}
+    return {
+        "verification_status": str(region.get("verification_status") or trust_status),
+        "source_method": source_method,
+        "extraction_confidence": float(confidence),
+        "evidence_score": score,
+        "evidence_tier": "A" if score >= 0.9 else "B" if score >= 0.78 else "C",
+        "evidence_id": str(region.get("evidence_id") or ""),
+        "evidence_quote": str(region.get("quote") or ""),
+        # Chroma metadata values must be scalar; serialize the normalized box.
+        "evidence_bbox": json.dumps(region.get("bbox")) if region.get("bbox") else "",
+        "evidence_locator": str(region.get("locator") or ""),
+    }
+
+
 def _medication_chunk_text(med: Dict[str, Any]) -> str:
     ingredients = ", ".join(med.get("ingredients") or []) or "unknown"
     duration = med.get("duration") or "not specified"
@@ -237,6 +307,65 @@ def _lab_result_chunk_text(lab: Dict[str, Any]) -> str:
     )
 
 
+def _diagnosis_chunk_text(item: Dict[str, Any]) -> str:
+    code = f" (code: {item['code']})" if item.get("code") else ""
+    return (
+        f"Documented diagnosis: {item.get('name', 'unknown')}{code}. "
+        f"Source status: {item.get('status', 'unknown')}. "
+        f"Onset/event date: {item.get('date') or 'not specified'} "
+        f"(source: {item.get('source_file') or 'unknown file'})."
+    )
+
+
+def _symptom_chunk_text(item: Dict[str, Any]) -> str:
+    return (
+        f"Documented symptom or sign: {item.get('name', 'unknown')}. "
+        f"Severity: {item.get('severity', 'unknown')}; status: {item.get('status', 'unknown')}. "
+        f"Onset/event date: {item.get('date') or 'not specified'} "
+        f"(source: {item.get('source_file') or 'unknown file'})."
+    )
+
+
+def _procedure_chunk_text(item: Dict[str, Any]) -> str:
+    body_site = f" Body site: {item['body_site']}." if item.get("body_site") else ""
+    outcome = f" Documented outcome: {item['outcome']}." if item.get("outcome") else ""
+    return (
+        f"Documented procedure: {item.get('name', 'unknown')}. "
+        f"Status: {item.get('status', 'unknown')}.{body_site}{outcome} "
+        f"Procedure/event date: {item.get('date') or 'not specified'} "
+        f"(source: {item.get('source_file') or 'unknown file'})."
+    )
+
+
+def _vital_sign_chunk_text(item: Dict[str, Any]) -> str:
+    unit = f" {item['unit']}" if item.get("unit") else ""
+    return (
+        f"Vital sign: {item.get('name', 'unknown')} = {item.get('value', 'unknown')}{unit}. "
+        f"Measured/event date: {item.get('date') or 'not specified'} "
+        f"(source: {item.get('source_file') or 'unknown file'})."
+    )
+
+
+def _imaging_result_chunk_text(item: Dict[str, Any]) -> str:
+    body_site = f" of {item['body_site']}" if item.get("body_site") else ""
+    impression = f" Impression: {item['impression']}" if item.get("impression") else ""
+    return (
+        f"Documented imaging study: {item.get('study_type', 'unknown')}{body_site}. "
+        f"Findings: {item.get('findings') or 'not specified'}.{impression} "
+        f"Study/event date: {item.get('date') or 'not specified'} "
+        f"(source: {item.get('source_file') or 'unknown file'})."
+    )
+
+
+_CLINICAL_CHUNK_SPECS = (
+    ("diagnoses_timeline", "diagnosis", _diagnosis_chunk_text),
+    ("symptoms_timeline", "symptom", _symptom_chunk_text),
+    ("procedures_timeline", "procedure", _procedure_chunk_text),
+    ("vital_signs_timeline", "vital_sign", _vital_sign_chunk_text),
+    ("imaging_results_timeline", "imaging_result", _imaging_result_chunk_text),
+)
+
+
 def _clinical_note_chunk_text(visit: Dict[str, Any]) -> str:
     source_file = visit.get("_source", {}).get("file")
     return (
@@ -247,14 +376,6 @@ def _clinical_note_chunk_text(visit: Dict[str, Any]) -> str:
 
 def _allergy_chunk_text(allergies: List[str]) -> str:
     return "Known allergies: " + ", ".join(allergies) + "."
-
-
-def _diagnosis_chunk_text(diagnosis: Dict[str, Any]) -> str:
-    return (
-        f"Diagnosis or condition explicitly mentioned: {diagnosis.get('name', 'unknown')} "
-        f"on {diagnosis.get('date') or 'an unknown date'} "
-        f"(source: {diagnosis.get('source_file') or 'unknown file'})."
-    )
 
 
 def build_chunks_from_timeline(patient_key: str, timeline: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -270,6 +391,7 @@ def build_chunks_from_timeline(patient_key: str, timeline: Dict[str, Any]) -> Li
     upserts instead of duplicating.
     """
     chunks: List[Dict[str, Any]] = []
+    fingerprint = timeline.get("_record_fingerprint") or timeline_fingerprint(timeline)
 
     for med in timeline.get("medications_timeline", []):
         text = _medication_chunk_text(med)
@@ -281,7 +403,11 @@ def build_chunks_from_timeline(patient_key: str, timeline: Dict[str, Any]) -> Li
                 "date": med.get("date") or "",
                 "source_file": med.get("source_file") or "",
                 "source_page": med.get("source_page") or 0,
+                "document_id": med.get("document_id") or "",
+                "fact_path": med.get("fact_path") or "",
                 "chunk_type": "medication",
+                "record_fingerprint": fingerprint,
+                **_evidence_metadata(med, document_type=str(med.get("document_type") or "prescription")),
             },
         })
 
@@ -295,15 +421,26 @@ def build_chunks_from_timeline(patient_key: str, timeline: Dict[str, Any]) -> Li
                 "date": lab.get("date") or "",
                 "source_file": lab.get("source_file") or "",
                 "source_page": lab.get("source_page") or 0,
+                "document_id": lab.get("document_id") or "",
+                "fact_path": lab.get("fact_path") or "",
                 "chunk_type": "lab_result",
+                "record_fingerprint": fingerprint,
+                **_evidence_metadata(lab, document_type=str(lab.get("document_type") or "lab_report")),
             },
         })
 
     for visit in timeline.get("visits", []):
-        if not visit.get("clinical_notes"):
+        if not visit.get("clinical_notes") or (visit.get("_trust") or {}).get("quarantined"):
             continue
-        source_file = visit.get("_source", {}).get("file")
+        source = visit.get("_source", {}) if isinstance(visit.get("_source"), dict) else {}
+        source_file = source.get("file")
         text = _clinical_note_chunk_text(visit)
+        note_fact = {
+            "confidence": visit.get("overall_confidence"),
+            "source_method": source.get("method"),
+            "_trust": visit.get("_trust"),
+            "evidence": (visit.get("field_evidence") or {}).get("clinical_notes") or [],
+        }
         chunks.append({
             "id": _chunk_id(patient_key, source_file, "clinical_note", text),
             "text": text,
@@ -311,29 +448,83 @@ def build_chunks_from_timeline(patient_key: str, timeline: Dict[str, Any]) -> Li
                 "patient_key": patient_key,
                 "date": visit.get("date") or "",
                 "source_file": source_file or "",
-                "source_page": visit.get("_source", {}).get("page") or 0,
+                "source_page": (first_evidence(note_fact) or {}).get("page") or source.get("page") or 0,
+                "document_id": visit.get("_document_id") or "",
+                "fact_path": "/clinical_notes",
                 "chunk_type": "clinical_note",
+                "record_fingerprint": fingerprint,
+                **_evidence_metadata(
+                    note_fact,
+                    document_type=str(visit.get("document_type") or "other"),
+                ),
             },
         })
 
-    for diagnosis in timeline.get("diagnoses_timeline", []) or []:
-        text = _diagnosis_chunk_text(diagnosis)
-        chunks.append({
-            "id": _chunk_id(patient_key, diagnosis.get("source_file"), "diagnosis", text),
-            "text": text,
-            "metadata": {
-                "patient_key": patient_key,
-                "date": diagnosis.get("date") or "",
-                "source_file": diagnosis.get("source_file") or "",
-                "source_page": diagnosis.get("source_page") or 0,
-                "chunk_type": "diagnosis",
-            },
-        })
+    for timeline_key, chunk_type, text_builder in _CLINICAL_CHUNK_SPECS:
+        for fact in timeline.get(timeline_key, []) or []:
+            if not isinstance(fact, dict) or (fact.get("_trust") or {}).get("quarantined"):
+                continue
+            text = text_builder(fact)
+            chunks.append({
+                "id": _chunk_id(patient_key, fact.get("source_file"), chunk_type, text),
+                "text": text,
+                "metadata": {
+                    "patient_key": patient_key,
+                    "date": fact.get("date") or "",
+                    "source_file": fact.get("source_file") or "",
+                    "source_page": int(fact.get("source_page") or 0),
+                    "document_id": fact.get("document_id") or "",
+                    "fact_path": fact.get("fact_path") or "",
+                    "chunk_type": chunk_type,
+                    "record_fingerprint": fingerprint,
+                    **_evidence_metadata(
+                        fact,
+                        document_type=str(fact.get("document_type") or "other"),
+                    ),
+                },
+            })
 
     # Preserve allergy provenance per visit so Q&A can validate a real
     # source citation. Keep an aggregate fallback for legacy timelines.
     represented_allergies = set()
-    for visit in timeline.get("visits", []):
+    allergy_facts = [
+        fact for fact in (timeline.get("allergy_evidence") or [])
+        if isinstance(fact, dict) and fact.get("allergy")
+    ]
+    for allergy_fact in allergy_facts:
+        allergy = allergy_fact.get("allergy")
+        fact_allergies = allergy if isinstance(allergy, list) else [str(allergy)]
+        represented_allergies.update(
+            item.lower() for item in fact_allergies if isinstance(item, str)
+        )
+        region = first_evidence(allergy_fact) or {}
+        text = (
+            _allergy_chunk_text(fact_allergies)
+            + f" Recorded on {allergy_fact.get('date') or 'an unknown date'} "
+            + f"(source: {allergy_fact.get('source_file') or 'unknown file'})."
+        )
+        chunks.append({
+            "id": _chunk_id(patient_key, allergy_fact.get("source_file"), "allergy", text),
+            "text": text,
+            "metadata": {
+                "patient_key": patient_key,
+                "date": allergy_fact.get("date") or "",
+                "source_file": allergy_fact.get("source_file") or "",
+                "source_page": region.get("page") or 0,
+                "document_id": allergy_fact.get("document_id") or "",
+                "fact_path": "/allergies_noted",
+                "chunk_type": "allergy",
+                "record_fingerprint": fingerprint,
+                **_evidence_metadata(
+                    allergy_fact,
+                    document_type=str(allergy_fact.get("document_type") or "other"),
+                ),
+            },
+        })
+
+    # Legacy timelines predate allergy_evidence; their visit still carries
+    # enough provenance for a truthful page/file citation.
+    for visit in timeline.get("visits", []) if not allergy_facts else []:
         allergies = visit.get("allergies_noted") or []
         if not allergies:
             continue
@@ -341,6 +532,12 @@ def build_chunks_from_timeline(patient_key: str, timeline: Dict[str, Any]) -> Li
             allergy.lower() for allergy in allergies if isinstance(allergy, str)
         )
         source_file = visit.get("_source", {}).get("file")
+        allergy_fact = {
+            "confidence": visit.get("overall_confidence"),
+            "source_method": (visit.get("_source") or {}).get("method"),
+            "_trust": visit.get("_trust"),
+            "evidence": (visit.get("field_evidence") or {}).get("allergies_noted") or [],
+        }
         text = (
             _allergy_chunk_text(allergies)
             + f" Recorded on {visit.get('date') or 'an unknown date'} "
@@ -353,8 +550,15 @@ def build_chunks_from_timeline(patient_key: str, timeline: Dict[str, Any]) -> Li
                 "patient_key": patient_key,
                 "date": visit.get("date") or "",
                 "source_file": source_file or "",
-                "source_page": visit.get("_source", {}).get("page") or 0,
+                "source_page": (first_evidence(allergy_fact) or {}).get("page") or visit.get("_source", {}).get("page") or 0,
+                "document_id": visit.get("_document_id") or "",
+                "fact_path": "/allergies_noted",
                 "chunk_type": "allergy",
+                "record_fingerprint": fingerprint,
+                **_evidence_metadata(
+                    allergy_fact,
+                    document_type=str(visit.get("document_type") or "other"),
+                ),
             },
         })
 
@@ -372,7 +576,15 @@ def build_chunks_from_timeline(patient_key: str, timeline: Dict[str, Any]) -> Li
                 "date": "",
                 "source_file": "",
                 "source_page": 0,
+                "document_id": "",
+                "fact_path": "/allergies_noted",
                 "chunk_type": "allergy",
+                "record_fingerprint": fingerprint,
+                "verification_status": "extracted",
+                "source_method": "",
+                "extraction_confidence": 0.65,
+                "evidence_score": 0.68,
+                "evidence_tier": "C",
             },
         })
 
@@ -497,7 +709,12 @@ def _iter_batches(chunks: List[Dict[str, Any]], size: int) -> Iterator[List[Dict
         yield chunks[start:start + size]
 
 
-def index_patient_timeline(patient_key: str, timeline: Dict[str, Any]) -> int:
+def index_patient_timeline(
+    patient_key: str,
+    timeline: Dict[str, Any],
+    *,
+    replace: bool = False,
+) -> int:
     """
     Entry point for indexing: chunks a patient's timeline, embeds every
     chunk, and upserts them into that patient's local Chroma collection
@@ -516,7 +733,8 @@ def index_patient_timeline(patient_key: str, timeline: Dict[str, Any]) -> int:
 
     Returns the number of chunks indexed. Returns 0 — WITHOUT storing
     anything — when the timeline has no retrievable content (no
-    medications, lab results, clinical notes, or allergies), in which
+    medications, labs, diagnoses, symptoms, procedures, vital signs, imaging,
+    clinical notes, or allergies), in which
     case callers must NOT report the patient as indexed: there is
     literally nothing for Q&A to retrieve. (Previously this returned
     None after printing "skipping indexing", which made upload callers
@@ -525,16 +743,25 @@ def index_patient_timeline(patient_key: str, timeline: Dict[str, Any]) -> int:
     if not patient_key or not patient_key.strip():
         raise ValueError("patient_key is required and cannot be empty.")
 
+    timeline["_record_fingerprint"] = timeline_fingerprint(timeline)
     chunks = build_chunks_from_timeline(patient_key, timeline)
     if not chunks:
+        if replace:
+            vector_store.delete_collection(patient_key)
         logger.warning(
-            "No indexable content found for patient '%s' — skipping indexing "
-            "(nothing to retrieve for Q&A).",
+            "No indexable trusted content found for patient '%s' — skipping indexing "
+            "(quarantined or nothing to retrieve for Q&A).",
             patient_key,
         )
         return 0
 
     total = len(chunks)
+    for chunk in chunks:
+        chunk["metadata"]["record_chunk_count"] = total
+    if replace:
+        # Content-addressed IDs prevent most duplication, but facts removed by
+        # a correction/quarantine still have to be deleted explicitly.
+        vector_store.delete_collection(patient_key)
     store_name = vector_store.get_store_name()
     batch_size = EMBEDDING_BATCH_SIZE
     log_rss(logger, "indexing_start", chunks=total, batch_size=batch_size, store=store_name)
@@ -592,8 +819,9 @@ def index_patient_timeline(patient_key: str, timeline: Dict[str, Any]) -> int:
 QA_SYSTEM_PROMPT = """
 You are a patient-facing medical records assistant. You answer questions
 using ONLY the retrieved context provided to you below — structured chunks
-pulled from that patient's own extracted medical records (medications, lab
-results, clinical notes, allergies).
+pulled from that patient's own extracted medical records (medications, labs,
+documented diagnoses and symptoms, procedures, vital signs, imaging reports,
+clinical notes, and allergies).
 
 Rules:
 - Answer strictly from the retrieved context. If the context does not cover
@@ -605,11 +833,11 @@ Rules:
   level, a blood type, an address, or an appointment) say plainly that it
   is not present in their uploaded records. Never estimate or infer it from
   typical values.
-- NEVER provide a diagnosis, confirm or deny that the patient has a
-  condition, or interpret what a result "means" clinically. If asked
-  "do I have X?", report only what the records document (for example a
-  recorded value and its flag) and state that only a clinician can
-  diagnose. Set recommend_professional_consult to true.
+- You may report a diagnosis only when a retrieved chunk explicitly labels it
+  as documented, and must attribute it to that record. NEVER infer a new
+  diagnosis, confirm a condition beyond what the source states, or interpret
+  what a lab, vital, symptom, or imaging result means clinically. If asked
+  "do I have X?", report only what the records document. State plainly that only a clinician can diagnose. Set recommend_professional_consult to true.
 - NEVER tell the patient to start, stop, increase, or decrease a
   medication, even if they ask directly. Report what the records document
   about the current instructions and refer them to their doctor or
@@ -620,9 +848,11 @@ Rules:
   recommend_professional_consult to true.
 - Distinguish clearly between what the records DOCUMENT and any general
   observation you make. Never present an inference as a documented fact.
-- Cite the date, source_file, and page (null when unavailable) of every chunk you rely on in "sources".
-  Only cite a source_file that appears verbatim in the retrieved context.
-  Never invent, guess, or reformat a filename.
+- Cite the date, source_file, page, document_id, evidence_id, verbatim quote,
+  bounding box, verification_status, and evidence_tier of every chunk you rely
+  on in "sources". Copy these values exactly from the context header. Only
+  cite source_file/evidence_id values that appear verbatim in that context.
+  Only cite a source_file that appears verbatim; never invent, guess, or reformat it.
 - If the question names a specific document, answer only from chunks whose
   source_file matches that document, and say so if it holds no relevant
   information.
@@ -671,8 +901,22 @@ ANSWER_JSON_SCHEMA = {
                     "date": {"type": "string"},
                     "source_file": {"type": "string"},
                     "page": {"type": ["integer", "null"]},
+                    "document_id": {"type": "string"},
+                    "evidence_id": {"type": "string"},
+                    "quote": {"type": "string"},
+                    "bbox": {
+                        "type": ["array", "null"],
+                        "items": {"type": "number"},
+                        "minItems": 4,
+                        "maxItems": 4,
+                    },
+                    "verification_status": {"type": "string"},
+                    "evidence_tier": {"type": "string", "enum": ["A", "B", "C"]},
                 },
-                "required": ["date", "source_file", "page"],
+                "required": [
+                    "date", "source_file", "page", "document_id", "evidence_id",
+                    "quote", "bbox", "verification_status", "evidence_tier",
+                ],
                 "additionalProperties": False,
             },
         },
@@ -703,20 +947,31 @@ _NO_INFO_ANSWER = {
 }
 
 # Patient HAS persisted documents, but none of them contain anything the
-# Q&A indexer can retrieve (no medications, lab results, clinical notes,
-# or allergies). Different from _NO_INFO_ANSWER, which means "no records
-# were ever uploaded" — returning the wrong one of the two is what made
+# Q&A indexer can retrieve (no medications, labs, longitudinal clinical
+# events, clinical notes, or allergies). Different from _NO_INFO_ANSWER,
+# which means "no records were ever uploaded" — returning the wrong one is what made
 # users with uploaded documents see a false "no indexed records" message.
 _NO_INDEXABLE_CONTENT_ANSWER = {
     "answer": (
         "I don't have enough information — your records were found, but they "
-        "contain no medications, lab results, clinical notes, diagnoses, or allergies for "
-        "Q&A to search."
+        "contain no medications, lab results, clinical notes, allergies, diagnoses, "
+        "symptoms, procedures, vital signs, or imaging results for Q&A to search."
     ),
     "confidence": 0.0,
-    "confidence_reason": "The uploaded records contain no medications, lab results, clinical notes, diagnoses, or allergies that Q&A can retrieve.",
+    "confidence_reason": "The uploaded records contain no retrievable medications, labs, notes, allergies, diagnoses, symptoms, procedures, vital signs, or imaging results.",
     "sources": [],
     "recommend_professional_consult": False,
+}
+
+_QUARANTINED_CONTENT_ANSWER = {
+    "answer": (
+        "I found records, but I cannot use the conflicting facts as settled evidence yet. "
+        "Review the unresolved conflict and confirm the authoritative source before asking again."
+    ),
+    "confidence": 0.0,
+    "sources": [],
+    "recommend_professional_consult": False,
+    "trust_notice": "Unresolved evidence was quarantined from this answer.",
 }
 
 
@@ -813,27 +1068,80 @@ def _persisted_documents(patient_key: str) -> Optional[List[Dict[str, Any]]]:
         return None
 
 
-def _reindex_from_persisted_documents(patient_key: str) -> Optional[int]:
-    """Self-healing re-index: rebuilds the patient's vector index from the
-    documents already persisted in Supabase (documents + patient_snapshots
-    survive deploys/restarts, while a local Chroma store or a freshly
-    migrated `chunks` table may not).
+def _trusted_timeline_from_persisted_documents(
+    patient_key: str,
+) -> Tuple[Optional[Dict[str, Any]], Optional[List[Dict[str, Any]]]]:
+    """Build the current corrected, conflict-quarantined timeline.
 
-    Returns:
-        int  — number of chunks indexed (0 = documents exist but contain no
-               indexable content)
-        None — the patient has no persisted documents (nothing to re-index)
-
-    Raises RuntimeError (embedding/store failure) — callers surface that as
-    an actionable error rather than masking it as "no records".
+    Conflict detection runs even if the conflict tables are temporarily
+    unavailable. That fail-closed fallback is important during migration:
+    unresolved contradictions are excluded from RAG before they have a
+    chance to be presented as settled evidence.
     """
     docs = _persisted_documents(patient_key)
     if not docs:
-        return None
-
+        return None, docs
+    persisted_conflicts: List[Dict[str, Any]] = []
+    # Real DB-loaded documents always carry a stable _document_id. Legacy
+    # unit/CLI payloads often do not and cannot have persisted resolutions;
+    # avoiding a pointless Supabase query keeps those offline paths offline.
+    if any(doc.get("_document_id") for doc in docs):
+        try:
+            import db
+            persisted_conflicts = db.load_conflicts(patient_key)
+        except Exception:
+            # Dynamic detections remain unresolved and therefore quarantined.
+            persisted_conflicts = []
     from medical_extractor import build_patient_timeline
-    timeline = build_patient_timeline(docs)
-    return index_patient_timeline(patient_key, timeline)
+    from record_trust import prepare_trusted_documents
+    trusted_docs, conflicts, trust_summary = prepare_trusted_documents(docs, persisted_conflicts)
+    timeline = build_patient_timeline(trusted_docs)
+    timeline["trust_summary"] = trust_summary
+    timeline["conflicts"] = conflicts
+    timeline["_record_fingerprint"] = timeline_fingerprint(timeline)
+    return timeline, docs
+
+
+def _reindex_from_persisted_documents(patient_key: str) -> Optional[int]:
+    """Self-heal from immutable docs using corrections + quarantine policy."""
+    timeline, docs = _trusted_timeline_from_persisted_documents(patient_key)
+    if timeline is None or not docs:
+        return None
+    return index_patient_timeline(patient_key, timeline, replace=True)
+
+
+def _recency_score(value: Any) -> float:
+    if not value:
+        return 0.4
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        # 2000 -> 0, 2030 -> 1; bounded and used only as a light tiebreaker.
+        return max(0.0, min(1.0, (parsed.year - 2000) / 30.0))
+    except (TypeError, ValueError):
+        return 0.4
+
+
+def _rank_evidence(
+    documents: List[str], metadatas: List[Dict[str, Any]], top_k: int
+) -> Tuple[List[str], List[Dict[str, Any]]]:
+    ranked = []
+    total = max(1, len(documents))
+    for index, (text, raw_meta) in enumerate(zip(documents, metadatas)):
+        meta = dict(raw_meta or {})
+        semantic = meta.get("semantic_score")
+        if not isinstance(semantic, (int, float)):
+            # Both stores already return semantic order; retain that signal
+            # when the backend does not expose raw distance/similarity.
+            semantic = 1.0 - (index / total)
+        evidence = meta.get("evidence_score")
+        if not isinstance(evidence, (int, float)):
+            evidence = 0.45  # legacy chunks rank below trust-aware chunks
+        score = 0.70 * float(semantic) + 0.25 * float(evidence) + 0.05 * _recency_score(meta.get("date"))
+        meta["retrieval_rank_score"] = round(score, 4)
+        ranked.append((score, index, text, meta))
+    ranked.sort(key=lambda row: (-row[0], row[1]))
+    chosen = ranked[:top_k]
+    return [row[2] for row in chosen], [row[3] for row in chosen]
 
 
 def answer_question(
@@ -896,11 +1204,20 @@ def answer_question(
     # while preventing an allergy/lab question from being answered using a
     # semantically nearby but unrelated medication/note chunk.
     requested_top_k = max(1, top_k)
+    current_timeline, persisted_docs = _trusted_timeline_from_persisted_documents(patient_key)
+    trust_summary = (current_timeline or {}).get("trust_summary", {})
+    expected_fingerprint = (current_timeline or {}).get("_record_fingerprint")
+    expected_count = len(build_chunks_from_timeline(patient_key, current_timeline)) if current_timeline else None
 
     # Use vector_store abstraction when supabase, else Chroma directly (for test mocks)
     if vector_store.get_store_name() == "supabase":
         store_count = vector_store.count(patient_key)
-        if store_count == 0:
+        indexed_fingerprint = vector_store.get_index_fingerprint(patient_key) if store_count else None
+        if current_timeline is not None and (
+            store_count != expected_count or indexed_fingerprint != expected_fingerprint
+        ):
+            store_count = index_patient_timeline(patient_key, current_timeline, replace=True)
+        elif store_count == 0:
             # Empty index + persisted documents => the index is stale/missing
             # (ephemeral Chroma dir wiped by a redeploy, chunks table freshly
             # created, background job crashed before indexing). Rebuild it from
@@ -911,12 +1228,26 @@ def answer_question(
             if reindexed == 0:
                 return _with_evidence_metadata(dict(_NO_INDEXABLE_CONTENT_ANSWER), intent, assess_evidence(intent, []))
             store_count = reindexed
+        if store_count == 0:
+            empty = _QUARANTINED_CONTENT_ANSWER if trust_summary.get("unresolved_conflicts") else _NO_INDEXABLE_CONTENT_ANSWER
+            return _with_evidence_metadata(dict(empty), intent, assess_evidence(intent, []))
         query_embedding = embed_texts([effective_retrieval_query])[0]
         fetch_count = min(store_count, max(requested_top_k * 4, requested_top_k))
         _, docs, metadatas = vector_store.query(patient_key, query_embedding, fetch_count)
     else:
         collection = _get_patient_collection(patient_key, create=False)
-        if collection is None or collection.count() == 0:
+        collection_count = collection.count() if collection is not None else 0
+        indexed_fingerprint = vector_store.get_index_fingerprint(patient_key) if collection_count else None
+        if current_timeline is not None and (
+            collection_count != expected_count or indexed_fingerprint != expected_fingerprint
+        ):
+            reindexed = index_patient_timeline(patient_key, current_timeline, replace=True)
+            collection = _get_patient_collection(patient_key, create=False)
+            collection_count = collection.count() if collection is not None else 0
+            if reindexed == 0 or collection_count == 0:
+                empty = _QUARANTINED_CONTENT_ANSWER if trust_summary.get("unresolved_conflicts") else _NO_INDEXABLE_CONTENT_ANSWER
+                return _with_evidence_metadata(dict(empty), intent, assess_evidence(intent, []))
+        elif collection is None or collection_count == 0:
             reindexed = _reindex_from_persisted_documents(patient_key)
             if reindexed is None:
                 return _with_evidence_metadata(dict(_NO_INFO_ANSWER), intent, assess_evidence(intent, []))
@@ -943,14 +1274,21 @@ def answer_question(
             return _with_evidence_metadata(dict(_NO_INDEXABLE_CONTENT_ANSWER), intent, assess_evidence(intent, []))
         return _with_evidence_metadata(dict(_NO_INFO_ANSWER), intent, assess_evidence(intent, []))
 
-    docs, metadatas = route_chunks(docs, metadatas, intent, requested_top_k)
+    docs, metadatas = route_chunks(docs, metadatas, intent, max(requested_top_k * 3, requested_top_k))
+    docs, metadatas = _rank_evidence(docs, metadatas, requested_top_k)
     if not docs:
         return _no_matching_evidence_answer(intent)
     evidence = assess_evidence(intent, metadatas)
 
     context_blocks = [
         f"[date: {meta.get('date') or 'unknown'} | source_file: {meta.get('source_file') or 'unknown'} "
-        f"| page: {meta.get('source_page') or 'unknown'} | type: {meta.get('chunk_type') or 'unknown'}]"
+        f"| page: {meta.get('source_page') or 0} | document_id: {meta.get('document_id') or ''} "
+        f"| type: {meta.get('chunk_type') or 'unknown'} "
+        f"| evidence_id: {meta.get('evidence_id') or ''} "
+        f"| quote: {json.dumps(meta.get('evidence_quote') or '')} "
+        f"| bbox: {meta.get('evidence_bbox') or 'null'} "
+        f"| verification_status: {meta.get('verification_status') or 'extracted'} "
+        f"| evidence_tier: {meta.get('evidence_tier') or 'C'}]"
         f"\n{_neutralize_injection(text)}"
         for text, meta in zip(docs, metadatas)
     ]
@@ -1014,7 +1352,17 @@ def answer_question(
     # Drop citations the model invented, then attach deterministic intent and
     # evidence-coverage metadata and apply the stricter confidence cap.
     validated = _validate_answer(parsed, metadatas)
-    return _finalize_answer(validated, intent, evidence, metadatas)
+    finalized = _finalize_answer(validated, intent, evidence, metadatas)
+    unresolved_count = int(trust_summary.get("unresolved_conflicts") or 0)
+    quarantined_count = int(trust_summary.get("quarantined_facts") or 0) + int(
+        trust_summary.get("quarantined_documents") or 0
+    )
+    if unresolved_count or quarantined_count:
+        finalized["trust_notice"] = (
+            "Conflicting evidence was excluded. This answer uses only non-conflicting or user-confirmed sources."
+        )
+        finalized["quarantined_conflict_count"] = unresolved_count
+    return finalized
 
 
 _INJECTION_PATTERNS = re.compile(
@@ -1060,18 +1408,21 @@ def _validate_answer(
     if not isinstance(answer, str) or not answer.strip():
         raise RuntimeError("Chat model returned an empty answer.")
 
-    # Map every retrieved file to the pages/dates actually retrieved.
+    # Map every retrieved file to the pages/dates and exact evidence metadata
+    # actually retrieved. Model-provided locators are never trusted directly.
     retrieved: Dict[str, Dict[str, Any]] = {}
-    for meta in metadatas:
-        source_file = (meta.get("source_file") or "").strip()
+    for raw_meta in metadatas:
+        meta = dict(raw_meta or {})
+        source_file = str(meta.get("source_file") or "").strip()
         if not source_file:
             continue
-        entry = retrieved.setdefault(source_file, {"pages": set(), "dates": set()})
+        entry = retrieved.setdefault(source_file, {"pages": set(), "dates": set(), "metas": []})
+        entry["metas"].append(meta)
         page = meta.get("source_page")
         # main writes 0 (not "") when a chunk has no page — both mean absent.
         if page not in (None, "", 0):
             entry["pages"].add(page)
-        date = (meta.get("date") or "").strip()
+        date = str(meta.get("date") or "").strip()
         if date:
             entry["dates"].add(date)
 
@@ -1090,9 +1441,35 @@ def _validate_answer(
         if source_file not in retrieved:
             dropped.append(source_file)
             continue
+        requested_evidence_id = str(source.get("evidence_id") or "").strip()
+        requested_document_id = str(source.get("document_id") or "").strip()
+        candidates = list(retrieved[source_file]["metas"])
+        if requested_document_id:
+            candidates = [
+                meta for meta in candidates
+                if str(meta.get("document_id") or "") == requested_document_id
+            ]
+        if requested_evidence_id:
+            candidates = [
+                meta for meta in candidates
+                if str(meta.get("evidence_id") or "") == requested_evidence_id
+            ]
+            # A concrete but unknown evidence ID must fail closed rather than
+            # deep-linking the claim to another fact in the same file.
+            if not candidates:
+                dropped.append(f"{source_file}#{requested_evidence_id}")
+                continue
+        if not candidates:
+            candidates = list(retrieved[source_file]["metas"])
+        selected_meta = candidates[0] if candidates else {}
+
         if source_file not in by_file:
-            by_file[source_file] = {"dates": set()}
+            by_file[source_file] = {"dates": set(), "meta": selected_meta}
             order.append(source_file)
+        elif requested_evidence_id:
+            # Prefer a citation whose exact evidence ID the model supplied
+            # over a filename-only citation encountered earlier.
+            by_file[source_file]["meta"] = selected_meta
         date = str(source.get("date") or "").strip()
         # Keep the model's date only when it matches what was retrieved.
         if date and date in retrieved[source_file]["dates"]:
@@ -1105,16 +1482,37 @@ def _validate_answer(
             # The model gave no usable date: fall back to what was retrieved.
             dates = sorted(retrieved[source_file]["dates"])
         pages = sorted(retrieved[source_file]["pages"], key=lambda value: str(value))
-        validated_sources.append(
-            {
-                # `date` stays the earliest for backward compatibility; `dates`
-                # carries the full set so the UI can show every occurrence.
-                "date": dates[0] if dates else "",
-                "dates": dates,
-                "source_file": source_file,
-                "page": pages[0] if len(pages) == 1 else None,
-            }
-        )
+        meta = by_file[source_file].get("meta") or {}
+        try:
+            evidence_bbox = json.loads(str(meta.get("evidence_bbox") or "null"))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            evidence_bbox = None
+        evidence_page = meta.get("source_page")
+        normalized_source = {
+            # `date` stays the earliest for backward compatibility; `dates`
+            # carries the full set so the UI can show every occurrence.
+            "date": dates[0] if dates else "",
+            "dates": dates,
+            "source_file": source_file,
+            "page": (
+                evidence_page
+                if evidence_page not in (None, "", 0)
+                else pages[0] if len(pages) == 1 else None
+            ),
+        }
+        # Preserve the compact legacy citation shape when a record predates
+        # source regions. Empty locator fields look authoritative but cannot
+        # deep-link anywhere, so expose them only with a real evidence ID.
+        if meta.get("evidence_id"):
+            normalized_source.update({
+                "document_id": str(meta.get("document_id") or ""),
+                "evidence_id": str(meta.get("evidence_id") or ""),
+                "quote": str(meta.get("evidence_quote") or ""),
+                "bbox": evidence_bbox,
+                "verification_status": str(meta.get("verification_status") or "extracted"),
+                "evidence_tier": str(meta.get("evidence_tier") or "C"),
+            })
+        validated_sources.append(normalized_source)
 
     if dropped:
         logger.warning(

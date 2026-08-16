@@ -58,6 +58,7 @@ export const si = {
     close: "සංචාලන මෙනුව වසන්න",
     dashboard: "සාරාංශය",
     records: "වෛද්‍ය වාර්තා",
+    trustReview: "මූලාශ්‍ර විශ්වාස සමාලෝචනය",
     medications: "ඖෂධ",
     labs: "පරීක්ෂණ ප්‍රතිඵල",
     timeline: "කාලරේඛාව",

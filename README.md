@@ -17,7 +17,8 @@ MediMind converts your private medical files into something you can actually nav
    patient_snapshots                    │
         └───────┬───────────────────────┘
                 |
-            Timeline (visits, meds, labs, allergies)
+            Timeline (visits, diagnoses, symptoms, procedures,
+                      vitals, imaging, meds, labs, allergies)
                 |
      ┌──────────┼──────────┐
      │          │          │
@@ -50,7 +51,10 @@ Vision+text use the same Gemini model; Groq needs two. All three are OpenAI-comp
 | `lab_trends.py` | Pure Python trend engine — direction, crossings, recovery (`returned_to_normal`), unit-clash decline, and thousands-aware parsing |
 | `change_detection.py` / `record_integrity.py` | Deterministic longitudinal change detection and source-linked cross-document discrepancy checks |
 | `appointment_prep.py` / `follow_up.py` | Printable clinician handoff plus a stable, grounded follow-up queue without inferred clinical deadlines |
-| `retrieval.py` | Chunks timelines into source-linked medication, lab, diagnosis, note, and allergy evidence; embeds/indexes through `vector_store`; then runs intent-routed Q&A with injection resistance, evidence-sufficiency gates, page-aware citation validation, and confidence caps |
+| `record_trust.py` | Immutable correction replay, deterministic conflict detection, authoritative-source state merge, and fail-closed fact/document quarantine |
+| `clinical_events.py` | Shared contracts for diagnoses, symptoms, procedures, vital signs, and imaging rollups, correction fields, dates, and evidence-search fallbacks |
+| `evidence.py` | Normalizes page/quote/box provenance, remaps vision coordinates, preserves stable evidence IDs, and uses deterministic PyMuPDF search for exact digital-PDF rectangles |
+| `retrieval.py` | Chunks only trusted timelines into source-linked medication, lab, diagnosis, note, and allergy evidence; carries source regions through `vector_store`; then runs intent-routed Q&A with injection resistance, evidence-sufficiency gates, stale-index repair, exact citation validation, and confidence caps |
 | `vector_store.py` | Abstraction over Chroma (`VECTOR_STORE=chroma`, local `CHROMA_DIR`) and Supabase `chunks` table (`VECTOR_STORE=supabase`, no volume, brute-force cosine) |
 | `jobs.py` | Thread-safe parent jobs with independent per-file progress (`queued → reading → extracting → saving → ready/failed`) and optional Supabase persistence |
 | `conversation.py` | In-memory conversation store, rewrites follow-ups like “was that safe?” into self-contained retrieval queries, summarizes older turns to keep context bounded |
@@ -125,7 +129,7 @@ If you switch `LLM_PROVIDER`, no code change needed — just env + restart.
 #### Supabase one-time setup
 
 1. Create project at supabase.com.
-2. SQL Editor → paste `backend/supabase_schema.sql` → Run (creates `documents`, `patient_snapshots`, indexes, RLS).
+2. SQL Editor → paste `backend/supabase_schema.sql` → Run. Re-run the idempotent file after upgrades; it creates `documents`, `patient_snapshots`, `chunks`, `extraction_corrections`, `record_conflicts`, `conflict_resolution_events`, indexes, grants, and RLS.
 3. Copy Project URL + service_role key into `.env`.
 
 ### Running backend
@@ -145,10 +149,11 @@ Base URL `http://127.0.0.1:8000`, all routes under `/api/v1/`.
 Zero-login anonymous model:
 
 - **Landing** `/` — hero, anonymous session explanation, Start My Health Record → auto-creates workspace via `POST /anonymous/session` (token stored in `localStorage.medimind.session.v1`).
-- **Overview / Dashboard** `/dashboard` — documents / medicines / labs / safety counts, latest safety warnings, recent history, pipeline hint.
+- **Overview / Dashboard** `/dashboard` — documents / clinical events / medicines / labs / safety counts, latest safety warnings, recent history, pipeline hint.
 - **Upload** `/upload` — drag-drop and dedup (`name-size-lastModified`); shows each document's independent queue/read/extract/save state, then clearly separates the one-time record finalization steps (history → safety → search).
-- **My Documents** `/documents` — list + `DocumentViewer` with Original (iframe/img via Cloudinary, `split("?")[0]` fixes PDF query-param urls) vs Structured tabs.
-- **My History** `/history` — year-grouped timeline (2026 → Jul 20 🧪 Blood Test etc.) + full `TimelineView`.
+- **My Documents** `/documents` — original and structured extraction plus **Correct & Audit**. “View evidence” beside dates, identities, medicines, labs, allergies, and notes opens the cited page and draws the saved region when exact geometry exists. Corrections are append-only and preserve every original/before/after value.
+- **Trust Review** `/review` — quarantines conflicting evidence, records an authoritative source decision, supports reopening, and rebuilds all derived views.
+- **My History** `/history` — event-date-specific longitudinal diagnoses, symptoms, procedures, vital signs, and imaging with evidence deep links, plus the year-grouped source-document timeline and full `TimelineView`.
 - **My Medicines** `/medicines` — current per ingredient (most recent) + historical log table, filterable, source file traceable (now fixed to original filename, not temp sanitized path).
 - **Test Results / Lab Trends** `/labs` — per-test direction, flag sequence, crossing / recovery badge (green when the latest reading is back to normal), approaching-threshold, SVG sparkline with reference band. Thousands-aware values; mixed units (`mg/dL` vs `mmol/L`) are declined rather than trended.
 - **Safety** `/safety` — allergy conflicts (danger), interactions with severity, dosage conflicts, duplicates, overall recommendation.
@@ -156,7 +161,7 @@ Zero-login anonymous model:
 - **Appointment Prep** `/appointment-prep` — printable handoff and prioritized record-grounded clinician questions.
 - **Action Center** `/follow-up` — combined follow-up queue with browser-only completion state, user-selected reminder dates, and `.ics` calendar export.
 - **Record Check** `/record-integrity` — side-by-side identity, allergy, same-date lab, and medication-instruction discrepancies.
-- **Ask** `/ask` — intent-routed RAG with evidence sufficiency, clickable page-aware citations, injection resistance, citation validation, and confidence caps.
+- **Ask** `/ask` — intent-routed RAG with evidence sufficiency, verbatim source quotes, exact-highlight deep links, injection resistance, citation validation, and confidence caps.
 
 ##### Ask AI groundedness
 
@@ -177,6 +182,23 @@ Citations resolve to documents by **exact** filename match (`frontend/src/utils/
 - **About MediMind** `/about` — current capabilities, hybrid architecture, safety/data boundaries, and an honest prioritized roadmap.
 
 States distinguished: loading, empty 404 (no record), 401 auth, 422 validation/non-medical, 502 ML pipeline, network/CORS.
+
+#### Source evidence contract
+
+Every supported extracted fact carries one or more evidence regions with a stable `evidence_id`, 1-based source `page`, verbatim `quote` when established, confidence, locator method, and optional `bbox`. Boxes use `[left, top, right, bottom]` coordinates normalized to `0..1`, so the UI can overlay them at any rendered size.
+
+- Digital PDFs: the model supplies the quote/page, then PyMuPDF searches the original PDF and replaces model geometry with a deterministic text rectangle.
+- Scanned PDFs and images: the vision model supplies a tight `0..1000` box, which the backend normalizes to `0..1`; scanned page-local coordinates are remapped to the original PDF page.
+- Unmatched or legacy records: MediMind keeps an honest page/quote or page-only link and does **not** fabricate a rectangle or claim an extracted legacy value is verbatim.
+- Corrections and conflict decisions annotate the linked source region while preserving original extraction provenance. Retrieval metadata and Q&A citations carry the same evidence ID, quote, page, and box.
+
+Cloudinary PDF page conversion is used for in-app overlays when available. If transformed preview delivery is unavailable, the viewer falls back to the original PDF page and saved quote without pretending that an exact overlay was rendered.
+
+#### Longitudinal clinical events
+
+The extraction contract also returns separate `diagnoses`, `symptoms`, `procedures`, `vital_signs`, and `imaging_results` arrays. Every item has its own confidence and evidence, plus an event-specific date where the source prints one. The timeline exposes corresponding chronological rollups (`diagnoses_timeline`, `symptoms_timeline`, `procedures_timeline`, `vital_signs_timeline`, and `imaging_results_timeline`) with document date, event date, source page, document ID, and correction path.
+
+These fields remain documentary: MediMind does not infer a diagnosis from medication, symptoms, labs, vitals, or imaging. Values and units are retained as printed until a separately validated terminology/unit-normalization layer is available. Explicitly conflicting vital measurements at the same recorded time are quarantined for source review, while undated serial observations are not treated as contradictions.
 
 #### Run frontend
 
@@ -288,7 +310,14 @@ X-User-Id: <user_id>
 #### Documents
 `POST /api/v1/documents` — multipart `files` field. Merges with prior uploads. Validates non-medical via `document_filter.py` (422 if `other` with no clinical content). Fixes `_source.file` to original filename (not temp path). Returns timeline + cross-check + lab_trends + indexed flag. If `indexed:false` includes `index_error`. Failures are per-file: one unreadable/non-medical file no longer fails the whole batch — kept files are merged normally and response includes `failed_files: [{file, file_id, file_index, error, kind, code, retryable, retry_after_seconds}]`. Provider traces are logged server-side; clients receive short, actionable messages. The request only fails outright when nothing was kept: 422 for content problems, 502 for a provider/storage interruption.
 
-`GET /api/v1/timeline`, `/cross-check`, `/lab-trends` — 404 if no snapshot yet. Lab trends recomputed on-the-fly for old snapshots lacking field.
+`GET /api/v1/timeline`, `/cross-check`, `/lab-trends` — 404 if no snapshot yet. Reads replay current corrections and quarantine policy so an older snapshot cannot leak conflicting facts.
+
+#### Corrections and source conflicts
+
+- `GET /api/v1/documents/{document_id}/corrections` returns immutable original/effective extraction and audit events.
+- `POST /api/v1/documents/{document_id}/corrections` appends allowlisted field changes and rebuilds timeline, safety, trends, snapshots, and vectors.
+- `GET /api/v1/conflicts?include_inactive=true` returns active and superseded conflict state plus resolution history.
+- `POST /api/v1/conflicts/{id}/resolve` selects an authoritative source; `POST /api/v1/conflicts/{id}/reopen` quarantines it again.
 
 #### Intelligence and action layer
 - `GET /api/v1/changes` — consecutive-record changes with both sources.
@@ -297,11 +326,11 @@ X-User-Id: <user_id>
 - `GET /api/v1/follow-up` — stable action queue; reminder dates/completion stay browser-side and are never clinically inferred.
 
 #### Single-shot Q&A
-`POST /api/v1/qa {question, chat_history?, top_k}` → `{answer, confidence, sources[], recommend_professional_consult}`
+`POST /api/v1/qa {question, chat_history?, top_k}` → `{answer, confidence, sources[], recommend_professional_consult}`. Each current source may include `{date, source_file, page, document_id, evidence_id, quote, bbox, verification_status, evidence_tier}`; the server normalizes these fields back to retrieved metadata so the model cannot invent a source location.
 
 Q&A classifies each question as medication, medication safety, lab result, lab trend, allergy, timeline, record change, or general. Vector candidates are filtered to compatible structured evidence; trend/change questions require at least two distinct dated source entries. With no matching evidence, MediMind responds without calling the answer model. Returned citations are validated against retrieved metadata, and limited/uncited answers have confidence capped.
 
-Q&A also self-heals: if the patient's vector index is empty but their documents are saved in the DB (e.g. a local `chroma_db` wiped by a redeploy with no volume, or a Supabase `chunks` table migrated after the last upload), the index is rebuilt from those saved documents on the next question, so it answers normally instead of reporting "no indexed records". If `VECTOR_STORE=supabase` and the `chunks` table is missing entirely, Q&A returns 502 with instructions to run `supabase_schema.sql` rather than a misleading empty answer.
+Q&A self-heals when the vector index is empty, stale after a correction/source decision, or incomplete. The current trusted timeline fingerprint and chunk count are checked before retrieval; unresolved and non-authoritative evidence never enters the prompt. If `VECTOR_STORE=supabase` and the `chunks` table is missing entirely, Q&A returns 502 with instructions to run `supabase_schema.sql` rather than a misleading empty answer.
 
 #### Conversations
 `POST /api/v1/sessions` → `{user_id, session_id}`

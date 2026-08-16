@@ -13,6 +13,7 @@ import {
   UploadIcon,
   FileIcon,
   ChatIcon,
+  TimelineIcon,
   ChangesIcon,
   IntegrityIcon,
   ReminderIcon,
@@ -116,6 +117,12 @@ export function DashboardPage() {
 
   const medCount = record.timeline.medications_timeline.length;
   const labCount = record.timeline.lab_results_timeline.length;
+  const clinicalEventCount =
+    (record.timeline.diagnoses_timeline?.length || 0) +
+    (record.timeline.symptoms_timeline?.length || 0) +
+    (record.timeline.procedures_timeline?.length || 0) +
+    (record.timeline.vital_signs_timeline?.length || 0) +
+    (record.timeline.imaging_results_timeline?.length || 0);
   const allergyCount = record.timeline.known_allergies.length;
   const issueCount =
     record.crossCheck.potential_drug_interactions.length +
@@ -123,7 +130,7 @@ export function DashboardPage() {
     record.crossCheck.conflicting_dosage_instructions.length +
     record.crossCheck.allergy_conflicts.length;
   const trendsCount = record.labTrends.trends.length;
-  const docCount = record.timeline.visits.length;
+  const docCount = (record.timeline.documents || record.timeline.visits).length;
   const doctorCount = new Set(
     record.timeline.visits.map((v) => (v.provider_or_doctor || "").trim().toLowerCase()).filter(Boolean)
   ).size;
@@ -151,8 +158,24 @@ export function DashboardPage() {
         </Alert>
       )}
 
+      {((record.timeline.trust_summary?.unresolved_conflicts || 0) > 0 ||
+        (record.timeline.trust_summary?.quarantined_documents || 0) > 0 ||
+        (record.timeline.trust_summary?.quarantined_facts || 0) > 0) && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-5 text-amber-900">
+          <div>
+            <p className="font-semibold">
+              {record.timeline.trust_summary?.unresolved_conflicts ? "Conflicting evidence needs review" : "Non-authoritative evidence is excluded"}
+            </p>
+            <p className="mt-1 text-sm">
+              {record.timeline.trust_summary?.unresolved_conflicts || 0} unresolved conflict(s), {record.timeline.trust_summary?.quarantined_documents || 0} source(s), and {record.timeline.trust_summary?.quarantined_facts || 0} fact(s) are excluded from derived views.
+            </p>
+          </div>
+          <Link to="/review" className="btn-secondary">Review sources</Link>
+        </div>
+      )}
+
       {/* Stat cards */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
         <StatCard
           icon={<FileIcon className="h-6 w-6" />}
           label={t("common.documents")}
@@ -160,6 +183,14 @@ export function DashboardPage() {
           to="/documents"
           chip="bg-sky-50 text-sky-600"
           sub="Reports, scans & summaries"
+        />
+        <StatCard
+          icon={<TimelineIcon className="h-6 w-6" />}
+          label="Clinical Events"
+          value={clinicalEventCount}
+          to="/history"
+          chip="bg-indigo-50 text-indigo-600"
+          sub="Diagnoses, symptoms & more"
         />
         <StatCard
           icon={<PillIcon className="h-6 w-6" />}
@@ -324,9 +355,15 @@ export function DashboardPage() {
               </Link>
             </div>
             {issueCount === 0 ? (
-              <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-base text-emerald-800">
-                ✅ Nothing to worry about — no interactions, duplicates, or allergy conflicts found in your medicines.
-              </div>
+              (record.timeline.trust_summary?.unresolved_conflicts || 0) > 0 ? (
+                <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-base text-amber-800">
+                  Safety results are withheld until conflicting sources are reviewed.
+                </div>
+              ) : (
+                <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-base text-emerald-800">
+                  ✅ Nothing to worry about — no interactions, duplicates, or allergy conflicts found in your medicines.
+                </div>
+              )
             ) : (
               <div className="mt-4 space-y-2">
                 {[

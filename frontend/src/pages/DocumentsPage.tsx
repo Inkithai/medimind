@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
 import { Card, CardBody } from "../components/Card";
 import { DocumentViewer } from "../components/DocumentViewer";
@@ -16,6 +16,9 @@ import { documentTypeLabel, formatDate } from "../utils/format";
 export function DocumentsPage() {
   const { credentials } = useAuth();
   const { t, formatNumber } = useI18n();
+  const [searchParams] = useSearchParams();
+  const requestedDocumentId = searchParams.get("document");
+  const requestedEvidenceId = searchParams.get("evidence");
   const [timeline, setTimeline] = useState<Timeline | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
@@ -27,17 +30,24 @@ export function DocumentsPage() {
     try {
       const data = await api.getTimeline(credentials);
       setTimeline(data);
+      setSelected((current) => {
+        const documents = data.documents || data.visits;
+        const targetId = requestedDocumentId || current?._document_id;
+        return targetId ? documents.find((visit) => visit._document_id === targetId) || null : null;
+      });
     } catch (err) {
       setTimeline(null);
       setError(err);
     } finally {
       setLoading(false);
     }
-  }, [credentials]);
+  }, [credentials, requestedDocumentId]);
 
   useStrictEffect(() => {
     void load();
   }, [load]);
+
+  const documentVisits = timeline?.documents || timeline?.visits || [];
 
   return (
     <div className="space-y-6">
@@ -57,7 +67,17 @@ export function DocumentsPage() {
 
       {!loading && timeline && (
         <>
-          {timeline.visits.length === 0 ? (
+          {((timeline.trust_summary?.unresolved_conflicts || 0) > 0 ||
+            (timeline.trust_summary?.quarantined_documents || 0) > 0 ||
+            (timeline.trust_summary?.quarantined_facts || 0) > 0) && (
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              <span>
+                <strong>{timeline.trust_summary?.unresolved_conflicts || 0}</strong> unresolved conflict(s); quarantined or non-authoritative evidence is excluded from answers and analytics.
+              </span>
+              <Link to="/review" className="font-semibold text-amber-900 underline">Review conflicts</Link>
+            </div>
+          )}
+          {documentVisits.length === 0 ? (
             <Card>
               <CardBody>
                 <div className="py-12 text-center">
@@ -77,14 +97,20 @@ export function DocumentsPage() {
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    {formatNumber(timeline.visits.length)} {t("common.documents")}
+                    {formatNumber(documentVisits.length)} {t("common.documents")}
                   </p>
                   <p className="text-xs text-slate-600">{t("documentsPage.clickFile")}</p>
                 </div>
 
                 <div className="space-y-2">
-                  {timeline.visits.map((visit, idx) => {
-                    const isSelected = selected?._source.file === visit._source.file && selected?.date === visit.date;
+                  {documentVisits.map((visit, idx) => {
+                    const isSelected = selected?._document_id === visit._document_id;
+                    const clinicalCount =
+                      (visit.diagnoses?.length || 0) +
+                      (visit.symptoms?.length || 0) +
+                      (visit.procedures?.length || 0) +
+                      (visit.vital_signs?.length || 0) +
+                      (visit.imaging_results?.length || 0);
                     return (
                       <button
                         type="button"
@@ -105,6 +131,8 @@ export function DocumentsPage() {
                               <p className="truncate text-sm font-semibold text-slate-900">{visit._source.file}</p>
                               <p className="flex items-center gap-1.5 text-xs text-slate-500">
                                 <StatusBadge tone="brand">{documentTypeLabel(visit.document_type)}</StatusBadge>
+                                {visit._trust?.quarantined && <StatusBadge tone="danger">quarantined</StatusBadge>}
+                                {visit._corrections?.paths.length ? <StatusBadge tone="success">corrected</StatusBadge> : null}
                                 {formatDate(visit.date)} • {visit._source.method === "text_layer" ? "Digital PDF" : "Scanned or photo"}
                               </p>
                             </div>
@@ -116,7 +144,7 @@ export function DocumentsPage() {
                           )}
                         </div>
 
-                        <div className="mt-2 flex gap-1.5">
+                        <div className="mt-2 flex flex-wrap gap-1.5">
                           {visit.medications.length > 0 && (
                             <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">
                               {visit.medications.length} meds
@@ -125,6 +153,11 @@ export function DocumentsPage() {
                           {visit.lab_results.length > 0 && (
                             <span className="rounded-full bg-sky-50 px-2 py-0.5 text-[11px] text-sky-700 ring-1 ring-sky-200">
                               {visit.lab_results.length} labs
+                            </span>
+                          )}
+                          {clinicalCount > 0 && (
+                            <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-[11px] text-indigo-700 ring-1 ring-indigo-200">
+                              {clinicalCount} clinical events
                             </span>
                           )}
                           {visit.allergies_noted.length > 0 && (
@@ -145,7 +178,12 @@ export function DocumentsPage() {
 
               <div className="lg:sticky lg:top-6">
                 {selected ? (
-                  <DocumentViewer visit={selected} onClose={() => setSelected(null)} />
+                  <DocumentViewer
+                    visit={selected}
+                    onClose={() => setSelected(null)}
+                    onUpdated={() => void load()}
+                    initialEvidenceId={requestedEvidenceId}
+                  />
                 ) : (
                   <Card>
                     <CardBody className="py-16 text-center">

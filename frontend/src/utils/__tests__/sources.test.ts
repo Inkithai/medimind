@@ -14,12 +14,18 @@ import { findVisitForSource } from "../sources";
 
 function visit(file: string, partial: Partial<Visit> = {}): Visit {
   return {
+    _document_id: `doc-${file}`,
     document_type: "prescription",
     date: "2026-08-07",
     provider_or_doctor: null,
     patient_name: "Arun Kumar",
     medications: [],
     lab_results: [],
+    diagnoses: [],
+    symptoms: [],
+    procedures: [],
+    vital_signs: [],
+    imaging_results: [],
     allergies_noted: [],
     clinical_notes: null,
     illegible_or_low_confidence_fields: [],

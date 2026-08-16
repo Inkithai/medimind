@@ -26,12 +26,18 @@ Object.assign(globalThis, {
 Object.defineProperty(globalThis, "navigator", { value: dom.window.navigator, configurable: true });
 
 const visit: Visit = {
+  _document_id: "doc-accessibility-test",
   document_type: "prescription",
   date: "2026-08-14",
   provider_or_doctor: "Dr. Test",
   patient_name: "Test Patient",
   medications: [],
   lab_results: [],
+  diagnoses: [],
+  symptoms: [],
+  procedures: [],
+  vital_signs: [],
+  imaging_results: [],
   allergies_noted: [],
   clinical_notes: "Follow-up note",
   illegible_or_low_confidence_fields: [],
@@ -110,7 +116,7 @@ async function main() {
   }
 
   let tabs = document.querySelectorAll<HTMLElement>('[role="tab"]');
-  if (tabs.length !== 2) throw new Error(`Expected 2 accessible tabs, found ${tabs.length}`);
+  if (tabs.length !== 3) throw new Error(`Expected 3 accessible tabs, found ${tabs.length}`);
   await act(async () => {
     tabs[1].dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }));
   });

@@ -58,6 +58,7 @@ export const en = {
     close: "Close navigation menu",
     dashboard: "Dashboard",
     records: "Medical Records",
+    trustReview: "Trust Review",
     medications: "Medications",
     labs: "Lab Results",
     timeline: "Timeline",

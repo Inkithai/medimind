@@ -24,19 +24,28 @@ export LLM_PROVIDER=gemini  # or groq
 
 ```jsonc
 {
-  document_type: "prescription" | "lab_report" | "discharge_summary" | "other",
+  document_type: "prescription" | "lab_report" | "discharge_summary" |
+                 "imaging_report" | "consultation_note" | "procedure_report" | "other",
   date, provider_or_doctor, patient_name,
   medications: [{name, ingredients: [INN English], dosage, frequency, duration,
-                 dosage_value, dosage_unit, frequency_per_day, is_as_needed, confidence}],
-  lab_results: [{test_name, value, unit, reference_range, flag, confidence}],
+                 dosage_value, dosage_unit, frequency_per_day, is_as_needed, confidence, evidence}],
+  lab_results: [{test_name, value, unit, reference_range, flag, confidence, evidence}],
+  diagnoses: [{name, code, status, onset_date, confidence, evidence}],
+  symptoms: [{name, severity, status, onset_date, confidence, evidence}],
+  procedures: [{name, procedure_date, body_site, status, outcome, confidence, evidence}],
+  vital_signs: [{name, value, unit, measured_at, confidence, evidence}],
+  imaging_results: [{study_type, body_site, study_date, findings, impression, confidence, evidence}],
   allergies_noted: [string],
-  clinical_notes, illegible_or_low_confidence_fields, overall_confidence
+  clinical_notes, field_evidence, illegible_or_low_confidence_fields, overall_confidence
 }
 ```
 
 - `ingredients` always English INN generic, even if source is Spanish/Japanese brand — needed for cross-language duplicate detection.
 - `dosage_value`/`dosage_unit` normalized to mg etc., `frequency_per_day` normalized numeric. Original strings kept for audit. Locale comma decimals handled (`1,5 g` → 1500 mg).
 - Confidence bands: 0.90-1.00 clear print, 0.60-0.89 judgment needed (brand→generic, abbreviation), <0.60 hard handwriting/blur.
+- Diagnoses are extracted only when explicitly documented; the model must not infer them from symptoms, medicines, labs, vitals, or imaging.
+- Clinical-event values/units remain as printed. Validated terminology and unit normalization are a separate layer, not implied by this schema.
+- Every fact has page/quote evidence and an optional normalized rectangle. Digital PDFs use deterministic PyMuPDF matching; vision boxes are normalized from `0..1000` to `0..1`.
 
 ### 2. File-type routing
 
@@ -86,7 +95,8 @@ Both do not attach `_source` — caller does.
 
 - Assumes one patient (run group first if not guaranteed).
 - Sorting now parses dates via `dateutil.parser` fuzzy — fixes lexicographic bug for `05 Jan 2026` vs `20 Apr 2026`. Unparseable → end.
-- Output: `{visits: sorted, medications_timeline: flat with date+source_file, lab_results_timeline, known_allergies: deduped}` — primary contract with `retrieval.py`.
+- Output: trusted `visits`, complete `documents`, medication/lab rollups, deduped allergies, and chronological `diagnoses_timeline`, `symptoms_timeline`, `procedures_timeline`, `vital_signs_timeline`, and `imaging_results_timeline` rollups.
+- Clinical rollups prefer each fact's explicit event date and retain the enclosing `document_date`, source page, document ID, field path, evidence, and trust state. This allows a 2018 procedure mentioned in a 2025 summary to appear at 2018 without losing its 2025 source provenance.
 
 For MediMind anonymous flow, `user_id` from `POST /anonymous/session` IS patient key — every read/write scoped.
 

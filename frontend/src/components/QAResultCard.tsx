@@ -28,6 +28,15 @@ export function QAResultCard({
           : "space-y-3 rounded-lg border border-slate-200 bg-white p-4"
       }
     >
+      {result.trust_notice && (
+        <Alert variant="warning" title="Some evidence was excluded">
+          {result.trust_notice}
+          {result.quarantined_conflict_count
+            ? ` ${result.quarantined_conflict_count} conflict(s) still need review.`
+            : ""}
+        </Alert>
+      )}
+
       {result.recommend_professional_consult && (
         <ConsiderProfessionalCare message={t("ask.consult")} />
       )}
@@ -122,24 +131,43 @@ export function QAResultCard({
                     {t("common.page")} {formatNumber(src.page)}
                   </span>
                 )}
+                {src.evidence_tier && (
+                  <span className="shrink-0 rounded-full bg-white px-2 py-0.5 font-semibold text-slate-500 ring-1 ring-slate-200">
+                    Evidence {src.evidence_tier}
+                  </span>
+                )}
               </>
             );
+            const sourceTarget = `/documents?document=${encodeURIComponent(src.document_id || "")}${src.evidence_id ? `&evidence=${encodeURIComponent(src.evidence_id)}` : ""}`;
+            const rowClass = "flex min-h-[44px] w-full items-center gap-2 rounded-md bg-slate-50 px-3 py-2 text-left text-xs text-slate-600 transition hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500";
             return (
-              <li key={src.source_file}>
+              <li key={src.source_file} className="rounded-md bg-slate-50">
                 {onOpenSource ? (
                   <button
                     type="button"
                     onClick={() => onOpenSource(src)}
                     aria-label={t("ask.openSource", { file: src.source_file })}
-                    className="flex min-h-[44px] w-full items-center gap-2 rounded-md bg-slate-50 px-3 py-2 text-left text-xs text-slate-600 transition hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+                    className={rowClass}
                   >
                     {label}
                     <span className="shrink-0 text-brand-600" aria-hidden="true">→</span>
                   </button>
+                ) : src.document_id ? (
+                  <Link to={sourceTarget} className={rowClass}>
+                    {label}
+                    <span className="shrink-0 font-semibold text-brand-700">
+                      {src.evidence_id ? "Open highlight →" : "Open source →"}
+                    </span>
+                  </Link>
                 ) : (
-                  <div className="flex items-center gap-2 rounded-md bg-slate-50 px-3 py-1.5 text-xs text-slate-600">
+                  <div className="flex items-center gap-2 rounded-md px-3 py-2 text-xs text-slate-600">
                     {label}
                   </div>
+                )}
+                {src.quote && (
+                  <blockquote className="mx-3 mb-2 border-l-2 border-amber-400 pl-2 text-xs text-slate-600">
+                    “{src.quote}”
+                  </blockquote>
                 )}
               </li>
             );

@@ -45,12 +45,12 @@ def test_diagnoses_are_structured_and_preserve_document_page_sources():
         "clinical_notes": "Follow-up advised",
         "_source": {"file": "discharge.pdf", "method": "vision_ocr", "page": 3},
     }])
-    assert timeline["diagnoses_timeline"] == [{
-        "name": "Hypertension",
-        "date": "2026-01-01",
-        "source_file": "discharge.pdf",
-        "source_page": 3,
-    }]
+    diagnosis = timeline["diagnoses_timeline"][0]
+    assert diagnosis["name"] == "Hypertension"
+    assert diagnosis["date"] is None, "a document date is not an explicit diagnosis date"
+    assert diagnosis["document_date"] == "2026-01-01"
+    assert diagnosis["source_file"] == "discharge.pdf"
+    assert diagnosis["source_page"] == 3
 
 
 def test_medication_changes_continuations_and_sources_are_deterministic():

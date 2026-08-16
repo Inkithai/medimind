@@ -21,11 +21,16 @@ pays for any of that either.
 
 from typing import Any, Dict, List, Tuple
 
+from clinical_events import CLINICAL_EVENT_COLLECTIONS
+
 # document_type values the extraction schema recognizes as genuinely
 # clinical. "other" is the extractor's catch-all for anything that isn't
 # one of these — which is exactly what a boarding pass / receipt / random
 # photo will come back as.
-RECOGNIZED_MEDICAL_TYPES = frozenset({"prescription", "lab_report", "discharge_summary"})
+RECOGNIZED_MEDICAL_TYPES = frozenset({
+    "prescription", "lab_report", "discharge_summary", "imaging_report",
+    "consultation_note", "procedure_report",
+})
 
 # Below this, an "other"-typed extraction with no clinical content is
 # treated as noise rather than a low-confidence-but-real medical document.
@@ -63,7 +68,7 @@ def _has_medical_content(doc: Dict[str, Any]) -> bool:
         return True
     if doc.get("diagnoses_or_conditions"):
         return True
-    return False
+    return any(doc.get(collection) for collection in CLINICAL_EVENT_COLLECTIONS)
 
 
 def looks_like_medical_document(doc: Dict[str, Any]) -> bool:
@@ -111,13 +116,13 @@ def rejection_reason(doc: Dict[str, Any]) -> str:
     confidence = doc.get("overall_confidence", 0.0)
     if doc_type not in RECOGNIZED_MEDICAL_TYPES:
         return (
-            f"classified as '{doc_type}' with no medications, lab results, or "
-            f"allergies found (overall_confidence={confidence})."
+            f"classified as '{doc_type}' with no medications, lab results, allergies, "
+            f"or structured clinical events found (overall_confidence={confidence})."
         )
     return (
         f"classified as '{doc_type}' but overall_confidence={confidence} is below "
-        f"{LOW_CONFIDENCE_THRESHOLD} and no medications, lab results, or allergies "
-        f"were found to support that label."
+        f"{LOW_CONFIDENCE_THRESHOLD} and no medications, lab results, allergies, "
+        f"or structured clinical events were found to support that label."
     )
 
 

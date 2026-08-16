@@ -18,7 +18,9 @@
     "test:sources": "tsx src/utils/__tests__/sources.test.ts",
     "test:qacard": "tsx src/components/__tests__/QAResultCard.test.tsx",
     "test:format": "TZ=Asia/Colombo tsx src/utils/__tests__/format.test.ts && TZ=America/New_York tsx src/utils/__tests__/format.test.ts && TZ=Pacific/Honolulu tsx src/utils/__tests__/format.test.ts && TZ=UTC tsx src/utils/__tests__/format.test.ts",
-    "test:about": "tsx src/pages/__tests__/AboutPage.test.tsx"
+    "test:about": "tsx src/pages/__tests__/AboutPage.test.tsx",
+    "test:evidence": "tsx src/components/__smoke__/evidence-viewer.smoke.tsx",
+    "test:clinical-events": "tsx src/components/__smoke__/clinical-events.smoke.tsx"
   },
   "dependencies": {
     "leaflet": "^1.9.4",

@@ -15,12 +15,18 @@ import { StatusBadge } from "./StatusBadge";
 export function TimelineView({ timeline }: { timeline: Timeline }) {
   const { t } = useI18n();
   const hasVisits = timeline.visits.length > 0;
+  const clinicalEventCount =
+    (timeline.diagnoses_timeline?.length || 0) +
+    (timeline.symptoms_timeline?.length || 0) +
+    (timeline.procedures_timeline?.length || 0) +
+    (timeline.vital_signs_timeline?.length || 0) +
+    (timeline.imaging_results_timeline?.length || 0);
 
   return (
     <Card>
       <CardHeader
         title={t("history.title")}
-        description={`${timeline.visits.length} · ${t("common.documents")} · ${timeline.medications_timeline.length} · ${t("common.medications")} · ${timeline.lab_results_timeline.length} · ${t("common.labResults")}`}
+        description={`${timeline.visits.length} · ${t("common.documents")} · ${clinicalEventCount} clinical events · ${timeline.medications_timeline.length} · ${t("common.medications")} · ${timeline.lab_results_timeline.length} · ${t("common.labResults")}`}
         icon={<TimelineIconSmall />}
       />
       <CardBody className="space-y-6">
@@ -41,8 +47,12 @@ export function TimelineView({ timeline }: { timeline: Timeline }) {
 
         {!hasVisits ? (
           <EmptyState
-            title={t("history.empty")}
-            description={t("history.emptyBody")}
+            title={timeline.trust_summary?.unresolved_conflicts ? "Timeline withheld pending source review" : t("history.empty")}
+            description={
+              timeline.trust_summary?.unresolved_conflicts
+                ? "Uploaded sources remain available in Medical Records, but conflicting facts are excluded until you confirm the authoritative source."
+                : t("history.emptyBody")
+            }
           />
         ) : (
           <ol className="relative space-y-6 border-l-2 border-slate-100 pl-6">
@@ -123,6 +133,8 @@ function TimelineVisit({ visit }: { visit: Visit }) {
               </Link>
             </div>
           )}
+
+          <LongitudinalFacts visit={visit} />
 
           {visit.medications.length > 0 && (
             <div>
@@ -253,6 +265,88 @@ function TimelineVisit({ visit }: { visit: Visit }) {
         </div>
       </div>
     </li>
+  );
+}
+
+function LongitudinalFacts({ visit }: { visit: Visit }) {
+  const diagnoses = visit.diagnoses || [];
+  const symptoms = visit.symptoms || [];
+  const procedures = visit.procedures || [];
+  const vitals = visit.vital_signs || [];
+  const imaging = visit.imaging_results || [];
+  if (!diagnoses.length && !symptoms.length && !procedures.length && !vitals.length && !imaging.length) return null;
+
+  return (
+    <div className="space-y-3">
+      {diagnoses.length > 0 && (
+        <TimelineFactGroup title="Documented diagnoses">
+          {diagnoses.map((item, index) => (
+            <TimelineFact key={index} title={item.name} meta={[item.status, item.code, item.onset_date]} />
+          ))}
+        </TimelineFactGroup>
+      )}
+      {symptoms.length > 0 && (
+        <TimelineFactGroup title="Symptoms & signs">
+          {symptoms.map((item, index) => (
+            <TimelineFact key={index} title={item.name} meta={[item.severity, item.status, item.onset_date]} />
+          ))}
+        </TimelineFactGroup>
+      )}
+      {procedures.length > 0 && (
+        <TimelineFactGroup title="Procedures">
+          {procedures.map((item, index) => (
+            <TimelineFact key={index} title={item.name} meta={[item.status, item.body_site, item.procedure_date]} detail={item.outcome} />
+          ))}
+        </TimelineFactGroup>
+      )}
+      {vitals.length > 0 && (
+        <TimelineFactGroup title="Vital signs">
+          {vitals.map((item, index) => (
+            <TimelineFact key={index} title={item.name} value={`${item.value}${item.unit ? ` ${item.unit}` : ""}`} meta={[item.measured_at]} />
+          ))}
+        </TimelineFactGroup>
+      )}
+      {imaging.length > 0 && (
+        <TimelineFactGroup title="Imaging">
+          {imaging.map((item, index) => (
+            <TimelineFact key={index} title={item.study_type} meta={[item.body_site, item.study_date]} detail={item.impression || item.findings} />
+          ))}
+        </TimelineFactGroup>
+      )}
+    </div>
+  );
+}
+
+function TimelineFactGroup({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <SectionLabel>{title}</SectionLabel>
+      <div className="mt-1.5 grid gap-2 sm:grid-cols-2">{children}</div>
+    </div>
+  );
+}
+
+function TimelineFact({
+  title,
+  value,
+  meta,
+  detail,
+}: {
+  title: string;
+  value?: string;
+  meta: Array<string | null | undefined>;
+  detail?: string | null;
+}) {
+  const visibleMeta = meta.filter(Boolean);
+  return (
+    <div className="rounded-md border border-slate-200 bg-slate-50/60 px-3 py-2 text-sm">
+      <div className="flex items-start justify-between gap-2">
+        <p className="font-medium text-slate-800">{title}</p>
+        {value && <span className="font-semibold text-brand-700">{value}</span>}
+      </div>
+      {visibleMeta.length > 0 && <p className="mt-0.5 text-xs capitalize text-slate-500">{visibleMeta.join(" · ")}</p>}
+      {detail && <p className="mt-1 text-xs text-slate-600">{detail}</p>}
+    </div>
   );
 }
 

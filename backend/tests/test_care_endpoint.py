@@ -176,7 +176,8 @@ def test_recommendation_endpoint_maps_saved_high_risk_issue_to_specialty():
         "lab_trends": {"trends": [], "insufficient_data": [], "note": ""},
     }
     try:
-        with mock.patch.object(api.db, "load_patient_snapshot", return_value=snapshot):
+        with mock.patch.object(api.db, "load_patient_snapshot", return_value=snapshot), \
+             mock.patch.object(api.db, "load_documents", return_value=[]):
             with _client() as client:
                 response = client.get("/api/v1/care/recommendation")
         assert response.status_code == 200, response.text

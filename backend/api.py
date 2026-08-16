@@ -106,7 +106,16 @@ from medical_extractor import (
     process_document,
 )
 from memory_probe import log_rss
-from retrieval import answer_question, index_patient_timeline, preload_embedding_model
+from retrieval import answer_question, index_patient_timeline, preload_embedding_model, timeline_fingerprint
+from record_trust import (
+    CorrectionValidationError,
+    apply_correction_events,
+    apply_conflict_quarantine,
+    build_correction_events,
+    detect_conflicts,
+    document_id as trust_document_id,
+    merge_conflict_state,
+)
 from care.models import FACILITY_KINDS
 from care.service import CareNavigationError, get_care_service
 import care_finder
@@ -303,6 +312,49 @@ class MessageRequest(BaseModel):
         if not cleaned:
             raise ValueError("Enter a question about your records.")
         return cleaned
+
+
+class CorrectionChange(BaseModel):
+    field_path: str
+    corrected_value: Any = None
+    expected_previous_value: Any = None
+
+
+class CorrectionRequest(BaseModel):
+    changes: List[CorrectionChange] = Field(min_length=1, max_length=100)
+    reason: str = Field(min_length=3, max_length=500)
+
+
+class ConflictResolutionRequest(BaseModel):
+    authoritative_document_id: str = Field(min_length=1, max_length=200)
+    note: Optional[str] = Field(default=None, max_length=1000)
+
+
+class ConflictReopenRequest(BaseModel):
+    note: Optional[str] = Field(default=None, max_length=1000)
+
+
+def _empty_cross_check(reason: str) -> Dict[str, Any]:
+    return {
+        "potential_drug_interactions": [],
+        "duplicate_prescriptions": [],
+        "conflicting_dosage_instructions": [],
+        "allergy_conflicts": [],
+        "overall_recommendation": reason,
+    }
+
+
+async def _cross_check_trusted_timeline(timeline: Dict[str, Any]) -> Dict[str, Any]:
+    if not timeline.get("medications_timeline"):
+        return _empty_cross_check(
+            "No trusted medication facts are currently available for safety analysis. "
+            "Resolve quarantined conflicts and consult a doctor or pharmacist before making changes."
+        )
+    return await asyncio.get_running_loop().run_in_executor(
+        _DOCUMENT_EXECUTOR,
+        cross_check_prescriptions,
+        timeline,
+    )
 
 
 class CareSearchRequest(BaseModel):
@@ -783,6 +835,9 @@ async def _execute_upload_pipeline(
                 continue
 
             for page in kept_pages:
+                # Stable application-level ID keeps old and new documents
+                # correctable without exposing storage-provider identifiers.
+                page.setdefault("_document_id", f"doc_{uuid.uuid4().hex}")
                 page["document_url"] = upload_info["document_url"]
                 page["cloudinary_public_id"] = upload_info["cloudinary_public_id"]
                 new_docs.append(page)
@@ -801,16 +856,30 @@ async def _execute_upload_pipeline(
     existing_docs = db.load_documents(user_id)
     all_docs = existing_docs + new_docs
     logger.info("upload: user=%s merged documents: +%d new, %d total", user_id, len(new_docs), len(all_docs))
+
+    # Detect conflicts before deriving anything. Resolved source choices are
+    # replayed when still valid; unresolved/non-authoritative facts remain in
+    # the document viewer but are removed from analytics and RAG inputs.
+    detected_conflicts = detect_conflicts(all_docs)
+    persisted_conflicts: List[Dict[str, Any]] = []
+    if detected_conflicts:
+        try:
+            persisted_conflicts = db.load_conflicts(user_id)
+        except db.SchemaNotInitializedError:
+            raise
+        except Exception as exc:
+            logger.warning("upload: could not load conflict state; using fail-closed unresolved policy: %s", exc)
+    active_conflicts = merge_conflict_state(detected_conflicts, persisted_conflicts)
+    trusted_docs, trust_summary = apply_conflict_quarantine(all_docs, active_conflicts)
+
     try:
-        timeline = build_patient_timeline(all_docs)
+        timeline = build_patient_timeline(trusted_docs)
+        timeline["trust_summary"] = trust_summary
+        timeline["conflicts"] = active_conflicts
         _progress("safety", "Checking medicines and allergies")
         # Safety is another provider call, so it shares the same bounded pool
         # as extraction instead of bypassing load control or blocking polling.
-        cross_check = await asyncio.get_running_loop().run_in_executor(
-            _DOCUMENT_EXECUTOR,
-            cross_check_prescriptions,
-            timeline,
-        )
+        cross_check = await _cross_check_trusted_timeline(timeline)
     except NonMedicalDocumentError as exc:
         raise UploadPipelineError(422, str(exc), code="not_medical", retryable=False) from exc
     except ProviderRateLimitError as exc:
@@ -864,9 +933,13 @@ async def _execute_upload_pipeline(
     # vanished. Writing to Supabase first makes a crash at worst cost the
     # search index, never the record.
     # ------------------------------------------------------------------
+    timeline["_record_fingerprint"] = timeline_fingerprint(timeline)
     _progress("saving", "Saving your records securely")
     log_rss(logger, "upload_before_persist", user=user_id, new_pages=len(new_docs))
     db.insert_documents(user_id, new_docs)
+    if detected_conflicts or persisted_conflicts:
+        active_conflicts = db.sync_conflicts(user_id, detected_conflicts)
+        timeline["conflicts"] = active_conflicts
     db.save_patient_snapshot(user_id, timeline, cross_check, lab_trends=lab_trends)
     logger.info(
         "upload: user=%s persisted %d new page(s) to Supabase before indexing",
@@ -879,11 +952,13 @@ async def _execute_upload_pipeline(
     indexed, index_error = True, None
     index_error_code: Optional[str] = None
     try:
-        chunks_indexed = await asyncio.to_thread(index_patient_timeline, user_id, timeline)
+        chunks_indexed = await asyncio.to_thread(
+            index_patient_timeline, user_id, timeline, replace=True
+        )
         if chunks_indexed == 0:
             indexed = False
             index_error_code = "no_indexable_content"
-            index_error = "Extraction succeeded but no medications, lab results, clinical notes, diagnoses, or allergies were found to index — Q&A has no documents to search yet."
+            index_error = "Extraction succeeded but no medications, lab results, clinical notes, allergies, diagnoses, symptoms, procedures, vital signs, or imaging results were found to index — Q&A has no documents to search yet."
             logger.warning("upload: user=%s %s", user_id, index_error)
         else:
             logger.info("upload: user=%s re-indexed for Q&A (%d chunk(s))", user_id, chunks_indexed)
@@ -915,6 +990,8 @@ async def _execute_upload_pipeline(
         "cross_check_report": cross_check,
         "lab_trends": lab_trends,
         "indexed": indexed,
+        "trust_summary": trust_summary,
+        "conflicts": active_conflicts,
         "failed_files": sorted(file_errors, key=lambda item: item.get("file_index", 0)),
     }
     if not indexed:
@@ -1091,6 +1168,262 @@ async def get_job(job_id: str, user_id: str = Depends(get_current_user)) -> Dict
 
 
 
+@app.get("/api/v1/corrections")
+async def list_corrections(user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
+    """Return the immutable field-level correction audit history."""
+    return {"corrections": db.load_correction_events(user_id)}
+
+
+@app.get("/api/v1/documents/{document_id}/corrections")
+async def get_document_corrections(
+    document_id: str,
+    user_id: str = Depends(get_current_user),
+) -> Dict[str, Any]:
+    originals = db.load_documents(user_id, include_corrections=False)
+    effective = db.load_documents(user_id)
+    original = next((doc for doc in originals if trust_document_id(doc) == document_id), None)
+    current = next((doc for doc in effective if trust_document_id(doc) == document_id), None)
+    if original is None or current is None:
+        raise HTTPException(404, "Document not found in this workspace.")
+    return {
+        "document_id": document_id,
+        "original_extraction": original,
+        "effective_extraction": current,
+        "corrections": db.load_correction_events(user_id, document_id),
+    }
+
+
+@app.post("/api/v1/documents/{document_id}/corrections", status_code=201)
+async def correct_document_extraction(
+    document_id: str,
+    body: CorrectionRequest,
+    user_id: str = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """Append correction events, then rebuild every derived representation."""
+    originals = db.load_documents(user_id, include_corrections=False)
+    effective_docs = db.load_documents(user_id)
+    original = next((doc for doc in originals if trust_document_id(doc) == document_id), None)
+    current = next((doc for doc in effective_docs if trust_document_id(doc) == document_id), None)
+    if original is None or current is None:
+        raise HTTPException(404, "Document not found in this workspace.")
+
+    batch_id = f"correction_{uuid.uuid4().hex}"
+    changes = [change.model_dump(exclude_unset=True) for change in body.changes]
+    try:
+        events = build_correction_events(
+            original,
+            current,
+            changes,
+            user_id=user_id,
+            correction_batch_id=batch_id,
+            reason=body.reason,
+        )
+        prospective_docs = apply_correction_events(effective_docs, events)
+        trusted, conflicts, trust_summary, detected = _prepare_current_trust_state(
+            user_id, prospective_docs
+        )
+        timeline, cross_check, lab_trends = await _derive_record(trusted, conflicts, trust_summary)
+    except CorrectionValidationError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except ProviderRateLimitError as exc:
+        raise HTTPException(503, "The correction was not saved because the safety rebuild is temporarily unavailable. Please retry.") from exc
+    except RuntimeError as exc:
+        raise HTTPException(502, f"The correction was not saved because the record rebuild failed: {exc}") from exc
+
+    # The expensive derivation succeeded. Append the audit rows first; source
+    # documents are never updated. Then atomically replace each derived view
+    # as far as the backing services permit.
+    db.insert_correction_events(user_id, events)
+    persisted_conflicts = db.sync_conflicts(user_id, detected)
+    timeline["conflicts"] = persisted_conflicts
+    db.save_patient_snapshot(user_id, timeline, cross_check, lab_trends=lab_trends)
+    indexed, index_error, chunks_indexed = await _replace_index(user_id, timeline)
+    return {
+        "correction_batch_id": batch_id,
+        "document_id": document_id,
+        "events": events,
+        "timeline": timeline,
+        "cross_check_report": cross_check,
+        "lab_trends": lab_trends,
+        "conflicts": persisted_conflicts,
+        "trust_summary": trust_summary,
+        "indexed": indexed,
+        "chunks_indexed": chunks_indexed,
+        "index_error": index_error,
+    }
+
+
+@app.get("/api/v1/conflicts")
+async def list_record_conflicts(
+    include_inactive: bool = Query(default=False),
+    user_id: str = Depends(get_current_user),
+) -> Dict[str, Any]:
+    documents = db.load_documents(user_id)
+    if not documents:
+        return {"conflicts": [], "resolution_events": [], "trust_summary": {}}
+    detected = detect_conflicts(documents)
+    db.sync_conflicts(user_id, detected)
+    conflicts = db.load_conflicts(user_id, include_inactive=include_inactive)
+    active = [item for item in conflicts if item.get("status") != "superseded"]
+    _trusted, trust_summary = apply_conflict_quarantine(documents, active)
+    return {
+        "conflicts": conflicts,
+        "resolution_events": db.load_conflict_events(user_id),
+        "trust_summary": trust_summary,
+    }
+
+
+async def _change_conflict_status(
+    user_id: str,
+    conflict_id: str,
+    *,
+    status: str,
+    authoritative_document_id: Optional[str],
+    note: Optional[str],
+) -> Dict[str, Any]:
+    documents = db.load_documents(user_id)
+    if not documents:
+        raise HTTPException(404, "No records found in this workspace.")
+    detected = detect_conflicts(documents)
+    db.sync_conflicts(user_id, detected)
+    persisted = db.load_conflicts(user_id)
+    current = next((item for item in persisted if item.get("conflict_id") == conflict_id), None)
+    if current is None:
+        raise HTTPException(404, "Conflict not found or no longer active.")
+    source_ids = {str(item.get("document_id")) for item in current.get("items", [])}
+    if status == "resolved" and authoritative_document_id not in source_ids:
+        raise HTTPException(400, "Choose one of the conflicting source documents as authoritative.")
+
+    override = {
+        "status": status,
+        "authoritative_document_id": authoritative_document_id if status == "resolved" else None,
+        "resolution_note": (note or "").strip() or None,
+    }
+    trusted, conflicts, trust_summary, _detected = _prepare_current_trust_state(
+        user_id,
+        documents,
+        conflict_overrides={conflict_id: override},
+    )
+    try:
+        timeline, cross_check, lab_trends = await _derive_record(trusted, conflicts, trust_summary)
+    except ProviderRateLimitError as exc:
+        raise HTTPException(503, "The source decision was not saved because the safety rebuild is temporarily unavailable. Please retry.") from exc
+    except RuntimeError as exc:
+        raise HTTPException(502, f"The source decision was not saved because the record rebuild failed: {exc}") from exc
+
+    try:
+        saved_conflict = db.set_conflict_resolution(
+            user_id,
+            conflict_id,
+            status=status,
+            authoritative_document_id=authoritative_document_id,
+            note=note,
+        )
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(409, str(exc)) from exc
+    timeline["conflicts"] = [
+        saved_conflict if item.get("conflict_id") == conflict_id else item
+        for item in conflicts
+    ]
+    db.save_patient_snapshot(user_id, timeline, cross_check, lab_trends=lab_trends)
+    indexed, index_error, chunks_indexed = await _replace_index(user_id, timeline)
+    return {
+        "conflict": saved_conflict,
+        "timeline": timeline,
+        "cross_check_report": cross_check,
+        "lab_trends": lab_trends,
+        "trust_summary": trust_summary,
+        "indexed": indexed,
+        "chunks_indexed": chunks_indexed,
+        "index_error": index_error,
+    }
+
+
+@app.post("/api/v1/conflicts/{conflict_id}/resolve")
+async def resolve_record_conflict(
+    conflict_id: str,
+    body: ConflictResolutionRequest,
+    user_id: str = Depends(get_current_user),
+) -> Dict[str, Any]:
+    return await _change_conflict_status(
+        user_id,
+        conflict_id,
+        status="resolved",
+        authoritative_document_id=body.authoritative_document_id,
+        note=body.note,
+    )
+
+
+@app.post("/api/v1/conflicts/{conflict_id}/reopen")
+async def reopen_record_conflict(
+    conflict_id: str,
+    body: ConflictReopenRequest,
+    user_id: str = Depends(get_current_user),
+) -> Dict[str, Any]:
+    return await _change_conflict_status(
+        user_id,
+        conflict_id,
+        status="unresolved",
+        authoritative_document_id=None,
+        note=body.note,
+    )
+
+
+def _prepare_current_trust_state(
+    user_id: str,
+    documents: Optional[List[Dict[str, Any]]] = None,
+    *,
+    conflict_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], Dict[str, Any], List[Dict[str, Any]]]:
+    corrected_docs = documents if documents is not None else db.load_documents(user_id)
+    detected = detect_conflicts(corrected_docs)
+    persisted = db.load_conflicts(user_id) if detected else []
+    conflicts = merge_conflict_state(detected, persisted)
+    if conflict_overrides:
+        conflicts = [
+            {**conflict, **conflict_overrides.get(str(conflict.get("conflict_id")), {})}
+            for conflict in conflicts
+        ]
+    trusted_docs, trust_summary = apply_conflict_quarantine(corrected_docs, conflicts)
+    return trusted_docs, conflicts, trust_summary, detected
+
+
+def _timeline_from_trust_state(
+    trusted_docs: List[Dict[str, Any]],
+    conflicts: List[Dict[str, Any]],
+    trust_summary: Dict[str, Any],
+) -> Dict[str, Any]:
+    timeline = build_patient_timeline(trusted_docs)
+    timeline["trust_summary"] = trust_summary
+    timeline["conflicts"] = conflicts
+    timeline["_record_fingerprint"] = timeline_fingerprint(timeline)
+    return timeline
+
+
+async def _derive_record(
+    trusted_docs: List[Dict[str, Any]],
+    conflicts: List[Dict[str, Any]],
+    trust_summary: Dict[str, Any],
+) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
+    timeline = _timeline_from_trust_state(trusted_docs, conflicts, trust_summary)
+    cross_check = await _cross_check_trusted_timeline(timeline)
+    lab_trends = track_lab_trends(timeline)
+    return timeline, cross_check, lab_trends
+
+
+async def _replace_index(user_id: str, timeline: Dict[str, Any]) -> Tuple[bool, Optional[str], int]:
+    try:
+        count = await asyncio.to_thread(index_patient_timeline, user_id, timeline, replace=True)
+        if count == 0:
+            return False, "No trusted facts are currently available to index; unresolved conflicts may be quarantined.", 0
+        return True, None, count
+    except Exception as exc:
+        logger.error("record rebuild: user=%s index replacement failed: %s", user_id, exc, exc_info=True)
+        return False, str(exc), 0
+
+
+
+
 @app.get("/api/v1/documents")
 async def list_documents(user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
     """Return every document page persisted for the authenticated user.
@@ -1158,13 +1491,37 @@ def _rebuild_snapshot_from_documents(user_id: str) -> Optional[Dict[str, Any]]:
 
 
 def _load_snapshot_or_rebuild(user_id: str) -> Optional[Dict[str, Any]]:
-    """Snapshot cache first, persisted documents second, None only if the
-    user genuinely has no records. A backend restart therefore has zero
-    effect on what the dashboard shows."""
+    """Return a current, fail-closed view rebuilt from durable source rows.
+
+    The snapshot remains a cache for expensive safety output, but corrected
+    and quarantined documents are replayed on every read so an older cache can
+    never re-admit unresolved or non-authoritative facts.
+    """
     snapshot = db.load_patient_snapshot(user_id)
-    if snapshot is not None:
+    documents = db.load_documents(user_id)
+    if not documents:
         return snapshot
-    return _rebuild_snapshot_from_documents(user_id)
+
+    trusted, conflicts, summary, _detected = _prepare_current_trust_state(user_id, documents)
+    timeline = _timeline_from_trust_state(trusted, conflicts, summary)
+    saved_fingerprint = (snapshot or {}).get("patient_timeline", {}).get("_record_fingerprint")
+    cache_is_current = bool(snapshot and saved_fingerprint == timeline.get("_record_fingerprint"))
+    if cache_is_current and not summary.get("unresolved_conflicts"):
+        cross_check = snapshot.get("cross_check_report") or dict(_EMPTY_CROSS_CHECK)
+    else:
+        cross_check = _empty_cross_check(
+            "Safety analysis is withheld while corrected or conflicting evidence awaits a trusted rebuild. "
+            "Confirm the source and consult a doctor or pharmacist before making changes."
+        )
+    result = {
+        "patient_timeline": timeline,
+        "cross_check_report": cross_check,
+        "lab_trends": track_lab_trends(timeline),
+        "updated_at": (snapshot or {}).get("updated_at"),
+    }
+    if snapshot is None:
+        result["rebuilt_from_documents"] = True
+    return result
 
 
 def _enhanced_cross_check(snapshot: Dict[str, Any]) -> Dict[str, Any]:
@@ -1231,7 +1588,7 @@ async def get_record_changes(user_id: str = Depends(get_current_user)) -> Dict[s
     claim. Missing fields are never interpreted as clinical resolution or a
     discontinued treatment.
     """
-    snapshot = db.load_patient_snapshot(user_id)
+    snapshot = _load_snapshot_or_rebuild(user_id)
     if snapshot is None:
         raise HTTPException(404, "No timeline found for this user.")
     return detect_record_changes(snapshot["patient_timeline"])
@@ -1240,7 +1597,7 @@ async def get_record_changes(user_id: str = Depends(get_current_user)) -> Dict[s
 @app.get("/api/v1/follow-up")
 async def get_follow_up_plan(user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
     """Return a source-grounded action queue without inferred deadlines."""
-    snapshot = db.load_patient_snapshot(user_id)
+    snapshot = _load_snapshot_or_rebuild(user_id)
     if snapshot is None:
         raise HTTPException(404, "No timeline found for this user.")
     timeline = snapshot["patient_timeline"]
@@ -1251,7 +1608,7 @@ async def get_follow_up_plan(user_id: str = Depends(get_current_user)) -> Dict[s
 @app.get("/api/v1/record-integrity")
 async def get_record_integrity(user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
     """Find source-linked cross-document discrepancies for verification."""
-    snapshot = db.load_patient_snapshot(user_id)
+    snapshot = _load_snapshot_or_rebuild(user_id)
     if snapshot is None:
         raise HTTPException(404, "No timeline found for this user.")
     return check_record_integrity(snapshot["patient_timeline"])
@@ -1260,7 +1617,7 @@ async def get_record_integrity(user_id: str = Depends(get_current_user)) -> Dict
 @app.get("/api/v1/appointment-prep")
 async def get_appointment_prep(user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
     """Build a printable, source-grounded clinician conversation packet."""
-    snapshot = db.load_patient_snapshot(user_id)
+    snapshot = _load_snapshot_or_rebuild(user_id)
     if snapshot is None:
         raise HTTPException(404, "No timeline found for this user.")
     timeline = snapshot["patient_timeline"]
@@ -1305,7 +1662,7 @@ async def get_care_recommendation(
     user_id: str = Depends(get_current_user),
 ) -> Dict[str, Any]:
     """Map saved safety/lab evidence to a transparent directory category."""
-    snapshot = db.load_patient_snapshot(user_id)
+    snapshot = _load_snapshot_or_rebuild(user_id)
     if snapshot is None:
         raise HTTPException(404, "No patient record is available for a care recommendation.")
     return recommend_care(
@@ -1327,7 +1684,7 @@ async def get_scored_care_recommendations(user_id: str = Depends(get_current_use
     Pure rule-based analysis of the patient's structured data — no LLM.
     The score is an informational ranking, not a medical probability.
     """
-    snapshot = db.load_patient_snapshot(user_id)
+    snapshot = _load_snapshot_or_rebuild(user_id)
     if snapshot is None:
         return {
             "recommendations": [],
@@ -1355,7 +1712,7 @@ async def get_care_recommendations(user_id: str = Depends(get_current_user)) -> 
     It only exposes existing high-risk/low-confidence flags so the user can
     select one before providing a city/area and availability preference.
     """
-    snapshot = db.load_patient_snapshot(user_id)
+    snapshot = _load_snapshot_or_rebuild(user_id)
     if snapshot is None:
         raise HTTPException(404, "No patient record found for this user. Upload and process medical documents first.")
     return recommendation_context(snapshot)
@@ -1372,7 +1729,7 @@ async def search_care_recommendations(
     during this request. There are no seeded, cached fallback, or fabricated
     provider records in this application.
     """
-    snapshot = db.load_patient_snapshot(user_id)
+    snapshot = _load_snapshot_or_rebuild(user_id)
     if snapshot is None:
         raise HTTPException(404, "No patient record found for this user. Upload and process medical documents first.")
     try:
@@ -1488,7 +1845,7 @@ async def delete_session(session_id: str, user_id: str = Depends(get_current_use
 def _care_timeline(user_id: str) -> Optional[Dict[str, Any]]:
     """Best-effort record load. Find-care still works without a snapshot."""
     try:
-        snapshot = db.load_patient_snapshot(user_id)
+        snapshot = _load_snapshot_or_rebuild(user_id)
     except Exception as exc:
         logger.warning("care finder: could not load snapshot for %s: %s", user_id, exc)
         return None
