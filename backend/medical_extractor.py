@@ -1829,6 +1829,30 @@ PAGE-LEVEL EVIDENCE — every extracted fact must point back to the document:
   inferred from a brand), cite the printed brand line and lower evidence
   confidence. If no supporting text exists, use an empty evidence array.
 
+PATIENT IDENTITY FIELDS — used to detect a document that belongs to a
+different patient than this account's other documents:
+- patient_age: the patient's age as printed on the document (a number), or
+  null if not printed. Never estimate an age that isn't stated.
+- patient_gender: "male", "female", or the document's own wording,
+  lowercased; null if not stated.
+
+LANGUAGE / CONFIDENCE METADATA — used to grade OCR risk vs translation
+risk separately (they have different fixes):
+- document_language: the main language the document is printed in, as an
+  English name (e.g. "English", "Japanese", "Sinhala"); null only if
+  genuinely indeterminate.
+- additional_languages: other languages that appear on the document
+  (mixed-language documents are common); empty array if none.
+- ocr_confidence: 0.0-1.0 — could you READ the characters off the page?
+  Low for handwriting, blur, glare, cut-off edges. Independent of language.
+- translation_confidence: 0.0-1.0 — did you convert what you read into the
+  normalized English fields (ingredients as INN names, units, frequencies)
+  faithfully? Low for transliterated drug names, unfamiliar regional
+  brands, ambiguous dosing phrases. A crisply printed foreign-language
+  document can score HIGH on ocr_confidence and lower on
+  translation_confidence; a blurry English note is the opposite. Report
+  them independently — do not blend them.
+
 Rules:
 - Extract diagnoses_or_conditions only when the document explicitly names
   them. Preserve the printed wording; do not infer a diagnosis from a test,
@@ -1969,6 +1993,12 @@ EXTRACTION_JSON_SCHEMA = {
         "date": {"type": ["string", "null"]},
         "provider_or_doctor": {"type": ["string", "null"]},
         "patient_name": {"type": ["string", "null"]},
+        "patient_age": {"type": ["number", "null"]},
+        "patient_gender": {"type": ["string", "null"]},
+        "document_language": {"type": ["string", "null"]},
+        "additional_languages": {"type": "array", "items": {"type": "string"}},
+        "ocr_confidence": {"type": ["number", "null"]},
+        "translation_confidence": {"type": ["number", "null"]},
         "medications": {
             "type": "array",
             "items": {
@@ -2039,6 +2069,9 @@ EXTRACTION_JSON_SCHEMA = {
     },
     "required": [
         "document_type", "date", "provider_or_doctor", "patient_name",
+        "patient_age", "patient_gender",
+        "document_language", "additional_languages",
+        "ocr_confidence", "translation_confidence",
         "medications", "lab_results", "diagnoses", "symptoms", "procedures",
         "vital_signs", "imaging_results", "allergies_noted", "diagnoses_or_conditions",
         "clinical_notes", "field_evidence", "illegible_or_low_confidence_fields", "overall_confidence",
@@ -3114,6 +3147,19 @@ def cross_check_prescriptions(timeline: Dict[str, Any], model: str = MODEL) -> D
         dup_sources = frozenset((occ["date"], occ["source_file"]) for occ in dup["occurrences"])
         if dup_sources not in existing_source_sets:
             existing.append(dup)
+
+    # Deterministic curated drug-interaction pass (never LLM-dependent):
+    # well-established, textbook-level interaction pairs are matched on
+    # normalized ingredients in code, so catching them never depends on the
+    # LLM noticing on any given run. The LLM remains the broad-coverage
+    # pass; the KB is the guaranteed floor.
+    try:
+        from drug_interactions import check_known_interactions, merge_into_report
+        merge_into_report(result, check_known_interactions(timeline))
+    except Exception as e:
+        # A KB failure must never take down the whole safety report — the
+        # LLM findings above are still valid on their own.
+        logger.warning("Deterministic interaction check failed (LLM findings kept): %s", e)
 
     from medication_history import detect_medication_transitions, enrich_cross_check_sources
 

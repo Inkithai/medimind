@@ -51,7 +51,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, Dict, List, Literal, Optional, Tuple
 
-from fastapi import BackgroundTasks, Depends, FastAPI, File, Header, HTTPException, Query, Request, UploadFile
+from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
@@ -68,7 +68,17 @@ from care_recommendations import ProviderSearchError, recommendation_context, se
 from auth import get_current_user, issue_anonymous_token
 from appointment_prep import build_appointment_prep
 from change_detection import detect_record_changes
+import audit
+import export as export_module
+from consult_triage import generate_consult_triage
 from document_filter import NonMedicalDocumentError, assert_medical_document
+from dosage_rules import check_dosages
+from identity_guard import build_identity_review, check_batch_identity
+from language_guard import (
+    LanguageNormalizationError,
+    assert_language_normalized,
+    assess_documents_translation_risk,
+)
 from follow_up import build_follow_up_plan
 from lab_trends import track_lab_trends
 from record_integrity import check_record_integrity
@@ -550,12 +560,19 @@ async def _execute_upload_pipeline(
     user_id: str,
     files_data: List[Tuple[str, bytes]],
     job_id: Optional[str] = None,
+    confirm_identity_mismatch: bool = False,
 ) -> Dict[str, Any]:
     """Process child documents independently, then finalize one patient record.
 
     Extraction work is submitted to a shared bounded executor. Thus separate
     files can be queued/reading/extracting at different times without allowing
     one batch (or several users) to overwhelm the upstream model provider.
+
+    Safety pipeline per file: extract -> medical-relevance filter ->
+    language/normalization guard -> identity guard (batch-level, held files
+    are excluded unless confirm_identity_mismatch=True). Then batch-level:
+    timeline -> cross-check (+ deterministic interaction KB) -> dosage rules
+    -> lab trends -> consult triage -> index -> persist.
     """
 
     def _progress(step: str, message: str, **metadata: Any) -> None:
@@ -721,6 +738,7 @@ async def _execute_upload_pipeline(
                     pages = result["pages"] if result.get("multi_page") else [result]
                     kept_pages: List[Dict[str, Any]] = []
                     rejected = False
+                    language_rejected_info: Optional[Dict[str, Any]] = None
                     for page_num, page in enumerate(pages, start=1):
                         label = original_name if len(pages) == 1 else f"{original_name} (page {page_num})"
                         if _is_demo_document(page):
@@ -743,12 +761,33 @@ async def _execute_upload_pipeline(
                             logger.warning("upload: user=%s rejected '%s': %s", user_id, original_name, exc.reason)
                             rejected = True
                             break
+                        try:
+                            assert_language_normalized(page, label)
+                        except LanguageNormalizationError as exc:
+                            logger.warning(
+                                "upload: user=%s language guard rejected '%s': %s",
+                                user_id, original_name, exc.reason,
+                            )
+                            language_rejected_info = {
+                                "file": original_name,
+                                "file_id": f"file-{file_index}",
+                                "file_index": file_index,
+                                "error": str(exc),
+                                "kind": "language_normalization",
+                                "code": "language_normalization_failed",
+                                "retryable": False,
+                                "retry_after_seconds": None,
+                            }
+                            rejected = True
+                            break
                         if isinstance(page.get("_source"), dict):
                             page["_source"]["file"] = original_name
                         kept_pages.append(page)
 
                     if rejected or not kept_pages:
-                        info = {
+                        # The language guard produces a specific, actionable
+                        # error; the generic not-medical message covers the rest.
+                        info = language_rejected_info or {
                             "file": original_name,
                             "file_id": f"file-{file_index}",
                             "file_index": file_index,
@@ -806,6 +845,52 @@ async def _execute_upload_pipeline(
 
         file_errors.extend(extraction_errors[index] for index in sorted(extraction_errors))
 
+        # --- Identity guard (pre-persistence) --------------------------------
+        # Compare each extracted file's patient identity against this
+        # account's document history (and the batch itself for new accounts).
+        # Held files are excluded BEFORE storage/persistence — never silently
+        # merged — unless the caller explicitly confirmed the mismatch.
+        identity_existing_docs = db.load_documents(user_id)
+        identity_review: Optional[Dict[str, Any]] = None
+        if extracted and not confirm_identity_mismatch:
+            _progress("safety", "Checking the documents belong to this record")
+            docs_by_file = {
+                original_name: kept_pages
+                for (_tmp, original_name, kept_pages) in extracted.values()
+            }
+            identity_result = check_batch_identity(docs_by_file, identity_existing_docs)
+            held = identity_result["held"]
+            if held:
+                held_files = {f for h in held for f in h["source_files"]}
+                for file_index in sorted(extracted):
+                    _tmp, original_name, _pages = extracted[file_index]
+                    if original_name in held_files:
+                        del extracted[file_index]
+                        _file_progress(
+                            file_index,
+                            status="failed",
+                            step="failed",
+                            message=(
+                                "Held: the patient on this document doesn't match your "
+                                "other documents. Confirm to add it anyway."
+                            ),
+                            error_info={
+                                "error": "Patient identity mismatch — document held for confirmation.",
+                                "code": "identity_mismatch_held",
+                                "retryable": True,
+                                "retry_after_seconds": None,
+                            },
+                        )
+                identity_review = build_identity_review(held, identity_result["known_identity"])
+                logger.warning(
+                    "upload: user=%s identity guard held %d file group(s): %s",
+                    user_id, len(held), sorted(held_files),
+                )
+                audit.record(user_id, "documents.identity_held", {
+                    "held_files": sorted(held_files),
+                    "confirmable": True,
+                })
+
         # Cloud storage is per-file too: one storage failure should not discard
         # documents that were extracted and saved successfully.
         for file_index in sorted(extracted):
@@ -850,6 +935,17 @@ async def _execute_upload_pipeline(
             )
 
     if not new_docs:
+        if identity_review:
+            # Every usable file was held by the identity guard: not an
+            # extraction failure — surface the review block so the caller can
+            # confirm. 409 (conflict) rather than 422: the files are valid,
+            # they just don't appear to belong to this record.
+            raise UploadPipelineError(
+                409,
+                identity_review["message"],
+                code="identity_mismatch_held",
+                retryable=True,
+            )
         _raise_no_usable_files(file_errors, total_files)
 
     _progress("organizing", "Updating your medical history")
@@ -923,6 +1019,27 @@ async def _execute_upload_pipeline(
         len(lab_trends["insufficient_data"]),
     )
 
+    # Deterministic dosage validation (rule table, no LLM) — findings feed
+    # the consult triage below and are persisted with the snapshot.
+    dosage_report = check_dosages(timeline)
+    if dosage_report["findings"]:
+        logger.warning(
+            "upload: user=%s dosage rules flagged %d finding(s)",
+            user_id, len(dosage_report["findings"]),
+        )
+
+    # Consult triage: deterministic routing of every finding to a
+    # pharmacist or doctor with urgency + specialty. Never de-escalates.
+    consult_triage_report = generate_consult_triage(cross_check, lab_trends, dosage_report)
+
+    # Graded OCR/translation risk banner across the whole record (never blocks).
+    translation_risk = assess_documents_translation_risk(all_docs)
+    if translation_risk["flag"] != "none":
+        logger.warning(
+            "upload: user=%s translation risk flag=%s on %d document(s)",
+            user_id, translation_risk["flag"], len(translation_risk["documents"]),
+        )
+
     # ------------------------------------------------------------------
     # PERSIST FIRST. The medical record is the product; the vector index is
     # derived data that can always be rebuilt from it (retrieval.py
@@ -940,7 +1057,17 @@ async def _execute_upload_pipeline(
     if detected_conflicts or persisted_conflicts:
         active_conflicts = db.sync_conflicts(user_id, detected_conflicts)
         timeline["conflicts"] = active_conflicts
-    db.save_patient_snapshot(user_id, timeline, cross_check, lab_trends=lab_trends)
+    db.save_patient_snapshot(
+        user_id, timeline, cross_check, lab_trends=lab_trends,
+        dosage_report=dosage_report, consult_triage=consult_triage_report,
+    )
+    audit.record(user_id, "documents.upload_result", {
+        "files_received": total_files,
+        "files_added": successfully_saved_files,
+        "documents_added": len(new_docs),
+        "failed_files": len(file_errors),
+        "cross_check_issues": issue_count,
+    })
     logger.info(
         "upload: user=%s persisted %d new page(s) to Supabase before indexing",
         user_id,
@@ -989,11 +1116,16 @@ async def _execute_upload_pipeline(
         "timeline": timeline,
         "cross_check_report": cross_check,
         "lab_trends": lab_trends,
+        "dosage_report": dosage_report,
+        "consult_triage": consult_triage_report,
+        "translation_risk": translation_risk,
         "indexed": indexed,
         "trust_summary": trust_summary,
         "conflicts": active_conflicts,
         "failed_files": sorted(file_errors, key=lambda item: item.get("file_index", 0)),
     }
+    if identity_review:
+        response["identity_review_needed"] = identity_review
     if not indexed:
         response["index_error"] = index_error
         response["index_error_code"] = index_error_code
@@ -1037,6 +1169,7 @@ async def upload_documents(
     files: List[UploadFile] = File(...),
     user_id: str = Depends(get_current_user),
     prefer: Optional[str] = Header(None, alias="Prefer"),
+    confirm_identity_mismatch: bool = Form(False),
 ) -> Dict[str, Any]:
     """
     Uploads one or more documents (PDF/image) for the authenticated user.
@@ -1044,10 +1177,19 @@ async def upload_documents(
       - Sync (default): processes immediately and returns UploadResponse
       - Async: when USE_BACKGROUND_JOBS=true or ?async=true or Prefer: respond-async,
         returns 202 {job_id, status} and processes in background. Poll GET /jobs/{id}.
+
+    Identity guard: documents whose extracted patient identity doesn't match
+    this account's document history are HELD (not stored, not merged) and
+    reported under identity_review_needed. To add held files anyway,
+    resubmit just those files with confirm_identity_mismatch=true.
     """
     logger.info("upload_documents: user=%s received %d file(s)", user_id, len(files))
     if not files:
         raise HTTPException(400, "No files were uploaded.")
+    audit.record(user_id, "documents.upload", {
+        "file_count": len(files),
+        "file_names": [Path(f.filename or "").name or "upload" for f in files],
+    })
 
     # Read files upfront (needed for background after request ends)
     files_data: List[Tuple[str, bytes]] = []
@@ -1080,7 +1222,10 @@ async def upload_documents(
                     status="processing",
                     progress={"step": "upload", "message": "Files received; assigning processing slots"},
                 )
-                result = await _execute_upload_pipeline(user_id, files_data, job_id=job_id)
+                result = await _execute_upload_pipeline(
+                    user_id, files_data, job_id=job_id,
+                    confirm_identity_mismatch=confirm_identity_mismatch,
+                )
                 # The pipeline may have finished in the "partial" state
                 # (records saved, indexing did not complete). Don't overwrite
                 # that with a blanket "ready" — the client needs to know the
@@ -1146,7 +1291,9 @@ async def upload_documents(
         )
 
     # Sync path (default, used by tests)
-    return await _execute_upload_pipeline(user_id, files_data)
+    return await _execute_upload_pipeline(
+        user_id, files_data, confirm_identity_mismatch=confirm_identity_mismatch,
+    )
 
 
 # --- Background Jobs polling ---
@@ -1580,6 +1727,75 @@ async def get_lab_trends(user_id: str = Depends(get_current_user)) -> Dict[str, 
     return _lab_trends_for_snapshot(snapshot)
 
 
+@app.get("/api/v1/consult-triage")
+async def get_consult_triage(user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
+    """Returns who this user should talk to about what the pipeline found —
+    a pharmacist or a doctor, how soon, with what confidence, and for a
+    doctor, which specialty. Deterministic routing over the saved
+    cross-check, dosage findings, and lab trends (see consult_triage.py);
+    recomputed on the fly for snapshots saved before this feature existed.
+
+    Safety properties: never de-escalates (consult_needed=false means "no
+    trigger found", not "you're fine") and low confidence never lowers
+    urgency."""
+    snapshot = _load_snapshot_or_rebuild(user_id)
+    if snapshot is None:
+        raise HTTPException(404, "No records found for this user.")
+    if "consult_triage" in snapshot:
+        audit.record(user_id, "records.read", {"view": "consult_triage"})
+        return snapshot["consult_triage"]
+    lab_trends = _lab_trends_for_snapshot(snapshot)
+    dosage_report = snapshot.get("dosage_report") or check_dosages(snapshot["patient_timeline"])
+    result = generate_consult_triage(snapshot["cross_check_report"], lab_trends, dosage_report)
+    audit.record(user_id, "records.read", {"view": "consult_triage", "recomputed": True})
+    return result
+
+
+@app.get("/api/v1/dosage-report")
+async def get_dosage_report(user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
+    """Returns the deterministic dosage validation report — each medication's
+    normalized dose checked against published adult limits (dosage_rules.py).
+    Recomputed on the fly for snapshots saved before this feature existed."""
+    snapshot = _load_snapshot_or_rebuild(user_id)
+    if snapshot is None:
+        raise HTTPException(404, "No records found for this user.")
+    if "dosage_report" in snapshot:
+        audit.record(user_id, "records.read", {"view": "dosage_report"})
+        return snapshot["dosage_report"]
+    result = check_dosages(snapshot["patient_timeline"])
+    audit.record(user_id, "records.read", {"view": "dosage_report", "recomputed": True})
+    return result
+
+
+@app.get("/api/v1/export")
+async def export_record(
+    format: str = Query("json", description="Export format: 'json' (native, lossless) or 'fhir' (FHIR R4 Bundle)"),
+    user_id: str = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """Exports the authenticated user's assembled record for portability.
+
+    - format=json: the complete MediMind-native snapshot (timeline +
+      cross-check + lab trends) in a self-describing envelope.
+    - format=fhir: a FHIR R4 collection Bundle (Patient,
+      MedicationStatement, Observation, AllergyIntolerance, Provenance)
+      mapping the portable core of the record onto standard resources for
+      hand-off to other health systems.
+
+    404s if the user has never been processed. Deterministic — no LLM calls.
+    """
+    snapshot = _load_snapshot_or_rebuild(user_id)
+    if snapshot is None:
+        raise HTTPException(404, "No patient record found for this user — upload documents first.")
+    if "lab_trends" not in snapshot:
+        snapshot = {**snapshot, "lab_trends": _lab_trends_for_snapshot(snapshot)}
+    try:
+        result = export_module.build_export(user_id, snapshot, format)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    audit.record(user_id, "records.export", {"format": format.strip().lower()})
+    return result
+
+
 @app.get("/api/v1/changes")
 async def get_record_changes(user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
     """Explain what changed between consecutive dated records.
@@ -1650,6 +1866,12 @@ async def get_patient_snapshot(user_id: str = Depends(get_current_user)) -> Dict
         # documents table rather than the cached snapshot row.
         result["rebuilt_from_documents"] = True
     result["lab_trends"] = _lab_trends_for_snapshot(snapshot)
+    # Derived safety reports — recomputed for pre-feature snapshots so the
+    # dashboard always has them.
+    result["dosage_report"] = snapshot.get("dosage_report") or check_dosages(snapshot["patient_timeline"])
+    result["consult_triage"] = snapshot.get("consult_triage") or generate_consult_triage(
+        snapshot["cross_check_report"], result["lab_trends"], result["dosage_report"],
+    )
     return result
 
 
@@ -1763,13 +1985,15 @@ async def qa(body: QARequest, user_id: str = Depends(get_current_user)) -> Dict[
         # directly in this coroutine stalls the whole event loop, so one slow
         # answer froze every other request (health checks and uploads
         # included). Hand it to a worker thread instead.
-        return await asyncio.to_thread(
+        result = await asyncio.to_thread(
             answer_question,
             patient_key=user_id,
             question=body.question,
             chat_history=body.chat_history,
             top_k=body.top_k,
         )
+        audit.record(user_id, "qa.ask", {"question_chars": len(body.question or "")})
+        return result
     except ValueError as e:
         raise HTTPException(400, str(e))
     except RuntimeError as e:
@@ -1787,6 +2011,7 @@ async def create_session(user_id: str = Depends(get_current_user)) -> Dict[str, 
     /sessions/{session_id}/messages calls."""
     session_id = uuid.uuid4().hex
     conversation.get_or_create_session(user_id, session_id)
+    audit.record(user_id, "session.create", {"session_id": session_id})
     return {"user_id": user_id, "session_id": session_id}
 
 
@@ -1805,9 +2030,14 @@ async def post_message(
     try:
         # Same reasoning as /qa: query rewriting + retrieval + answering are
         # blocking calls and must not run on the event loop.
-        return await asyncio.to_thread(
+        result = await asyncio.to_thread(
             conversation.ask, session, body.question, top_k=body.top_k
         )
+        audit.record(user_id, "session.message", {
+            "session_id": session_id,
+            "question_chars": len(body.question or ""),
+        })
+        return result
     except ValueError as e:
         raise HTTPException(400, str(e))
     except RuntimeError as e:
@@ -1833,9 +2063,11 @@ async def get_session_history(
 
 @app.delete("/api/v1/sessions/{session_id}", status_code=204)
 async def delete_session(session_id: str, user_id: str = Depends(get_current_user)) -> None:
-    """Ends a conversation session, freeing its in-memory turn history."""
+    """Ends a conversation session, removing its transcript from memory and
+    the durable store."""
     if not conversation.delete_session(user_id, session_id):
         raise HTTPException(404, f"Session '{session_id}' not found.")
+    audit.record(user_id, "session.delete", {"session_id": session_id})
 
 
 # ---------------------------------------------------------------------------
