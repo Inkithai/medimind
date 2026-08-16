@@ -32,9 +32,12 @@ changes is that it stops being presented as something happening now.
 
 Nor does it invent a maximum safe dose. `cumulative_daily_dose` is arithmetic
 over concurrent prescriptions of one ingredient — a number the record
-supports. Saying that number is "too much" would need reference data this
-system does not have, and would be exactly the ungrounded claim
-evidence_grading.py exists to cap.
+supports. It is only emitted when the doses are comparable: identical units
+are summed directly, and different mass units (mg / g / mcg) are converted
+exactly to mg first; when either unit is not a checkable mass unit the total
+is omitted rather than added up in mismatched units. Saying that number is
+"too much" would need reference data this system does not have, and would be
+exactly the ungrounded claim evidence_grading.py exists to cap.
 
 DATES
 -----
@@ -42,21 +45,26 @@ Prescription dates arrive in mixed formats, and "09/11/2025" is ambiguous. The
 convention is inferred from the record itself rather than assumed: if any date
 in it has a first component above 12 ("14/10/2023", "26/02/2026"), the record
 is day-first and every date is read that way. Only when nothing disambiguates
-does it fall back to the parser default — and a date that cannot be read at
-all makes a window unknown, never a guess.
+does it fall back to day-first (the majority convention outside the US) — and
+a date that cannot be read at all makes a window unknown, never a guess.
+
+The same inference lives in date_convention.py and is shared by the timeline
+merge, lab trends, change detection and record-integrity checks, so every
+feature orders the same record the same way.
 """
 
 import re
 from datetime import date, timedelta
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from dateutil import parser as dateutil_parser
+from date_convention import infer_dayfirst, parse_mixed_date
 
 # Overlap verdicts.
 CONCURRENT = "concurrent"          # windows provably overlap
 POSSIBLE = "possible"              # a duration is unknown — cannot rule out
 NOT_CONCURRENT = "not_concurrent"  # windows provably do not overlap
-UNKNOWN = "unknown"                # dates unusable on one side
+UNKNOWN = "unknown"                # dates unusable on one side, or a course
+                                   # length unknown so non-overlap is unprovable
 
 _DURATION_UNITS = (
     (r"day", 1),
@@ -91,50 +99,17 @@ def parse_duration_days(text: Any) -> Optional[int]:
     return None
 
 
-def infer_dayfirst(date_strings: Sequence[Any]) -> bool:
-    """
-    Whether this record writes dates day-first, inferred from the record.
-
-    A single unambiguous date settles it for all the ambiguous ones:
-    "14/10/2023" can only be day-first, so "09/11/2025" in the same record is
-    9 November, not 11 September. Guessing this wrong shifts a treatment
-    window by months and silently changes which risks look concurrent.
-    """
-    for raw in date_strings:
-        if not isinstance(raw, str):
-            continue
-        match = re.match(r"\s*(\d{1,2})\s*[/\-.]\s*(\d{1,2})\s*[/\-.]\s*\d{2,4}", raw)
-        if not match:
-            continue
-        first, second = int(match.group(1)), int(match.group(2))
-        if first > 12 and second <= 12:
-            return True
-        if second > 12 and first <= 12:
-            return False
-    return True  # day-first is the majority convention outside the US
-
-
-# YYYY-MM-DD is unambiguous, but dateutil still applies `dayfirst` to it and
-# reads "2025-11-09" as 11 September. One real record contained both
-# "09/11/2025" and "2025-11-09" for the same prescription, so a record-wide
-# dayfirst would have shifted that window by two months and changed which
-# risks looked concurrent. ISO is therefore matched first and parsed straight.
-_ISO_DATE_RE = re.compile(r"^\s*(\d{4})-(\d{1,2})-(\d{1,2})")
-
-
 def parse_date(raw: Any, dayfirst: bool = True) -> Optional[date]:
-    if not isinstance(raw, str) or not raw.strip():
-        return None
-    iso = _ISO_DATE_RE.match(raw)
-    if iso:
-        try:
-            return date(int(iso.group(1)), int(iso.group(2)), int(iso.group(3)))
-        except ValueError:
-            return None
-    try:
-        return dateutil_parser.parse(raw.strip(), fuzzy=True, dayfirst=dayfirst).date()
-    except (ValueError, OverflowError, TypeError):
-        return None
+    """Parse one prescription date, honouring the record's convention.
+
+    YYYY-MM-DD (ISO) is unambiguous and always read year-first. One real
+    record contained both "09/11/2025" and "2025-11-09" for the same
+    prescription, so a record-wide dayfirst would otherwise have shifted that
+    window by two months and changed which risks looked concurrent. The
+    shared implementation lives in date_convention.py so every feature that
+    reads clinical dates applies the identical rule.
+    """
+    return parse_mixed_date(raw, dayfirst=dayfirst)
 
 
 def _daily_dose(med: Dict[str, Any]) -> Optional[float]:
@@ -146,6 +121,32 @@ def _daily_dose(med: Dict[str, Any]) -> Optional[float]:
     if not isinstance(per_day, (int, float)) or isinstance(per_day, bool):
         return None
     return round(float(value) * float(per_day), 3)
+
+
+_MASS_TO_MG = {
+    "mg": 1.0,
+    "g": 1000.0, "gram": 1000.0, "grams": 1000.0,
+    "mcg": 1 / 1000.0, "ug": 1 / 1000.0, "µg": 1 / 1000.0,
+    "microgram": 1 / 1000.0, "micrograms": 1 / 1000.0,
+}
+
+
+def _daily_dose_in_mg(window: Dict[str, Any]) -> Optional[float]:
+    """The window's daily dose expressed in mg via exact mass-unit factors.
+
+    Returns None for non-mass or unknown units (IU, mL, puffs...) — those are
+    never summed with another prescription's dose. This mirrors
+    dosage_rules._to_mg: mg/g/mcg conversions are exact decimal scaling and
+    need no clinical knowledge, while anything else is uncheckable.
+    """
+    dose = window.get("daily_dose")
+    unit = str(window.get("dosage_unit") or "").strip().lower()
+    if dose is None or not unit:
+        return None
+    factor = _MASS_TO_MG.get(unit)
+    if factor is None:
+        return None
+    return round(float(dose) * factor, 6)
 
 
 def _ingredient_keys(med: Dict[str, Any]) -> List[str]:
@@ -213,8 +214,8 @@ def overlap_of(a: Dict[str, Any], b: Dict[str, Any]) -> Dict[str, Any]:
     Whether two treatment windows overlap, and by how much.
 
     Returns {"status", "start", "end", "days", "gap_days"} — `gap_days` is how
-    far apart they were when they don't overlap, which is the number that makes
-    a stale finding obviously stale.
+    far apart they were when they provably don't overlap, which is the number
+    that makes a stale finding obviously stale.
     """
     if not a["start"] or not b["start"]:
         return {"status": UNKNOWN, "start": None, "end": None, "days": 0, "gap_days": None}
@@ -232,6 +233,19 @@ def overlap_of(a: Dict[str, Any], b: Dict[str, Any]) -> Dict[str, Any]:
             "days": (earliest_end - latest_start).days + 1,
             "gap_days": 0,
         }
+
+    if not (a["duration_known"] and b["duration_known"]):
+        # The 30-day assumption for an unstated duration exists only to WIDEN
+        # what gets checked (it can turn an overlap into "possible"). A
+        # non-overlap measured against an ASSUMED end proves nothing: a PRN /
+        # open-ended course can run far past the assumption and genuinely
+        # overlap the later course. Previously this branch still returned
+        # not_concurrent — with gap_days measured from the assumed end — so
+        # e.g. "Drug A (as required, Jan)" + "Drug B (5 days, Sep)" was
+        # presented as "never taken at the same time, 213 days apart", a
+        # claim the documents do not support. When either end is unknown the
+        # honest verdict is unknown, with no fabricated gap.
+        return {"status": UNKNOWN, "start": None, "end": None, "days": 0, "gap_days": None}
 
     return {
         "status": NOT_CONCURRENT,
@@ -259,15 +273,32 @@ def _best_overlap(
 
     Takes the BEST case for the patient being exposed (the longest genuine
     overlap), because the question a finding answers is "was this ever a live
-    risk?" — not "is it a risk on average".
+    risk?" — not "is it a risk on average". A pair-level "not concurrent"
+    verdict requires EVERY combination of the drugs' courses to be provably
+    separate: if any combination's course length is unknown, non-overlap can
+    never be proven for the pair, so the honest verdict is unknown.
     """
     if len(groups) < 2 or any(not g for g in groups):
         return {"status": UNKNOWN, "start": None, "end": None, "days": 0, "gap_days": None}
 
+    # Single-drug findings (a duplicate or a dosage conflict) pass the same
+    # window list twice: [own, own]. Pairing a course with ITSELF trivially
+    # "overlaps" for its entire length — before this guard, every one of
+    # those findings reported CONCURRENT ("a live risk") for two courses that
+    # were months apart.  Only distinct courses (and distinct prescriptions —
+    # a re-uploaded scan is not a second exposure) can overlap.
+    same_group = groups[0] is groups[1]
+
     best = None
     smallest_gap = None
-    for a in groups[0]:
-        for b in groups[1]:
+    saw_unknown = False
+    for index_a, a in enumerate(groups[0]):
+        for index_b, b in enumerate(groups[1]):
+            if same_group:
+                if index_a == index_b:
+                    continue
+                if a["prescription_group"] and a["prescription_group"] == b["prescription_group"]:
+                    continue
             result = overlap_of(a, b)
             if result["status"] in (CONCURRENT, POSSIBLE):
                 if best is None or result["days"] > best["days"] or (
@@ -277,7 +308,13 @@ def _best_overlap(
             elif result["status"] == NOT_CONCURRENT:
                 if smallest_gap is None or (result["gap_days"] or 0) < smallest_gap["gap_days"]:
                     smallest_gap = result
-    return best or smallest_gap or {
+            else:
+                saw_unknown = True
+    if best is not None:
+        return best
+    if saw_unknown:
+        return {"status": UNKNOWN, "start": None, "end": None, "days": 0, "gap_days": None}
+    return smallest_gap or {
         "status": UNKNOWN, "start": None, "end": None, "days": 0, "gap_days": None,
     }
 
@@ -301,14 +338,15 @@ def _timing_note(result: Dict[str, Any], subjects: Sequence[str]) -> str:
             "the dates cannot be confirmed from the documents."
         )
     if result["status"] == NOT_CONCURRENT:
+        verb = "was" if len(subjects) == 1 else "were"
         return (
-            f"{names} were never taken at the same time — the courses finished about "
+            f"{names} {verb} never taken at the same time — the courses finished about "
             f"{result['gap_days']} day(s) apart. This is a historical pairing, not a "
             "current risk."
         )
     return (
-        f"The dates for {names} could not be read from the documents, so it is not "
-        "possible to tell whether the courses overlapped."
+        f"The dates or course lengths for {names} could not be fully read from the "
+        "documents, so it is not possible to tell whether the courses overlapped."
     )
 
 
@@ -422,8 +460,26 @@ def concurrent_exposure(timeline: Dict[str, Any]) -> List[Dict[str, Any]]:
                 if result["status"] not in (CONCURRENT, POSSIBLE):
                     continue
                 doses = [w["daily_dose"] for w in (a, b) if w["daily_dose"] is not None]
-                cumulative = round(sum(doses), 3) if len(doses) == 2 else None
                 unit = a["dosage_unit"] or b["dosage_unit"]
+                cumulative = None
+                if len(doses) == 2:
+                    unit_a = str(a["dosage_unit"] or "").strip().lower()
+                    unit_b = str(b["dosage_unit"] or "").strip().lower()
+                    if unit_a and unit_a == unit_b:
+                        # Same unit on both sides: plain addition is exact.
+                        cumulative = round(doses[0] + doses[1], 3)
+                        unit = a["dosage_unit"]
+                    else:
+                        # Different printed units are normalized to mg first —
+                        # summing raw numbers across units used to report e.g.
+                        # "3004 mg per day" for 3x1000 mg + 4x1 g (the true
+                        # total is 7000 mg): a fabricated figure in exactly
+                        # the double-dosing report where accuracy matters.
+                        # Non-mass units (IU, mL) decline the total instead.
+                        mg_a, mg_b = _daily_dose_in_mg(a), _daily_dose_in_mg(b)
+                        if mg_a is not None and mg_b is not None:
+                            cumulative = round(mg_a + mg_b, 3)
+                            unit = "mg"
                 exposures.append({
                     "ingredient": ingredient,
                     "status": result["status"],
@@ -440,7 +496,7 @@ def concurrent_exposure(timeline: Dict[str, Any]) -> List[Dict[str, Any]]:
                     "note": (
                         f"Between {_fmt(result['start'])} and {_fmt(result['end'])}, two "
                         f"separate prescriptions supplied {ingredient}"
-                        + (f", totalling {cumulative} {unit} per day"
+                        + (f", totalling {cumulative:g} {unit} per day"
                            if cumulative is not None and unit else "")
                         + ". Whether that total is appropriate is for a pharmacist or "
                           "doctor to judge — this is the arithmetic, not a verdict."
@@ -457,8 +513,8 @@ def risk_calendar(cross_check: Dict[str, Any], timeline: Dict[str, Any]) -> List
           {"kind", "subjects", "severity", "confidence", "status"} ]}]
 
     This is the "in this week, this interaction was active" view. Findings that
-    were never concurrent, or whose dates could not be read, are collected
-    under a final undated entry rather than dropped.
+    were never concurrent, or whose dates/course lengths could not be read,
+    are collected under a final undated entry rather than dropped.
     """
     annotate_findings_with_timing(cross_check, timeline)
 

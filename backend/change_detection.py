@@ -14,7 +14,8 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 try:
-    from dateutil import parser as date_parser
+    from dateutil import parser as date_parser  # noqa: F401  (presence check only)
+    from date_convention import infer_dayfirst, parse_mixed_datetime
 except ImportError:  # pragma: no cover - production requirements include dateutil
     date_parser = None
 
@@ -22,16 +23,18 @@ except ImportError:  # pragma: no cover - production requirements include dateut
 _NUMBER = re.compile(r"[-+]?\d+(?:\.\d+)?")
 
 
-def _date(value: Any) -> Optional[datetime]:
+def _date(value: Any, dayfirst: bool = True) -> Optional[datetime]:
     if not value or not isinstance(value, str):
         return None
     if date_parser is not None:
-        try:
-            # Record ordering is day-level; strip timezone metadata so mixed
-            # offset-aware and date-only extractions remain sortable.
-            return date_parser.parse(value, fuzzy=True).replace(tzinfo=None)
-        except (TypeError, ValueError, OverflowError):
-            pass
+        # Record ordering is day-level; strip timezone metadata so mixed
+        # offset-aware and date-only extractions remain sortable. The
+        # dayfirst convention is inferred once per record by the caller, so
+        # an ambiguous "03/11/2025" orders the same way here as in the
+        # timeline, lab trends, and risk-window engines.
+        parsed = parse_mixed_datetime(value, dayfirst=dayfirst)
+        if parsed is not None:
+            return parsed.replace(tzinfo=None)
     # Keep the engine useful in minimal/offline environments too.
     normalized = value.strip().replace("Z", "+00:00")
     try:
@@ -242,9 +245,11 @@ def _compare(before: Dict[str, Any], after: Dict[str, Any]) -> Dict[str, Any]:
 
 def detect_record_changes(timeline: Dict[str, Any]) -> Dict[str, Any]:
     """Compare consecutive dated visits and return newest comparison first."""
+    visits = timeline.get("visits", [])
+    dayfirst = infer_dayfirst([visit.get("date") for visit in visits]) if date_parser else True
     dated: List[Tuple[datetime, int, Dict[str, Any]]] = []
-    for index, visit in enumerate(timeline.get("visits", [])):
-        parsed = _date(visit.get("date"))
+    for index, visit in enumerate(visits):
+        parsed = _date(visit.get("date"), dayfirst=dayfirst)
         if parsed is not None:
             dated.append((parsed, index, visit))
     dated.sort(key=lambda item: (item[0], item[1]))

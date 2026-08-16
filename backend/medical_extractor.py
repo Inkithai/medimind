@@ -2698,15 +2698,22 @@ def group_documents_by_patient(
     return groups
 
 
-def _parse_timeline_date(date_str: Optional[str]):
+def _parse_timeline_date(date_str: Optional[str], dayfirst: bool = True):
     """Best-effort parse of wildly varying date formats in extracted docs.
     Returns datetime or None for unparseable/missing dates. Used only for
-    sorting, so failure falls back to far-future."""
+    sorting, so failure falls back to far-future.
+
+    Ambiguous slash dates follow the record's inferred day/month convention
+    (date_convention.py) — the same reading used by lab_trends,
+    change_detection, record_integrity and risk_timeline, so every feature
+    orders the same documents the same way."""
     if not date_str or not isinstance(date_str, str):
         return None
     try:
-        from dateutil import parser as _date_parser
-        parsed = _date_parser.parse(date_str, fuzzy=True)
+        from date_convention import parse_mixed_datetime
+        parsed = parse_mixed_datetime(date_str, dayfirst=dayfirst)
+        if parsed is None:
+            return None
         # Extracted event dates may mix date-only values with ISO timestamps.
         # Normalize aware values to UTC-naive so Python can sort both safely.
         if parsed.tzinfo is not None:
@@ -2738,11 +2745,18 @@ def build_patient_timeline(raw_results: List[Dict[str, Any]]) -> Dict[str, Any]:
     from document_dedup import annotate_prescription_groups
     annotate_prescription_groups(docs)
 
+    # One day/month convention for the whole record, inferred from all its
+    # document dates: a "26/02/2026" anywhere settles every "03/11/2025".
+    # Shared with lab trends / change detection / risk windows so no two
+    # features read the same ambiguous date as different days.
+    from date_convention import infer_dayfirst
+    dayfirst = infer_dayfirst([d.get("date") for d in docs])
+
     # Sort by parsed date; undated/unparseable docs go to the end.
     # Previously sorted by raw string which broke for formats like
     # "05 Jan 2026" vs "20 Apr 2026" (lexicographic != chronological).
     def sort_key(d):
-        dt = _parse_timeline_date(d.get("date"))
+        dt = _parse_timeline_date(d.get("date"), dayfirst=dayfirst)
         # Use max datetime for missing, and original string as tiebreaker for stability
         return (dt is None, dt or d.get("date") or "9999-99-99")
 
@@ -2876,8 +2890,8 @@ def build_patient_timeline(raw_results: List[Dict[str, Any]]) -> Dict[str, Any]:
     # date, so sort every clinical rollup independently.
     for values in clinical_rollups.values():
         values.sort(key=lambda item: (
-            _parse_timeline_date(item.get("date")) is None,
-            _parse_timeline_date(item.get("date")) or item.get("date") or "9999-99-99",
+            _parse_timeline_date(item.get("date"), dayfirst=dayfirst) is None,
+            _parse_timeline_date(item.get("date"), dayfirst=dayfirst) or item.get("date") or "9999-99-99",
         ))
 
     from document_dedup import find_duplicate_document_groups

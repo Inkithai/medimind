@@ -22,13 +22,21 @@ languages, "02-Jan-2020, 03:26 PM" vs "04-07-2019" vs "05 Jan 2026") —
 see the varied `date` fields real extractions produce. dateutil.parser is
 used with best-effort fuzzy parsing; anything unparseable is dropped from
 the trend (noted in confidence) rather than mis-sorted.
+
+Ambiguous slash dates ("03/11/2025") are read with the RECORD's day/month
+convention via date_convention.infer_dayfirst, defaulting day-first — the
+same rule the timeline merge, treatment windows, and change detection use.
+Previously each module parsed independently with dateutil's month-first
+default, so one record could be ordered March-then-November by the trends
+engine and November-then-March by the risk windows — opposite stories from
+the same numbers, months apart.
 """
 
 import re
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
-from dateutil import parser as dateutil_parser
+from date_convention import infer_dayfirst, parse_mixed_datetime
 
 # A value within this fraction of the reference range width, relative to
 # the boundary it's moving toward, counts as "approaching" that boundary
@@ -40,13 +48,16 @@ APPROACHING_THRESHOLD_FRACTION = 0.15
 STABLE_CHANGE_FRACTION = 0.10
 
 
-def _parse_date(date_str: Optional[str]) -> Optional[datetime]:
+def _parse_date(date_str: Optional[str], dayfirst: bool = True) -> Optional[datetime]:
+    """Best-effort parse of one lab date string (fuzzy, record convention).
+
+    ISO-8601 strings are always read year-first; everything else uses the
+    supplied dayfirst convention so every ambiguous slash date in one record
+    is read the same way — and the same way every other module reads it.
+    """
     if not date_str or not isinstance(date_str, str):
         return None
-    try:
-        return dateutil_parser.parse(date_str, fuzzy=True)
-    except (ValueError, OverflowError):
-        return None
+    return parse_mixed_datetime(date_str, dayfirst=dayfirst)
 
 
 def _parse_value(value: Any) -> Optional[float]:
@@ -355,6 +366,10 @@ def track_lab_trends(timeline: Dict[str, Any]) -> Dict[str, Any]:
     lab_results_timeline = timeline.get("lab_results_timeline", [])
     grouped = _group_by_test(lab_results_timeline)
 
+    # One day/month convention for the whole record, inferred once from all
+    # its date strings (a "26/02/2026" anywhere settles every "03/11/2025").
+    dayfirst = infer_dayfirst([e.get("date") for e in lab_results_timeline])
+
     trends: List[Dict[str, Any]] = []
     insufficient: List[Dict[str, Any]] = []
 
@@ -364,7 +379,7 @@ def track_lab_trends(timeline: Dict[str, Any]) -> Dict[str, Any]:
         units_seen = set()
         ranges_seen = set()
         for e in entries:
-            dt = _parse_date(e.get("date"))
+            dt = _parse_date(e.get("date"), dayfirst=dayfirst)
             val = _parse_value(e.get("value"))
             if dt is None or val is None:
                 dropped += 1
