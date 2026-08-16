@@ -57,6 +57,7 @@ Deterministic, no LLM calls.
 
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, List, Optional
 
 URGENCY_ORDER = {"routine": 0, "soon": 1, "urgent": 2}
@@ -84,15 +85,21 @@ STANDING_NOTE = (
 )
 
 # Lab-test keyword -> (specialty_key, patient-facing specialty). Keys are
-# checked as case-insensitive substrings of the test name. First match wins;
-# order groups related tests together.
+# matched on case-insensitive WORD boundaries against the test name — plain
+# substring matching routes any test whose name contains the letters to the
+# wrong clinic ("f-ast-ing glucose" contains "ast", "hemoglobin a1c" reached
+# the hematologist row before endocrinology). First match wins; order groups
+# related tests together.
 _LAB_SPECIALTY_MAP: List[Dict[str, str]] = [
     {"keyword": "hba1c", "key": "endocrinologist", "specialty": "Endocrinologist"},
+    {"keyword": "a1c", "key": "endocrinologist", "specialty": "Endocrinologist"},
     {"keyword": "glucose", "key": "endocrinologist", "specialty": "Endocrinologist"},
     {"keyword": "insulin", "key": "endocrinologist", "specialty": "Endocrinologist"},
     {"keyword": "tsh", "key": "endocrinologist", "specialty": "Endocrinologist"},
     {"keyword": "t3", "key": "endocrinologist", "specialty": "Endocrinologist"},
     {"keyword": "t4", "key": "endocrinologist", "specialty": "Endocrinologist"},
+    {"keyword": "ft3", "key": "endocrinologist", "specialty": "Endocrinologist"},
+    {"keyword": "ft4", "key": "endocrinologist", "specialty": "Endocrinologist"},
     {"keyword": "creatinine", "key": "nephrologist", "specialty": "Nephrologist"},
     {"keyword": "egfr", "key": "nephrologist", "specialty": "Nephrologist"},
     {"keyword": "urea", "key": "nephrologist", "specialty": "Nephrologist"},
@@ -100,14 +107,17 @@ _LAB_SPECIALTY_MAP: List[Dict[str, str]] = [
     {"keyword": "alt", "key": "gastroenterologist", "specialty": "Gastroenterologist / Hepatologist"},
     {"keyword": "ast", "key": "gastroenterologist", "specialty": "Gastroenterologist / Hepatologist"},
     {"keyword": "alp", "key": "gastroenterologist", "specialty": "Gastroenterologist / Hepatologist"},
+    {"keyword": "alkaline phosphatase", "key": "gastroenterologist", "specialty": "Gastroenterologist / Hepatologist"},
     {"keyword": "bilirubin", "key": "gastroenterologist", "specialty": "Gastroenterologist / Hepatologist"},
     {"keyword": "ggt", "key": "gastroenterologist", "specialty": "Gastroenterologist / Hepatologist"},
     {"keyword": "cholesterol", "key": "cardiologist", "specialty": "Cardiologist"},
+    {"keyword": "lipid", "key": "cardiologist", "specialty": "Cardiologist"},
     {"keyword": "ldl", "key": "cardiologist", "specialty": "Cardiologist"},
     {"keyword": "hdl", "key": "cardiologist", "specialty": "Cardiologist"},
     {"keyword": "triglycer", "key": "cardiologist", "specialty": "Cardiologist"},
     {"keyword": "troponin", "key": "cardiologist", "specialty": "Cardiologist"},
     {"keyword": "bnp", "key": "cardiologist", "specialty": "Cardiologist"},
+    {"keyword": "probnp", "key": "cardiologist", "specialty": "Cardiologist"},
     {"keyword": "hemoglobin", "key": "hematologist", "specialty": "Hematologist"},
     {"keyword": "haemoglobin", "key": "hematologist", "specialty": "Hematologist"},
     {"keyword": "platelet", "key": "hematologist", "specialty": "Hematologist"},
@@ -128,10 +138,29 @@ _GP_SPECIALTY = {
 }
 
 
+def _keyword_matches(keyword: str, test_name_lower: str) -> bool:
+    """Match a keyword against a lowercased test name.
+
+    Short keywords (<= 4 chars: "alt", "ast", "tsh", ...) are matched on word
+    boundaries — plain substring matching routes any test whose name merely
+    *contains* the letters to the wrong clinic ("f-ast-ing lipid profile"
+    contains "ast" and used to send a cholesterol work-up to a hepatologist,
+    and "hemoglobin a1c" reached the hematologist row before the a1c row it
+    never matched). Longer keywords/phrases ("bilirubin", "triglycer",
+    "albumin/creatinine") are distinctive enough to match as substrings, and
+    must: "triglycer" has to catch "triglycerides", and 3-char forms like
+    "ft4" cover the common "FT4" spelling that a bare word boundary on "t4"
+    would miss. Consistent with care/recommendation.py's own matcher.
+    """
+    if len(keyword) <= 4:
+        return re.search(rf"\b{re.escape(keyword)}\b", test_name_lower) is not None
+    return keyword in test_name_lower
+
+
 def _specialty_for_lab(test_name: str) -> Dict[str, str]:
     name_lower = (test_name or "").lower()
     for entry in _LAB_SPECIALTY_MAP:
-        if entry["keyword"] in name_lower:
+        if _keyword_matches(entry["keyword"], name_lower):
             return {
                 "specialty": entry["specialty"],
                 "key": entry["key"],

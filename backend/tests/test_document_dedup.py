@@ -282,6 +282,25 @@ def test_different_bytes_same_name_not_treated_as_duplicate():
         app.dependency_overrides.clear()
 
 
+# ---------------------------------------------------------------------------
+# Regression: ISO dates are NOT day/month-ambiguous. dateutil's dayfirst=True
+# reads "2025-11-09" as 11 September, which used to give every ISO date a
+# phantom second reading — so two ISO prescription dates two months apart
+# ("2025-11-09" vs "2025-09-11") intersected on the phantom day and could
+# merge two genuinely separate repeat prescriptions into one group.
+# ---------------------------------------------------------------------------
+
+def test_iso_dates_have_a_single_reading():
+    assert sorted(str(d) for d in document_dedup.plausible_dates("2025-11-09")) == ["2025-11-09"]
+
+
+def test_distinct_iso_prescription_dates_do_not_merge():
+    a = _rx("scan.png", "2025-11-09")
+    b = _rx("photo.jpeg", "2025-09-11")
+    document_dedup.annotate_prescription_groups([a, b])
+    assert a["prescription_group"] != b["prescription_group"]
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:

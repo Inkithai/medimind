@@ -18,7 +18,9 @@ const STATUS_LABELS: Record<string, string> = {
   concurrent: "Taken together",
   possible: "May have overlapped",
   not_concurrent: "Never taken together",
-  unknown: "Dates unreadable",
+  // "unknown" means the documents do not prove overlap either way —
+  // unreadable dates, or a course with no stated length (e.g. PRN).
+  unknown: "Timing unclear",
 };
 
 const KIND_LABELS: Record<string, string> = {

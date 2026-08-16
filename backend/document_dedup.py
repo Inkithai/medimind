@@ -36,8 +36,6 @@ merging two genuinely separate prescriptions would hide a real duplicate.
 import re
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from dateutil import parser as dateutil_parser
-
 # Salt / ester suffixes stripped before comparing ingredients. The same
 # prescription re-extracted from a different photo legitimately comes back as
 # "Diclofenac" one time and "Diclofenac sodium" the next, and an exact string
@@ -91,16 +89,25 @@ def plausible_dates(raw: Any) -> frozenset:
     9 November; read month-first it is 11 September. Committing to either
     reading would split one prescription into two — so both are kept, and two
     dates are treated as compatible when their sets overlap.
+
+    ISO-8601 strings are NOT ambiguous: dateutil's dayfirst=True reads
+    "2025-11-09" as 11 September, which used to give an ISO date a phantom
+    second reading — so "2025-11-09" (9 Nov) and "2025-09-11" (11 Sep),
+    genuinely different prescription days, intersected on the phantom day
+    and could merge two real repeat prescriptions into one group.
     """
     if not isinstance(raw, str) or not raw.strip():
         return frozenset()
     text = raw.strip()
+    from date_convention import is_iso_date, parse_mixed_date
+    if is_iso_date(text):
+        iso = parse_mixed_date(text, dayfirst=False)
+        return frozenset({iso}) if iso else frozenset()
     found = set()
     for dayfirst in (True, False):
-        try:
-            found.add(dateutil_parser.parse(text, fuzzy=True, dayfirst=dayfirst).date())
-        except (ValueError, OverflowError, TypeError):
-            continue
+        parsed = parse_mixed_date(text, dayfirst=dayfirst)
+        if parsed is not None:
+            found.add(parsed)
     return frozenset(found)
 
 

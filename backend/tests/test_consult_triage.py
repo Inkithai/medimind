@@ -173,3 +173,54 @@ def test_specialties_deduplicated_with_triggers_merged():
     assert len(specialties) == 1
     assert specialties[0]["key"] == "gastroenterologist"
     assert set(specialties[0]["triggered_by"]) == {"ALT", "AST"}
+
+
+# ---------------------------------------------------------------------------
+# Regression: specialty matching used PLAIN SUBSTRING on the test name, so
+# any word containing a short keyword's letters hijacked the route —
+# "Fasting Lipid Profile" contains "ast" (f-ast-ing) and was sent to a
+# hepatologist instead of cardiology, and "Hemoglobin A1c" never matched
+# "hba1c" and fell through to the hematologist below it.
+# ---------------------------------------------------------------------------
+
+from consult_triage import _specialty_for_lab  # noqa: E402
+
+
+def test_fasting_lipid_panel_routes_to_cardiology_not_hepatology():
+    for name in ("Fasting Lipid Profile", "Fasting Lipids", "Fasting Lipid Panel"):
+        assert _specialty_for_lab(name)["key"] == "cardiologist", name
+
+
+def test_keywords_do_not_fire_inside_unrelated_words():
+    # "fasting" contains "ast"; "standby" contains no keyword but the
+    # boundary checks guard the whole map against this class of error.
+    assert _specialty_for_lab("Fasting ESR")["key"] != "gastroenterologist"
+    assert _specialty_for_lab("ESR")["key"] == "general_physician"
+    assert _specialty_for_lab("Vitamin B12")["key"] == "general_physician"
+
+
+def test_abbreviations_and_full_names_both_match():
+    assert _specialty_for_lab("ALT")["key"] == "gastroenterologist"
+    assert _specialty_for_lab("AST")["key"] == "gastroenterologist"
+    assert _specialty_for_lab("Alkaline Phosphatase")["key"] == "gastroenterologist"
+    assert _specialty_for_lab("PT/INR")["key"] == "hematologist"
+    assert _specialty_for_lab("Total Platelet Count")["key"] == "hematologist"
+
+
+def test_a1c_spellings_route_to_endocrinology():
+    for name in ("HbA1c", "Hemoglobin A1c", "Glycated Haemoglobin (HbA1c)"):
+        assert _specialty_for_lab(name)["key"] == "endocrinologist", name
+    # A plain haemoglobin count is still haematology.
+    assert _specialty_for_lab("Haemoglobin")["key"] == "hematologist"
+
+
+def test_free_thyroid_spellings_match():
+    assert _specialty_for_lab("Free T4")["key"] == "endocrinologist"
+    assert _specialty_for_lab("FT4")["key"] == "endocrinologist"
+    assert _specialty_for_lab("FT3")["key"] == "endocrinologist"
+
+
+def test_troponin_bnp_family_intact():
+    assert _specialty_for_lab("Troponin I")["key"] == "cardiologist"
+    assert _specialty_for_lab("NT-proBNP")["key"] == "cardiologist"
+    assert _specialty_for_lab("Triglycerides")["key"] == "cardiologist"

@@ -208,6 +208,130 @@ def test_overlap_of_disjoint_windows_reports_gap():
     assert result["gap_days"] == 50
 
 
+# ---------------------------------------------------------------------------
+# Regression: an assumed 30-day window for a course with NO stated duration
+# can widen into "possible" but must never prove NON-overlap. A PRN drug has
+# no end date by definition, so claiming "never taken at the same time — 213
+# days apart" for it was a fabricated reassurance measured against an
+# invented end date.
+# ---------------------------------------------------------------------------
+
+def test_open_ended_course_is_never_proven_not_concurrent():
+    timeline = {"medications_timeline": [
+        _med("PRN Drug", "druga", "01/01/2023", "As required", 10, "mg", 1, "g1"),
+        _med("Course B", "drugb", "01/09/2023", "5 days", 10, "mg", 1, "g2"),
+    ]}
+    windows = build_treatment_windows(timeline)
+    result = overlap_of(windows[0], windows[1])
+    assert result["status"] == UNKNOWN
+    assert result["gap_days"] is None
+
+    # And the finding-level wiring keeps the same honest verdict + plain note.
+    report = {"potential_drug_interactions": [
+        {"medications_involved": ["PRN Drug", "Course B"], "explanation": "x",
+         "severity": "low", "confidence": 0.5}]}
+    annotate_findings_with_timing(report, timeline)
+    timing = report["potential_drug_interactions"][0]["timing"]
+    assert timing["status"] == UNKNOWN
+    assert "not possible to tell" in timing["note"]
+    assert "never taken at the same time" not in timing["note"]
+
+
+def test_pair_level_not_concurrent_needs_every_combination_provable():
+    # Fluconazole provably never overlapped the DATED Montelukast course, but
+    # a second Montelukast course is open-ended (PRN): with it, non-overlap
+    # cannot be proven, so the pair cannot be declared not_concurrent.
+    timeline = {"medications_timeline": [
+        _med("Fluconazole", "Fluconazole", "27/03/2025", "4 weeks", 150, "mg", 0.14, "rx-1"),
+        _med("Montelukast", "Montelukast", "01/01/2023", "14 days", 10, "mg", 1, "rx-2"),
+        _med("Montelukast", "Montelukast", "01/06/2025", "As required", 10, "mg", 1, "rx-3"),
+    ]}
+    report = {"potential_drug_interactions": [
+        {"medications_involved": ["Fluconazole", "Montelukast"], "explanation": "x",
+         "severity": "moderate", "confidence": 0.6}]}
+    annotate_findings_with_timing(report, timeline)
+    timing = report["potential_drug_interactions"][0]["timing"]
+    assert timing["status"] == UNKNOWN, timing
+    assert timing["gap_days"] is None
+
+
+# ---------------------------------------------------------------------------
+# Regression: cumulative_daily_dose must not add doses in different units.
+# 3 x 1000 mg + 4 x 1 g used to report "totalling 3004 mg per day" — half the
+# true total — in the very report that exists to catch double-dosing.
+# ---------------------------------------------------------------------------
+
+def test_concurrent_exposure_normalizes_mixed_mass_units():
+    mixed = {"medications_timeline": [
+        _med("Panadol", "Paracetamol", "01/01/2026", "10 days", 1000, "mg", 3, "rx-A"),
+        _med("IV Paracetamol", "Paracetamol", "03/01/2026", "5 days", 1, "g", 4, "rx-B"),
+    ]}
+    exposures = concurrent_exposure(mixed)
+    assert len(exposures) == 1
+    assert exposures[0]["cumulative_daily_dose"] == 7000.0
+    assert exposures[0]["dosage_unit"] == "mg"
+    assert "7000 mg" in exposures[0]["note"]
+
+
+def test_concurrent_exposure_declines_uncheckable_units():
+    odd = {"medications_timeline": [
+        _med("Spray A", "Budesonide", "01/01/2026", "10 days", 2, "puffs", 2, "rx-A"),
+        _med("Spray B", "budesonide", "03/01/2026", "5 days", 400, "mcg", 2, "rx-B"),
+    ]}
+    exposures = concurrent_exposure(odd)
+    assert len(exposures) == 1
+    assert exposures[0]["cumulative_daily_dose"] is None
+    # The exposure window and source list are still reported; only the
+    # fabricated total is withheld.
+    assert exposures[0]["sources"]
+    assert "totalling" not in exposures[0]["note"]
+
+
+# ---------------------------------------------------------------------------
+# Regression: single-drug findings (duplicate / dosage conflict) compared the
+# SAME course to itself — a window always overlaps itself, so every duplicate
+# finding with dated courses reported CONCURRENT ("a live risk") even when the
+# two prescriptions were months apart. Only distinct courses, from distinct
+# prescriptions, can overlap.
+# ---------------------------------------------------------------------------
+
+def _duplicate_timing(meds):
+    report = {"potential_drug_interactions": [], "conflicting_dosage_instructions": [],
+              "duplicate_prescriptions": [{"medication": meds[0]["name"], "occurrences": [
+                  {"date": m["date"], "source_file": m["source_file"]} for m in meds
+              ], "explanation": "duplicate", "confidence": 0.9}]}
+    annotate_findings_with_timing(report, {"medications_timeline": meds})
+    return report["duplicate_prescriptions"][0]["timing"]
+
+
+def test_duplicate_finding_never_compares_a_course_to_itself():
+    meds = [
+        _med("Cetirizine", "cetirizine", "01/01/2025", "10 days", 10, "mg", 1, "rx-1"),
+        _med("Cetirizine", "cetirizine", "01/09/2025", "10 days", 10, "mg", 1, "rx-2"),
+    ]
+    timing = _duplicate_timing(meds)
+    assert timing["status"] == NOT_CONCURRENT, timing
+    assert timing["gap_days"] > 200
+
+
+def test_duplicate_finding_still_catches_genuine_overlap():
+    meds = [
+        _med("Cetirizine", "cetirizine", "01/01/2025", "10 days", 10, "mg", 1, "rx-1"),
+        _med("Cetirizine", "cetirizine", "04/01/2025", "10 days", 10, "mg", 1, "rx-2"),
+    ]
+    assert _duplicate_timing(meds)["status"] == CONCURRENT
+
+
+def test_reuploaded_prescription_is_not_a_second_overlapping_course():
+    # Same physical prescription uploaded twice (one prescription_group):
+    # one exposure, not two concurrent ones.
+    meds = [
+        _med("Cetirizine", "cetirizine", "01/01/2025", "10 days", 10, "mg", 1, "rx-1"),
+        _med("Cetirizine", "cetirizine", "01/01/2025", "10 days", 10, "mg", 1, "rx-1"),
+    ]
+    assert _duplicate_timing(meds)["status"] == UNKNOWN
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:

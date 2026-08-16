@@ -14,7 +14,8 @@ from datetime import datetime
 from typing import Any, DefaultDict, Dict, Iterable, List, Optional, Tuple
 
 try:
-    from dateutil import parser as date_parser
+    from dateutil import parser as date_parser  # noqa: F401  (presence check only)
+    from date_convention import infer_dayfirst, parse_mixed_date
 except ImportError:  # pragma: no cover
     date_parser = None
 
@@ -33,14 +34,16 @@ def _key(value: Any) -> str:
     return re.sub(r"[^a-z0-9]+", " ", str(value or "").lower()).strip()
 
 
-def _canonical_date(value: Any) -> Optional[str]:
+def _canonical_date(value: Any, dayfirst: bool = True) -> Optional[str]:
     if not value or not isinstance(value, str):
         return None
     if date_parser is not None:
-        try:
-            return date_parser.parse(value, fuzzy=True).date().isoformat()
-        except (TypeError, ValueError, OverflowError):
-            pass
+        # Same record-level day/month convention as the rest of the
+        # pipeline: same-document grouping must agree with the timeline
+        # sort and the risk windows on ambiguous dates like "03/11/2025".
+        parsed = parse_mixed_date(value, dayfirst=dayfirst)
+        if parsed is not None:
+            return parsed.isoformat()
     value = value.strip()
     try:
         return datetime.fromisoformat(value.replace("Z", "+00:00")).date().isoformat()
@@ -156,10 +159,10 @@ def _identity_issues(visits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     )]
 
 
-def _lab_issues(visits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _lab_issues(visits: List[Dict[str, Any]], dayfirst: bool = True) -> List[Dict[str, Any]]:
     groups: DefaultDict[Tuple[str, str], List[Tuple[Dict[str, Any], Dict[str, Any]]]] = defaultdict(list)
     for visit in visits:
-        date = _canonical_date(visit.get("date"))
+        date = _canonical_date(visit.get("date"), dayfirst=dayfirst)
         if not date:
             continue
         for lab in visit.get("lab_results", []) or []:
@@ -203,10 +206,10 @@ def _lab_issues(visits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return issues
 
 
-def _medication_issues(visits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _medication_issues(visits: List[Dict[str, Any]], dayfirst: bool = True) -> List[Dict[str, Any]]:
     groups: DefaultDict[Tuple[str, str], List[Tuple[Dict[str, Any], Dict[str, Any]]]] = defaultdict(list)
     for visit in visits:
-        date = _canonical_date(visit.get("date"))
+        date = _canonical_date(visit.get("date"), dayfirst=dayfirst)
         if not date:
             continue
         for medication in visit.get("medications", []) or []:
@@ -282,11 +285,12 @@ def _allergy_issues(visits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 def check_record_integrity(timeline: Dict[str, Any]) -> Dict[str, Any]:
     """Return all source-linked discrepancies in a patient timeline."""
     visits = timeline.get("visits", []) or []
+    dayfirst = infer_dayfirst([visit.get("date") for visit in visits]) if date_parser else True
     issues = (
         _identity_issues(visits)
         + _allergy_issues(visits)
-        + _medication_issues(visits)
-        + _lab_issues(visits)
+        + _medication_issues(visits, dayfirst=dayfirst)
+        + _lab_issues(visits, dayfirst=dayfirst)
     )
     category_order = {"identity": 0, "allergy": 1, "medication": 2, "lab": 3}
     severity_order = {"important": 0, "review": 1}
