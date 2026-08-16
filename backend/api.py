@@ -62,6 +62,7 @@ import storage
 from care import CareConfigurationError, CareProviderError, get_care_provider
 from care.recommendations import generate_care_recommendations
 from auth import get_current_user, issue_anonymous_token
+from appointment_prep import build_appointment_prep
 from change_detection import detect_record_changes
 from document_filter import NonMedicalDocumentError, assert_medical_document
 from lab_trends import track_lab_trends
@@ -969,6 +970,17 @@ async def get_record_changes(user_id: str = Depends(get_current_user)) -> Dict[s
     if snapshot is None:
         raise HTTPException(404, "No timeline found for this user.")
     return detect_record_changes(snapshot["patient_timeline"])
+
+
+@app.get("/api/v1/appointment-prep")
+async def get_appointment_prep(user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
+    """Build a printable, source-grounded clinician conversation packet."""
+    snapshot = db.load_patient_snapshot(user_id)
+    if snapshot is None:
+        raise HTTPException(404, "No timeline found for this user.")
+    timeline = snapshot["patient_timeline"]
+    lab_trends_data = snapshot.get("lab_trends") or track_lab_trends(timeline)
+    return build_appointment_prep(timeline, snapshot["cross_check_report"], lab_trends_data)
 
 
 @app.get("/api/v1/patient-snapshot")

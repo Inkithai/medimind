@@ -14,6 +14,7 @@ import { DocumentsPage } from "./pages/DocumentsPage";
 import { MedicinesPage } from "./pages/MedicinesPage";
 import { HistoryPage } from "./pages/HistoryPage";
 import { ChangesPage } from "./pages/ChangesPage";
+import { AppointmentPrepPage } from "./pages/AppointmentPrepPage";
 import { Spinner } from "./components/Spinner";
 
 const FindCarePage = lazy(() =>
@@ -126,6 +127,14 @@ export default function App() {
           element={
             <RequireAuth>
               <ChangesPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/appointment-prep"
+          element={
+            <RequireAuth>
+              <AppointmentPrepPage />
             </RequireAuth>
           }
         />

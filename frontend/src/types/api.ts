@@ -197,6 +197,52 @@ export interface RecordChangesReport {
   note: string;
 }
 
+// ---- Appointment preparation (appointment_prep.py) -----------------------
+
+export interface AppointmentEvidence {
+  date: string | null;
+  source_file: string | null;
+  document_url?: string | null;
+}
+
+export interface AppointmentPriority {
+  id: string;
+  level: "important" | "review" | "routine";
+  category: string;
+  title: string;
+  question: string;
+  rationale: string;
+  evidence: AppointmentEvidence[];
+}
+
+export interface HandoffMedication {
+  name: string;
+  ingredients: string[];
+  dosage: string | null;
+  frequency: string | null;
+  source: AppointmentEvidence;
+}
+
+export interface AppointmentPrepReport {
+  handoff: {
+    record_count: number;
+    record_period: { from: string | null; to: string | null };
+    providers_documented: string[];
+    known_allergies: string[];
+    latest_medication_record: AppointmentEvidence | null;
+    latest_documented_medications: HandoffMedication[];
+    key_findings: Array<{
+      level: "important" | "review" | "routine";
+      text: string;
+      evidence: AppointmentEvidence[];
+    }>;
+  };
+  priorities: AppointmentPriority[];
+  checklist: Array<{ id: string; text: string }>;
+  method: string;
+  note: string;
+}
+
 // ---- Q&A / conversation (retrieval.py, conversation.py) ------------------
 
 export interface QASource {

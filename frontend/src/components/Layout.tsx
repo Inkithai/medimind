@@ -3,6 +3,7 @@ import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { classNames } from "../utils/format";
 import {
+  AppointmentIcon,
   BeakerIcon,
   ChangesIcon,
   ChatIcon,
@@ -30,6 +31,7 @@ const NAV: NavItem[] = [
   { to: "/labs", label: "Lab Results", icon: BeakerIcon, chip: "bg-violet-50 text-violet-600" },
   { to: "/history", label: "Timeline", icon: TimelineIcon, chip: "bg-sky-50 text-sky-600" },
   { to: "/changes", label: "What Changed?", icon: ChangesIcon, chip: "bg-indigo-50 text-indigo-600" },
+  { to: "/appointment-prep", label: "Appointment Prep", icon: AppointmentIcon, chip: "bg-cyan-50 text-cyan-700" },
   { to: "/safety", label: "Safety Alerts", icon: ShieldIcon, chip: "bg-amber-50 text-amber-600" },
   { to: "/ask", label: "Ask AI", icon: ChatIcon, chip: "bg-brand-50 text-brand-600" },
   { to: "/find-care", label: "Find Care", icon: LocationIcon, chip: "bg-rose-50 text-rose-600" },

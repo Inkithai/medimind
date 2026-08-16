@@ -1,6 +1,7 @@
 import type { CareFacility, CareFacilityResponse, FacilityKind } from "../types/facility";
 import type { CareRecommendationsResponse } from "../types/recommendations";
 import type {
+  AppointmentPrepReport,
   CrossCheckReport,
   HealthResponse,
   LabTrendsReport,
@@ -341,6 +342,10 @@ export const api = {
 
   getRecordChanges(credentials: Credentials): Promise<RecordChangesReport> {
     return request<RecordChangesReport>(credentials, "/api/v1/changes");
+  },
+
+  getAppointmentPrep(credentials: Credentials): Promise<AppointmentPrepReport> {
+    return request<AppointmentPrepReport>(credentials, "/api/v1/appointment-prep");
   },
 
   async getCareFacilities(
