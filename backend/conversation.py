@@ -8,13 +8,24 @@ sessions.
 
 The core problem this solves: a raw embedding search on a follow-up like
 "was that safe with my allergy?" retrieves poorly, because the follow-up
-is only meaningful in light of what was said earlier. This module:
+is only meaningful in light of what was said earlier. Two mechanisms
+handle this, in increasing order of reliability:
 
-    1. Tracks conversation turns per (patient_key, session_id) in a plain
-       in-memory ConversationSession.
-    2. Rewrites each new question into a self-contained search query
-       (using conversation history) before it is embedded/retrieved —
-       the raw question is still what's shown to the final answering LLM.
+    1. QUERY REWRITING (LLM) — turns "was that safe?" into a self-contained
+       retrieval query. Good at natural language, but it's a model call that
+       can fail or drop a detail, so nothing safety-critical depends on it
+       alone.
+
+    2. ENTITY FOCUS (deterministic) — the session tracks WHICH medications,
+       lab tests and documents the conversation is actually about, resolved
+       by exact matching against the patient's own record vocabulary. Focus
+       is passed to retrieval so the subject of a follow-up is pinned into
+       context as established fact, not re-inferred every turn. This is what
+       keeps "what if I take it with this?" anchored even when the LLM
+       rewrite fails.
+
+On top of that:
+
     3. Keeps prompt/token cost bounded via a recent-turns window plus
        periodic summarization of older turns.
 
@@ -38,6 +49,13 @@ REWRITE_MODEL = MODEL
 SUMMARIZE_AFTER_TOTAL_TURNS = 20  # start summarizing once a session grows past this
 KEEP_RECENT_TURNS_VERBATIM = 6    # ...but always keep this many most-recent turns as-is
 
+# How many turns an entity stays "in focus" after it was last mentioned.
+# Long enough to survive a couple of intervening clarifications, short enough
+# that a conversation which has moved on isn't dragged back to an old drug.
+FOCUS_TURN_MEMORY = 6
+
+FOCUS_FIELDS = ("medications", "lab_tests", "source_files")
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -49,29 +67,72 @@ def _now_iso() -> str:
 
 class ConversationSession:
     """
-    Holds the in-memory turn history for one (patient_key, session_id)
-    conversation. Pure Python object — no external session store, so
-    sessions live only as long as the process does.
+    Holds the in-memory turn history and entity focus for one (patient_key,
+    session_id) conversation. Pure Python object — no external session
+    store, so sessions live only as long as the process does.
     """
 
     def __init__(self, patient_key: str, session_id: str):
         self.patient_key = patient_key
         self.session_id = session_id
-        self.turns: List[Dict[str, str]] = []  # full, untrimmed transcript
+        self.turns: List[Dict[str, Any]] = []  # full, untrimmed transcript
         self._summary: Optional[str] = None
         self._summary_covers_up_to = 0  # index into self.turns the cached summary accounts for
 
-    def add_user_turn(self, text: str) -> None:
-        """Appends a user turn with the current UTC timestamp."""
-        self.turns.append({"role": "user", "content": text, "timestamp": _now_iso()})
+    # -- turn recording ------------------------------------------------
+
+    def add_user_turn(self, text: str, entities: Optional[Dict[str, List[str]]] = None) -> None:
+        """Appends a user turn, tagged with the record entities it named.
+        Those tags are what get_focus() later reads — resolved once, when
+        the vocabulary is at hand, rather than re-derived per turn."""
+        self.turns.append({
+            "role": "user",
+            "content": text,
+            "timestamp": _now_iso(),
+            "entities": entities or {},
+        })
 
     def add_assistant_turn(self, answer: Dict[str, Any]) -> None:
-        """Appends an assistant turn. Stores the "answer" field as the turn's
-        content (the same text a human would read), since the full answer
-        dict (confidence, sources, etc.) is retrievable from logs/exports
-        rather than needed for prompting future turns."""
+        """Appends an assistant turn. Stores the "answer" text as the turn's
+        content (what a human would read), plus the source files it cited —
+        those files are part of what the conversation is "about", so they
+        feed focus alongside entities the user named explicitly."""
         content = answer.get("answer", "") if isinstance(answer, dict) else str(answer)
-        self.turns.append({"role": "assistant", "content": content, "timestamp": _now_iso()})
+        cited_files = []
+        if isinstance(answer, dict):
+            cited_files = [
+                s.get("source_file")
+                for s in answer.get("sources") or []
+                if isinstance(s, dict) and s.get("source_file")
+            ]
+        self.turns.append({
+            "role": "assistant",
+            "content": content,
+            "timestamp": _now_iso(),
+            "entities": {"source_files": cited_files},
+        })
+
+    # -- focus ---------------------------------------------------------
+
+    def get_focus(self, turn_memory: int = FOCUS_TURN_MEMORY) -> Dict[str, List[str]]:
+        """
+        The entities this conversation is currently about, gathered from the
+        last `turn_memory` turns, most-recently-mentioned first.
+
+        Deliberately deterministic: these are exact matches against the
+        patient's own record vocabulary, recorded at the time each turn was
+        processed. A follow-up's subject is therefore recalled, not guessed,
+        which is why it doesn't degrade when the rewrite model has a bad day.
+        """
+        focus: Dict[str, List[str]] = {field: [] for field in FOCUS_FIELDS}
+        for turn in reversed(self.turns[-turn_memory:] if turn_memory else self.turns):
+            for field in FOCUS_FIELDS:
+                for value in (turn.get("entities") or {}).get(field) or []:
+                    if value and value not in focus[field]:
+                        focus[field].append(value)
+        return focus
+
+    # -- history for prompting ----------------------------------------
 
     def get_history(self, max_turns: int = 6) -> List[Dict[str, str]]:
         """
@@ -103,11 +164,11 @@ class ConversationSession:
         recent = self.turns[-max_turns:] if max_turns else []
         return [{"role": t["role"], "content": t["content"]} for t in recent]
 
-    def get_full_history(self) -> List[Dict[str, str]]:
-        """Returns the complete, untrimmed transcript (with timestamps) for
-        logging/export. Unlike get_history(), this is never summarized or
-        truncated — summarization only affects what's sent to the LLM for
-        prompting, not what's retained in memory."""
+    def get_full_history(self) -> List[Dict[str, Any]]:
+        """Returns the complete, untrimmed transcript (with timestamps and
+        resolved entities) for logging/export. Unlike get_history(), this is
+        never summarized or truncated — summarization only affects what's
+        sent to the LLM for prompting, not what's retained in memory."""
         return list(self.turns)
 
 
@@ -153,12 +214,16 @@ allergies).
 Rules:
 - Resolve pronouns and vague references ("that", "it", "the other one",
   "this medication") into the specific medication/lab/date/event they refer
-  to, using the conversation history provided.
+  to, using the conversation history and the "currently being discussed"
+  entities provided.
 - Preserve ALL safety-relevant framing from the original question. If the
   patient is asking about risk, danger, safety, interactions, allergies, or
   dosage, the rewritten query must keep that risk framing explicit (e.g.
   keep words like "safe", "danger", "interact", "allergy") — never rewrite
   it into a neutral factual lookup that loses the risk framing.
+- Preserve comparisons across documents or time ("since", "before", "still",
+  "changed", "the newer one") — these decide which chunks get retrieved, so
+  dropping them silently narrows the answer to a single document.
 - Do not answer the question. Do not add information that isn't implied by
   the conversation.
 - Output ONLY the rewritten query text — no quotes, no preamble, no
@@ -166,30 +231,46 @@ Rules:
 """
 
 
-def rewrite_query_with_context(question: str, history: List[Dict[str, str]]) -> str:
+def rewrite_query_with_context(
+    question: str,
+    history: List[Dict[str, str]],
+    focus: Optional[Dict[str, List[str]]] = None,
+) -> str:
     """
     Turns an ambiguous follow-up question into a self-contained search
-    query, using recent conversation history for context. This rewritten
-    string is what gets embedded for Chroma retrieval — the original
+    query, using recent conversation history and the session's entity focus.
+    This rewritten string is what gets embedded for retrieval — the original
     `question` is left untouched for the final answer-generation prompt.
 
-    If `history` is empty (first turn in a session), rewriting is skipped
-    and `question` is returned as-is, since there's no prior context to
-    resolve against. If the rewrite LLM call fails for any reason (auth,
-    rate limit, network), falls back to the raw `question` rather than
-    raising, so a rewrite failure never blocks retrieval entirely.
+    If there's no history and no focus (first turn in a session), rewriting
+    is skipped and `question` is returned as-is. If the rewrite call fails
+    for any reason (auth, rate limit, network), falls back to the raw
+    `question` rather than raising — a rewrite failure degrades the query
+    but never blocks the answer, and the session's focus is passed to
+    retrieval separately, so the subject of the follow-up survives
+    regardless.
     """
     if not question or not question.strip():
         return question
-    if not history:
+    has_focus = any((focus or {}).get(field) for field in FOCUS_FIELDS)
+    if not history and not has_focus:
         return question
 
-    messages = [{"role": "system", "content": REWRITE_SYSTEM_PROMPT}]
+    messages: List[Dict[str, str]] = [{"role": "system", "content": REWRITE_SYSTEM_PROMPT}]
     messages.extend(history)
+    focus_note = ""
+    if has_focus:
+        parts = [
+            f"{field.replace('_', ' ')}: {', '.join(values)}"
+            for field in FOCUS_FIELDS
+            for values in [(focus or {}).get(field) or []]
+            if values
+        ]
+        focus_note = "Currently being discussed — " + "; ".join(parts) + "\n\n"
     messages.append({
         "role": "user",
         "content": (
-            f"New follow-up question to rewrite: {question}\n\n"
+            f"{focus_note}New follow-up question to rewrite: {question}\n\n"
             "Output only the rewritten, self-contained search query."
         ),
     })
@@ -217,6 +298,8 @@ Rules:
   and lab results discussed, and any risk/interaction/dosage questions
   raised — including whether a professional consult was recommended in the
   response.
+- Preserve which documents/dates were being compared, since later follow-ups
+  often refer back to them.
 - Do not soften, omit, or generalize away risk-related content.
 - Do not add new information, speculation, or medical advice.
 - Output 3-6 sentences of plain prose. No headers, no bullet points, no
@@ -224,7 +307,7 @@ Rules:
 """
 
 
-def summarize_old_turns(turns: List[Dict[str, str]]) -> str:
+def summarize_old_turns(turns: List[Dict[str, Any]]) -> str:
     """
     Collapses a list of older {"role", "content"} turns into a single
     compact summary string via a cheap LLM call, preserving safety-relevant
@@ -260,30 +343,58 @@ def ask(session: ConversationSession, question: str, top_k: int = 8) -> Dict[str
     """
     Answers one turn of a multi-turn conversation about session.patient_key.
 
-    1. Pulls recent history from the session (get_history()).
-    2. Rewrites `question` into a self-contained retrieval query using that
-       history (rewrite_query_with_context()) — skipped on the first turn.
-    3. Calls retrieval.answer_question() with the rewritten query used for
-       Chroma retrieval, but the ORIGINAL question + history passed through
-       for the final answer-generation prompt, so the model responds
-       naturally to what was actually asked while retrieving against a
-       fully-specified query.
-    4. Records both the user turn and assistant turn on the session.
+    1. Derives the patient's record vocabulary from their persisted
+       documents (the closed set of medications / lab tests / files on
+       file).
+    2. Pulls recent history and the conversation's current entity focus.
+    3. Rewrites `question` into a self-contained retrieval query using
+       both — skipped on a first turn with no focus.
+    4. Resolves which record entities the rewritten query and the raw
+       question actually name (exact match against the vocabulary), and
+       merges them into the focus passed to retrieval.
+    5. Calls retrieval.answer_question() with the rewritten query driving
+       retrieval, but the ORIGINAL question + history passed through for
+       answer generation, so the model responds to what was actually asked.
+    6. Records both turns (tagged with their entities, which become the
+       next turn's focus).
 
-    Returns the same JSON shape as retrieval.answer_question() (answer,
-    confidence, sources, recommend_professional_consult), plus
-    "rewritten_query" — the retrieval query actually used, for debugging
-    and demo transparency.
+    Returns the same JSON shape as retrieval.answer_question(), plus:
+        "rewritten_query" — the retrieval query actually used
+        "focus"           — the entities this turn was resolved against
+    both for debugging and demo transparency.
 
-    Raises ValueError for an empty question. A session_id that hasn't been
-    seen before is not this function's concern — use get_or_create_session()
-    to obtain `session`, which auto-creates one if needed.
+    Raises ValueError for an empty question.
     """
     if not question or not question.strip():
         raise ValueError("question is required and cannot be empty.")
 
+    timeline = retrieval._timeline_for(session.patient_key)
+    vocabulary = retrieval.build_record_vocabulary(timeline) if timeline else {}
+
     history = session.get_history()
-    rewritten_query = rewrite_query_with_context(question, history)
+    prior_focus = session.get_focus()
+    rewritten_query = rewrite_query_with_context(question, history, prior_focus)
+
+    # Entities named in this turn, resolved against the patient's own record.
+    # Both the raw question and the rewrite are scanned: the rewrite may
+    # introduce the resolved name ("that" -> "Metformin"), while the raw
+    # question may keep wording the rewrite dropped.
+    turn_entities: Dict[str, List[str]] = {field: [] for field in FOCUS_FIELDS}
+    if vocabulary:
+        from_question = retrieval.match_vocabulary(question, vocabulary)
+        from_rewrite = retrieval.match_vocabulary(rewritten_query, vocabulary)
+        turn_entities = {
+            field: list(dict.fromkeys(from_question[field] + from_rewrite[field]))
+            for field in FOCUS_FIELDS
+        }
+
+    # Focus for THIS turn = what it names, ahead of what the conversation was
+    # already about. Ordering matters: the current subject should outrank a
+    # carried-over one when only some of the context can fit.
+    effective_focus = {
+        field: list(dict.fromkeys(turn_entities.get(field, []) + prior_focus.get(field, [])))
+        for field in FOCUS_FIELDS
+    }
 
     result = retrieval.answer_question(
         patient_key=session.patient_key,
@@ -291,11 +402,13 @@ def ask(session: ConversationSession, question: str, top_k: int = 8) -> Dict[str
         chat_history=history,
         top_k=top_k,
         retrieval_query=rewritten_query,
+        focus=effective_focus,
     )
 
-    session.add_user_turn(question)
+    session.add_user_turn(question, entities=turn_entities)
     session.add_assistant_turn(result)
 
     result = dict(result)
     result["rewritten_query"] = rewritten_query
+    result["focus"] = effective_focus
     return result

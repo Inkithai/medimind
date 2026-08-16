@@ -49,6 +49,23 @@ logger = logging.getLogger("retrieval")
 EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL", "text-embedding-3-small")
 CHAT_MODEL = MODEL  # reuse the same chat model configured in medical_extractor.py
 
+# At or below this answer confidence the deterministic safety guard always
+# recommends a professional. Shared with evidence_grading's model-knowledge
+# cap so "low confidence" means one thing across the product.
+LOW_CONFIDENCE_THRESHOLD = 0.6
+
+# Questions about risk / interactions / allergies / dosage changes ALWAYS get
+# recommend_professional_consult=true, regardless of what the answering model
+# said — the prompt already tells it to, but "already told to" is not a
+# control. This regex is the control.
+RISK_PATTERN = re.compile(
+    r"\b(safe|safety|danger|dangerous|risk|risky|interact\w*|allerg\w*|overdose|"
+    r"side.?effect\w*|adverse|contraindicat\w*|harmful|toxic|stop taking|"
+    r"increase|decrease|double|halve|adjust|change (?:my|the) dose|together|combine|mix|"
+    r"dosage|dose)\b",
+    re.IGNORECASE,
+)
+
 CHROMA_DIR = os.environ.get("CHROMA_DIR", "./chroma_db")
 EMBEDDING_BATCH_SIZE = 100  # keep well under the API's per-request item limit
 # VECTOR_STORE is read inside vector_store.py; we keep CHROMA_DIR for backward compat
@@ -328,7 +345,192 @@ def index_patient_timeline(patient_key: str, timeline: Dict[str, Any]) -> int:
 
 
 # ---------------------------------------------------------------------------
-# 3. Retrieval + Q&A
+# 3. Record vocabulary — deterministic entity matching against the patient's
+#    own record. Powers conversational focus carry-over (conversation.py):
+#    "what if I take it with this?" resolves against real record entities
+#    even when the LLM query rewrite fails.
+# ---------------------------------------------------------------------------
+
+def build_record_vocabulary(timeline: Dict[str, Any]) -> Dict[str, List[str]]:
+    """
+    Every entity name that appears anywhere in this patient's timeline. Used
+    to resolve conversational focus deterministically without an LLM call:
+    a question can only ever be matched against drugs/tests/files the patient
+    actually has on record.
+    """
+    medications = set()
+    for med in timeline.get("medications_timeline", []) or []:
+        if med.get("name"):
+            medications.add(med["name"])
+        for ingredient in med.get("ingredients") or []:
+            if ingredient:
+                medications.add(ingredient)
+
+    lab_tests = {
+        lab["test_name"]
+        for lab in timeline.get("lab_results_timeline", []) or []
+        if lab.get("test_name")
+    }
+    source_files = {
+        (visit.get("_source") or {}).get("file")
+        for visit in timeline.get("visits", []) or []
+        if (visit.get("_source") or {}).get("file")
+    }
+
+    return {
+        "medications": sorted(medications),
+        "lab_tests": sorted(lab_tests),
+        "source_files": sorted(f for f in source_files if f),
+        "allergies": list(timeline.get("known_allergies") or []),
+    }
+
+
+# Words that appear inside record entity names but carry no identity on their
+# own — matching a question against them alone would select half the record.
+_GENERIC_TERM_WORDS = {
+    "fasting", "random", "total", "free", "direct", "serum", "plasma", "blood",
+    "urine", "level", "levels", "test", "tests", "count", "profile", "panel",
+    "report", "ratio", "index", "pdf", "jpg", "jpeg", "png", "webp", "page",
+    "tablet", "tablets", "capsule", "capsules", "oral", "injection",
+}
+
+# Below this length a term is matched whole-word only: "ALT" as a substring
+# also hits "salt" and "alternative".
+_SUBSTRING_SAFE_MIN_LEN = 5
+
+
+def _significant_words(term: str):
+    return {
+        word
+        for word in re.findall(r"[a-z0-9]+", term.lower())
+        if len(word) >= 4 and word not in _GENERIC_TERM_WORDS
+    }
+
+
+def match_vocabulary(text: str, vocabulary: Dict[str, List[str]]) -> Dict[str, List[str]]:
+    """
+    Deterministic entity spotting: which known medications / lab tests /
+    source files does this text actually name? Matching is against a closed,
+    patient-specific vocabulary, so an unrelated drug the patient isn't on
+    can never be selected.
+
+    Matches three ways, in decreasing strictness:
+      * the full term appears verbatim ("metformin sr");
+      * a short term appears as a whole word (so "ALT" doesn't match "salt");
+      * a distinctive word of the term appears — this is what lets "my
+        glucose" find the record's "Fasting Glucose". Generic qualifiers
+        ("fasting", "serum", "total") are excluded from that last rule, so
+        the match still has to be on something identifying.
+    """
+    lowered = (text or "").lower()
+    if not lowered:
+        return {"medications": [], "lab_tests": [], "source_files": []}
+
+    words = set(re.findall(r"[a-z0-9]+", lowered))
+
+    def matches(term: str) -> bool:
+        lowered_term = term.lower()
+        if len(lowered_term) >= _SUBSTRING_SAFE_MIN_LEN:
+            if lowered_term in lowered:
+                return True
+        elif lowered_term in words:
+            return True
+        return bool(_significant_words(term) & words)
+
+    return {
+        field: [term for term in vocabulary.get(field, []) if term and matches(term)]
+        for field in ("medications", "lab_tests", "source_files")
+    }
+
+
+def _timeline_for(patient_key: str) -> Dict[str, Any]:
+    """Builds the patient's timeline from persisted documents, or {} when
+    nothing is stored/unreachable. Pure-Python and cheap; used to enrich
+    cited sources and to pin conversational focus into the prompt."""
+    docs = _persisted_documents(patient_key)
+    if not docs:
+        return {}
+    from medical_extractor import build_patient_timeline
+    return build_patient_timeline(docs)
+
+
+MAX_FOCUS_ENTRIES_PER_ENTITY = 8  # keep the pinned focus block bounded
+
+
+def _render_focus_context(timeline: Dict[str, Any], focus: Dict[str, List[str]]) -> str:
+    """
+    Renders the conversation's current focus — the medications, lab tests and
+    documents under discussion — as established facts taken directly from the
+    patient's timeline. This block is appended to the retrieved context so a
+    follow-up's subject is pinned into the prompt even when the embedding
+    search for the rewritten query misses it. Deterministic: no model call.
+    """
+    if not timeline or not focus:
+        return ""
+
+    lines: List[str] = []
+
+    meds = focus.get("medications") or []
+    if meds:
+        lowered = {m.lower() for m in meds}
+        picked = [
+            med for med in timeline.get("medications_timeline", []) or []
+            if any(term in (med.get("name") or "").lower()
+                   or any(term in (ing or "").lower() for ing in med.get("ingredients") or [])
+                   for term in lowered)
+        ][:MAX_FOCUS_ENTRIES_PER_ENTITY]
+        for med in picked:
+            lines.append(
+                f"- Medication on file: {med.get('name') or 'unknown'} — "
+                f"{med.get('dosage') or 'dose not printed'} "
+                f"{med.get('frequency') or ''} "
+                f"(prescribed {med.get('date') or 'undated'}, "
+                f"source: {med.get('source_file') or 'unknown file'})"
+            )
+
+    tests = focus.get("lab_tests") or []
+    if tests:
+        lowered = {t.lower() for t in tests}
+        picked = [
+            lab for lab in timeline.get("lab_results_timeline", []) or []
+            if any(term in (lab.get("test_name") or "").lower() for term in lowered)
+        ][:MAX_FOCUS_ENTRIES_PER_ENTITY]
+        for lab in picked:
+            lines.append(
+                f"- Lab result on file: {lab.get('test_name')} = {lab.get('value')}"
+                f"{(' ' + lab.get('unit')) if lab.get('unit') else ''} "
+                f"(flag: {lab.get('flag') or 'unknown'}, "
+                f"recorded {lab.get('date') or 'undated'}, "
+                f"source: {lab.get('source_file') or 'unknown file'})"
+            )
+
+    files = focus.get("source_files") or []
+    if files:
+        by_file = {
+            (visit.get("_source") or {}).get("file"): visit
+            for visit in timeline.get("visits", []) or []
+        }
+        for name in files[:MAX_FOCUS_ENTRIES_PER_ENTITY]:
+            visit = by_file.get(name)
+            if not visit:
+                continue
+            lines.append(
+                f"- Document on file: {name} "
+                f"(type: {visit.get('document_type') or 'unknown'}, "
+                f"date: {visit.get('date') or 'undated'})"
+            )
+
+    if not lines:
+        return ""
+    return (
+        "Entities this conversation is already about (from the patient's own "
+        "records — treat these as established context for the follow-up):\n"
+        + "\n".join(lines)
+    )
+
+
+# ---------------------------------------------------------------------------
+# 4. Retrieval + Q&A
 # ---------------------------------------------------------------------------
 
 QA_SYSTEM_PROMPT = """
@@ -347,6 +549,9 @@ Rules:
   patient consult a doctor or pharmacist, and set
   recommend_professional_consult to true.
 - Cite the date and source_file of every chunk you rely on in "sources".
+- Set cross_document to true if your answer combined facts from more than
+  one source document (different source_file values), e.g. comparing a drug
+  prescribed in one document with a lab result or allergy noted in another.
 - Respond with STRICT JSON only, matching the required schema.
 
 CONFIDENCE SCORING — "confidence" reflects how directly the retrieved
@@ -375,9 +580,16 @@ ANSWER_JSON_SCHEMA = {
                 "additionalProperties": False,
             },
         },
+        "cross_document": {"type": "boolean"},
         "recommend_professional_consult": {"type": "boolean"},
     },
-    "required": ["answer", "confidence", "sources", "recommend_professional_consult"],
+    "required": [
+        "answer",
+        "confidence",
+        "sources",
+        "cross_document",
+        "recommend_professional_consult",
+    ],
     "additionalProperties": False,
 }
 
@@ -394,7 +606,9 @@ _NO_INFO_ANSWER = {
     "answer": "I don't have enough information — no indexed records were found for this patient yet.",
     "confidence": 0.0,
     "sources": [],
+    "cross_document": False,
     "recommend_professional_consult": False,
+    "low_confidence": False,
 }
 
 # Patient HAS persisted documents, but none of them contain anything the
@@ -410,8 +624,81 @@ _NO_INDEXABLE_CONTENT_ANSWER = {
     ),
     "confidence": 0.0,
     "sources": [],
+    "cross_document": False,
     "recommend_professional_consult": False,
+    "low_confidence": False,
 }
+
+
+def _enrich_sources(sources: List[Dict[str, Any]], timeline: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Attaches document_type and the archived document_url to each cited
+    source by looking it up in the timeline. Done in code rather than asked
+    of the model — a URL is exactly the kind of field a model will happily
+    invent."""
+    by_file: Dict[str, Dict[str, Any]] = {}
+    for visit in timeline.get("visits", []) or []:
+        source_file = (visit.get("_source") or {}).get("file")
+        if source_file:
+            by_file[source_file] = visit
+
+    enriched = []
+    for source in sources or []:
+        if not isinstance(source, dict):
+            continue
+        visit = by_file.get(source.get("source_file") or "")
+        entry = dict(source)
+        if visit:
+            entry["document_type"] = visit.get("document_type")
+            if visit.get("document_url"):
+                entry["document_url"] = visit["document_url"]
+        enriched.append(entry)
+    return enriched
+
+
+def _apply_safety_guard(result: Dict[str, Any], question: str) -> Dict[str, Any]:
+    """
+    Deterministic backstop for the product's stated safety promise:
+    recommend a professional for risk/allergy/dosage questions OR
+    low-confidence answers. The answering prompt already tells the model to
+    do this, but "already told to" is not a control — this makes it one, and
+    records WHY it fired in `consult_reason`.
+
+    Never de-escalates: it can only turn recommend_professional_consult on,
+    never off.
+    """
+    reasons: List[str] = []
+
+    if RISK_PATTERN.search(question or ""):
+        reasons.append(
+            "the question involves safety, interactions, allergies, or a dosage change"
+        )
+
+    confidence = result.get("confidence")
+    low_confidence = (
+        isinstance(confidence, (int, float))
+        and not isinstance(confidence, bool)
+        and confidence <= LOW_CONFIDENCE_THRESHOLD
+    )
+    if low_confidence:
+        reasons.append(
+            f"the answer's confidence is low ({confidence:.2f} at or below "
+            f"{LOW_CONFIDENCE_THRESHOLD:.2f})"
+        )
+
+    result["low_confidence"] = bool(low_confidence)
+    result["cross_document"] = bool(result.get("cross_document"))
+    if reasons:
+        result["recommend_professional_consult"] = True
+        result["consult_reason"] = (
+            "Please confirm this with a doctor or pharmacist, because "
+            + "; ".join(dict.fromkeys(reasons))
+            + "."
+        )
+    elif result.get("recommend_professional_consult"):
+        result["consult_reason"] = (
+            "Please confirm this with a doctor or pharmacist before acting on it."
+        )
+    return result
 
 
 def _persisted_documents(patient_key: str) -> Optional[List[Dict[str, Any]]]:
@@ -455,6 +742,7 @@ def answer_question(
     chat_history: Optional[List[Dict[str, str]]] = None,
     top_k: int = 8,
     retrieval_query: Optional[str] = None,
+    focus: Optional[Dict[str, List[str]]] = None,
 ) -> Dict[str, Any]:
     """
     Answers a natural-language question about one patient, grounded only in
@@ -464,10 +752,16 @@ def answer_question(
     2. Queries the patient's Chroma collection for the top_k most similar
        chunks.
     3. Builds a prompt from those chunks (each tagged with its date and
-       source_file), plus chat_history and the (display) question.
+       source_file), plus chat_history and the (display) question. When
+       `focus` is given, the entities under discussion are additionally
+       pinned into the prompt as established facts from the timeline.
     4. Calls the chat model with a system prompt that forbids diagnosis,
        requires deferring to a professional for risk/interaction/dosage
        questions, and forces structured JSON output.
+    5. Post-processes deterministically: cited sources are enriched with
+       document_type/document_url from the timeline, and the safety guard
+       forces recommend_professional_consult=true on risk/allergy/dosage
+       questions and low-confidence answers (see _apply_safety_guard).
 
     retrieval_query: optional string used for embedding/Chroma retrieval
         instead of `question`. Lets a caller (e.g. conversation.py) rewrite
@@ -475,10 +769,15 @@ def answer_question(
         search query, while `question` remains the literal text shown to
         the answering LLM as "the question asked". Defaults to `question`
         when omitted, so existing single-shot callers are unaffected.
+    focus: entities under discussion in this conversation (medications,
+        lab_tests, source_files), carried across turns by conversation.py so
+        a follow-up keeps its subject even if the rewrite/embedding misses.
 
     Returns the parsed JSON:
-        {"answer": str, "confidence": float, "sources": [{"date", "source_file"}],
-         "recommend_professional_consult": bool}
+        {"answer": str, "confidence": float,
+         "sources": [{"date", "source_file", "document_type"?, "document_url"?}],
+         "cross_document": bool, "recommend_professional_consult": bool,
+         "low_confidence": bool, "consult_reason": str?}
 
     Raises ValueError for a missing patient_key/question, RuntimeError if
     the embedding or chat call fails (including VectorStoreSchemaError when
@@ -551,6 +850,17 @@ def answer_question(
     ]
     context_str = "\n\n".join(context_blocks)
 
+    # Conversational focus: pin the entities the conversation is already
+    # about into the prompt as established facts from the timeline. This is
+    # the deterministic half of follow-up handling — it does not depend on
+    # the LLM rewrite having succeeded, so "what if I take it with this?"
+    # keeps its subject even on a bad rewrite day.
+    focus_block = ""
+    if focus and any(focus.get(field) for field in ("medications", "lab_tests", "source_files")):
+        focus_block = _render_focus_context(_timeline_for(patient_key), focus)
+        if focus_block:
+            context_str = f"{context_str}\n\n{focus_block}"
+
     user_content = (
         f"Retrieved patient records:\n\n{context_str}\n\nQuestion: {question}"
     )
@@ -589,6 +899,21 @@ def answer_question(
     # to plain-text mode) doesn't blow up the Q&A endpoint.
     from medical_extractor import _parse_json_object
     try:
-        return _parse_json_object(raw)
+        result = _parse_json_object(raw)
     except ValueError as e:
         raise RuntimeError(f"Chat model returned unparseable output: {e}") from e
+
+    # Enforce the response contract even when a provider's fallback ladder
+    # produced partial JSON: cross_document defaults to False, never missing.
+    result.setdefault("cross_document", False)
+    result.setdefault("recommend_professional_consult", False)
+    result.setdefault("sources", [])
+
+    # Deterministic post-processing, in code rather than left to the model:
+    # sources gain document_type/document_url from the timeline, and the
+    # safety guard forces a professional consult on risk/allergy/dosage
+    # questions and low-confidence answers.
+    timeline = _timeline_for(patient_key)
+    result["sources"] = _enrich_sources(result.get("sources") or [], timeline)
+    result = _apply_safety_guard(result, question)
+    return result

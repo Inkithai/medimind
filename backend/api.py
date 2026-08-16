@@ -39,6 +39,7 @@ Env:
 """
 
 import asyncio
+import hashlib
 import logging
 import os
 from dotenv import load_dotenv
@@ -72,6 +73,7 @@ from medical_extractor import (
     process_document,
 )
 from retrieval import answer_question, index_patient_timeline
+from risk_timeline import build_treatment_windows, concurrent_exposure, risk_calendar
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("api")
@@ -434,10 +436,31 @@ async def _execute_upload_pipeline(
     )
     new_docs: List[Dict[str, Any]] = []
     file_errors: List[Dict[str, Any]] = []
+    duplicate_files_skipped: List[Dict[str, Any]] = []
     successfully_saved_files = 0
 
+    # Loaded up front (rather than after extraction) so an already-uploaded
+    # file can be recognised BEFORE it costs a vision/extraction call.
+    # Re-uploading a file this user already sent used to add a SECOND copy of
+    # the same document — inflating the timeline, duplicating every
+    # medication on it, and skewing the safety evidence. A byte-for-byte
+    # content hash catches `CBC_Report.pdf` / `CBC_Report (1).pdf` re-uploads
+    # regardless of the new filename. Fail-open: if the document history is
+    # unreachable, dedup is skipped and the upload proceeds normally.
+    existing_docs: List[Dict[str, Any]] = []
+    try:
+        existing_docs = db.load_documents(user_id) or []
+    except Exception as exc:
+        logger.warning("upload: user=%s could not load document history for dedup check: %s", user_id, exc)
+    seen_hashes: Dict[str, Dict[str, Any]] = {
+        d["content_sha256"]: d for d in existing_docs if d.get("content_sha256")
+    }
+    # sha256 of every file in THIS batch that has already been accepted, so
+    # the same file sent twice in one request is only processed once.
+    batch_hashes: Dict[str, str] = {}
+
     with TemporaryDirectory() as tmp_dir:
-        work_items: List[Tuple[int, str, Path]] = []
+        work_items: List[Tuple[int, str, Path, str]] = []  # (index, name, path, sha256)
         for file_index, (original_name, content) in enumerate(files_data, start=1):
             suffix = Path(original_name).suffix.lower()
             if suffix not in SUPPORTED_EXTENSIONS:
@@ -454,16 +477,48 @@ async def _execute_upload_pipeline(
                 file_errors.append(info)
                 _file_progress(file_index, status="failed", step="failed", message=info["error"], error_info=info)
                 continue
+
+            content_sha256 = hashlib.sha256(content).hexdigest()
+            already = seen_hashes.get(content_sha256) or (
+                {"_source": {"file": batch_hashes[content_sha256]}}
+                if content_sha256 in batch_hashes else None
+            )
+            if already is not None:
+                first_seen = already.get("uploaded_at") or "this upload"
+                logger.info(
+                    "upload: user=%s skipping '%s' — identical file already on file as '%s' (sha256=%s)",
+                    user_id, original_name, (already.get("_source") or {}).get("file", "unknown"), content_sha256[:12],
+                )
+                duplicate_files_skipped.append({
+                    "filename": original_name,
+                    "reason": "identical_file_already_uploaded",
+                    "previously_uploaded_as": (already.get("_source") or {}).get("file"),
+                    "previously_uploaded_at": already.get("uploaded_at"),
+                    "message": (
+                        f"'{original_name}' is byte-for-byte identical to a document "
+                        f"already in your records (uploaded {first_seen}), so it was not "
+                        "added again. Nothing was lost — the existing copy is still there."
+                    ),
+                })
+                _file_progress(
+                    file_index,
+                    status="completed",
+                    step="ready",
+                    message="Already in your records — duplicate file skipped",
+                )
+                continue
+
+            batch_hashes[content_sha256] = original_name
             safe_stem = re.sub(r"[^A-Za-z0-9._-]+", "_", Path(original_name).stem) or "upload"
             tmp_path = Path(tmp_dir) / f"{file_index:03d}_{safe_stem}{suffix}"
             tmp_path.write_bytes(content)
-            work_items.append((file_index, original_name, tmp_path))
+            work_items.append((file_index, original_name, tmp_path, content_sha256))
 
         # Results are keyed by input index so concurrent workers never reorder
         # the response or mismatch duplicate-looking filenames.
-        extracted: Dict[int, Tuple[Path, str, List[Dict[str, Any]]]] = {}
+        extracted: Dict[int, Tuple[Path, str, List[Dict[str, Any]], str]] = {}  # + content_sha256
         extraction_errors: Dict[int, Dict[str, Any]] = {}
-        queue: asyncio.Queue[Optional[Tuple[int, str, Path]]] = asyncio.Queue()
+        queue: asyncio.Queue[Optional[Tuple[int, str, Path, str]]] = asyncio.Queue()
         for item in work_items:
             queue.put_nowait(item)
 
@@ -479,7 +534,7 @@ async def _execute_upload_pipeline(
                 if item is None:
                     queue.task_done()
                     return
-                file_index, original_name, tmp_path = item
+                file_index, original_name, tmp_path, content_sha256 = item
                 try:
                     if capacity_failure is not None:
                         info = _blocked_file_error(capacity_failure, original_name, file_index)
@@ -604,7 +659,7 @@ async def _execute_upload_pipeline(
                         _file_progress(file_index, status="failed", step="failed", message=info["error"], error_info=info)
                         continue
 
-                    extracted[file_index] = (tmp_path, original_name, kept_pages)
+                    extracted[file_index] = (tmp_path, original_name, kept_pages, content_sha256)
                     _file_progress(
                         file_index,
                         status="processing",
@@ -651,7 +706,7 @@ async def _execute_upload_pipeline(
         # Cloud storage is per-file too: one storage failure should not discard
         # documents that were extracted and saved successfully.
         for file_index in sorted(extracted):
-            tmp_path, filename, kept_pages = extracted[file_index]
+            tmp_path, filename, kept_pages, content_sha256 = extracted[file_index]
             _file_progress(file_index, status="processing", step="saving", message="Saving securely")
             try:
                 upload_info = await asyncio.to_thread(
@@ -679,6 +734,10 @@ async def _execute_upload_pipeline(
             for page in kept_pages:
                 page["document_url"] = upload_info["document_url"]
                 page["cloudinary_public_id"] = upload_info["cloudinary_public_id"]
+                # Persisted with the document so a future re-upload of this
+                # exact file is recognised before extraction (see the hash
+                # check at the top of this pipeline).
+                page["content_sha256"] = content_sha256
                 new_docs.append(page)
             successfully_saved_files += 1
             _file_progress(
@@ -689,10 +748,41 @@ async def _execute_upload_pipeline(
             )
 
     if not new_docs:
+        if duplicate_files_skipped and not file_errors:
+            # Every file in this batch was a byte-for-byte re-upload of a
+            # document already on file: nothing to extract, nothing to
+            # rebuild. Return the existing record untouched, with the skip
+            # list explaining what happened. Not an error — the user's
+            # record is exactly as complete as before.
+            logger.info(
+                "upload: user=%s all %d file(s) were duplicates — nothing added",
+                user_id, len(duplicate_files_skipped),
+            )
+            snapshot = None
+            try:
+                snapshot = db.load_patient_snapshot(user_id)
+            except Exception as exc:
+                logger.warning("upload: user=%s snapshot read after all-duplicate batch failed: %s", user_id, exc)
+            response: Dict[str, Any] = {
+                "user_id": user_id,
+                "documents_added": 0,
+                "documents_total": len(existing_docs),
+                "files_received": total_files,
+                "files_added": 0,
+                "timeline": (snapshot or {}).get("patient_timeline") or {},
+                "cross_check_report": (snapshot or {}).get("cross_check_report") or {},
+                "indexed": True,
+                "failed_files": [],
+                "duplicate_files_skipped": duplicate_files_skipped,
+                "all_files_duplicate": True,
+            }
+            if snapshot and "lab_trends" in snapshot:
+                response["lab_trends"] = snapshot["lab_trends"]
+            _progress("ready", "These files are already in your records — nothing was added twice")
+            return response
         _raise_no_usable_files(file_errors, total_files)
 
     _progress("organizing", "Updating your medical history")
-    existing_docs = db.load_documents(user_id)
     all_docs = existing_docs + new_docs
     logger.info("upload: user=%s merged documents: +%d new, %d total", user_id, len(new_docs), len(all_docs))
     try:
@@ -739,7 +829,26 @@ async def _execute_upload_pipeline(
         ) from exc
 
     issue_count = sum(len(value) for value in cross_check.values() if isinstance(value, list))
-    logger.info("upload: user=%s timeline rebuilt, cross-check found %d issue(s)", user_id, issue_count)
+    evidence = cross_check.get("evidence_summary") or {}
+    timing = cross_check.get("timing_summary") or {}
+    logger.info(
+        "upload: user=%s timeline rebuilt, cross-check found %d issue(s) "
+        "(evidence: %d deterministic, %d reference-graph, %d unverified model knowledge; "
+        "timing: %d concurrent, %d possible, %d never overlapped, %d undatable; "
+        "%d double-dose period(s))",
+        user_id, issue_count,
+        evidence.get("deterministic", 0), evidence.get("reference_graph", 0),
+        evidence.get("model_knowledge", 0),
+        timing.get("concurrent", 0), timing.get("possible", 0),
+        timing.get("not_concurrent", 0), timing.get("unknown", 0),
+        len(cross_check.get("concurrent_exposure") or []),
+    )
+    if duplicate_files_skipped:
+        logger.info(
+            "upload: user=%s skipped %d duplicate re-upload(s): %s",
+            user_id, len(duplicate_files_skipped),
+            ", ".join(d["filename"] for d in duplicate_files_skipped),
+        )
     lab_trends = track_lab_trends(timeline)
     logger.info(
         "upload: user=%s lab trends: %d trends, %d insufficient",
@@ -784,6 +893,9 @@ async def _execute_upload_pipeline(
         "lab_trends": lab_trends,
         "indexed": indexed,
         "failed_files": sorted(file_errors, key=lambda item: item.get("file_index", 0)),
+        # Present (and non-empty) when a re-uploaded file was recognised and
+        # not added a second time.
+        "duplicate_files_skipped": duplicate_files_skipped,
     }
     if not indexed:
         response["index_error"] = index_error
@@ -954,6 +1066,51 @@ async def get_lab_trends(user_id: str = Depends(get_current_user)) -> Dict[str, 
     if "lab_trends" in snapshot:
         return snapshot["lab_trends"]
     return track_lab_trends(snapshot["patient_timeline"])
+
+
+@app.get("/api/v1/risk-timeline")
+async def get_risk_timeline(user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
+    """Returns this user's safety findings placed in time — a chronological
+    risk view of the record: which risks were live during which dates, most
+    recent period first, plus any period where two prescriptions supplied the
+    same ingredient at once (double-dosing arithmetic).
+
+    Two drugs only interact if they were taken together, so findings whose
+    courses never overlapped are grouped separately as history rather than
+    presented as current risks. Every finding also carries its evidence
+    grade (deterministic vs model knowledge). Computed from the printed
+    prescription dates and durations — no model call.
+
+    For snapshots saved before timing/grading existed, the report is
+    re-annotated on the fly from the saved timeline."""
+    snapshot = db.load_patient_snapshot(user_id)
+    if snapshot is None:
+        raise HTTPException(404, "No records found for this user.")
+
+    timeline = snapshot.get("patient_timeline") or {}
+    cross_check = snapshot.get("cross_check_report") or {}
+
+    # Backward compat: older snapshots carry findings with no timing/grading.
+    if cross_check and "timing_summary" not in cross_check:
+        from risk_timeline import annotate_findings_with_timing
+        annotate_findings_with_timing(cross_check, timeline)
+    if cross_check and "evidence_summary" not in cross_check:
+        from evidence_grading import grade_cross_check
+        grade_cross_check(cross_check)
+    if "concurrent_exposure" not in cross_check:
+        cross_check["concurrent_exposure"] = concurrent_exposure(timeline)
+
+    return {
+        "calendar": risk_calendar(cross_check, timeline),
+        "concurrent_exposure": cross_check.get("concurrent_exposure") or [],
+        "treatment_windows": [
+            {**w, "start": w["start"].isoformat() if w["start"] else None,
+             "end": w["end"].isoformat() if w["end"] else None}
+            for w in build_treatment_windows(timeline)
+        ],
+        "timing_summary": cross_check.get("timing_summary") or {},
+        "evidence_summary": cross_check.get("evidence_summary") or {},
+    }
 
 
 @app.get("/api/v1/patient-snapshot")

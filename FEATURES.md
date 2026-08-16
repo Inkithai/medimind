@@ -6,7 +6,9 @@
 - Multilingual document extraction (Tamil/Arabic/etc., INN normalization)
 - Non-medical document filter (early rejection before LLM/Chroma)
 - Patient timeline + longitudinal lab trends (threshold approach detection)
-- Patient-grounded RAG / Ask AI
+- Patient-grounded RAG / Ask AI with conversational focus carry-over
+- Risk Timeline page — when each safety finding was actually live, graded by evidence strength
+- Duplicate re-upload detection — the same file or prescription is never counted twice
 - Optional Care Navigation with search-as-you-type, current location, map confirmation, and nearby facility results
 - Facility category filters for hospitals, clinics, pharmacies, laboratories, and doctors
 - Public listing details including distance, address, rating, phone, website, opening hours, and map link when available
@@ -45,6 +47,13 @@
 - [x] Multi-document Q&A
 - [x] Confidence scoring
 - [x] High-risk/low-confidence detection
+
+## Round 3 (Intelligence hardening — Added)
+
+- [x] Entity focus carry-over — deterministic per-session `focus` (medications/labs/documents under discussion) matched against the patient's own record vocabulary, so "what if I take it with this?" stays anchored even if the LLM rewrite fails
+- [x] Richer QA response contract — `cross_document`, `low_confidence`, `consult_reason` flags; deterministic guard forces `recommend_professional_consult=true` on risk/allergy/dosage questions; `sources` enriched in code with `document_type` + `document_url`
+- [x] Document deduplication — byte-for-byte re-uploads (`CBC_Report.pdf` / `CBC_Report (1).pdf`) skipped before extraction via `content_sha256`; same-prescription grouping (`prescription_group`) keeps duplicate detection counting prescriptions, not files
+- [x] Risk timeline + evidence grading — chronological risk view (`GET /api/v1/risk-timeline`) separating live risks from courses that never overlapped; every finding graded `deterministic` vs `model_knowledge` with ungrounded confidence capped at 0.6
 
 ## Round 2 (Care Navigation — Added)
 

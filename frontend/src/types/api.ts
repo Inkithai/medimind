@@ -53,6 +53,9 @@ export interface Visit {
 export interface MedicationTimelineEntry extends Medication {
   date: string | null;
   source_file: string | null;
+  // Documents recording the SAME physical prescription share a group id
+  // (document_dedup.py) so re-uploads don't count as repeat prescriptions.
+  prescription_group?: string | null;
 }
 
 export interface LabResultTimelineEntry extends LabResult {
@@ -65,6 +68,9 @@ export interface Timeline {
   medications_timeline: MedicationTimelineEntry[];
   lab_results_timeline: LabResultTimelineEntry[];
   known_allergies: string[];
+  // Files recognised as re-uploads of the same physical prescription.
+  // Absent on snapshots built before deduplication existed.
+  duplicate_document_groups?: DuplicateDocumentGroup[];
 }
 
 // ---- Cross-check (medical_extractor.py CROSS_CHECK_JSON_SCHEMA) ----------
@@ -110,12 +116,133 @@ export interface AllergyConflict {
   confidence: number;
 }
 
+// Evidence grading + timing (evidence_grading.py, risk_timeline.py) -------
+
+export type EvidenceSource = "deterministic" | "reference_graph" | "model_knowledge";
+
+export interface FindingTiming {
+  status: "concurrent" | "possible" | "not_concurrent" | "unknown";
+  window_start: string | null;
+  window_end: string | null;
+  overlap_days: number;
+  gap_days: number | null;
+  note: string;
+}
+
+// Every finding list item may carry these graded/timed fields.
+export interface GradedFinding {
+  evidence_source?: EvidenceSource;
+  grounded?: boolean;
+  evidence_note?: string;
+  model_reported_confidence?: number;
+  timing?: FindingTiming;
+}
+
 export interface CrossCheckReport {
-  potential_drug_interactions: DrugInteraction[];
-  duplicate_prescriptions: DuplicatePrescription[];
-  conflicting_dosage_instructions: ConflictingDosage[];
-  allergy_conflicts: AllergyConflict[];
+  potential_drug_interactions: (DrugInteraction & GradedFinding)[];
+  duplicate_prescriptions: (DuplicatePrescription & GradedFinding)[];
+  conflicting_dosage_instructions: (ConflictingDosage & GradedFinding)[];
+  allergy_conflicts: (AllergyConflict & GradedFinding)[];
   overall_recommendation: string;
+  concurrent_exposure?: ConcurrentExposure[];
+  timing_summary?: {
+    concurrent: number;
+    possible: number;
+    not_concurrent: number;
+    unknown: number;
+    note: string;
+  };
+  evidence_summary?: {
+    total_findings: number;
+    deterministic: number;
+    reference_graph: number;
+    model_knowledge: number;
+    model_knowledge_confidence_ceiling: number;
+    note: string;
+  };
+}
+
+// ---- Risk timeline (risk_timeline.py) -------------------------------------
+
+export interface ConcurrentExposureSource {
+  name: string | null;
+  date: string | null;
+  source_file: string | null;
+  daily_dose: number | null;
+}
+
+export interface ConcurrentExposure {
+  ingredient: string;
+  status: "concurrent" | "possible";
+  window_start: string | null;
+  window_end: string | null;
+  overlap_days: number;
+  sources: ConcurrentExposureSource[];
+  cumulative_daily_dose: number | null;
+  dosage_unit: string | null;
+  note: string;
+}
+
+export interface RiskCalendarPeriod {
+  window_start: string | null;
+  window_end: string | null;
+  overlap_days: number;
+  label: string;
+  risks: {
+    kind: "drug_interaction" | "duplicate_prescription" | "dosage_conflict";
+    subjects: string[];
+    severity: string | null;
+    confidence: number | null;
+    status: string;
+    evidence_source?: EvidenceSource | null;
+  }[];
+}
+
+export interface TreatmentWindow {
+  ingredients: string[];
+  name: string | null;
+  date: string | null;
+  start: string | null;
+  end: string | null;
+  duration_days: number | null;
+  duration_known: boolean;
+  daily_dose: number | null;
+  dosage_unit: string | null;
+  source_file: string | null;
+  prescription_group: string | null;
+}
+
+export interface RiskTimelineReport {
+  calendar: RiskCalendarPeriod[];
+  concurrent_exposure: ConcurrentExposure[];
+  treatment_windows: TreatmentWindow[];
+  timing_summary: CrossCheckReport["timing_summary"];
+  evidence_summary: CrossCheckReport["evidence_summary"];
+}
+
+// ---- Document deduplication (document_dedup.py) ---------------------------
+
+export interface DuplicateDocumentInfo {
+  source_file: string | null;
+  date: string | null;
+  uploaded_at: string | null;
+  document_url?: string | null;
+  content_sha256?: string | null;
+}
+
+export interface DuplicateDocumentGroup {
+  prescription_group: string;
+  identical_files: boolean;
+  medications: string[];
+  documents: DuplicateDocumentInfo[];
+}
+
+export interface DuplicateFileSkipped {
+  filename: string;
+  reason: string;
+  previously_uploaded_as?: string | null;
+  previously_uploaded_at?: string | null;
+  message: string;
 }
 
 // ---- Lab trends (lab_trends.py) ------------------------------------------
@@ -161,14 +288,29 @@ export interface LabTrendsReport {
 export interface QASource {
   date: string;
   source_file: string;
+  // Enriched in code from the timeline (never invented by the model).
+  document_type?: DocumentType | string | null;
+  document_url?: string;
 }
 
 export interface QAResponse {
   answer: string;
   confidence: number;
   sources: QASource[];
+  // True when the answer combined facts from more than one source document.
+  cross_document: boolean;
   recommend_professional_consult: boolean;
+  // True when confidence <= 0.6; the consult guard always escalates these.
+  low_confidence?: boolean;
+  // Deterministic explanation of why a professional consult was forced.
+  consult_reason?: string;
   rewritten_query?: string;
+  // Entities this turn was resolved against (conversational focus).
+  focus?: {
+    medications: string[];
+    lab_tests: string[];
+    source_files: string[];
+  };
 }
 
 export interface ChatHistoryEntry {
@@ -222,6 +364,10 @@ export interface UploadResponse {
   index_error?: string;
   // Files that failed while the rest of the batch succeeded (partial upload).
   failed_files?: FailedFile[];
+  // Re-uploads recognised as byte-for-byte duplicates and not added again.
+  duplicate_files_skipped?: DuplicateFileSkipped[];
+  // True when every file in the batch was an already-uploaded duplicate.
+  all_files_duplicate?: boolean;
 }
 
 // ---- Sessions ------------------------------------------------------------

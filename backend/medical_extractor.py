@@ -2312,6 +2312,15 @@ def build_patient_timeline(raw_results: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
     docs = _flatten_documents(raw_results)
 
+    # Tag documents that record the SAME physical prescription (a scan and a
+    # photo of one page, the same file re-sent under another name). Nothing is
+    # dropped — the tag exists so duplicate detection below counts
+    # prescriptions rather than files. Without it, one prescription uploaded
+    # twice makes every drug on it look prescribed twice. See
+    # document_dedup.py.
+    from document_dedup import annotate_prescription_groups
+    annotate_prescription_groups(docs)
+
     # Sort by parsed date; undated/unparseable docs go to the end.
     # Previously sorted by raw string which broke for formats like
     # "05 Jan 2026" vs "20 Apr 2026" (lexicographic != chronological).
@@ -2331,7 +2340,12 @@ def build_patient_timeline(raw_results: List[Dict[str, Any]]) -> Dict[str, Any]:
         source_file = d.get("_source", {}).get("file")
 
         for med in d.get("medications", []):
-            all_medications.append({**med, "date": visit_date, "source_file": source_file})
+            all_medications.append({
+                **med,
+                "date": visit_date,
+                "source_file": source_file,
+                "prescription_group": d.get("prescription_group"),
+            })
 
         for lab in d.get("lab_results", []):
             all_lab_results.append({**lab, "date": visit_date, "source_file": source_file})
@@ -2339,11 +2353,19 @@ def build_patient_timeline(raw_results: List[Dict[str, Any]]) -> Dict[str, Any]:
         for allergy in d.get("allergies_noted", []) or []:
             all_allergies.add(allergy)
 
+    from document_dedup import find_duplicate_document_groups
+
     return {
         "visits": docs_sorted,               # one entry per document, chronological
         "medications_timeline": all_medications,
         "lab_results_timeline": all_lab_results,
         "known_allergies": sorted(all_allergies),
+        # Documents that record the SAME physical prescription (re-uploads,
+        # scan + photo of one page). Nothing was removed from the timeline —
+        # this is the review list explaining which files collapse into one
+        # prescription for duplicate-detection purposes. Empty in the common
+        # case. See document_dedup.py.
+        "duplicate_document_groups": find_duplicate_document_groups(docs_sorted),
     }
 
 
@@ -2406,6 +2428,15 @@ default to a high score:
   would be the more dangerous error, and mark it clearly as low-confidence.
 
 Rules:
+- Every medication entry carries a `prescription_group`. Entries sharing a
+  prescription_group came from THE SAME physical prescription, uploaded more
+  than once (e.g. a scan and a phone photo of one page). Count them as ONE
+  prescription — a drug does not interact with itself, and the same
+  prescription appearing in two files is not a duplicate prescription.
+  Compare entries ACROSS different prescription_group values. Note that the
+  printed `date` and `source_file` can differ between copies of one
+  prescription (the same date gets extracted in different formats);
+  prescription_group is the authority, not those.
 - Compare medications by their active ingredients (not just brand names) —
   two different brand names with the same active ingredient is a likely
   duplicate.
@@ -2562,9 +2593,21 @@ def detect_exact_duplicate_medications(timeline: Dict[str, Any]) -> List[Dict[st
 
     duplicates: List[Dict[str, Any]] = []
     for (ingredients, dosage_value, dosage_unit), meds in groups.items():
-        distinct_sources = {(m.get("date"), m.get("source_file")) for m in meds}
-        if len(distinct_sources) < 2:
-            continue  # same medication appearing once is not a duplicate
+        # Counted by PRESCRIPTION, not by file. One prescription uploaded as
+        # both a scan and a phone photo yields two (date, source_file) pairs
+        # for every drug on it, which the old check read as "prescribed
+        # twice" — reporting a double-dosing risk that came from the upload
+        # history rather than the patient's medication history. Documents
+        # recording the same prescription share a prescription_group (see
+        # document_dedup.py), so they collapse to one here. Entries without a
+        # group tag (older timelines) fall back to the (date, source_file)
+        # identity, matching the historical behaviour.
+        distinct_prescriptions = {
+            m.get("prescription_group") or (m.get("date"), m.get("source_file"))
+            for m in meds
+        }
+        if len(distinct_prescriptions) < 2:
+            continue  # same medication on one prescription is not a duplicate
         duplicates.append({
             "medication": " / ".join(ingredients),
             "occurrences": [
@@ -2573,16 +2616,21 @@ def detect_exact_duplicate_medications(timeline: Dict[str, Any]) -> List[Dict[st
             ],
             "explanation": (
                 f"Deterministic check: identical active ingredient(s) ({', '.join(ingredients)}) "
-                f"at the same normalized dose ({dosage_value} {dosage_unit}) appear in "
-                f"{len(distinct_sources)} separate documents, regardless of source language or "
-                "printed wording."
+                f"at the same normalized dose ({dosage_value} {dosage_unit}) appear on "
+                f"{len(distinct_prescriptions)} separate prescriptions, regardless of source "
+                "language or printed wording."
             ),
             "confidence": 0.95,  # exact numeric/ingredient match, not model inference
+            "evidence_source": "deterministic",
         })
     return duplicates
 
 
-def cross_check_prescriptions(timeline: Dict[str, Any], model: str = MODEL) -> Dict[str, Any]:
+def cross_check_prescriptions(
+    timeline: Dict[str, Any],
+    model: str = MODEL,
+    graph_backed_findings: Optional[Dict[str, Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
     """
     Runs interaction / duplicate / dosage-conflict / allergy cross-checking
     over a patient's merged medication timeline (output of
@@ -2590,6 +2638,16 @@ def cross_check_prescriptions(timeline: Dict[str, Any], model: str = MODEL) -> D
     independent duplicate check (see detect_exact_duplicate_medications)
     alongside the LLM's own duplicate detection, rather than relying on
     the LLM pass alone to catch exact cross-language matches.
+
+    After the findings are merged they are post-processed deterministically:
+      * evidence grading (evidence_grading.py) — each finding is tagged by
+        what actually backs it (computed-from-records vs model knowledge),
+        and ungrounded model claims get their confidence capped;
+      * timing (risk_timeline.py) — each finding is placed in time using the
+        prescription dates/durations, so a pair of courses that never
+        overlapped is marked historical instead of reading as a live risk;
+      * concurrent_exposure — periods where two live prescriptions supplied
+        the same ingredient (double-dosing arithmetic over the record).
     """
     payload = {
         "medications_timeline": timeline["medications_timeline"],
@@ -2613,6 +2671,25 @@ def cross_check_prescriptions(timeline: Dict[str, Any], model: str = MODEL) -> D
         dup_sources = frozenset((occ["date"], occ["source_file"]) for occ in dup["occurrences"])
         if dup_sources not in existing_source_sets:
             existing.append(dup)
+
+    # Grade every finding by what actually backs it. The model scores its own
+    # findings, and it scores a verifiable arithmetic fact and a half-recalled
+    # pharmacology claim on the same scale — so an ungrounded interaction can
+    # arrive at 0.95 and outrank a duplicate that was genuinely computed.
+    # Grading caps and flags the ungrounded ones, which is what this pipeline
+    # already tells users it is (a reasoning layer, not a validated
+    # drug-interaction database).
+    from evidence_grading import grade_cross_check
+    grade_cross_check(result, graph_backed_findings)
+
+    # Place every finding in time. Two drugs only interact if the patient was
+    # taking them at the same time, and the model compares a flat list with no
+    # notion of when each course started or ended. Nothing is removed;
+    # findings whose courses never overlapped are marked `not_concurrent` so
+    # they can be shown as history rather than as a live risk.
+    from risk_timeline import annotate_findings_with_timing, concurrent_exposure
+    annotate_findings_with_timing(result, timeline)
+    result["concurrent_exposure"] = concurrent_exposure(timeline)
 
     return result
 

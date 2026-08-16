@@ -136,7 +136,19 @@ def test_index_lost_but_documents_exist_self_heals_and_answers():
 
         assert "Paracetamol" in out["answer"], out
         assert out["confidence"] == 0.95
-        assert out["sources"] == [{"date": "2024-03-15", "source_file": "rx.pdf"}]
+        # Sources are enriched in code with document_type from the timeline
+        # (no document_url on this fixture document).
+        assert out["sources"] == [{
+            "date": "2024-03-15",
+            "source_file": "rx.pdf",
+            "document_type": "prescription",
+        }]
+        # New contract fields: a benign, high-confidence, non-risk question
+        # must not be escalated.
+        assert out["cross_document"] is False
+        assert out["low_confidence"] is False
+        assert out["recommend_professional_consult"] is False
+        assert "consult_reason" not in out
         # The store must now actually contain the rebuilt index.
         assert state["collections"]["anon_self_heal"].count() == 3  # med + lab + allergy
     finally:
