@@ -11,6 +11,7 @@ import {
   UploadIcon,
   FileIcon,
   ChatIcon,
+  ChangesIcon,
 } from "../components/icons";
 import { useAuth } from "../context/AuthContext";
 import { useStrictEffect } from "../hooks/useStrictEffect";
@@ -167,6 +168,30 @@ export function DashboardPage() {
           sub={issueCount > 0 ? "Worth a look" : "Nothing flagged 🎉"}
         />
       </div>
+
+      {docCount >= 2 && (
+        <Link
+          to="/changes"
+          className="group flex flex-col gap-4 overflow-hidden rounded-2xl border border-indigo-200 bg-gradient-to-r from-indigo-50 via-white to-sky-50 p-5 shadow-sm transition hover:border-indigo-300 hover:shadow-md sm:flex-row sm:items-center"
+        >
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-indigo-600 text-white shadow-sm">
+            <ChangesIcon className="h-6 w-6" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold uppercase tracking-[0.12em] text-indigo-700">Longitudinal insight</span>
+              <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-bold text-indigo-700">NEW</span>
+            </div>
+            <h2 className="mt-1 text-lg font-bold text-slate-900">What changed between my records?</h2>
+            <p className="mt-1 text-sm text-slate-600">
+              Compare labs, medication instructions, and allergies with before-and-after source evidence.
+            </p>
+          </div>
+          <span className="shrink-0 text-sm font-semibold text-indigo-700 transition group-hover:translate-x-1">
+            Review changes →
+          </span>
+        </Link>
+      )}
 
       {allergyCount > 0 && (
         <div className="rounded-2xl border border-red-100 bg-red-50/60 p-5">

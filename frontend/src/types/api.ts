@@ -156,6 +156,47 @@ export interface LabTrendsReport {
   note: string;
 }
 
+// ---- Deterministic record changes (change_detection.py) ------------------
+
+export interface ChangeEvidence {
+  date: string | null;
+  source_file: string | null;
+  document_url?: string | null;
+}
+
+export interface RecordChange {
+  category: "lab" | "medication" | "allergy";
+  kind: "status_changed" | "value_changed" | "newly_measured" | "instruction_changed" | "newly_documented";
+  importance: "attention" | "review" | "info";
+  title: string;
+  description: string;
+  before: string | null;
+  after: string | null;
+  evidence: ChangeEvidence[];
+}
+
+export interface RecordComparison {
+  from_date: string;
+  to_date: string;
+  from_source: ChangeEvidence;
+  to_source: ChangeEvidence;
+  changes: RecordChange[];
+  change_count: number;
+}
+
+export interface RecordChangesReport {
+  latest: RecordComparison | null;
+  comparisons: RecordComparison[];
+  summary: {
+    dated_records: number;
+    comparisons: number;
+    changes_found: number;
+    attention_items: number;
+  };
+  method: string;
+  note: string;
+}
+
 // ---- Q&A / conversation (retrieval.py, conversation.py) ------------------
 
 export interface QASource {

@@ -6,6 +6,8 @@
 - Multilingual document extraction (Tamil/Arabic/etc., INN normalization)
 - Non-medical document filter (early rejection before LLM/Chroma)
 - Patient timeline + longitudinal lab trends (threshold approach detection)
+- “What Changed?” comparison across consecutive records, with before/after values and source evidence
+- Conservative medication change semantics: newly documented is never mislabeled as started, and omission is never treated as stopped
 - Patient-grounded RAG / Ask AI
 - Optional Care Navigation with search-as-you-type, current location, map confirmation, and nearby facility results
 - Facility category filters for hospitals, clinics, pharmacies, laboratories, and doctors
@@ -28,6 +30,7 @@
 
 - Language-independent medical structure (multilingual → English INN)
 - Longitudinal trend intelligence (not just extraction)
+- Deterministic, citation-backed change detection across labs, medication instructions, and allergies
 - Safety-first AI (interpretation ≠ diagnosis; professional-care cues)
 - Provider-decoupled Care Navigation with a server-side Google Places adapter
 - Location accuracy through saved latitude/longitude rather than city text alone

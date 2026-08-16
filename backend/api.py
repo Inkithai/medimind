@@ -62,6 +62,7 @@ import storage
 from care import CareConfigurationError, CareProviderError, get_care_provider
 from care.recommendations import generate_care_recommendations
 from auth import get_current_user, issue_anonymous_token
+from change_detection import detect_record_changes
 from document_filter import NonMedicalDocumentError, assert_medical_document
 from lab_trends import track_lab_trends
 from medical_extractor import (
@@ -954,6 +955,20 @@ async def get_lab_trends(user_id: str = Depends(get_current_user)) -> Dict[str, 
     if "lab_trends" in snapshot:
         return snapshot["lab_trends"]
     return track_lab_trends(snapshot["patient_timeline"])
+
+
+@app.get("/api/v1/changes")
+async def get_record_changes(user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
+    """Explain what changed between consecutive dated records.
+
+    Results are deterministic and include both source records for every
+    claim. Missing fields are never interpreted as clinical resolution or a
+    discontinued treatment.
+    """
+    snapshot = db.load_patient_snapshot(user_id)
+    if snapshot is None:
+        raise HTTPException(404, "No timeline found for this user.")
+    return detect_record_changes(snapshot["patient_timeline"])
 
 
 @app.get("/api/v1/patient-snapshot")

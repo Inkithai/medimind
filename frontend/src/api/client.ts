@@ -6,6 +6,7 @@ import type {
   LabTrendsReport,
   PatientSnapshot,
   QAResponse,
+  RecordChangesReport,
   SessionHistory,
   SessionInfo,
   Timeline,
@@ -336,6 +337,10 @@ export const api = {
 
   getLabTrends(credentials: Credentials): Promise<LabTrendsReport> {
     return request<LabTrendsReport>(credentials, "/api/v1/lab-trends");
+  },
+
+  getRecordChanges(credentials: Credentials): Promise<RecordChangesReport> {
+    return request<RecordChangesReport>(credentials, "/api/v1/changes");
   },
 
   async getCareFacilities(

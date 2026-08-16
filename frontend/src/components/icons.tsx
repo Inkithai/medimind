@@ -47,6 +47,15 @@ export const ChartIcon = (p: IconProps) => (
   </svg>
 );
 
+export const ChangesIcon = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M4 7h12" />
+    <path d="m13 4 3 3-3 3" />
+    <path d="M20 17H8" />
+    <path d="m11 14-3 3 3 3" />
+  </svg>
+);
+
 export const ChatIcon = (p: IconProps) => (
   <svg {...base(p)}>
     <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />

@@ -4,6 +4,7 @@ import { useAuth } from "../context/AuthContext";
 import { classNames } from "../utils/format";
 import {
   BeakerIcon,
+  ChangesIcon,
   ChatIcon,
   FileIcon,
   PillIcon,
@@ -28,6 +29,7 @@ const NAV: NavItem[] = [
   { to: "/medicines", label: "Medications", icon: PillIcon, chip: "bg-emerald-50 text-emerald-600" },
   { to: "/labs", label: "Lab Results", icon: BeakerIcon, chip: "bg-violet-50 text-violet-600" },
   { to: "/history", label: "Timeline", icon: TimelineIcon, chip: "bg-sky-50 text-sky-600" },
+  { to: "/changes", label: "What Changed?", icon: ChangesIcon, chip: "bg-indigo-50 text-indigo-600" },
   { to: "/safety", label: "Safety Alerts", icon: ShieldIcon, chip: "bg-amber-50 text-amber-600" },
   { to: "/ask", label: "Ask AI", icon: ChatIcon, chip: "bg-brand-50 text-brand-600" },
   { to: "/find-care", label: "Find Care", icon: LocationIcon, chip: "bg-rose-50 text-rose-600" },

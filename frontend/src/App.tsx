@@ -13,6 +13,7 @@ import { UploadPage } from "./pages/UploadPage";
 import { DocumentsPage } from "./pages/DocumentsPage";
 import { MedicinesPage } from "./pages/MedicinesPage";
 import { HistoryPage } from "./pages/HistoryPage";
+import { ChangesPage } from "./pages/ChangesPage";
 import { Spinner } from "./components/Spinner";
 
 const FindCarePage = lazy(() =>
@@ -117,6 +118,14 @@ export default function App() {
           element={
             <RequireAuth>
               <HistoryPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/changes"
+          element={
+            <RequireAuth>
+              <ChangesPage />
             </RequireAuth>
           }
         />
