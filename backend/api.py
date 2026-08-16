@@ -55,8 +55,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+import audit
 import conversation
 import db
+import export as export_module
 import jobs
 import storage
 from care import CareConfigurationError, CareProviderError, get_care_provider
@@ -764,6 +766,14 @@ async def _execute_upload_pipeline(
 
     db.insert_documents(user_id, new_docs)
     db.save_patient_snapshot(user_id, timeline, cross_check, lab_trends=lab_trends)
+    audit.record(user_id, "documents.upload_result", {
+        "files_received": total_files,
+        "files_added": successfully_saved_files,
+        "documents_added": len(new_docs),
+        "failed_files": len(file_errors),
+        "indexed": indexed,
+        "cross_check_issues": issue_count,
+    })
     logger.info(
         "upload: user=%s complete: +%d new pages, %d saved files, %d total pages, indexed=%s, failed=%d",
         user_id,
@@ -814,6 +824,10 @@ async def upload_documents(
     logger.info("upload_documents: user=%s received %d file(s)", user_id, len(files))
     if not files:
         raise HTTPException(400, "No files were uploaded.")
+    audit.record(user_id, "documents.upload", {
+        "file_count": len(files),
+        "file_names": [Path(f.filename or "").name or "upload" for f in files],
+    })
 
     # Read files upfront (needed for background after request ends)
     files_data: List[Tuple[str, bytes]] = []
@@ -983,6 +997,35 @@ async def get_patient_snapshot(user_id: str = Depends(get_current_user)) -> Dict
     return result
 
 
+@app.get("/api/v1/export")
+async def export_record(
+    format: str = Query("json", description="Export format: 'json' (native, lossless) or 'fhir' (FHIR R4 Bundle)"),
+    user_id: str = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """Exports the authenticated user's assembled record for portability.
+
+    - format=json: the complete MediMind-native snapshot (timeline +
+      cross-check + lab trends) in a self-describing envelope.
+    - format=fhir: a FHIR R4 collection Bundle (Patient,
+      MedicationStatement, Observation, AllergyIntolerance, Provenance)
+      mapping the portable core of the record onto standard resources for
+      hand-off to other health systems.
+
+    404s if the user has never been processed. Deterministic — no LLM calls.
+    """
+    snapshot = db.load_patient_snapshot(user_id)
+    if snapshot is None:
+        raise HTTPException(404, "No patient record found for this user — upload documents first.")
+    if "lab_trends" not in snapshot:
+        snapshot = {**snapshot, "lab_trends": track_lab_trends(snapshot["patient_timeline"])}
+    try:
+        result = export_module.build_export(user_id, snapshot, format)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    audit.record(user_id, "records.export", {"format": format.strip().lower()})
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Care navigation (optional, provider-neutral public directory)
 # ---------------------------------------------------------------------------
@@ -1095,12 +1138,14 @@ async def qa(body: QARequest, user_id: str = Depends(get_current_user)) -> Dict[
     timeline, with no session/conversation state (caller manages
     chat_history, if any)."""
     try:
-        return answer_question(
+        result = answer_question(
             patient_key=user_id,
             question=body.question,
             chat_history=body.chat_history,
             top_k=body.top_k,
         )
+        audit.record(user_id, "qa.ask", {"question_chars": len(body.question or "")})
+        return result
     except ValueError as e:
         raise HTTPException(400, str(e))
     except RuntimeError as e:
@@ -1118,6 +1163,7 @@ async def create_session(user_id: str = Depends(get_current_user)) -> Dict[str, 
     /sessions/{session_id}/messages calls."""
     session_id = uuid.uuid4().hex
     conversation.get_or_create_session(user_id, session_id)
+    audit.record(user_id, "session.create", {"session_id": session_id})
     return {"user_id": user_id, "session_id": session_id}
 
 
@@ -1134,7 +1180,12 @@ async def post_message(
     if session is None:
         raise HTTPException(404, f"Session '{session_id}' not found.")
     try:
-        return conversation.ask(session, body.question, top_k=body.top_k)
+        result = conversation.ask(session, body.question, top_k=body.top_k)
+        audit.record(user_id, "session.message", {
+            "session_id": session_id,
+            "question_chars": len(body.question or ""),
+        })
+        return result
     except ValueError as e:
         raise HTTPException(400, str(e))
     except RuntimeError as e:
@@ -1160,9 +1211,11 @@ async def get_session_history(
 
 @app.delete("/api/v1/sessions/{session_id}", status_code=204)
 async def delete_session(session_id: str, user_id: str = Depends(get_current_user)) -> None:
-    """Ends a conversation session, freeing its in-memory turn history."""
+    """Ends a conversation session, removing its transcript from memory and
+    the durable store."""
     if not conversation.delete_session(user_id, session_id):
         raise HTTPException(404, f"Session '{session_id}' not found.")
+    audit.record(user_id, "session.delete", {"session_id": session_id})
 
 
 # ---------------------------------------------------------------------------

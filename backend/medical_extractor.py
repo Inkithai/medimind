@@ -2590,6 +2590,12 @@ def cross_check_prescriptions(timeline: Dict[str, Any], model: str = MODEL) -> D
     independent duplicate check (see detect_exact_duplicate_medications)
     alongside the LLM's own duplicate detection, rather than relying on
     the LLM pass alone to catch exact cross-language matches.
+
+    Also merges in deterministic drug-interaction findings from the curated
+    knowledge base (drug_interactions.py): well-established, textbook-level
+    interaction pairs are matched on normalized ingredients in code, so
+    catching them never depends on the LLM noticing on any given run. The
+    LLM remains the broad-coverage pass; the KB is the guaranteed floor.
     """
     payload = {
         "medications_timeline": timeline["medications_timeline"],
@@ -2613,6 +2619,15 @@ def cross_check_prescriptions(timeline: Dict[str, Any], model: str = MODEL) -> D
         dup_sources = frozenset((occ["date"], occ["source_file"]) for occ in dup["occurrences"])
         if dup_sources not in existing_source_sets:
             existing.append(dup)
+
+    # Deterministic curated drug-interaction pass (never LLM-dependent).
+    try:
+        from drug_interactions import check_known_interactions, merge_into_report
+        merge_into_report(result, check_known_interactions(timeline))
+    except Exception as e:
+        # A KB failure must never take down the whole safety report — the
+        # LLM findings above are still valid on their own.
+        print(f"  Deterministic interaction check failed (LLM findings kept): {e}")
 
     return result
 

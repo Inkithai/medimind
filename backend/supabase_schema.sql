@@ -76,3 +76,31 @@ create table if not exists public.jobs (
 create index if not exists jobs_user_id_idx on public.jobs (user_id, created_at);
 grant select, insert, update, delete on table public.jobs to service_role;
 alter table public.jobs enable row level security;
+
+-- Durable conversation transcripts (optional; conversation.py falls back to
+-- in-memory sessions when this table is missing). One row per
+-- (user_id, session_id); `turns` is the full untrimmed transcript.
+create table if not exists public.conversation_sessions (
+    user_id    text        not null,
+    session_id text        not null,
+    turns      jsonb       not null default '[]'::jsonb,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now(),
+    primary key (user_id, session_id)
+);
+grant select, insert, update, delete on table public.conversation_sessions to service_role;
+alter table public.conversation_sessions enable row level security;
+
+-- Append-only audit log of data-touching API actions (optional; audit.py
+-- degrades to structured app-log lines when this table is missing).
+create table if not exists public.audit_log (
+    id         bigint generated always as identity primary key,
+    user_id    text        not null,
+    action     text        not null,
+    detail     jsonb,
+    created_at timestamptz not null default now()
+);
+create index if not exists audit_log_user_id_idx on public.audit_log (user_id, created_at);
+grant select, insert on table public.audit_log to service_role;
+grant usage, select on sequence public.audit_log_id_seq to service_role;
+alter table public.audit_log enable row level security;

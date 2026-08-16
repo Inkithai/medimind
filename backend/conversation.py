@@ -10,8 +10,12 @@ The core problem this solves: a raw embedding search on a follow-up like
 "was that safe with my allergy?" retrieves poorly, because the follow-up
 is only meaningful in light of what was said earlier. This module:
 
-    1. Tracks conversation turns per (patient_key, session_id) in a plain
-       in-memory ConversationSession.
+    1. Tracks conversation turns per (patient_key, session_id) in a
+       ConversationSession — held in memory for speed, and (when
+       PERSIST_SESSIONS=true and the conversation_sessions table exists)
+       mirrored to Supabase after every turn so transcripts survive
+       process restarts. On a cache miss, get_session()/
+       get_or_create_session() transparently rehydrate from Supabase.
     2. Rewrites each new question into a self-contained search query
        (using conversation history) before it is embedded/retrieved —
        the raw question is still what's shown to the final answering LLM.
@@ -23,6 +27,8 @@ Env:
     export GEMINI_API_KEY="AIza..."  (or GROQ_API_KEY="gsk_..." for groq)
 """
 
+import logging
+import os
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -30,6 +36,15 @@ from openai import OpenAIError
 
 from medical_extractor import client, MODEL, _chat_completion
 import retrieval
+
+logger = logging.getLogger("conversation")
+
+# Durable transcripts: mirror every session to the Supabase
+# conversation_sessions table (created by supabase_schema.sql) so
+# conversations survive process restarts/redeploys. Enabled by default;
+# degrades silently to memory-only when Supabase is unreachable or the
+# table doesn't exist, so a persistence outage can never block Q&A.
+PERSIST_SESSIONS = os.environ.get("PERSIST_SESSIONS", "true").lower() in ("true", "1", "yes")
 
 # Cheap/fast model for query rewriting and summarization — these are short,
 # low-stakes generations, not the main answer synthesis.
@@ -114,30 +129,116 @@ class ConversationSession:
 _SESSIONS: Dict[Tuple[str, str], ConversationSession] = {}
 
 
+# ---------------------------------------------------------------------------
+# 1b. Durable transcript store (Supabase, optional)
+# ---------------------------------------------------------------------------
+
+def _persist_session(session: ConversationSession) -> None:
+    """Mirrors the full transcript to Supabase. Best-effort: any failure
+    (missing table, network, misconfiguration) is logged once and swallowed
+    so persistence problems never block a conversation turn."""
+    if not PERSIST_SESSIONS:
+        return
+    try:
+        from db import _get_client
+        _get_client().table("conversation_sessions").upsert(
+            {
+                "user_id": session.patient_key,
+                "session_id": session.session_id,
+                "turns": session.turns,
+                "updated_at": _now_iso(),
+            },
+            on_conflict="user_id,session_id",
+        ).execute()
+    except Exception as e:
+        logger.warning("Session persist failed (kept in memory only): %s", e)
+
+
+def _load_persisted_session(patient_key: str, session_id: str) -> Optional[ConversationSession]:
+    """Rehydrates a ConversationSession from Supabase after a process
+    restart. Returns None when persistence is off, the row doesn't exist,
+    or Supabase is unreachable."""
+    if not PERSIST_SESSIONS:
+        return None
+    try:
+        from db import _get_client
+        res = (
+            _get_client().table("conversation_sessions")
+            .select("turns")
+            .eq("user_id", patient_key)
+            .eq("session_id", session_id)
+            .limit(1)
+            .execute()
+        )
+        rows = res.data or []
+        if not rows:
+            return None
+        session = ConversationSession(patient_key, session_id)
+        session.turns = list(rows[0].get("turns") or [])
+        return session
+    except Exception as e:
+        logger.warning("Session rehydrate failed (treating as unknown session): %s", e)
+        return None
+
+
+def _delete_persisted_session(patient_key: str, session_id: str) -> bool:
+    """Removes the durable copy of a session. Returns True if a row was
+    deleted. Best-effort — failures are logged and reported as False."""
+    if not PERSIST_SESSIONS:
+        return False
+    try:
+        from db import _get_client
+        res = (
+            _get_client().table("conversation_sessions")
+            .delete()
+            .eq("user_id", patient_key)
+            .eq("session_id", session_id)
+            .execute()
+        )
+        return bool(res.data)
+    except Exception as e:
+        logger.warning("Session durable delete failed: %s", e)
+        return False
+
+
 def get_or_create_session(patient_key: str, session_id: str) -> ConversationSession:
     """Fetches the ConversationSession for (patient_key, session_id),
-    creating and registering a new empty one if it doesn't exist yet."""
+    rehydrating from the durable store on a memory miss, and creating +
+    registering a new empty one if it doesn't exist anywhere yet."""
     key = (patient_key, session_id)
     session = _SESSIONS.get(key)
     if session is None:
-        session = ConversationSession(patient_key, session_id)
+        session = _load_persisted_session(patient_key, session_id)
+        if session is None:
+            session = ConversationSession(patient_key, session_id)
+            _persist_session(session)  # register durably at creation time
         _SESSIONS[key] = session
     return session
 
 
 def get_session(patient_key: str, session_id: str) -> Optional[ConversationSession]:
     """Fetches the ConversationSession for (patient_key, session_id) without
-    creating one. Returns None if no such session exists — used by callers
-    (e.g. the HTTP API) that need to distinguish "unknown session" (404)
-    from "brand new session" (auto-create)."""
-    return _SESSIONS.get((patient_key, session_id))
+    creating one. Falls back to the durable store on a memory miss (process
+    restarted since the session was created). Returns None if no such
+    session exists anywhere — used by callers (e.g. the HTTP API) that need
+    to distinguish "unknown session" (404) from "brand new session"
+    (auto-create)."""
+    key = (patient_key, session_id)
+    session = _SESSIONS.get(key)
+    if session is None:
+        session = _load_persisted_session(patient_key, session_id)
+        if session is not None:
+            _SESSIONS[key] = session
+    return session
 
 
 def delete_session(patient_key: str, session_id: str) -> bool:
-    """Removes a session from the in-memory registry, freeing its turn
-    history. Returns True if a session was found and removed, False if it
-    didn't exist."""
-    return _SESSIONS.pop((patient_key, session_id), None) is not None
+    """Removes a session from the in-memory registry AND the durable store,
+    freeing its turn history. Returns True if a session was found in either
+    place and removed, False if it didn't exist."""
+    removed_memory = _SESSIONS.pop((patient_key, session_id), None) is not None
+    removed_durable = _delete_persisted_session(patient_key, session_id)
+    return removed_memory or removed_durable
 
 
 # ---------------------------------------------------------------------------
@@ -295,6 +396,7 @@ def ask(session: ConversationSession, question: str, top_k: int = 8) -> Dict[str
 
     session.add_user_turn(question)
     session.add_assistant_turn(result)
+    _persist_session(session)  # best-effort durable mirror after every turn
 
     result = dict(result)
     result["rewritten_query"] = rewritten_query
