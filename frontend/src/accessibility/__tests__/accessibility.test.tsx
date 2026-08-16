@@ -116,7 +116,7 @@ async function main() {
   }
 
   let tabs = document.querySelectorAll<HTMLElement>('[role="tab"]');
-  if (tabs.length !== 2) throw new Error(`Expected 2 accessible tabs, found ${tabs.length}`);
+  if (tabs.length !== 3) throw new Error(`Expected 3 accessible tabs, found ${tabs.length}`);
   await act(async () => {
     tabs[1].dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }));
   });

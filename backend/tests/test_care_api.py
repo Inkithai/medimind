@@ -96,7 +96,9 @@ def _authenticated_test_env():
 
 
 def test_context_is_authenticated_and_returns_existing_flag_only():
-    with _authenticated_test_env(), mock.patch.object(api.db, "load_patient_snapshot", return_value=SNAPSHOT):
+    with _authenticated_test_env(), \
+         mock.patch.object(api.db, "load_patient_snapshot", return_value=SNAPSHOT), \
+         mock.patch.object(api.db, "load_documents", return_value=[]):
         with TestClient(api.app) as client:
             response = client.get("/api/v1/care-recommendations", headers=_headers())
     assert response.status_code == 200
@@ -118,7 +120,9 @@ def test_search_reports_missing_live_source_configuration_without_provider_fallb
     old_agent = os.environ.pop("OSM_NOMINATIM_USER_AGENT", None)
     os.environ["PROVIDER_DIRECTORY_SOURCE"] = "openstreetmap"
     try:
-        with _authenticated_test_env(), mock.patch.object(api.db, "load_patient_snapshot", return_value=SNAPSHOT):
+        with _authenticated_test_env(), \
+             mock.patch.object(api.db, "load_patient_snapshot", return_value=SNAPSHOT), \
+             mock.patch.object(api.db, "load_documents", return_value=[]):
             with TestClient(api.app) as client:
                 response = client.post(
                     "/api/v1/care-recommendations/search",
@@ -164,6 +168,7 @@ def test_search_response_preserves_existing_fields_and_adds_clinical_evidence():
     # zero-result response remains compatible while clinical evidence is added.
     with _authenticated_test_env(), \
          mock.patch.object(api.db, "load_patient_snapshot", return_value=SNAPSHOT), \
+         mock.patch.object(api.db, "load_documents", return_value=[]), \
          mock.patch("care_recommendations.get_provider_source", return_value=EmptyLiveSource()):
         with TestClient(api.app) as client:
             response = client.post(
@@ -231,7 +236,9 @@ def test_evidence_cannot_leak_between_authenticated_patient_snapshots():
     def snapshot_for(user_id):
         return patient_a if user_id == "anon_patient_a" else patient_b
 
-    with _authenticated_test_env(), mock.patch.object(api.db, "load_patient_snapshot", side_effect=snapshot_for):
+    with _authenticated_test_env(), \
+         mock.patch.object(api.db, "load_patient_snapshot", side_effect=snapshot_for), \
+         mock.patch.object(api.db, "load_documents", return_value=[]):
         with TestClient(api.app) as client:
             response_a = client.get("/api/v1/care-recommendations", headers=_headers("anon_patient_a"))
             response_b = client.get("/api/v1/care-recommendations", headers=_headers("anon_patient_b"))
