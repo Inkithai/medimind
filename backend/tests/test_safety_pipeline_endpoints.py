@@ -200,6 +200,7 @@ def _plain_client():
 
 def test_consult_triage_endpoint_recomputes_for_old_snapshots():
     with mock.patch.object(api.db, "load_patient_snapshot", return_value=dict(SNAPSHOT)), \
+         mock.patch.object(api.db, "load_documents", return_value=[]), \
          mock.patch.object(api.audit, "record"):
         with _plain_client() as client:
             resp = client.get("/api/v1/consult-triage")
@@ -211,6 +212,7 @@ def test_consult_triage_endpoint_recomputes_for_old_snapshots():
 
 def test_dosage_report_endpoint_recomputes_for_old_snapshots():
     with mock.patch.object(api.db, "load_patient_snapshot", return_value=dict(SNAPSHOT)), \
+         mock.patch.object(api.db, "load_documents", return_value=[]), \
          mock.patch.object(api.audit, "record"):
         with _plain_client() as client:
             resp = client.get("/api/v1/dosage-report")
@@ -221,6 +223,7 @@ def test_dosage_report_endpoint_recomputes_for_old_snapshots():
 
 def test_patient_snapshot_includes_derived_safety_reports():
     with mock.patch.object(api.db, "load_patient_snapshot", return_value=dict(SNAPSHOT)), \
+         mock.patch.object(api.db, "load_documents", return_value=[]), \
          mock.patch.object(api.audit, "record"):
         with _plain_client() as client:
             resp = client.get("/api/v1/patient-snapshot")
@@ -231,7 +234,8 @@ def test_patient_snapshot_includes_derived_safety_reports():
 
 
 def test_triage_endpoint_404_without_records():
-    with mock.patch.object(api.db, "load_patient_snapshot", return_value=None):
+    with mock.patch.object(api.db, "load_patient_snapshot", return_value=None), \
+         mock.patch.object(api.db, "load_documents", return_value=[]):
         with _plain_client() as client:
             assert client.get("/api/v1/consult-triage").status_code == 404
             assert client.get("/api/v1/dosage-report").status_code == 404

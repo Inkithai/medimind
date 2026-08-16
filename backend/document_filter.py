@@ -21,11 +21,16 @@ pays for any of that either.
 
 from typing import Any, Dict, List, Tuple
 
+from clinical_events import CLINICAL_EVENT_COLLECTIONS
+
 # document_type values the extraction schema recognizes as genuinely
 # clinical. "other" is the extractor's catch-all for anything that isn't
 # one of these — which is exactly what a boarding pass / receipt / random
 # photo will come back as.
-RECOGNIZED_MEDICAL_TYPES = frozenset({"prescription", "lab_report", "discharge_summary"})
+RECOGNIZED_MEDICAL_TYPES = frozenset({
+    "prescription", "lab_report", "discharge_summary", "imaging_report",
+    "consultation_note", "procedure_report",
+})
 
 # Below this, an "other"-typed extraction with no clinical content is
 # treated as noise rather than a low-confidence-but-real medical document.
@@ -61,7 +66,9 @@ def _has_medical_content(doc: Dict[str, Any]) -> bool:
         return True
     if doc.get("allergies_noted"):
         return True
-    return False
+    if doc.get("diagnoses_or_conditions"):
+        return True
+    return any(doc.get(collection) for collection in CLINICAL_EVENT_COLLECTIONS)
 
 
 def looks_like_medical_document(doc: Dict[str, Any]) -> bool:
@@ -109,13 +116,13 @@ def rejection_reason(doc: Dict[str, Any]) -> str:
     confidence = doc.get("overall_confidence", 0.0)
     if doc_type not in RECOGNIZED_MEDICAL_TYPES:
         return (
-            f"classified as '{doc_type}' with no medications, lab results, or "
-            f"allergies found (overall_confidence={confidence})."
+            f"classified as '{doc_type}' with no medications, lab results, allergies, "
+            f"or structured clinical events found (overall_confidence={confidence})."
         )
     return (
         f"classified as '{doc_type}' but overall_confidence={confidence} is below "
-        f"{LOW_CONFIDENCE_THRESHOLD} and no medications, lab results, or allergies "
-        f"were found to support that label."
+        f"{LOW_CONFIDENCE_THRESHOLD} and no medications, lab results, allergies, "
+        f"or structured clinical events were found to support that label."
     )
 
 
@@ -194,11 +201,54 @@ if __name__ == "__main__":
         "overall_confidence": 0.78,
     }
 
+    tamil_prescription = {
+        # non-English document in Tamil script, but the structured medication
+        # field IS populated — the content path accepts it regardless of what
+        # language the page happens to be in
+        "document_type": "prescription",
+        "medications": [{"name": "Metformin", "confidence": 0.88}],
+        "lab_results": [],
+        "allergies_noted": [],
+        "clinical_notes": "மருந்துச்சீட்டு: மெட்ஃபோர்மின் 500 மி.கி., காலை மற்றும் இரவு உணவுடன் ஒரு மாத்திரை.",
+        "overall_confidence": 0.92,
+    }
+    arabic_lab_report = {
+        # non-English document in Arabic script — passes via structured
+        # lab_results even though the free-text notes are entirely Arabic
+        "document_type": "lab_report",
+        "medications": [],
+        "lab_results": [{"test_name": "HbA1c", "value": "7.2", "unit": "%"}],
+        "allergies_noted": [],
+        "clinical_notes": "تقرير المختبر: الهيموغلوبين السكري HbA1c بنسبة 7.2٪.",
+        "overall_confidence": 0.9,
+    }
+    tamil_bus_ticket = {
+        # non-English NON-medical document: a non-empty Tamil transcription
+        # with zero structured clinical content, typed "other" — must be
+        # rejected, proving a non-English OCR dump alone can't slip past the
+        # filter (the Tamil analogue of conference_slide_screenshot)
+        "document_type": "other",
+        "medications": [],
+        "lab_results": [],
+        "allergies_noted": [],
+        "clinical_notes": "பேருந்து முன்பதிவு: சென்னையிலிருந்து மதுரைக்கு, இருக்கை 12, விலை ₹450.",
+        "overall_confidence": 0.71,
+    }
+
     kept, rejected = filter_non_medical_documents(
-        [real_prescription, empty_other, unusual_but_real, mistagged_screenshot, conference_slide_screenshot]
+        [
+            real_prescription,
+            empty_other,
+            unusual_but_real,
+            mistagged_screenshot,
+            conference_slide_screenshot,
+            tamil_prescription,
+            arabic_lab_report,
+            tamil_bus_ticket,
+        ]
     )
-    assert len(kept) == 2, f"expected 2 kept, got {len(kept)}"
-    assert len(rejected) == 3, f"expected 3 rejected, got {len(rejected)}"
+    assert len(kept) == 4, f"expected 4 kept, got {len(kept)}"
+    assert len(rejected) == 4, f"expected 4 rejected, got {len(rejected)}"
 
     try:
         assert_medical_document(empty_other, "boarding_pass.jpg")

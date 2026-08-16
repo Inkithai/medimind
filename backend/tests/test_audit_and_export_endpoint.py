@@ -50,6 +50,7 @@ def teardown_function():
 
 def test_export_json_returns_native_envelope_and_audits():
     with mock.patch.object(api.db, "load_patient_snapshot", return_value=dict(SNAPSHOT)), \
+         mock.patch.object(api.db, "load_documents", return_value=[]), \
          mock.patch.object(api.audit, "record") as rec:
         with _client() as client:
             resp = client.get("/api/v1/export?format=json")
@@ -61,7 +62,8 @@ def test_export_json_returns_native_envelope_and_audits():
 
 
 def test_export_fhir_returns_bundle():
-    with mock.patch.object(api.db, "load_patient_snapshot", return_value=dict(SNAPSHOT)):
+    with mock.patch.object(api.db, "load_patient_snapshot", return_value=dict(SNAPSHOT)), \
+         mock.patch.object(api.db, "load_documents", return_value=[]):
         with _client() as client:
             resp = client.get("/api/v1/export?format=fhir")
         assert resp.status_code == 200, resp.text
@@ -72,14 +74,16 @@ def test_export_fhir_returns_bundle():
 
 
 def test_export_unknown_format_is_400():
-    with mock.patch.object(api.db, "load_patient_snapshot", return_value=dict(SNAPSHOT)):
+    with mock.patch.object(api.db, "load_patient_snapshot", return_value=dict(SNAPSHOT)), \
+         mock.patch.object(api.db, "load_documents", return_value=[]):
         with _client() as client:
             resp = client.get("/api/v1/export?format=csv")
         assert resp.status_code == 400
 
 
 def test_export_without_record_is_404():
-    with mock.patch.object(api.db, "load_patient_snapshot", return_value=None):
+    with mock.patch.object(api.db, "load_patient_snapshot", return_value=None), \
+         mock.patch.object(api.db, "load_documents", return_value=[]):
         with _client() as client:
             resp = client.get("/api/v1/export?format=json")
         assert resp.status_code == 404

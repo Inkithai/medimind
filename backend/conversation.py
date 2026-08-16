@@ -10,12 +10,8 @@ The core problem this solves: a raw embedding search on a follow-up like
 "was that safe with my allergy?" retrieves poorly, because the follow-up
 is only meaningful in light of what was said earlier. This module:
 
-    1. Tracks conversation turns per (patient_key, session_id) in a
-       ConversationSession — held in memory for speed, and (when
-       PERSIST_SESSIONS=true and the conversation_sessions table exists)
-       mirrored to Supabase after every turn so transcripts survive
-       process restarts. On a cache miss, get_session()/
-       get_or_create_session() transparently rehydrate from Supabase.
+    1. Tracks conversation turns per (patient_key, session_id) in a plain
+       in-memory ConversationSession.
     2. Rewrites each new question into a self-contained search query
        (using conversation history) before it is embedded/retrieved —
        the raw question is still what's shown to the final answering LLM.
@@ -29,22 +25,16 @@ Env:
 
 import logging
 import os
+import threading
+import time
+from collections import OrderedDict
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
-from openai import OpenAIError
-
-from medical_extractor import client, MODEL, _chat_completion
+from medical_extractor import MODEL, _chat_completion
 import retrieval
 
 logger = logging.getLogger("conversation")
-
-# Durable transcripts: mirror every session to the Supabase
-# conversation_sessions table (created by supabase_schema.sql) so
-# conversations survive process restarts/redeploys. Enabled by default;
-# degrades silently to memory-only when Supabase is unreachable or the
-# table doesn't exist, so a persistence outage can never block Q&A.
-PERSIST_SESSIONS = os.environ.get("PERSIST_SESSIONS", "true").lower() in ("true", "1", "yes")
 
 # Cheap/fast model for query rewriting and summarization — these are short,
 # low-stakes generations, not the main answer synthesis.
@@ -75,6 +65,12 @@ class ConversationSession:
         self.turns: List[Dict[str, str]] = []  # full, untrimmed transcript
         self._summary: Optional[str] = None
         self._summary_covers_up_to = 0  # index into self.turns the cached summary accounts for
+        # Monotonic so TTL is immune to wall-clock adjustments.
+        self.last_used_at: float = time.monotonic()
+
+    def touch(self) -> None:
+        """Marks the session as recently used, deferring its eviction."""
+        self.last_used_at = time.monotonic()
 
     def add_user_turn(self, text: str) -> None:
         """Appends a user turn with the current UTC timestamp."""
@@ -126,7 +122,40 @@ class ConversationSession:
         return list(self.turns)
 
 
-_SESSIONS: Dict[Tuple[str, str], ConversationSession] = {}
+#: Sessions are per-process and never expire on their own, so without a
+#: bound this dict grows for the life of the server — every abandoned
+#: conversation keeps its full transcript resident. Evict least-recently-used
+#: sessions past this many, and drop ones untouched for the TTL.
+MAX_SESSIONS = int(os.environ.get("MAX_CONVERSATION_SESSIONS", "500"))
+SESSION_TTL_SECONDS = int(os.environ.get("CONVERSATION_SESSION_TTL_SECONDS", str(24 * 3600)))
+
+# Durable transcripts: mirror every session to the Supabase
+# conversation_sessions table (created by supabase_schema.sql) so
+# conversations survive process restarts/redeploys AND in-memory LRU/TTL
+# eviction. Enabled by default; degrades silently to memory-only when
+# Supabase is unreachable or the table doesn't exist, so a persistence
+# outage can never block Q&A.
+PERSIST_SESSIONS = os.environ.get("PERSIST_SESSIONS", "true").lower() in ("true", "1", "yes")
+
+#: OrderedDict = insertion/most-recent order, so eviction is O(1) from the
+#: front. Guarded by a lock because FastAPI serves requests from a thread
+#: pool: two concurrent turns in the same session would otherwise race.
+_SESSIONS: "OrderedDict[Tuple[str, str], ConversationSession]" = OrderedDict()
+_SESSIONS_LOCK = threading.RLock()
+
+
+def _evict_locked() -> None:
+    """Drop expired, then oldest, sessions. Caller must hold the lock."""
+    now = time.monotonic()
+    expired = [
+        key
+        for key, session in _SESSIONS.items()
+        if now - session.last_used_at > SESSION_TTL_SECONDS
+    ]
+    for key in expired:
+        _SESSIONS.pop(key, None)
+    while len(_SESSIONS) > MAX_SESSIONS:
+        _SESSIONS.popitem(last=False)
 
 
 # ---------------------------------------------------------------------------
@@ -156,8 +185,8 @@ def _persist_session(session: ConversationSession) -> None:
 
 def _load_persisted_session(patient_key: str, session_id: str) -> Optional[ConversationSession]:
     """Rehydrates a ConversationSession from Supabase after a process
-    restart. Returns None when persistence is off, the row doesn't exist,
-    or Supabase is unreachable."""
+    restart or LRU/TTL eviction. Returns None when persistence is off, the
+    row doesn't exist, or Supabase is unreachable."""
     if not PERSIST_SESSIONS:
         return None
     try:
@@ -206,39 +235,64 @@ def get_or_create_session(patient_key: str, session_id: str) -> ConversationSess
     rehydrating from the durable store on a memory miss, and creating +
     registering a new empty one if it doesn't exist anywhere yet."""
     key = (patient_key, session_id)
-    session = _SESSIONS.get(key)
-    if session is None:
-        session = _load_persisted_session(patient_key, session_id)
+    with _SESSIONS_LOCK:
+        session = _SESSIONS.get(key)
         if session is None:
-            session = ConversationSession(patient_key, session_id)
-            _persist_session(session)  # register durably at creation time
-        _SESSIONS[key] = session
-    return session
+            session = _load_persisted_session(patient_key, session_id)
+            if session is None:
+                session = ConversationSession(patient_key, session_id)
+                _persist_session(session)  # register durably at creation time
+            _SESSIONS[key] = session
+        session.touch()
+        _SESSIONS.move_to_end(key)
+        _evict_locked()
+        return session
 
 
 def get_session(patient_key: str, session_id: str) -> Optional[ConversationSession]:
     """Fetches the ConversationSession for (patient_key, session_id) without
     creating one. Falls back to the durable store on a memory miss (process
-    restarted since the session was created). Returns None if no such
-    session exists anywhere — used by callers (e.g. the HTTP API) that need
-    to distinguish "unknown session" (404) from "brand new session"
-    (auto-create)."""
+    restarted, or the session was LRU/TTL-evicted since it was created).
+    Returns None if no such session exists anywhere — used by callers
+    (e.g. the HTTP API) that need to distinguish "unknown session" (404)
+    from "brand new session" (auto-create)."""
     key = (patient_key, session_id)
-    session = _SESSIONS.get(key)
-    if session is None:
-        session = _load_persisted_session(patient_key, session_id)
-        if session is not None:
+    with _SESSIONS_LOCK:
+        session = _SESSIONS.get(key)
+        if session is None:
+            session = _load_persisted_session(patient_key, session_id)
+            if session is None:
+                return None
             _SESSIONS[key] = session
-    return session
+        elif time.monotonic() - session.last_used_at > SESSION_TTL_SECONDS:
+            # In-memory copy expired. With durable persistence the transcript
+            # is still authoritative in Supabase — rehydrate instead of 404ing
+            # so a conversation can continue after a long pause. Without
+            # persistence, expired == unknown (fresh conversation).
+            _SESSIONS.pop(key, None)
+            session = _load_persisted_session(patient_key, session_id)
+            if session is None:
+                return None
+            _SESSIONS[key] = session
+        session.touch()
+        _SESSIONS.move_to_end(key)
+        return session
 
 
 def delete_session(patient_key: str, session_id: str) -> bool:
     """Removes a session from the in-memory registry AND the durable store,
     freeing its turn history. Returns True if a session was found in either
     place and removed, False if it didn't exist."""
-    removed_memory = _SESSIONS.pop((patient_key, session_id), None) is not None
+    with _SESSIONS_LOCK:
+        removed_memory = _SESSIONS.pop((patient_key, session_id), None) is not None
     removed_durable = _delete_persisted_session(patient_key, session_id)
     return removed_memory or removed_durable
+
+
+def session_count() -> int:
+    """Number of live sessions — used by tests and operational checks."""
+    with _SESSIONS_LOCK:
+        return len(_SESSIONS)
 
 
 # ---------------------------------------------------------------------------
@@ -299,8 +353,12 @@ def rewrite_query_with_context(question: str, history: List[Dict[str, str]]) -> 
         response = _chat_completion(model=REWRITE_MODEL, messages=messages)
         rewritten = (response.choices[0].message.content or "").strip()
         return rewritten if rewritten else question
-    except OpenAIError as e:
-        print(f"  Query rewrite failed, falling back to raw question for retrieval: {e}")
+    except Exception as e:
+        # _chat_completion raises ProviderRateLimitError (a RuntimeError),
+        # APIError, and connection errors — not just OpenAIError. Swallowing
+        # only OpenAIError let the common 429/quota path crash the whole turn
+        # instead of falling back to the raw question as documented.
+        logger.warning("Query rewrite failed, falling back to raw question for retrieval: %s", e)
         return question
 
 
@@ -348,8 +406,10 @@ def summarize_old_turns(turns: List[Dict[str, str]]) -> str:
     try:
         response = _chat_completion(model=REWRITE_MODEL, messages=messages)
         return (response.choices[0].message.content or "").strip()
-    except OpenAIError as e:
-        print(f"  Conversation summarization failed, using raw fallback: {e}")
+    except Exception as e:
+        # Same as rewrite_query_with_context: a hard quota / 429 must not
+        # take down get_history() (and therefore ask()) on a long session.
+        logger.warning("Conversation summarization failed, using raw fallback: %s", e)
         return transcript[:2000]
 
 

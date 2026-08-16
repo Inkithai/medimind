@@ -28,6 +28,7 @@ Env:
 """
 
 import os
+import hashlib
 import re
 import math
 import logging
@@ -85,16 +86,43 @@ def get_chroma_client():
     return _get_chroma_client()
 
 def _sanitize_collection_name(patient_key: str) -> str:
+    """Chroma-safe collection name that is stable and UNIQUE per patient.
+
+    Chroma requires 3-63 chars, start/end alphanumeric, only [a-zA-Z0-9._-].
+
+    Two separate correctness constraints are combined here:
+      * Truncate BEFORE the end-alphanumeric fixup, or a long key can be cut
+        mid-separator and leave a trailing '_'/'.'/'-' that Chroma rejects.
+      * Append a hash of the raw key, or lossy sanitising lets two different
+        patients collide onto one collection (a cross-patient record leak).
+
+    vector_store._sanitize_collection_name() and
+    retrieval._sanitize_collection_name() must stay byte-identical, or a
+    write and a subsequent read resolve to different collections.
+    """
     name = re.sub(r"[^a-z0-9._-]+", "_", patient_key.strip().lower()).strip("_.-")
     if not name:
         name = "patient"
     if not name[0].isalnum():
         name = "p" + name
+    # Truncate BEFORE the end-alphanumeric fixup. Cutting last can land on a
+    # separator (e.g. 62 'a's + space -> trailing '_') and Chroma rejects it.
+    # Reserve room for the 11-char disambiguating suffix appended below.
+    name = name[:52].rstrip("_.-")
+    if not name:
+        name = "patient"
+    # The sanitising above is lossy: it maps "Bob"/"bob" and
+    # "user@x.com"/"user_x.com" onto the same string, and truncation collides
+    # keys sharing a long prefix. Two patients sharing a collection would mean
+    # one seeing the other's records, so append a short hash of the ORIGINAL
+    # key to keep them distinct.
+    name = f"{name}_{hashlib.sha256(patient_key.encode('utf-8')).hexdigest()[:10]}"
     if not name[-1].isalnum():
         name = name + "0"
     while len(name) < 3:
         name += "0"
-    return name[:63]
+    return name
+
 
 def _chroma_upsert(patient_key: str, ids: List[str], embeddings: List[List[float]], documents: List[str], metadatas: List[Dict[str, Any]]):
     db = _get_chroma_client()
@@ -132,8 +160,28 @@ def _chroma_delete(patient_key: str):
     name = _sanitize_collection_name(patient_key)
     try:
         db.delete_collection(name=name)
+    except Exception as exc:
+        # Chroma uses backend/version-specific exception classes for a missing
+        # collection. A count of zero proves there is nothing to replace;
+        # otherwise do not hide a failed security-sensitive delete.
+        if _chroma_count(patient_key) == 0:
+            return
+        raise RuntimeError(f"Could not clear stale vector index for '{patient_key}': {exc}") from exc
+
+def _chroma_fingerprint(patient_key: str) -> Optional[str]:
+    db = _get_chroma_client()
+    try:
+        col = db.get_collection(name=_sanitize_collection_name(patient_key))
+        if col.count() == 0:
+            return None
+        result = col.get(limit=1, include=["metadatas"])
+        metadata = (result.get("metadatas") or [{}])[0] or {}
+        value = metadata.get("record_fingerprint")
+        return str(value) if value else None
     except Exception:
-        pass
+        # Old/fake Chroma clients may not support get(limit/include). Treat the
+        # index as stale; callers can rebuild from immutable documents.
+        return None
 
 # --- Supabase backend (brute-force) ---
 
@@ -216,7 +264,10 @@ def _supabase_query(patient_key: str, query_embedding: Any, n_results: int) -> T
     top = scored[:n_results]
     ids = [r["id"] for _, r in top]
     docs = [r["text"] for _, r in top]
-    metas = [r["metadata"] or {} for _, r in top]
+    metas = [
+        {**(r["metadata"] or {}), "semantic_score": float(similarity)}
+        for similarity, r in top
+    ]
     return ids, docs, metas
 
 def _supabase_count(patient_key: str) -> int:
@@ -240,8 +291,30 @@ def _supabase_delete(patient_key: str):
     client = _supabase_client()
     try:
         client.table("chunks").delete().eq("patient_key", patient_key).execute()
-    except Exception:
-        pass
+    except Exception as e:
+        if "chunks" in str(e).lower() or "PGRST205" in str(e):
+            raise VectorStoreSchemaError(_VECTOR_STORE_SCHEMA_MSG) from e
+        raise RuntimeError(f"Could not clear stale vector index for '{patient_key}': {e}") from e
+
+def _supabase_fingerprint(patient_key: str) -> Optional[str]:
+    client = _supabase_client()
+    try:
+        response = (
+            client.table("chunks")
+            .select("metadata")
+            .eq("patient_key", patient_key)
+            .limit(1)
+            .execute()
+        )
+    except Exception as e:
+        if "chunks" in str(e).lower() or "PGRST205" in str(e):
+            raise VectorStoreSchemaError(_VECTOR_STORE_SCHEMA_MSG) from e
+        raise
+    rows = response.data or []
+    if not rows:
+        return None
+    value = (rows[0].get("metadata") or {}).get("record_fingerprint")
+    return str(value) if value else None
 
 # --- Public facade ---
 
@@ -264,6 +337,11 @@ def delete_collection(patient_key: str):
     if VECTOR_STORE == "supabase":
         return _supabase_delete(patient_key)
     return _chroma_delete(patient_key)
+
+def get_index_fingerprint(patient_key: str) -> Optional[str]:
+    if VECTOR_STORE == "supabase":
+        return _supabase_fingerprint(patient_key)
+    return _chroma_fingerprint(patient_key)
 
 def get_store_name() -> str:
     return VECTOR_STORE

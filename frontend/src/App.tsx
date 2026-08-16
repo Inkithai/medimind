@@ -2,7 +2,9 @@ import { lazy, Suspense } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { Layout } from "./components/Layout";
 import { useAuth } from "./context/AuthContext";
+import { AboutPage } from "./pages/AboutPage";
 import { CrossCheckPage } from "./pages/CrossCheckPage";
+import { CareRecommendationsPage } from "./pages/CareRecommendationsPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { LabTrendsPage } from "./pages/LabTrendsPage";
 import { LandingPage } from "./pages/LandingPage";
@@ -13,38 +15,46 @@ import { UploadPage } from "./pages/UploadPage";
 import { DocumentsPage } from "./pages/DocumentsPage";
 import { MedicinesPage } from "./pages/MedicinesPage";
 import { HistoryPage } from "./pages/HistoryPage";
+import { ChangesPage } from "./pages/ChangesPage";
+import { AppointmentPrepPage } from "./pages/AppointmentPrepPage";
+import { RecordIntegrityPage } from "./pages/RecordIntegrityPage";
+import { FollowUpPage } from "./pages/FollowUpPage";
+import { ReviewPage } from "./pages/ReviewPage";
 import { Spinner } from "./components/Spinner";
+import { useI18n } from "./i18n/I18nContext";
 
 const FindCarePage = lazy(() =>
   import("./pages/FindCarePage").then((module) => ({ default: module.FindCarePage }))
 );
 
 function FindCareLoading() {
+  const { t } = useI18n();
   return (
-    <div className="flex min-h-[50vh] items-center justify-center gap-3 text-sm font-medium text-slate-600">
-      <Spinner className="h-5 w-5 text-brand-600" /> Loading nearby care…
+    <div role="status" aria-live="polite" className="flex min-h-[50vh] items-center justify-center gap-3 text-sm font-medium text-slate-700">
+      <Spinner className="h-5 w-5 text-brand-600" /> {t("care.finding")}
     </div>
   );
 }
 
 function RequireAuth({ children }: { children: JSX.Element }) {
   const { isConfigured, isInitializing, initError } = useAuth();
+  const { t } = useI18n();
   if (isInitializing) {
     return (
       <div className="flex min-h-[60vh] flex-col items-center justify-center gap-3 text-center">
         <Spinner className="h-6 w-6 text-brand-600" />
-        <p className="text-base font-medium text-slate-700">Preparing your private workspace…</p>
-        <p className="text-sm text-slate-500">One moment</p>
+        <p className="text-base font-medium text-slate-700">{t("auth.preparing")}</p>
+        <p className="text-sm text-slate-600">{t("auth.oneMoment")}</p>
       </div>
     );
   }
   if (initError) {
     return (
       <div className="mx-auto max-w-md rounded-2xl border border-red-200 bg-red-50 p-6 text-center">
-        <p className="text-base font-semibold text-red-800">We couldn't set up your workspace</p>
+        <p className="text-base font-semibold text-red-900">{t("auth.failedTitle")}</p>
         <p className="mt-1 text-sm text-red-700">{initError}</p>
         <p className="mt-3 text-sm text-slate-600">
-          Check your connection, then refresh the page to try again.
+          {t("auth.checkConnection")}
         </p>
       </div>
     );
@@ -60,6 +70,8 @@ export default function App() {
       <Route element={<Layout />}>
         <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="/settings" element={<SettingsPage />} />
+        {/* Informational, like /settings: readable without a workspace. */}
+        <Route path="/about" element={<AboutPage />} />
         <Route
           path="/find-care"
           element={
@@ -104,6 +116,14 @@ export default function App() {
           }
         />
         <Route
+          path="/review"
+          element={
+            <RequireAuth>
+              <ReviewPage />
+            </RequireAuth>
+          }
+        />
+        <Route
           path="/medicines"
           element={
             <RequireAuth>
@@ -117,6 +137,38 @@ export default function App() {
           element={
             <RequireAuth>
               <HistoryPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/changes"
+          element={
+            <RequireAuth>
+              <ChangesPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/follow-up"
+          element={
+            <RequireAuth>
+              <FollowUpPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/record-integrity"
+          element={
+            <RequireAuth>
+              <RecordIntegrityPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/appointment-prep"
+          element={
+            <RequireAuth>
+              <AppointmentPrepPage />
             </RequireAuth>
           }
         />
@@ -149,6 +201,14 @@ export default function App() {
           element={
             <RequireAuth>
               <LabTrendsPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/care"
+          element={
+            <RequireAuth>
+              <CareRecommendationsPage />
             </RequireAuth>
           }
         />
