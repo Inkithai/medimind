@@ -1,7 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api/client";
 import { useAuth } from "../context/AuthContext";
-import type { CorrectionEvent, LabResult, Medication, Visit } from "../types/api";
+import type {
+  CorrectionEvent,
+  Diagnosis,
+  LabResult,
+  Medication,
+  Procedure,
+  Symptom,
+  Visit,
+} from "../types/api";
 import { formatDate } from "../utils/format";
 import { Alert } from "./Alert";
 import { Spinner } from "./Spinner";
@@ -28,6 +36,23 @@ interface Draft {
     reference_range: string;
     flag: LabResult["flag"];
   }>;
+  diagnoses: Array<{ name: string; code: string; status: Diagnosis["status"]; onset_date: string }>;
+  symptoms: Array<{ name: string; severity: Symptom["severity"]; status: Symptom["status"]; onset_date: string }>;
+  procedures: Array<{
+    name: string;
+    procedure_date: string;
+    body_site: string;
+    status: Procedure["status"];
+    outcome: string;
+  }>;
+  vital_signs: Array<{ name: string; value: string; unit: string; measured_at: string }>;
+  imaging_results: Array<{
+    study_type: string;
+    body_site: string;
+    study_date: string;
+    findings: string;
+    impression: string;
+  }>;
 }
 
 function draftFromVisit(visit: Visit): Draft {
@@ -52,6 +77,38 @@ function draftFromVisit(visit: Visit): Draft {
       unit: lab.unit || "",
       reference_range: lab.reference_range || "",
       flag: lab.flag,
+    })),
+    diagnoses: (visit.diagnoses || []).map((item) => ({
+      name: item.name,
+      code: item.code || "",
+      status: item.status,
+      onset_date: item.onset_date || "",
+    })),
+    symptoms: (visit.symptoms || []).map((item) => ({
+      name: item.name,
+      severity: item.severity,
+      status: item.status,
+      onset_date: item.onset_date || "",
+    })),
+    procedures: (visit.procedures || []).map((item) => ({
+      name: item.name,
+      procedure_date: item.procedure_date || "",
+      body_site: item.body_site || "",
+      status: item.status,
+      outcome: item.outcome || "",
+    })),
+    vital_signs: (visit.vital_signs || []).map((item) => ({
+      name: item.name,
+      value: item.value,
+      unit: item.unit || "",
+      measured_at: item.measured_at || "",
+    })),
+    imaging_results: (visit.imaging_results || []).map((item) => ({
+      study_type: item.study_type,
+      body_site: item.body_site || "",
+      study_date: item.study_date || "",
+      findings: item.findings,
+      impression: item.impression || "",
     })),
   };
 }
@@ -103,6 +160,49 @@ function buildChanges(visit: Visit, draft: Draft) {
     add(`${prefix}/unit`, old.unit, item.unit.trim() || null);
     add(`${prefix}/reference_range`, old.reference_range, item.reference_range.trim() || null);
     add(`${prefix}/flag`, old.flag, item.flag);
+  });
+
+  draft.diagnoses.forEach((item, index) => {
+    const old = visit.diagnoses[index];
+    const prefix = `/diagnoses/${index}`;
+    add(`${prefix}/name`, old.name, item.name.trim());
+    add(`${prefix}/code`, old.code, item.code.trim() || null);
+    add(`${prefix}/status`, old.status, item.status);
+    add(`${prefix}/onset_date`, old.onset_date, item.onset_date.trim() || null);
+  });
+  draft.symptoms.forEach((item, index) => {
+    const old = visit.symptoms[index];
+    const prefix = `/symptoms/${index}`;
+    add(`${prefix}/name`, old.name, item.name.trim());
+    add(`${prefix}/severity`, old.severity, item.severity);
+    add(`${prefix}/status`, old.status, item.status);
+    add(`${prefix}/onset_date`, old.onset_date, item.onset_date.trim() || null);
+  });
+  draft.procedures.forEach((item, index) => {
+    const old = visit.procedures[index];
+    const prefix = `/procedures/${index}`;
+    add(`${prefix}/name`, old.name, item.name.trim());
+    add(`${prefix}/procedure_date`, old.procedure_date, item.procedure_date.trim() || null);
+    add(`${prefix}/body_site`, old.body_site, item.body_site.trim() || null);
+    add(`${prefix}/status`, old.status, item.status);
+    add(`${prefix}/outcome`, old.outcome, item.outcome.trim() || null);
+  });
+  draft.vital_signs.forEach((item, index) => {
+    const old = visit.vital_signs[index];
+    const prefix = `/vital_signs/${index}`;
+    add(`${prefix}/name`, old.name, item.name.trim());
+    add(`${prefix}/value`, old.value, item.value.trim());
+    add(`${prefix}/unit`, old.unit, item.unit.trim() || null);
+    add(`${prefix}/measured_at`, old.measured_at, item.measured_at.trim() || null);
+  });
+  draft.imaging_results.forEach((item, index) => {
+    const old = visit.imaging_results[index];
+    const prefix = `/imaging_results/${index}`;
+    add(`${prefix}/study_type`, old.study_type, item.study_type.trim());
+    add(`${prefix}/body_site`, old.body_site, item.body_site.trim() || null);
+    add(`${prefix}/study_date`, old.study_date, item.study_date.trim() || null);
+    add(`${prefix}/findings`, old.findings, item.findings.trim());
+    add(`${prefix}/impression`, old.impression, item.impression.trim() || null);
   });
   return changes;
 }
@@ -250,6 +350,100 @@ export function CorrectionEditor({ visit, onSaved }: { visit: Visit; onSaved: ()
                 <option value="unknown">unknown</option>
               </select>
             </Field>
+          </div>
+        </fieldset>
+      ))}
+
+      {draft.diagnoses.map((item, index) => (
+        <fieldset key={index} className="rounded-lg border border-slate-200 p-3">
+          <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Diagnosis {index + 1}</legend>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {(["name", "code", "onset_date"] as const).map((key) => (
+              <Field key={key} label={key.replace(/_/g, " ")}>
+                <input
+                  className="input"
+                  value={item[key]}
+                  onChange={(e) => setDraft({ ...draft, diagnoses: draft.diagnoses.map((value, i) => i === index ? { ...value, [key]: e.target.value } : value) })}
+                />
+              </Field>
+            ))}
+            <Field label="status">
+              <select className="input" value={item.status} onChange={(e) => setDraft({ ...draft, diagnoses: draft.diagnoses.map((value, i) => i === index ? { ...value, status: e.target.value as Diagnosis["status"] } : value) })}>
+                {(["active", "confirmed", "suspected", "history", "resolved", "unknown"] as const).map((value) => <option key={value}>{value}</option>)}
+              </select>
+            </Field>
+          </div>
+        </fieldset>
+      ))}
+
+      {draft.symptoms.map((item, index) => (
+        <fieldset key={index} className="rounded-lg border border-slate-200 p-3">
+          <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Symptom or sign {index + 1}</legend>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {(["name", "onset_date"] as const).map((key) => (
+              <Field key={key} label={key.replace(/_/g, " ")}>
+                <input className="input" value={item[key]} onChange={(e) => setDraft({ ...draft, symptoms: draft.symptoms.map((value, i) => i === index ? { ...value, [key]: e.target.value } : value) })} />
+              </Field>
+            ))}
+            <Field label="severity">
+              <select className="input" value={item.severity} onChange={(e) => setDraft({ ...draft, symptoms: draft.symptoms.map((value, i) => i === index ? { ...value, severity: e.target.value as Symptom["severity"] } : value) })}>
+                {(["mild", "moderate", "severe", "unknown"] as const).map((value) => <option key={value}>{value}</option>)}
+              </select>
+            </Field>
+            <Field label="status">
+              <select className="input" value={item.status} onChange={(e) => setDraft({ ...draft, symptoms: draft.symptoms.map((value, i) => i === index ? { ...value, status: e.target.value as Symptom["status"] } : value) })}>
+                {(["current", "resolved", "intermittent", "historical", "unknown"] as const).map((value) => <option key={value}>{value}</option>)}
+              </select>
+            </Field>
+          </div>
+        </fieldset>
+      ))}
+
+      {draft.procedures.map((item, index) => (
+        <fieldset key={index} className="rounded-lg border border-slate-200 p-3">
+          <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Procedure {index + 1}</legend>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {(["name", "procedure_date", "body_site", "outcome"] as const).map((key) => (
+              <Field key={key} label={key.replace(/_/g, " ")}>
+                <input className="input" value={item[key]} onChange={(e) => setDraft({ ...draft, procedures: draft.procedures.map((value, i) => i === index ? { ...value, [key]: e.target.value } : value) })} />
+              </Field>
+            ))}
+            <Field label="status">
+              <select className="input" value={item.status} onChange={(e) => setDraft({ ...draft, procedures: draft.procedures.map((value, i) => i === index ? { ...value, status: e.target.value as Procedure["status"] } : value) })}>
+                {(["completed", "planned", "cancelled", "historical", "unknown"] as const).map((value) => <option key={value}>{value}</option>)}
+              </select>
+            </Field>
+          </div>
+        </fieldset>
+      ))}
+
+      {draft.vital_signs.map((item, index) => (
+        <fieldset key={index} className="rounded-lg border border-slate-200 p-3">
+          <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Vital sign {index + 1}</legend>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {(["name", "value", "unit", "measured_at"] as const).map((key) => (
+              <Field key={key} label={key.replace(/_/g, " ")}>
+                <input className="input" value={item[key]} onChange={(e) => setDraft({ ...draft, vital_signs: draft.vital_signs.map((value, i) => i === index ? { ...value, [key]: e.target.value } : value) })} />
+              </Field>
+            ))}
+          </div>
+        </fieldset>
+      ))}
+
+      {draft.imaging_results.map((item, index) => (
+        <fieldset key={index} className="rounded-lg border border-slate-200 p-3">
+          <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Imaging result {index + 1}</legend>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {(["study_type", "body_site", "study_date"] as const).map((key) => (
+              <Field key={key} label={key.replace(/_/g, " ")}>
+                <input className="input" value={item[key]} onChange={(e) => setDraft({ ...draft, imaging_results: draft.imaging_results.map((value, i) => i === index ? { ...value, [key]: e.target.value } : value) })} />
+              </Field>
+            ))}
+            {(["findings", "impression"] as const).map((key) => (
+              <Field key={key} label={key}>
+                <textarea className="input min-h-20" value={item[key]} onChange={(e) => setDraft({ ...draft, imaging_results: draft.imaging_results.map((value, i) => i === index ? { ...value, [key]: e.target.value } : value) })} />
+              </Field>
+            ))}
           </div>
         </fieldset>
       ))}

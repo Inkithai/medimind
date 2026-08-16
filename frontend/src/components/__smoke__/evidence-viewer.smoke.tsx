@@ -32,6 +32,11 @@ const visit: Visit = {
     confidence: 0.9,
     evidence: [evidence],
   }],
+  diagnoses: [],
+  symptoms: [],
+  procedures: [],
+  vital_signs: [],
+  imaging_results: [],
   allergies_noted: [],
   clinical_notes: null,
   field_evidence: {

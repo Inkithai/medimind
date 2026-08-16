@@ -13,6 +13,7 @@ import {
   UploadIcon,
   FileIcon,
   ChatIcon,
+  TimelineIcon,
   ChangesIcon,
   IntegrityIcon,
   ReminderIcon,
@@ -116,6 +117,12 @@ export function DashboardPage() {
 
   const medCount = record.timeline.medications_timeline.length;
   const labCount = record.timeline.lab_results_timeline.length;
+  const clinicalEventCount =
+    (record.timeline.diagnoses_timeline?.length || 0) +
+    (record.timeline.symptoms_timeline?.length || 0) +
+    (record.timeline.procedures_timeline?.length || 0) +
+    (record.timeline.vital_signs_timeline?.length || 0) +
+    (record.timeline.imaging_results_timeline?.length || 0);
   const allergyCount = record.timeline.known_allergies.length;
   const issueCount =
     record.crossCheck.potential_drug_interactions.length +
@@ -168,7 +175,7 @@ export function DashboardPage() {
       )}
 
       {/* Stat cards */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
         <StatCard
           icon={<FileIcon className="h-6 w-6" />}
           label={t("common.documents")}
@@ -176,6 +183,14 @@ export function DashboardPage() {
           to="/documents"
           chip="bg-sky-50 text-sky-600"
           sub="Reports, scans & summaries"
+        />
+        <StatCard
+          icon={<TimelineIcon className="h-6 w-6" />}
+          label="Clinical Events"
+          value={clinicalEventCount}
+          to="/history"
+          chip="bg-indigo-50 text-indigo-600"
+          sub="Diagnoses, symptoms & more"
         />
         <StatCard
           icon={<PillIcon className="h-6 w-6" />}

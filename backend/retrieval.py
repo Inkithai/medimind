@@ -6,8 +6,9 @@ medical_extractor.py — specifically the per-patient timeline returned by
 build_patient_timeline(). It does NOT re-read raw documents.
 
 Pipeline:
-    patient timeline -> chunks (one per medication / lab result / clinical
-    note / allergy list) -> embed each chunk's text -> store in a
+    patient timeline -> chunks (one per medication / lab / diagnosis /
+    symptom / procedure / vital / imaging result / note / allergy source)
+    -> embed each chunk's text -> store in a
     per-patient local Chroma collection -> at query time, embed the
     question, retrieve the top_k most similar chunks, and ask a chat
     model to answer strictly from that retrieved context.
@@ -216,6 +217,10 @@ def timeline_fingerprint(timeline: Dict[str, Any]) -> str:
         "medications": timeline.get("medications_timeline", []),
         "labs": timeline.get("lab_results_timeline", []),
         "diagnoses": timeline.get("diagnoses_timeline", []),
+        "symptoms": timeline.get("symptoms_timeline", []),
+        "procedures": timeline.get("procedures_timeline", []),
+        "vital_signs": timeline.get("vital_signs_timeline", []),
+        "imaging_results": timeline.get("imaging_results_timeline", []),
         "allergies": timeline.get("known_allergies", []),
         "allergy_evidence": timeline.get("allergy_evidence", []),
         "notes": notes,
@@ -234,8 +239,11 @@ def _evidence_metadata(fact: Dict[str, Any], *, document_type: str = "other") ->
     source_weight = 0.9 if source_method == "text_layer" else 0.72 if source_method == "vision_ocr" else 0.65
     type_weight = {
         "lab_report": 0.96,
+        "imaging_report": 0.95,
         "prescription": 0.94,
+        "procedure_report": 0.92,
         "discharge_summary": 0.86,
+        "consultation_note": 0.84,
         "other": 0.65,
     }.get(document_type or "other", 0.65)
     confidence = fact.get("confidence")
@@ -299,6 +307,65 @@ def _lab_result_chunk_text(lab: Dict[str, Any]) -> str:
     )
 
 
+def _diagnosis_chunk_text(item: Dict[str, Any]) -> str:
+    code = f" (code: {item['code']})" if item.get("code") else ""
+    return (
+        f"Documented diagnosis: {item.get('name', 'unknown')}{code}. "
+        f"Source status: {item.get('status', 'unknown')}. "
+        f"Onset/event date: {item.get('date') or 'not specified'} "
+        f"(source: {item.get('source_file') or 'unknown file'})."
+    )
+
+
+def _symptom_chunk_text(item: Dict[str, Any]) -> str:
+    return (
+        f"Documented symptom or sign: {item.get('name', 'unknown')}. "
+        f"Severity: {item.get('severity', 'unknown')}; status: {item.get('status', 'unknown')}. "
+        f"Onset/event date: {item.get('date') or 'not specified'} "
+        f"(source: {item.get('source_file') or 'unknown file'})."
+    )
+
+
+def _procedure_chunk_text(item: Dict[str, Any]) -> str:
+    body_site = f" Body site: {item['body_site']}." if item.get("body_site") else ""
+    outcome = f" Documented outcome: {item['outcome']}." if item.get("outcome") else ""
+    return (
+        f"Documented procedure: {item.get('name', 'unknown')}. "
+        f"Status: {item.get('status', 'unknown')}.{body_site}{outcome} "
+        f"Procedure/event date: {item.get('date') or 'not specified'} "
+        f"(source: {item.get('source_file') or 'unknown file'})."
+    )
+
+
+def _vital_sign_chunk_text(item: Dict[str, Any]) -> str:
+    unit = f" {item['unit']}" if item.get("unit") else ""
+    return (
+        f"Vital sign: {item.get('name', 'unknown')} = {item.get('value', 'unknown')}{unit}. "
+        f"Measured/event date: {item.get('date') or 'not specified'} "
+        f"(source: {item.get('source_file') or 'unknown file'})."
+    )
+
+
+def _imaging_result_chunk_text(item: Dict[str, Any]) -> str:
+    body_site = f" of {item['body_site']}" if item.get("body_site") else ""
+    impression = f" Impression: {item['impression']}" if item.get("impression") else ""
+    return (
+        f"Documented imaging study: {item.get('study_type', 'unknown')}{body_site}. "
+        f"Findings: {item.get('findings') or 'not specified'}.{impression} "
+        f"Study/event date: {item.get('date') or 'not specified'} "
+        f"(source: {item.get('source_file') or 'unknown file'})."
+    )
+
+
+_CLINICAL_CHUNK_SPECS = (
+    ("diagnoses_timeline", "diagnosis", _diagnosis_chunk_text),
+    ("symptoms_timeline", "symptom", _symptom_chunk_text),
+    ("procedures_timeline", "procedure", _procedure_chunk_text),
+    ("vital_signs_timeline", "vital_sign", _vital_sign_chunk_text),
+    ("imaging_results_timeline", "imaging_result", _imaging_result_chunk_text),
+)
+
+
 def _clinical_note_chunk_text(visit: Dict[str, Any]) -> str:
     source_file = visit.get("_source", {}).get("file")
     return (
@@ -309,14 +376,6 @@ def _clinical_note_chunk_text(visit: Dict[str, Any]) -> str:
 
 def _allergy_chunk_text(allergies: List[str]) -> str:
     return "Known allergies: " + ", ".join(allergies) + "."
-
-
-def _diagnosis_chunk_text(diagnosis: Dict[str, Any]) -> str:
-    return (
-        f"Diagnosis or condition explicitly mentioned: {diagnosis.get('name', 'unknown')} "
-        f"on {diagnosis.get('date') or 'an unknown date'} "
-        f"(source: {diagnosis.get('source_file') or 'unknown file'})."
-    )
 
 
 def build_chunks_from_timeline(patient_key: str, timeline: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -401,23 +460,29 @@ def build_chunks_from_timeline(patient_key: str, timeline: Dict[str, Any]) -> Li
             },
         })
 
-    for diagnosis in timeline.get("diagnoses_timeline", []) or []:
-        text = _diagnosis_chunk_text(diagnosis)
-        chunks.append({
-            "id": _chunk_id(patient_key, diagnosis.get("source_file"), "diagnosis", text),
-            "text": text,
-            "metadata": {
-                "patient_key": patient_key,
-                "date": diagnosis.get("date") or "",
-                "source_file": diagnosis.get("source_file") or "",
-                "source_page": diagnosis.get("source_page") or 0,
-                "document_id": diagnosis.get("document_id") or "",
-                "fact_path": diagnosis.get("fact_path") or "/diagnoses_or_conditions",
-                "chunk_type": "diagnosis",
-                "record_fingerprint": fingerprint,
-                **_evidence_metadata(diagnosis, document_type=str(diagnosis.get("document_type") or "other")),
-            },
-        })
+    for timeline_key, chunk_type, text_builder in _CLINICAL_CHUNK_SPECS:
+        for fact in timeline.get(timeline_key, []) or []:
+            if not isinstance(fact, dict) or (fact.get("_trust") or {}).get("quarantined"):
+                continue
+            text = text_builder(fact)
+            chunks.append({
+                "id": _chunk_id(patient_key, fact.get("source_file"), chunk_type, text),
+                "text": text,
+                "metadata": {
+                    "patient_key": patient_key,
+                    "date": fact.get("date") or "",
+                    "source_file": fact.get("source_file") or "",
+                    "source_page": int(fact.get("source_page") or 0),
+                    "document_id": fact.get("document_id") or "",
+                    "fact_path": fact.get("fact_path") or "",
+                    "chunk_type": chunk_type,
+                    "record_fingerprint": fingerprint,
+                    **_evidence_metadata(
+                        fact,
+                        document_type=str(fact.get("document_type") or "other"),
+                    ),
+                },
+            })
 
     # Preserve allergy provenance per visit so Q&A can validate a real
     # source citation. Keep an aggregate fallback for legacy timelines.
@@ -668,7 +733,8 @@ def index_patient_timeline(
 
     Returns the number of chunks indexed. Returns 0 — WITHOUT storing
     anything — when the timeline has no retrievable content (no
-    medications, lab results, clinical notes, or allergies), in which
+    medications, labs, diagnoses, symptoms, procedures, vital signs, imaging,
+    clinical notes, or allergies), in which
     case callers must NOT report the patient as indexed: there is
     literally nothing for Q&A to retrieve. (Previously this returned
     None after printing "skipping indexing", which made upload callers
@@ -753,8 +819,9 @@ def index_patient_timeline(
 QA_SYSTEM_PROMPT = """
 You are a patient-facing medical records assistant. You answer questions
 using ONLY the retrieved context provided to you below — structured chunks
-pulled from that patient's own extracted medical records (medications, lab
-results, clinical notes, allergies).
+pulled from that patient's own extracted medical records (medications, labs,
+documented diagnoses and symptoms, procedures, vital signs, imaging reports,
+clinical notes, and allergies).
 
 Rules:
 - Answer strictly from the retrieved context. If the context does not cover
@@ -766,11 +833,12 @@ Rules:
   level, a blood type, an address, or an appointment) say plainly that it
   is not present in their uploaded records. Never estimate or infer it from
   typical values.
-- NEVER provide a diagnosis, confirm or deny that the patient has a
-  condition, or interpret what a result "means" clinically. If asked
-  "do I have X?", report only what the records document (for example a
-  recorded value and its flag) and state that only a clinician can
-  diagnose. Set recommend_professional_consult to true.
+- You may report a diagnosis only when a retrieved chunk explicitly labels it
+  as documented, and must attribute it to that record. NEVER infer a new
+  diagnosis, confirm a condition beyond what the source states, or interpret
+  what a lab, vital, symptom, or imaging result means clinically. If asked
+  "do I have X?", report only what the records document and state that only a
+  clinician can diagnose. Set recommend_professional_consult to true.
 - NEVER tell the patient to start, stop, increase, or decrease a
   medication, even if they ask directly. Report what the records document
   about the current instructions and refer them to their doctor or
@@ -880,18 +948,18 @@ _NO_INFO_ANSWER = {
 }
 
 # Patient HAS persisted documents, but none of them contain anything the
-# Q&A indexer can retrieve (no medications, lab results, clinical notes,
-# or allergies). Different from _NO_INFO_ANSWER, which means "no records
-# were ever uploaded" — returning the wrong one of the two is what made
+# Q&A indexer can retrieve (no medications, labs, longitudinal clinical
+# events, clinical notes, or allergies). Different from _NO_INFO_ANSWER,
+# which means "no records were ever uploaded" — returning the wrong one is what made
 # users with uploaded documents see a false "no indexed records" message.
 _NO_INDEXABLE_CONTENT_ANSWER = {
     "answer": (
         "I don't have enough information — your records were found, but they "
-        "contain no medications, lab results, clinical notes, diagnoses, or allergies for "
-        "Q&A to search."
+        "contain no medications, lab results, clinical notes, allergies, diagnoses, "
+        "symptoms, procedures, vital signs, or imaging results for Q&A to search."
     ),
     "confidence": 0.0,
-    "confidence_reason": "The uploaded records contain no medications, lab results, clinical notes, diagnoses, or allergies that Q&A can retrieve.",
+    "confidence_reason": "The uploaded records contain no retrievable medications, labs, notes, allergies, diagnoses, symptoms, procedures, vital signs, or imaging results.",
     "sources": [],
     "recommend_professional_consult": False,
 }

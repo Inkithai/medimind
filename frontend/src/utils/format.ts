@@ -173,6 +173,12 @@ export function documentTypeLabel(type: string): string {
       return translate(language, "common.labReport");
     case "discharge_summary":
       return translate(language, "common.dischargeSummary");
+    case "imaging_report":
+      return "Imaging report";
+    case "consultation_note":
+      return "Consultation note";
+    case "procedure_report":
+      return "Procedure report";
     default:
       return translate(language, "common.other");
   }

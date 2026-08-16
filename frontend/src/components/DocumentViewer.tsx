@@ -157,6 +157,94 @@ export function DocumentViewer({
             </div>
           </Section>
 
+          {(visit.diagnoses?.length || 0) > 0 && (
+            <Section title={`Documented diagnoses (${visit.diagnoses.length})`}>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {visit.diagnoses.map((item, index) => (
+                  <ClinicalCard
+                    key={index}
+                    title={item.name}
+                    meta={[item.status, item.code ? `code ${item.code}` : null, item.onset_date ? `onset ${item.onset_date}` : null]}
+                    confidence={item.confidence}
+                    evidence={item.evidence?.[0]}
+                    onEvidence={showEvidence}
+                  />
+                ))}
+              </div>
+            </Section>
+          )}
+
+          {(visit.symptoms?.length || 0) > 0 && (
+            <Section title={`Symptoms & signs (${visit.symptoms.length})`}>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {visit.symptoms.map((item, index) => (
+                  <ClinicalCard
+                    key={index}
+                    title={item.name}
+                    meta={[item.severity, item.status, item.onset_date ? `onset ${item.onset_date}` : null]}
+                    confidence={item.confidence}
+                    evidence={item.evidence?.[0]}
+                    onEvidence={showEvidence}
+                  />
+                ))}
+              </div>
+            </Section>
+          )}
+
+          {(visit.procedures?.length || 0) > 0 && (
+            <Section title={`Procedures (${visit.procedures.length})`}>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {visit.procedures.map((item, index) => (
+                  <ClinicalCard
+                    key={index}
+                    title={item.name}
+                    meta={[item.status, item.body_site, item.procedure_date]}
+                    detail={item.outcome}
+                    confidence={item.confidence}
+                    evidence={item.evidence?.[0]}
+                    onEvidence={showEvidence}
+                  />
+                ))}
+              </div>
+            </Section>
+          )}
+
+          {(visit.vital_signs?.length || 0) > 0 && (
+            <Section title={`Vital signs (${visit.vital_signs.length})`}>
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {visit.vital_signs.map((item, index) => (
+                  <ClinicalCard
+                    key={index}
+                    title={item.name}
+                    value={`${item.value}${item.unit ? ` ${item.unit}` : ""}`}
+                    meta={[item.measured_at]}
+                    confidence={item.confidence}
+                    evidence={item.evidence?.[0]}
+                    onEvidence={showEvidence}
+                  />
+                ))}
+              </div>
+            </Section>
+          )}
+
+          {(visit.imaging_results?.length || 0) > 0 && (
+            <Section title={`Imaging (${visit.imaging_results.length})`}>
+              <div className="space-y-2">
+                {visit.imaging_results.map((item, index) => (
+                  <ClinicalCard
+                    key={index}
+                    title={item.study_type}
+                    meta={[item.body_site, item.study_date]}
+                    detail={item.impression ? `${item.findings} · Impression: ${item.impression}` : item.findings}
+                    confidence={item.confidence}
+                    evidence={item.evidence?.[0]}
+                    onEvidence={showEvidence}
+                  />
+                ))}
+              </div>
+            </Section>
+          )}
+
           {visit.medications.length > 0 && (
             <Section title={`${t("common.medications")} (${visit.medications.length})`} icon={<PillIcon className="h-4 w-4" />}>
               <div className="grid gap-2 sm:grid-cols-2">
@@ -268,8 +356,51 @@ function findEvidence(visit: Visit, evidenceId: string): EvidenceRegion | null {
     ...Object.values(visit.field_evidence || {}).flat(),
     ...visit.medications.flatMap((med) => med.evidence || []),
     ...visit.lab_results.flatMap((lab) => lab.evidence || []),
+    ...(visit.diagnoses || []).flatMap((item) => item.evidence || []),
+    ...(visit.symptoms || []).flatMap((item) => item.evidence || []),
+    ...(visit.procedures || []).flatMap((item) => item.evidence || []),
+    ...(visit.vital_signs || []).flatMap((item) => item.evidence || []),
+    ...(visit.imaging_results || []).flatMap((item) => item.evidence || []),
   ];
   return regions.find((region) => region.evidence_id === evidenceId) || null;
+}
+
+function ClinicalCard({
+  title,
+  value,
+  meta,
+  detail,
+  confidence,
+  evidence,
+  onEvidence,
+}: {
+  title: string;
+  value?: string;
+  meta: Array<string | null | undefined>;
+  detail?: string | null;
+  confidence: number;
+  evidence?: EvidenceRegion;
+  onEvidence: (evidence?: EvidenceRegion) => void;
+}) {
+  const visibleMeta = meta.filter(Boolean);
+  return (
+    <div className="rounded-lg border border-slate-200 bg-slate-50/60 px-3 py-2.5 text-sm">
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <p className="font-medium text-slate-800">{title}</p>
+          {value && <p className="mt-0.5 text-base font-semibold text-brand-700">{value}</p>}
+        </div>
+        <span className="rounded-full bg-white px-2 py-0.5 text-xs ring-1 ring-slate-200">
+          {formatConfidence(confidence)}
+        </span>
+      </div>
+      {visibleMeta.length > 0 && (
+        <p className="mt-1 text-xs capitalize text-slate-500">{visibleMeta.join(" • ")}</p>
+      )}
+      {detail && <p className="mt-1.5 text-xs leading-relaxed text-slate-600">{detail}</p>}
+      <EvidenceButton evidence={evidence} onClick={onEvidence} />
+    </div>
+  );
 }
 
 function FactRow({

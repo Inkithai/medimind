@@ -21,7 +21,14 @@ export type {
 // CROSS_CHECK_JSON_SCHEMA), lab_trends.py, retrieval.py, conversation.py,
 // and api.py response shapes.
 
-export type DocumentType = "prescription" | "lab_report" | "discharge_summary" | "other";
+export type DocumentType =
+  | "prescription"
+  | "lab_report"
+  | "discharge_summary"
+  | "imaging_report"
+  | "consultation_note"
+  | "procedure_report"
+  | "other";
 
 export interface TrustMetadata {
   status: "extracted" | "user_corrected" | "source_confirmed" | "quarantined" | string;
@@ -77,6 +84,58 @@ export interface LabResult {
   _trust?: TrustMetadata;
 }
 
+export interface Diagnosis {
+  name: string;
+  code: string | null;
+  status: "active" | "confirmed" | "suspected" | "history" | "resolved" | "unknown";
+  onset_date: string | null;
+  confidence: number;
+  evidence?: EvidenceRegion[];
+  _trust?: TrustMetadata;
+}
+
+export interface Symptom {
+  name: string;
+  severity: "mild" | "moderate" | "severe" | "unknown";
+  status: "current" | "resolved" | "intermittent" | "historical" | "unknown";
+  onset_date: string | null;
+  confidence: number;
+  evidence?: EvidenceRegion[];
+  _trust?: TrustMetadata;
+}
+
+export interface Procedure {
+  name: string;
+  procedure_date: string | null;
+  body_site: string | null;
+  status: "completed" | "planned" | "cancelled" | "historical" | "unknown";
+  outcome: string | null;
+  confidence: number;
+  evidence?: EvidenceRegion[];
+  _trust?: TrustMetadata;
+}
+
+export interface VitalSign {
+  name: string;
+  value: string;
+  unit: string | null;
+  measured_at: string | null;
+  confidence: number;
+  evidence?: EvidenceRegion[];
+  _trust?: TrustMetadata;
+}
+
+export interface ImagingResult {
+  study_type: string;
+  body_site: string | null;
+  study_date: string | null;
+  findings: string;
+  impression: string | null;
+  confidence: number;
+  evidence?: EvidenceRegion[];
+  _trust?: TrustMetadata;
+}
+
 export interface DocumentSource {
   file: string;
   method: "text_layer" | "vision_ocr";
@@ -92,6 +151,11 @@ export interface Visit {
   patient_name: string | null;
   medications: Medication[];
   lab_results: LabResult[];
+  diagnoses: Diagnosis[];
+  symptoms: Symptom[];
+  procedures: Procedure[];
+  vital_signs: VitalSign[];
+  imaging_results: ImagingResult[];
   allergies_noted: string[];
   diagnoses_or_conditions?: string[];
   clinical_notes: string | null;
@@ -129,12 +193,22 @@ export interface LabResultTimelineEntry extends LabResult {
   source_page?: number | null;
 }
 
-export interface DiagnosisTimelineEntry {
-  name: string;
+export interface ClinicalTimelineProvenance {
   date: string | null;
+  document_date: string | null;
   source_file: string | null;
   source_page?: number | null;
+  source_method?: DocumentSource["method"];
+  document_id: string;
+  fact_path: string;
+  document_type: DocumentType;
 }
+
+export type DiagnosisTimelineEntry = Diagnosis & ClinicalTimelineProvenance;
+export type SymptomTimelineEntry = Symptom & ClinicalTimelineProvenance;
+export type ProcedureTimelineEntry = Procedure & ClinicalTimelineProvenance;
+export type VitalSignTimelineEntry = VitalSign & ClinicalTimelineProvenance;
+export type ImagingResultTimelineEntry = ImagingResult & ClinicalTimelineProvenance;
 
 export interface TrustSummary {
   unresolved_conflicts: number;
@@ -177,6 +251,10 @@ export interface Timeline {
   medications_timeline: MedicationTimelineEntry[];
   lab_results_timeline: LabResultTimelineEntry[];
   diagnoses_timeline?: DiagnosisTimelineEntry[];
+  symptoms_timeline?: SymptomTimelineEntry[];
+  procedures_timeline?: ProcedureTimelineEntry[];
+  vital_signs_timeline?: VitalSignTimelineEntry[];
+  imaging_results_timeline?: ImagingResultTimelineEntry[];
   known_allergies: string[];
   allergy_evidence?: Array<{
     allergy: string;

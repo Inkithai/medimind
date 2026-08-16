@@ -105,6 +105,12 @@ export function DocumentsPage() {
                 <div className="space-y-2">
                   {documentVisits.map((visit, idx) => {
                     const isSelected = selected?._document_id === visit._document_id;
+                    const clinicalCount =
+                      (visit.diagnoses?.length || 0) +
+                      (visit.symptoms?.length || 0) +
+                      (visit.procedures?.length || 0) +
+                      (visit.vital_signs?.length || 0) +
+                      (visit.imaging_results?.length || 0);
                     return (
                       <button
                         type="button"
@@ -138,7 +144,7 @@ export function DocumentsPage() {
                           )}
                         </div>
 
-                        <div className="mt-2 flex gap-1.5">
+                        <div className="mt-2 flex flex-wrap gap-1.5">
                           {visit.medications.length > 0 && (
                             <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">
                               {visit.medications.length} meds
@@ -147,6 +153,11 @@ export function DocumentsPage() {
                           {visit.lab_results.length > 0 && (
                             <span className="rounded-full bg-sky-50 px-2 py-0.5 text-[11px] text-sky-700 ring-1 ring-sky-200">
                               {visit.lab_results.length} labs
+                            </span>
+                          )}
+                          {clinicalCount > 0 && (
+                            <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-[11px] text-indigo-700 ring-1 ring-indigo-200">
+                              {clinicalCount} clinical events
                             </span>
                           )}
                           {visit.allergies_noted.length > 0 && (

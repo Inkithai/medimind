@@ -17,7 +17,8 @@ MediMind converts your private medical files into something you can actually nav
    patient_snapshots                    │
         └───────┬───────────────────────┘
                 |
-            Timeline (visits, meds, labs, allergies)
+            Timeline (visits, diagnoses, symptoms, procedures,
+                      vitals, imaging, meds, labs, allergies)
                 |
      ┌──────────┼──────────┐
      │          │          │
@@ -51,6 +52,7 @@ Vision+text use the same Gemini model; Groq needs two. All three are OpenAI-comp
 | `change_detection.py` / `record_integrity.py` | Deterministic longitudinal change detection and source-linked cross-document discrepancy checks |
 | `appointment_prep.py` / `follow_up.py` | Printable clinician handoff plus a stable, grounded follow-up queue without inferred clinical deadlines |
 | `record_trust.py` | Immutable correction replay, deterministic conflict detection, authoritative-source state merge, and fail-closed fact/document quarantine |
+| `clinical_events.py` | Shared contracts for diagnoses, symptoms, procedures, vital signs, and imaging rollups, correction fields, dates, and evidence-search fallbacks |
 | `evidence.py` | Normalizes page/quote/box provenance, remaps vision coordinates, preserves stable evidence IDs, and uses deterministic PyMuPDF search for exact digital-PDF rectangles |
 | `retrieval.py` | Chunks only trusted timelines into source-linked medication, lab, diagnosis, note, and allergy evidence; carries source regions through `vector_store`; then runs intent-routed Q&A with injection resistance, evidence-sufficiency gates, stale-index repair, exact citation validation, and confidence caps |
 | `vector_store.py` | Abstraction over Chroma (`VECTOR_STORE=chroma`, local `CHROMA_DIR`) and Supabase `chunks` table (`VECTOR_STORE=supabase`, no volume, brute-force cosine) |
@@ -147,11 +149,11 @@ Base URL `http://127.0.0.1:8000`, all routes under `/api/v1/`.
 Zero-login anonymous model:
 
 - **Landing** `/` — hero, anonymous session explanation, Start My Health Record → auto-creates workspace via `POST /anonymous/session` (token stored in `localStorage.medimind.session.v1`).
-- **Overview / Dashboard** `/dashboard` — documents / medicines / labs / safety counts, latest safety warnings, recent history, pipeline hint.
+- **Overview / Dashboard** `/dashboard` — documents / clinical events / medicines / labs / safety counts, latest safety warnings, recent history, pipeline hint.
 - **Upload** `/upload` — drag-drop and dedup (`name-size-lastModified`); shows each document's independent queue/read/extract/save state, then clearly separates the one-time record finalization steps (history → safety → search).
 - **My Documents** `/documents` — original and structured extraction plus **Correct & Audit**. “View evidence” beside dates, identities, medicines, labs, allergies, and notes opens the cited page and draws the saved region when exact geometry exists. Corrections are append-only and preserve every original/before/after value.
 - **Trust Review** `/review` — quarantines conflicting evidence, records an authoritative source decision, supports reopening, and rebuilds all derived views.
-- **My History** `/history` — year-grouped timeline (2026 → Jul 20 🧪 Blood Test etc.) + full `TimelineView`.
+- **My History** `/history` — event-date-specific longitudinal diagnoses, symptoms, procedures, vital signs, and imaging with evidence deep links, plus the year-grouped source-document timeline and full `TimelineView`.
 - **My Medicines** `/medicines` — current per ingredient (most recent) + historical log table, filterable, source file traceable (now fixed to original filename, not temp sanitized path).
 - **Test Results / Lab Trends** `/labs` — per-test direction, flag sequence, crossing / recovery badge (green when the latest reading is back to normal), approaching-threshold, SVG sparkline with reference band. Thousands-aware values; mixed units (`mg/dL` vs `mmol/L`) are declined rather than trended.
 - **Safety** `/safety` — allergy conflicts (danger), interactions with severity, dosage conflicts, duplicates, overall recommendation.
@@ -191,6 +193,12 @@ Every supported extracted fact carries one or more evidence regions with a stabl
 - Corrections and conflict decisions annotate the linked source region while preserving original extraction provenance. Retrieval metadata and Q&A citations carry the same evidence ID, quote, page, and box.
 
 Cloudinary PDF page conversion is used for in-app overlays when available. If transformed preview delivery is unavailable, the viewer falls back to the original PDF page and saved quote without pretending that an exact overlay was rendered.
+
+#### Longitudinal clinical events
+
+The extraction contract also returns separate `diagnoses`, `symptoms`, `procedures`, `vital_signs`, and `imaging_results` arrays. Every item has its own confidence and evidence, plus an event-specific date where the source prints one. The timeline exposes corresponding chronological rollups (`diagnoses_timeline`, `symptoms_timeline`, `procedures_timeline`, `vital_signs_timeline`, and `imaging_results_timeline`) with document date, event date, source page, document ID, and correction path.
+
+These fields remain documentary: MediMind does not infer a diagnosis from medication, symptoms, labs, vitals, or imaging. Values and units are retained as printed until a separately validated terminology/unit-normalization layer is available. Explicitly conflicting vital measurements at the same recorded time are quarantined for source review, while undated serial observations are not treated as contradictions.
 
 #### Run frontend
 

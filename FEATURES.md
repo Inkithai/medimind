@@ -6,6 +6,8 @@
 - Multilingual document extraction (Tamil/Arabic/etc., INN normalization)
 - Non-medical document filter (early rejection before LLM/Chroma)
 - Patient timeline + longitudinal lab trends (threshold approach detection)
+- Evidence-linked longitudinal diagnoses, symptoms, procedures, vital signs, and imaging results
+- Event-specific chronology that separates a historical event date from the source document date
 - “What Changed?” comparison across consecutive records, with before/after values and source evidence
 - Conservative medication change semantics: newly documented is never mislabeled as started, and omission is never treated as stopped
 - Appointment Prep: printable clinician handoff, prioritized questions, source evidence, and visit checklist
@@ -143,6 +145,19 @@
 - [x] Server-normalize Q&A source locations against retrieved chunks
 - [x] Link Q&A citations and structured facts to the original document highlight
 - [x] Fall back to a quote/page or page-only locator without fabricating a rectangle
+
+## Round 5 (Longitudinal Clinical Events — Added)
+
+- [x] Extract documented diagnoses without inferring them from symptoms, medicines, labs, vitals, or imaging
+- [x] Extract symptoms/signs, procedures, raw vital measurements, and imaging findings/impressions
+- [x] Preserve event-specific dates independently from the enclosing document date
+- [x] Build trusted chronological rollups for all five clinical event classes
+- [x] Attach page-level evidence to every event and deep-link timeline rows to the highlight
+- [x] Index each event as a separate evidence-ranked Q&A chunk
+- [x] Extend append-only correction/audit workflows to all supported event fields
+- [x] Quarantine conflicting vital values at the same explicitly recorded time
+- [x] Keep legacy documents API-compatible with dynamically added empty event arrays
+- [x] Avoid claiming validated terminology or unit normalization; retain source wording and units
 
 ## Round 2 (Care Navigation — Added)
 

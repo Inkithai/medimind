@@ -98,6 +98,26 @@ def test_unresolved_lab_conflict_is_visible_but_absent_from_analytics_and_rag():
     assert summary["quarantined_facts"] == 2
 
 
+def test_quarantined_value_cannot_leak_through_duplicate_free_text():
+    docs = [
+        _doc("doc-a", "lab-a.pdf", labs=[_lab("6.1")]),
+        _doc("doc-b", "lab-b.pdf", labs=[_lab("8.1")]),
+    ]
+    docs[0]["clinical_notes"] = "HbA1c 6.1 percent"
+    docs[1]["clinical_notes"] = "HbA1c 8.1 percent"
+    docs[0]["diagnoses_or_conditions"] = ["HbA1c 6.1 percent"]
+    docs[1]["diagnoses_or_conditions"] = ["HbA1c 8.1 percent"]
+
+    quarantined, _ = apply_conflict_quarantine(docs, detect_conflicts(docs))
+    timeline = build_patient_timeline(quarantined)
+    chunks = build_chunks_from_timeline("anon-free-text", timeline)
+    corpus = " ".join(chunk["text"] for chunk in chunks)
+
+    assert "6.1" not in corpus and "8.1" not in corpus
+    assert all(visit["clinical_notes"] is None for visit in timeline["visits"])
+    assert timeline["diagnoses_timeline"] == []
+
+
 def test_resolved_conflict_admits_only_authoritative_source():
     docs = [
         _doc("doc-a", "lab-a.pdf", labs=[_lab("6.1")]),

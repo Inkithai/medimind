@@ -958,7 +958,7 @@ async def _execute_upload_pipeline(
         if chunks_indexed == 0:
             indexed = False
             index_error_code = "no_indexable_content"
-            index_error = "Extraction succeeded but no medications, lab results, clinical notes, diagnoses, or allergies were found to index — Q&A has no documents to search yet."
+            index_error = "Extraction succeeded but no medications, lab results, clinical notes, allergies, diagnoses, symptoms, procedures, vital signs, or imaging results were found to index — Q&A has no documents to search yet."
             logger.warning("upload: user=%s %s", user_id, index_error)
         else:
             logger.info("upload: user=%s re-indexed for Q&A (%d chunk(s))", user_id, chunks_indexed)

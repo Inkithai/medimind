@@ -18,7 +18,10 @@ function displayValue(value: unknown): string {
   if (typeof value === "object") {
     const item = value as Record<string, unknown>;
     if ("test_name" in item) return `${item.test_name}: ${item.value ?? "?"} ${item.unit ?? ""}`.trim();
-    if ("name" in item) return `${item.name}: ${item.dosage ?? ""} ${item.frequency ?? ""}`.trim();
+    if ("study_type" in item) return `${item.study_type}: ${item.impression ?? item.findings ?? ""}`.trim();
+    if ("name" in item && "value" in item) return `${item.name}: ${item.value ?? "?"} ${item.unit ?? ""}`.trim();
+    if ("name" in item && "dosage" in item) return `${item.name}: ${item.dosage ?? ""} ${item.frequency ?? ""}`.trim();
+    if ("name" in item) return `${item.name}: ${item.status ?? item.severity ?? ""}`.trim();
   }
   return JSON.stringify(value);
 }

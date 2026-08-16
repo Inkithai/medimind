@@ -20,6 +20,8 @@ try:
 except ImportError:  # pragma: no cover - older PyMuPDF
     import fitz as pymupdf
 
+from clinical_events import CLINICAL_EVENT_SEARCH_FIELDS
+
 
 FIELD_EVIDENCE_KEYS = (
     "date",
@@ -147,6 +149,12 @@ def normalize_document_evidence(
         )
     document["field_evidence"] = field_evidence
 
+    # Legacy documents predate some structured collections. Normalize them to
+    # empty arrays so every API consumer receives a stable shape.
+    for collection in ("medications", "lab_results", *CLINICAL_EVENT_SEARCH_FIELDS):
+        if not isinstance(document.get(collection), list):
+            document[collection] = []
+
     for index, medication in enumerate(document.get("medications") or []):
         if not isinstance(medication, dict):
             continue
@@ -182,6 +190,21 @@ def normalize_document_evidence(
             default_page=default_page,
             vision=vision,
         )
+
+    for collection, search_fields in CLINICAL_EVENT_SEARCH_FIELDS.items():
+        for index, fact in enumerate(document.get(collection) or []):
+            if not isinstance(fact, dict):
+                continue
+            fallback = " ".join(
+                value for value in (_text(fact.get(field)) for field in search_fields) if value
+            )
+            fact["evidence"] = _normalize_regions(
+                fact.get("evidence"),
+                path=f"/{collection}/{index}",
+                fallback_quote=fallback,
+                default_page=default_page,
+                vision=vision,
+            )
     return document
 
 
@@ -217,6 +240,15 @@ def iter_document_evidence(document: Dict[str, Any]) -> Iterator[Tuple[Dict[str,
         for region in lab.get("evidence") or []:
             if isinstance(region, dict):
                 yield region, [region.get("quote") or "", *fallbacks]
+
+    for collection, search_fields in CLINICAL_EVENT_SEARCH_FIELDS.items():
+        for fact in document.get(collection) or []:
+            if not isinstance(fact, dict):
+                continue
+            fallbacks = [_text(fact.get(field)) for field in search_fields]
+            for region in fact.get("evidence") or []:
+                if isinstance(region, dict):
+                    yield region, [region.get("quote") or "", *fallbacks]
 
 
 def _search_variants(value: str) -> Iterable[str]:

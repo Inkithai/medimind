@@ -20,6 +20,8 @@ import re
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
+from clinical_events import ALL_FACT_COLLECTIONS, CLINICAL_EVENT_CORRECTABLE_FIELDS
+
 
 _CORRECTABLE_ROOT_FIELDS = {"date", "patient_name", "provider_or_doctor"}
 _CORRECTABLE_MEDICATION_FIELDS = {
@@ -29,7 +31,13 @@ _CORRECTABLE_MEDICATION_FIELDS = {
 _CORRECTABLE_LAB_FIELDS = {
     "test_name", "value", "unit", "reference_range", "flag",
 }
-_PATH_RE = re.compile(r"^/(medications|lab_results)/(\d+)/([A-Za-z_][A-Za-z0-9_]*)$")
+_CORRECTABLE_COLLECTION_FIELDS = {
+    "medications": frozenset(_CORRECTABLE_MEDICATION_FIELDS),
+    "lab_results": frozenset(_CORRECTABLE_LAB_FIELDS),
+    **CLINICAL_EVENT_CORRECTABLE_FIELDS,
+}
+_COLLECTION_PATTERN = "|".join(re.escape(value) for value in _CORRECTABLE_COLLECTION_FIELDS)
+_PATH_RE = re.compile(rf"^/({_COLLECTION_PATTERN})/(\d+)/([A-Za-z_][A-Za-z0-9_]*)$")
 
 
 class CorrectionValidationError(ValueError):
@@ -70,10 +78,10 @@ def validate_correction_path(path: str) -> Tuple[str, Optional[int], str]:
     match = _PATH_RE.match(path)
     if not match:
         raise CorrectionValidationError(
-            "Only dates, patient/provider identities, medication fields, and lab fields can be corrected."
+            "Only dates, patient/provider identities, and supported structured clinical fields can be corrected."
         )
     collection, index_text, field = match.groups()
-    allowed = _CORRECTABLE_MEDICATION_FIELDS if collection == "medications" else _CORRECTABLE_LAB_FIELDS
+    allowed = _CORRECTABLE_COLLECTION_FIELDS[collection]
     if field not in allowed:
         raise CorrectionValidationError(f"'{field}' is not a correctable {collection} field.")
     return collection, int(index_text), field
@@ -91,6 +99,17 @@ def _validate_value(collection: str, field: str, value: Any) -> None:
             raise CorrectionValidationError("is_as_needed must be true or false.")
     if collection == "lab_results" and field == "flag" and value not in {"normal", "high", "low", "unknown"}:
         raise CorrectionValidationError("Lab flag must be normal, high, low, or unknown.")
+    enum_fields = {
+        ("diagnoses", "status"): {"active", "confirmed", "suspected", "history", "resolved", "unknown"},
+        ("symptoms", "severity"): {"mild", "moderate", "severe", "unknown"},
+        ("symptoms", "status"): {"current", "resolved", "intermittent", "historical", "unknown"},
+        ("procedures", "status"): {"completed", "planned", "cancelled", "historical", "unknown"},
+    }
+    allowed_values = enum_fields.get((collection, field))
+    if allowed_values is not None and value not in allowed_values:
+        raise CorrectionValidationError(
+            f"{field} must be one of: {', '.join(sorted(allowed_values))}."
+        )
     if field not in {"ingredients", "dosage_value", "frequency_per_day", "is_as_needed"}:
         if value is not None and not isinstance(value, str):
             raise CorrectionValidationError(f"{field} must be text or null.")
@@ -124,8 +143,8 @@ def set_path(document: Dict[str, Any], path: str, value: Any) -> None:
 
 
 def _evidence_for_path(document: Dict[str, Any], path: str) -> List[Dict[str, Any]]:
-    if path.startswith("/medications/") or path.startswith("/lab_results/"):
-        parts = path.strip("/").split("/")
+    parts = path.strip("/").split("/")
+    if parts and parts[0] in ALL_FACT_COLLECTIONS:
         try:
             item = document[parts[0]][int(parts[1])]
         except (KeyError, IndexError, TypeError, ValueError):
@@ -260,12 +279,14 @@ def _stable_conflict_id(kind: str, fact_key: str) -> str:
 
 def _source_item(doc: Dict[str, Any], path: str, value: Any, confidence: Any = None) -> Dict[str, Any]:
     source = doc.get("_source") if isinstance(doc.get("_source"), dict) else {}
+    evidence = value.get("evidence") if isinstance(value, dict) else None
+    region = next((item for item in (evidence or []) if isinstance(item, dict)), {})
     return {
         "document_id": document_id(doc),
         "field_path": path,
         "value": copy.deepcopy(value),
         "source_file": source.get("file") or "unknown",
-        "page": source.get("page"),
+        "page": region.get("page") or source.get("page"),
         "confidence": confidence if isinstance(confidence, (int, float)) else doc.get("overall_confidence"),
     }
 
@@ -336,6 +357,7 @@ def detect_conflicts(documents: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]
 
     medication_groups: Dict[str, List[Tuple[Dict[str, Any], int, Dict[str, Any], Tuple[Any, ...]]]] = {}
     lab_groups: Dict[str, List[Tuple[Dict[str, Any], int, Dict[str, Any], Tuple[Any, ...]]]] = {}
+    vital_groups: Dict[str, List[Tuple[Dict[str, Any], int, Dict[str, Any], Tuple[Any, ...]]]] = {}
     for doc in docs:
         date_key = normalize_text(doc.get("date")) or "undated"
         for index, med in enumerate(doc.get("medications") or []):
@@ -370,6 +392,21 @@ def detect_conflicts(documents: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]
             key = f"{date_key}|{test_key}"
             signature = (normalize_text(lab.get("value")), normalize_text(lab.get("unit")))
             lab_groups.setdefault(key, []).append((doc, index, lab, signature))
+
+        for index, vital in enumerate(doc.get("vital_signs") or []):
+            if not isinstance(vital, dict):
+                continue
+            vital_key = normalize_name(vital.get("name"))
+            if not vital_key:
+                continue
+            measured_key = normalize_text(vital.get("measured_at"))
+            # Without an explicit measurement date/time, two values on the
+            # same document date may be legitimate serial observations.
+            if not measured_key:
+                continue
+            key = f"{measured_key}|{vital_key}"
+            signature = (normalize_text(vital.get("value")), normalize_text(vital.get("unit")))
+            vital_groups.setdefault(key, []).append((doc, index, vital, signature))
 
     for fact_key, group in medication_groups.items():
         source_ids = {document_id(doc) for doc, _index, _med, _signature in group}
@@ -413,6 +450,27 @@ def detect_conflicts(documents: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]
             "resolution_note": None,
         })
 
+    for fact_key, group in vital_groups.items():
+        source_ids = {document_id(doc) for doc, _index, _vital, _signature in group}
+        if len(source_ids) < 2 or not _different_signatures(signature for _d, _i, _v, signature in group):
+            continue
+        vital_label = group[0][2].get("name") or "vital sign"
+        conflicts.append({
+            "conflict_id": _stable_conflict_id("vital_sign", fact_key),
+            "kind": "vital_sign",
+            "field_type": "vital_value",
+            "fact_key": fact_key,
+            "severity": "high",
+            "summary": f"Different values were extracted for {vital_label} at the same recorded time.",
+            "items": [
+                _source_item(doc, f"/vital_signs/{index}", vital, vital.get("confidence"))
+                for doc, index, vital, _signature in group
+            ],
+            "status": "unresolved",
+            "authoritative_document_id": None,
+            "resolution_note": None,
+        })
+
     return sorted(conflicts, key=lambda conflict: (conflict["kind"], conflict["conflict_id"]))
 
 
@@ -440,8 +498,8 @@ def merge_conflict_state(
 def _mark_fact(doc: Dict[str, Any], path: str, conflict: Dict[str, Any], quarantined: bool) -> None:
     conflict_id = str(conflict["conflict_id"])
     reason = conflict.get("summary") or "Conflicting source evidence"
-    if path.startswith("/medications/") or path.startswith("/lab_results/"):
-        parts = path.strip("/").split("/")
+    parts = path.strip("/").split("/")
+    if parts and parts[0] in ALL_FACT_COLLECTIONS:
         try:
             target = doc[parts[0]][int(parts[1])]
         except (KeyError, IndexError, TypeError, ValueError):
@@ -522,7 +580,7 @@ def apply_conflict_quarantine(
     quarantined_documents = sum(bool((doc.get("_trust") or {}).get("quarantined")) for doc in result)
     quarantined_facts = 0
     for doc in result:
-        for collection in ("medications", "lab_results"):
+        for collection in ALL_FACT_COLLECTIONS:
             for fact in doc.get(collection) or []:
                 if isinstance(fact, dict) and (fact.get("_trust") or {}).get("quarantined"):
                     quarantined_facts += 1

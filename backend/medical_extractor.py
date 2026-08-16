@@ -34,6 +34,7 @@ import time
 import base64
 import threading
 from collections import deque
+from datetime import timezone
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple, Callable
 
@@ -52,6 +53,7 @@ from openai import (
 from dotenv import load_dotenv
 import logging
 
+from clinical_events import CLINICAL_EVENT_COLLECTIONS, CLINICAL_EVENT_DATE_FIELDS, CLINICAL_TIMELINE_KEYS
 from evidence import first_evidence, locate_pdf_text_evidence, normalize_document_evidence
 
 load_dotenv(override=True)
@@ -1012,7 +1014,7 @@ def _format_ladder(
         # Compact JSON materially reduces prompt tokens on the 8K TPM tier.
         f"{json.dumps(schema, separators=(',', ':'))}\n"
         "Example of the required shape (illustrative values, adapt to the actual document):\n"
-        '{\n  "document_type": "prescription",\n  "date": "2024-03-15",\n  "provider_or_doctor": "Dr. Smith",\n  "patient_name": "John Doe",\n  "medications": [],\n  "lab_results": [],\n  "allergies_noted": [],\n  "diagnoses_or_conditions": [],\n  "clinical_notes": null,\n  "field_evidence": {"date": [], "provider_or_doctor": [], "patient_name": [], "allergies_noted": [], "clinical_notes": []},\n  "illegible_or_low_confidence_fields": [],\n  "overall_confidence": 0.92\n}\n'
+        '{\n  "document_type": "prescription",\n  "date": "2024-03-15",\n  "provider_or_doctor": "Dr. Smith",\n  "patient_name": "John Doe",\n  "medications": [],\n  "lab_results": [],\n  "diagnoses": [],\n  "symptoms": [],\n  "procedures": [],\n  "vital_signs": [],\n  "imaging_results": [],\n  "allergies_noted": [],\n  "diagnoses_or_conditions": [],\n  "clinical_notes": null,\n  "field_evidence": {"date": [], "provider_or_doctor": [], "patient_name": [], "allergies_noted": [], "clinical_notes": []},\n  "illegible_or_low_confidence_fields": [],\n  "overall_confidence": 0.92\n}\n'
     )
     if model in _STRICT_SCHEMA_MODELS:
         return [
@@ -1724,8 +1726,9 @@ def _parse_json_object(raw: str) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 EXTRACTION_SCHEMA_PROMPT = """
-You are a medical document extraction engine. You will be shown an image of
-a medical document (prescription, lab report, or discharge summary).
+You are a medical document extraction engine. You will be shown an image or
+text from a medical document (prescription, lab or imaging report, discharge
+summary, consultation note, or procedure report).
 
 **CRITICAL INSTRUCTION — FOLLOW EXACTLY:**
 - Output **ONLY** a single valid JSON object. Nothing else.
@@ -1792,9 +1795,30 @@ the same regardless of what language or units each was printed in:
   into the medication's confidence the same way an inferred brand-to-
   generic mapping is.
 
+LONGITUDINAL CLINICAL EVENTS — extract only what the document explicitly
+states, preserving separate event dates when printed:
+- `diagnoses`: documented problem-list/assessment diagnoses only. Never infer
+  a diagnosis from symptoms, medication, labs, or imaging. `status` describes
+  how the source presents it: confirmed, suspected, history, resolved, or
+  unknown. Keep any printed ICD/code in `code`; otherwise null.
+- `symptoms`: patient-reported symptoms or documented signs. Do not turn a
+  symptom into a diagnosis. Use only printed severity/status information.
+- `procedures`: completed, planned, cancelled, or historical operations,
+  interventions, therapies, or bedside procedures. Keep outcome/body site
+  only when documented.
+- `vital_signs`: one object per printed measurement (blood pressure, pulse,
+  temperature, respiratory rate, oxygen saturation, height, weight, BMI,
+  etc.). Keep `value` exactly as printed and never guess or convert a unit.
+- `imaging_results`: one object per radiology/imaging study. Keep the study,
+  body site, findings, and impression as documented; never promote an imaging
+  finding into a diagnosis.
+- Use null for an event-specific date when the document does not print one;
+  the timeline will fall back to the enclosing document date.
+
 PAGE-LEVEL EVIDENCE — every extracted fact must point back to the document:
 - Include a short VERBATIM quote for every date, identity, provider, allergy,
-  clinical note, medication, and lab result. Never paraphrase the quote.
+  clinical note, medication, lab result, diagnosis, symptom, procedure, vital
+  sign, and imaging result. Never paraphrase the quote.
 - `page` is 1-based. Text PDFs contain explicit `--- Page N ---` markers;
   use that N. For a single image use page 1.
 - For image input, return `bbox` as [left, top, right, bottom] in a 0..1000
@@ -1812,7 +1836,7 @@ Rules:
 - If handwriting is unclear, make your best guess but LOWER the confidence
   score for that field and add a note to illegible_or_low_confidence_fields.
 - Never invent data. Use null for missing string fields (per the schema).
-- Do not provide medical advice or diagnosis — extraction only.
+- Do not provide medical advice or infer a new diagnosis — extraction of documented facts only.
 """
 
 # One supporting region. Vision returns 0..1000 coordinates which are
@@ -1840,6 +1864,96 @@ EVIDENCE_LIST_JSON_SCHEMA = {
     "items": EVIDENCE_REGION_JSON_SCHEMA,
 }
 
+# Longitudinal events must be explicitly documented, so accepting an event
+# without at least one source locator would violate the record's trust model.
+CLINICAL_EVIDENCE_LIST_JSON_SCHEMA = {
+    **EVIDENCE_LIST_JSON_SCHEMA,
+    "minItems": 1,
+}
+
+DIAGNOSIS_JSON_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "name": {"type": "string"},
+        "code": {"type": ["string", "null"]},
+        "status": {
+            "type": "string",
+            "enum": ["active", "confirmed", "suspected", "history", "resolved", "unknown"],
+        },
+        "onset_date": {"type": ["string", "null"]},
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        "evidence": CLINICAL_EVIDENCE_LIST_JSON_SCHEMA,
+    },
+    "required": ["name", "code", "status", "onset_date", "confidence", "evidence"],
+    "additionalProperties": False,
+}
+
+SYMPTOM_JSON_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "name": {"type": "string"},
+        "severity": {"type": "string", "enum": ["mild", "moderate", "severe", "unknown"]},
+        "status": {
+            "type": "string",
+            "enum": ["current", "resolved", "intermittent", "historical", "unknown"],
+        },
+        "onset_date": {"type": ["string", "null"]},
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        "evidence": CLINICAL_EVIDENCE_LIST_JSON_SCHEMA,
+    },
+    "required": ["name", "severity", "status", "onset_date", "confidence", "evidence"],
+    "additionalProperties": False,
+}
+
+PROCEDURE_JSON_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "name": {"type": "string"},
+        "procedure_date": {"type": ["string", "null"]},
+        "body_site": {"type": ["string", "null"]},
+        "status": {
+            "type": "string",
+            "enum": ["completed", "planned", "cancelled", "historical", "unknown"],
+        },
+        "outcome": {"type": ["string", "null"]},
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        "evidence": CLINICAL_EVIDENCE_LIST_JSON_SCHEMA,
+    },
+    "required": ["name", "procedure_date", "body_site", "status", "outcome", "confidence", "evidence"],
+    "additionalProperties": False,
+}
+
+VITAL_SIGN_JSON_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "name": {"type": "string"},
+        "value": {"type": "string"},
+        "unit": {"type": ["string", "null"]},
+        "measured_at": {"type": ["string", "null"]},
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        "evidence": CLINICAL_EVIDENCE_LIST_JSON_SCHEMA,
+    },
+    "required": ["name", "value", "unit", "measured_at", "confidence", "evidence"],
+    "additionalProperties": False,
+}
+
+IMAGING_RESULT_JSON_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "study_type": {"type": "string"},
+        "body_site": {"type": ["string", "null"]},
+        "study_date": {"type": ["string", "null"]},
+        "findings": {"type": "string"},
+        "impression": {"type": ["string", "null"]},
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        "evidence": CLINICAL_EVIDENCE_LIST_JSON_SCHEMA,
+    },
+    "required": [
+        "study_type", "body_site", "study_date", "findings", "impression", "confidence", "evidence",
+    ],
+    "additionalProperties": False,
+}
+
 # Strict JSON Schema (OpenAI Structured Outputs) — guarantees every field,
 # including evidence links, is always present in the response.
 EXTRACTION_JSON_SCHEMA = {
@@ -1847,7 +1961,10 @@ EXTRACTION_JSON_SCHEMA = {
     "properties": {
         "document_type": {
             "type": "string",
-            "enum": ["prescription", "lab_report", "discharge_summary", "other"],
+            "enum": [
+                "prescription", "lab_report", "discharge_summary", "imaging_report",
+                "consultation_note", "procedure_report", "other",
+            ],
         },
         "date": {"type": ["string", "null"]},
         "provider_or_doctor": {"type": ["string", "null"]},
@@ -1894,6 +2011,11 @@ EXTRACTION_JSON_SCHEMA = {
                 "additionalProperties": False,
             },
         },
+        "diagnoses": {"type": "array", "items": DIAGNOSIS_JSON_SCHEMA},
+        "symptoms": {"type": "array", "items": SYMPTOM_JSON_SCHEMA},
+        "procedures": {"type": "array", "items": PROCEDURE_JSON_SCHEMA},
+        "vital_signs": {"type": "array", "items": VITAL_SIGN_JSON_SCHEMA},
+        "imaging_results": {"type": "array", "items": IMAGING_RESULT_JSON_SCHEMA},
         "allergies_noted": {"type": "array", "items": {"type": "string"}},
         "diagnoses_or_conditions": {"type": "array", "items": {"type": "string"}},
         "clinical_notes": {"type": ["string", "null"]},
@@ -1917,7 +2039,8 @@ EXTRACTION_JSON_SCHEMA = {
     },
     "required": [
         "document_type", "date", "provider_or_doctor", "patient_name",
-        "medications", "lab_results", "allergies_noted", "diagnoses_or_conditions",
+        "medications", "lab_results", "diagnoses", "symptoms", "procedures",
+        "vital_signs", "imaging_results", "allergies_noted", "diagnoses_or_conditions",
         "clinical_notes", "field_evidence", "illegible_or_low_confidence_fields", "overall_confidence",
     ],
     "additionalProperties": False,
@@ -2105,12 +2228,10 @@ def _apply_confidence_ceiling(result: Dict[str, Any], ceiling: float) -> Dict[st
     """
     if "overall_confidence" in result and isinstance(result["overall_confidence"], (int, float)):
         result["overall_confidence"] = min(result["overall_confidence"], ceiling)
-    for med in result.get("medications", []) or []:
-        if isinstance(med.get("confidence"), (int, float)):
-            med["confidence"] = min(med["confidence"], ceiling)
-    for lab in result.get("lab_results", []) or []:
-        if isinstance(lab.get("confidence"), (int, float)):
-            lab["confidence"] = min(lab["confidence"], ceiling)
+    for collection in ("medications", "lab_results", *CLINICAL_EVENT_COLLECTIONS):
+        for fact in result.get(collection, []) or []:
+            if isinstance(fact, dict) and isinstance(fact.get("confidence"), (int, float)):
+                fact["confidence"] = min(fact["confidence"], ceiling)
     return result
 
 
@@ -2148,8 +2269,9 @@ def looks_like_medical_text(text: str, filename: str) -> bool:
         "prescription", "rx", "medication", "medicine", "drug", "tablet", "capsule",
         "dosage", "dose", "frequency", "mg", "g", "ml", "lab", "laboratory", "report",
         "test", "results", "analysis", "allergy", "allergies", "clinical", "hospital",
-        "clinic", "treatment", "diagnosis", "discharge", "summary", "patient", "doctor",
-        "physician"
+        "clinic", "treatment", "diagnosis", "symptom", "procedure", "surgery", "discharge",
+        "summary", "patient", "doctor", "physician", "imaging", "radiology", "x-ray", "ultrasound",
+        "blood pressure", "pulse", "temperature", "oxygen saturation"
     ]
     medical_matches = 0
     for kw in medical_keywords:
@@ -2551,7 +2673,12 @@ def _parse_timeline_date(date_str: Optional[str]):
         return None
     try:
         from dateutil import parser as _date_parser
-        return _date_parser.parse(date_str, fuzzy=True)
+        parsed = _date_parser.parse(date_str, fuzzy=True)
+        # Extracted event dates may mix date-only values with ISO timestamps.
+        # Normalize aware values to UTC-naive so Python can sort both safely.
+        if parsed.tzinfo is not None:
+            parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+        return parsed
     except Exception:
         return None
 
@@ -2560,8 +2687,8 @@ def build_patient_timeline(raw_results: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
     Merge extracted documents (output of process_document, one per file) into
     a single chronological patient timeline: one entry per visit/document,
-    sorted by date, plus flattened rollups of all medications and lab
-    results for easy downstream cross-checking.
+    sorted by date, plus flattened evidence-linked rollups of medications,
+    labs, diagnoses, symptoms, procedures, vital signs, and imaging results.
 
     NOTE: assumes all documents passed in already belong to ONE patient.
     Use group_documents_by_patient() first if a batch might mix patients
@@ -2581,7 +2708,9 @@ def build_patient_timeline(raw_results: List[Dict[str, Any]]) -> Dict[str, Any]:
 
     all_medications = []
     all_lab_results = []
-    all_diagnoses = []
+    clinical_rollups: Dict[str, List[Dict[str, Any]]] = {
+        timeline_key: [] for timeline_key in CLINICAL_TIMELINE_KEYS.values()
+    }
     all_allergies = set()
     allergy_evidence = []
     trusted_visits = []
@@ -2596,11 +2725,23 @@ def build_patient_timeline(raw_results: List[Dict[str, Any]]) -> Dict[str, Any]:
             continue
 
         safe_visit = copy.deepcopy(d)
-        for collection in ("medications", "lab_results"):
+        fact_collections = ("medications", "lab_results", *CLINICAL_EVENT_COLLECTIONS)
+        has_quarantined_fact = any(
+            isinstance(fact, dict) and (fact.get("_trust") or {}).get("quarantined")
+            for collection in fact_collections
+            for fact in safe_visit.get(collection, []) or []
+        )
+        for collection in fact_collections:
             safe_visit[collection] = [
                 fact for fact in safe_visit.get(collection, [])
                 if isinstance(fact, dict) and not (fact.get("_trust") or {}).get("quarantined")
             ]
+        if has_quarantined_fact:
+            # Notes and legacy diagnosis strings are unstructured mirrors of
+            # extracted facts. If a competing fact is quarantined, retaining
+            # the same value here would leak it back into RAG and analytics.
+            safe_visit["clinical_notes"] = None
+            safe_visit["diagnoses_or_conditions"] = []
         trusted_visits.append(safe_visit)
 
         for index, med in enumerate(d.get("medications", [])):
@@ -2633,14 +2774,43 @@ def build_patient_timeline(raw_results: List[Dict[str, Any]]) -> Dict[str, Any]:
                 "document_type": d.get("document_type"),
             })
 
-        for diagnosis in d.get("diagnoses_or_conditions", []) or []:
+        # Legacy generic diagnoses remain available as low-detail events.
+        for index, diagnosis in enumerate((d.get("diagnoses_or_conditions", []) or []) if not has_quarantined_fact else []):
             if isinstance(diagnosis, str) and diagnosis.strip():
-                all_diagnoses.append({
+                clinical_rollups["diagnoses_timeline"].append({
                     "name": diagnosis.strip(),
-                    "date": visit_date,
+                    # The enclosing document date is provenance, not an
+                    # explicitly documented diagnosis/onset date.
+                    "date": None,
+                    "document_date": visit_date,
                     "source_file": source_file,
                     "source_page": source_page,
+                    "source_method": source.get("method"),
                     "document_id": doc_id,
+                    "fact_path": f"/diagnoses_or_conditions/{index}",
+                    "document_type": d.get("document_type"),
+                })
+
+        for collection in CLINICAL_EVENT_COLLECTIONS:
+            timeline_key = CLINICAL_TIMELINE_KEYS[collection]
+            event_date_field = CLINICAL_EVENT_DATE_FIELDS[collection]
+            for index, fact in enumerate(d.get(collection, [])):
+                if not isinstance(fact, dict) or (fact.get("_trust") or {}).get("quarantined"):
+                    continue
+                fact_evidence = first_evidence(fact) or {}
+                clinical_rollups[timeline_key].append({
+                    **fact,
+                    # Never relabel the enclosing document date as the event
+                    # date. Undated facts remain undated and retain the source
+                    # date separately for provenance.
+                    "date": fact.get(event_date_field) or None,
+                    "document_date": visit_date,
+                    "source_file": source_file,
+                    "source_page": fact_evidence.get("page") or source.get("page"),
+                    "source_method": source.get("method"),
+                    "document_id": doc_id,
+                    "fact_path": f"/{collection}/{index}",
+                    "document_type": d.get("document_type"),
                 })
 
         allergy_regions = (d.get("field_evidence") or {}).get("allergies_noted") or []
@@ -2658,12 +2828,21 @@ def build_patient_timeline(raw_results: List[Dict[str, Any]]) -> Dict[str, Any]:
                 "_trust": copy.deepcopy(d.get("_trust")),
             })
 
+    # Event-specific dates (for example a historical procedure date printed
+    # in a recent discharge summary) can differ from the enclosing document
+    # date, so sort every clinical rollup independently.
+    for values in clinical_rollups.values():
+        values.sort(key=lambda item: (
+            _parse_timeline_date(item.get("date")) is None,
+            _parse_timeline_date(item.get("date")) or item.get("date") or "9999-99-99",
+        ))
+
     return {
         "visits": trusted_visits,
         "documents": docs_sorted,
         "medications_timeline": all_medications,
         "lab_results_timeline": all_lab_results,
-        "diagnoses_timeline": all_diagnoses,
+        **clinical_rollups,
         "known_allergies": sorted(all_allergies),
         "allergy_evidence": allergy_evidence,
     }
