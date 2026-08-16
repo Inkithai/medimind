@@ -1,251 +1,625 @@
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import type { ReactNode } from "react";
+import { Figure, Flow, Node, TechChip } from "../components/about/Diagram";
 import {
   AppointmentIcon,
   BeakerIcon,
   ChangesIcon,
   ChatIcon,
+  CheckIcon,
   FileIcon,
-  InfoIcon,
   IntegrityIcon,
   LocationIcon,
+  PillIcon,
   ReminderIcon,
   ShieldIcon,
-  SparkleIcon,
-  UploadIcon,
 } from "../components/icons";
-import { useAuth } from "../context/AuthContext";
+import { useI18n } from "../i18n/I18nContext";
+import { classNames } from "../utils/format";
 
-const CAPABILITIES = [
-  {
-    title: "Build a clinical memory",
-    description: "Upload prescriptions, laboratory reports, and discharge summaries. MediMind extracts structured visits, medicines, tests, allergies, and notes into one patient-scoped timeline.",
-    icon: UploadIcon,
-    tone: "bg-sky-50 text-sky-700",
-    items: ["PDF and image extraction", "Medical relevance checks", "Multilingual medicine normalization"],
-    to: "/documents",
-  },
-  {
-    title: "Understand change over time",
-    description: "Deterministic engines compare dated records and laboratory values without asking a language model to calculate the trend.",
-    icon: ChangesIcon,
-    tone: "bg-indigo-50 text-indigo-700",
-    items: ["Lab direction and range crossings", "Before-and-after record changes", "Conservative medication wording"],
-    to: "/changes",
-  },
-  {
-    title: "Verify before trusting",
-    description: "Record Integrity shows possible identity, allergy, same-date lab, and medication-instruction discrepancies side by side instead of silently selecting a winner.",
-    icon: IntegrityIcon,
-    tone: "bg-orange-50 text-orange-700",
-    items: ["Both source records shown", "Specific verification guidance", "No automatic clinical correction"],
-    to: "/record-integrity",
-  },
-  {
-    title: "Review medication safety",
-    description: "MediMind compares medication history and documented allergies to surface potential interactions, duplicate prescriptions, conflicting instructions, and allergy conflicts for professional review.",
-    icon: ShieldIcon,
-    tone: "bg-amber-50 text-amber-700",
-    items: ["Interaction severity", "Duplicate and dosage checks", "Professional-review guardrails"],
-    to: "/safety",
-  },
-  {
-    title: "Ask with evidence",
-    description: "Questions are routed to matching record categories. MediMind checks evidence coverage, validates returned citations, and lowers confidence when the available support is limited.",
-    icon: ChatIcon,
-    tone: "bg-brand-50 text-brand-700",
-    items: ["Patient-scoped retrieval", "Intent-aware evidence selection", "Citation validation and confidence caps"],
-    to: "/ask",
-  },
-  {
-    title: "Prepare to act",
-    description: "Appointment Prep turns safety findings, trends, and recent changes into a printable handoff and prioritized questions for a clinician.",
-    icon: AppointmentIcon,
-    tone: "bg-cyan-50 text-cyan-800",
-    items: ["Latest documented medication list", "Record-backed clinician questions", "Printable visit checklist"],
-    to: "/appointment-prep",
-  },
-  {
-    title: "Keep track of follow-up",
-    description: "The Action Center combines findings into one queue. You choose reminder dates, track completion locally, and can export reminders to a calendar.",
-    icon: ReminderIcon,
-    tone: "bg-fuchsia-50 text-fuchsia-700",
-    items: ["Stable grounded tasks", "Browser-only task state", "No invented clinical deadlines"],
-    to: "/follow-up",
-  },
-  {
-    title: "Navigate nearby care",
-    description: "Record-derived specialty suggestions connect to a provider-neutral public directory with location search, map confirmation, and nearby facility details.",
-    icon: LocationIcon,
-    tone: "bg-rose-50 text-rose-700",
-    items: ["Specialty relevance from records", "Coordinate-based nearby search", "Public listing—not clinical referral"],
-    to: "/find-care",
-  },
-];
-
-const ROADMAP = [
-  {
-    priority: "Next",
-    title: "Persistent correction and conflict resolution",
-    description: "Let a patient or clinician correct an extraction, choose the verified source, preserve an audit trail, and rebuild snapshots and the retrieval index safely.",
-  },
-  {
-    priority: "Next",
-    title: "Conflict-aware retrieval quarantine",
-    description: "Prevent unresolved identity or fact discrepancies from being treated as settled evidence in trends and Q&A—not merely display a warning after ingestion.",
-  },
-  {
-    priority: "Next",
-    title: "Page-level evidence highlighting",
-    description: "Map every extracted fact and answer claim to a document page and highlighted region, with source-quality and provenance details.",
-  },
-  {
-    priority: "Then",
-    title: "Broader longitudinal clinical entities",
-    description: "Track diagnoses, symptoms, procedures, vitals, and imaging findings with validated terminology and unit normalization—not just medicines and labs.",
-  },
-  {
-    priority: "Then",
-    title: "Secure export, deletion, and clinician sharing",
-    description: "Add full data export, server-side deletion and retention controls, plus a consented, time-limited handoff link for a healthcare professional.",
-  },
-  {
-    priority: "Later",
-    title: "Delivered reminders and care coordination",
-    description: "Optional push/email reminders, verified provider availability, and appointment handoff workflows. Current reminders are browser-managed calendar events only.",
-  },
-];
-
+/**
+ * About / technical overview.
+ *
+ * Reachable from the sidebar footer, deliberately outside the nine
+ * patient-workflow items. Every visible string comes from the `about.*`
+ * i18n namespace (en/si/ta), so this file holds layout only.
+ *
+ * Content is verified against the repository — endpoints against
+ * backend/api.py, pipeline stages against medical_extractor.py and
+ * retrieval.py. A backend test asserts the documented routes exist.
+ */
 export function AboutPage() {
-  const { isConfigured } = useAuth();
+  const { t } = useI18n();
+
+  const sections = [
+    { id: "overview", title: t("about.overviewTitle") },
+    { id: "features", title: t("about.featuresTitle") },
+    { id: "architecture", title: t("about.archTitle") },
+    { id: "pipeline", title: t("about.pipeTitle") },
+    { id: "data-flow", title: t("about.flowTitle") },
+    { id: "security", title: t("about.secTitle") },
+    { id: "api", title: t("about.apiTitle") },
+  ];
+  const activeId = useActiveSection(sections.map((section) => section.id));
 
   return (
-    <div className="space-y-10 pb-10">
-      <section className="relative overflow-hidden rounded-3xl border border-brand-100 bg-gradient-to-br from-brand-900 via-brand-800 to-slate-900 px-6 py-10 text-white shadow-xl sm:px-10 sm:py-14">
-        <div className="absolute -right-20 -top-24 h-72 w-72 rounded-full bg-cyan-400/10 blur-3xl" />
-        <div className="absolute -bottom-32 left-1/3 h-72 w-72 rounded-full bg-brand-300/10 blur-3xl" />
-        <div className="relative max-w-3xl">
-          <div className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1.5 text-xs font-bold uppercase tracking-[0.12em] text-brand-50">
-            <InfoIcon className="h-4 w-4" /> About MediMind
-          </div>
-          <h1 className="mt-5 text-4xl font-bold leading-tight tracking-tight sm:text-5xl">
-            A continuously understandable clinical memory—grounded in your records.
-          </h1>
-          <p className="mt-5 max-w-2xl text-lg leading-relaxed text-brand-50/85">
-            MediMind does more than read one report. It assembles a longitudinal patient record, computes changes with deterministic engines, retrieves patient-scoped evidence, and helps turn findings into safer conversations and next steps.
-          </p>
-          <div className="mt-7 flex flex-wrap gap-3">
-            {isConfigured ? (
-              <Link to="/dashboard" className="btn bg-white text-brand-800 hover:bg-brand-50">Open my workspace →</Link>
-            ) : (
-              <Link to="/" className="btn bg-white text-brand-800 hover:bg-brand-50">Start a private workspace →</Link>
-            )}
-            <a href="#how-it-works" className="btn border border-white/25 bg-white/5 text-white hover:bg-white/10">How it works</a>
-          </div>
+    <div className="space-y-8">
+      <header>
+        <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-brand-200 bg-brand-50 px-3 py-1 text-xs font-bold uppercase tracking-wider text-brand-700">
+          <InfoIcon className="h-3.5 w-3.5" /> {t("about.eyebrow")}
         </div>
-      </section>
+        <h1 className="page-title">{t("about.title")}</h1>
+        <p className="mt-3 max-w-3xl text-base leading-relaxed text-slate-600">
+          {t("about.lede")}
+        </p>
+        <Link to="/dashboard" className="btn-secondary mt-5 inline-flex">
+          {t("about.backToDashboard")}
+        </Link>
+      </header>
 
-      <section>
-        <SectionHeading eyebrow="Available now" title="What has been built" description="The current product spans understanding, verification, evidence-grounded answers, and action—not just document summarization." />
-        <div className="mt-6 grid gap-5 md:grid-cols-2 xl:grid-cols-3">
-          {CAPABILITIES.map((capability) => {
-            const Icon = capability.icon;
-            const content = (
-              <>
-                <div className={`flex h-11 w-11 items-center justify-center rounded-xl ${capability.tone}`}><Icon className="h-5 w-5" /></div>
-                <h3 className="mt-4 text-lg font-bold text-slate-900">{capability.title}</h3>
-                <p className="mt-2 text-sm leading-relaxed text-slate-600">{capability.description}</p>
-                <ul className="mt-4 space-y-2">
-                  {capability.items.map((item) => <li key={item} className="flex items-start gap-2 text-xs leading-relaxed text-slate-500"><span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-brand-500" />{item}</li>)}
-                </ul>
-                {isConfigured && <p className="mt-5 text-sm font-semibold text-brand-700">Explore feature →</p>}
-              </>
-            );
-            return isConfigured ? (
-              <Link key={capability.title} to={capability.to} className="group rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-md">{content}</Link>
-            ) : (
-              <article key={capability.title} className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">{content}</article>
-            );
-          })}
-        </div>
-      </section>
+      <div className="lg:grid lg:grid-cols-[15rem_minmax(0,1fr)] lg:gap-10">
+        <TableOfContents sections={sections} activeId={activeId} label={t("about.onThisPage")} />
 
-      <section id="how-it-works" className="scroll-mt-8 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
-        <SectionHeading eyebrow="Hybrid architecture" title="Deterministic where calculation matters. Generative where language helps." description="MediMind keeps numerical comparison, routing, integrity checks, and confidence guardrails outside the answer model." />
-        <div className="mt-7 grid gap-3 lg:grid-cols-[1fr_auto_1fr_auto_1fr] lg:items-stretch">
-          <PipelineStep icon={<UploadIcon className="h-5 w-5" />} number="01" title="Understand" text="Extract structured facts, reject irrelevant content, and assemble a dated patient timeline." />
-          <Arrow />
-          <PipelineStep icon={<BeakerIcon className="h-5 w-5" />} number="02" title="Compute & verify" text="Calculate lab trends and changes; surface conflicting facts with both sources." />
-          <Arrow />
-          <PipelineStep icon={<SparkleIcon className="h-5 w-5" />} number="03" title="Explain & act" text="Retrieve matching evidence, answer with validated citations, prepare appointments, and organize follow-up." />
+        {/* min-w-0 stops a long endpoint path widening the grid column. */}
+        <div className="min-w-0 space-y-10">
+          <Overview />
+          <Features />
+          <Architecture />
+          <Pipeline />
+          <DataFlow />
+          <Security />
+          <ApiOverview />
+          <Disclaimer />
         </div>
-      </section>
-
-      <section className="grid gap-6 lg:grid-cols-2">
-        <div className="rounded-3xl border border-emerald-200 bg-emerald-50/60 p-6 sm:p-8">
-          <SectionHeading eyebrow="Trust model" title="Safety boundaries built into the product" />
-          <ul className="mt-6 space-y-4">
-            <Boundary icon={<ShieldIcon className="h-5 w-5" />} title="Evidence before fluency" text="No matching record category means an explicit insufficient-evidence response, not a generic medical answer." />
-            <Boundary icon={<FileIcon className="h-5 w-5" />} title="Omission is not resolution" text="A missing medicine is not called stopped, and a newly documented medicine is not automatically called newly started." />
-            <Boundary icon={<IntegrityIcon className="h-5 w-5" />} title="Disagreement stays visible" text="The integrity layer never silently decides which conflicting source is clinically correct." />
-            <Boundary icon={<ReminderIcon className="h-5 w-5" />} title="No invented deadlines" text="MediMind prioritizes a review queue, but reminder dates and clinical timing remain user- or clinician-selected." />
-            <Boundary icon={<LocationIcon className="h-5 w-5" />} title="Directory, not referral" text="Nearby care comes from public listings and is not presented as a verified booking, endorsement, or “best doctor” ranking." />
-          </ul>
-        </div>
-
-        <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
-          <SectionHeading eyebrow="Data model" title="What “private workspace” means" />
-          <div className="mt-6 space-y-4 text-sm leading-relaxed text-slate-600">
-            <p><strong className="text-slate-900">No account is required.</strong> The browser stores an anonymous workspace identifier and signed access token so only that workspace can request its records.</p>
-            <p><strong className="text-slate-900">Records are not stored only in the browser.</strong> Original files are archived in Cloudinary, structured records and snapshots in Supabase, and retrieval chunks in the configured Chroma or Supabase vector store.</p>
-            <p><strong className="text-slate-900">Patient scoping is enforced on every authenticated API request.</strong> The token identity must match the workspace header, and data services use that patient key.</p>
-            <p className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-amber-900"><strong>Still pending:</strong> full server-side deletion, retention controls, account recovery, and multi-device access. Do not treat the anonymous demo model as a completed healthcare compliance program.</p>
-          </div>
-        </div>
-      </section>
-
-      <section>
-        <SectionHeading eyebrow="Honest roadmap" title="Highest-value features still pending" description="The next phase is primarily about making evidence correctable, governable, and safer to reuse—not adding another generic AI screen." />
-        <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {ROADMAP.map((item, index) => (
-            <article key={item.title} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <div className="flex items-center justify-between gap-3">
-                <span className={`rounded-full px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide ${item.priority === "Next" ? "bg-brand-100 text-brand-800" : item.priority === "Then" ? "bg-sky-100 text-sky-800" : "bg-slate-100 text-slate-700"}`}>{item.priority}</span>
-                <span className="text-xs font-bold text-slate-300">{String(index + 1).padStart(2, "0")}</span>
-              </div>
-              <h3 className="mt-4 text-base font-bold text-slate-900">{item.title}</h3>
-              <p className="mt-2 text-sm leading-relaxed text-slate-600">{item.description}</p>
-            </article>
-          ))}
-        </div>
-      </section>
-
-      <section className="rounded-3xl bg-slate-900 p-7 text-white sm:p-9">
-        <div className="grid gap-6 lg:grid-cols-[1fr_auto] lg:items-center">
-          <div>
-            <p className="text-xs font-bold uppercase tracking-[0.14em] text-brand-300">Product thesis</p>
-            <h2 className="mt-2 text-2xl font-bold">Understand me. Show me the evidence. Help me prepare the next step.</h2>
-            <p className="mt-3 max-w-3xl text-sm leading-relaxed text-slate-300">MediMind is a patient record intelligence and preparation tool. It does not diagnose, prescribe, replace a clinician, provide emergency triage, or guarantee that extraction from a document is correct.</p>
-          </div>
-          {isConfigured && <Link to="/appointment-prep" className="btn bg-white text-slate-900 hover:bg-slate-100">Prepare my appointment →</Link>}
-        </div>
-      </section>
+      </div>
     </div>
   );
 }
 
-function SectionHeading({ eyebrow, title, description }: { eyebrow: string; title: string; description?: string }) {
-  return <div><p className="text-xs font-bold uppercase tracking-[0.14em] text-brand-700">{eyebrow}</p><h2 className="mt-2 text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">{title}</h2>{description && <p className="mt-3 max-w-3xl text-sm leading-relaxed text-slate-600">{description}</p>}</div>;
+/** Tracks which section is in view, to highlight the contents list. */
+function useActiveSection(ids: string[]): string | null {
+  const [activeId, setActiveId] = useState<string | null>(ids[0] ?? null);
+  const idsRef = useRef(ids);
+  idsRef.current = ids;
+
+  useEffect(() => {
+    if (typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visible = entries
+          .filter((entry) => entry.isIntersecting)
+          .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
+        if (visible[0]) setActiveId(visible[0].target.id);
+      },
+      { rootMargin: "-80px 0px -70% 0px", threshold: 0 }
+    );
+    for (const id of idsRef.current) {
+      const element = document.getElementById(id);
+      if (element) observer.observe(element);
+    }
+    return () => observer.disconnect();
+  }, []);
+
+  return activeId;
 }
 
-function PipelineStep({ icon, number, title, text }: { icon: ReactNode; number: string; title: string; text: string }) {
-  return <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-5"><div className="flex items-center justify-between"><span className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-600 text-white">{icon}</span><span className="text-xs font-black tracking-wider text-slate-300">{number}</span></div><h3 className="mt-4 text-lg font-bold text-slate-900">{title}</h3><p className="mt-2 text-sm leading-relaxed text-slate-600">{text}</p></div>;
+function TableOfContents({
+  sections,
+  activeId,
+  label,
+}: {
+  sections: Array<{ id: string; title: string }>;
+  activeId: string | null;
+  label: string;
+}) {
+  return (
+    <nav aria-label={label} className="mb-8 lg:sticky lg:top-8 lg:mb-0 lg:self-start">
+      <p className="px-3 text-xs font-bold uppercase tracking-wider text-slate-400">{label}</p>
+      <ol className="mt-2 space-y-0.5">
+        {sections.map((section, index) => (
+          <li key={section.id}>
+            <a
+              href={`#${section.id}`}
+              aria-current={activeId === section.id ? "true" : undefined}
+              className={classNames(
+                "flex min-h-[40px] items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500",
+                activeId === section.id
+                  ? "bg-brand-50 font-semibold text-brand-700"
+                  : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+              )}
+            >
+              <span className="w-4 shrink-0 text-xs tabular-nums text-slate-400">{index + 1}</span>
+              <span className="min-w-0 break-words">{section.title}</span>
+            </a>
+          </li>
+        ))}
+      </ol>
+    </nav>
+  );
 }
 
-function Arrow() {
-  return <div className="hidden items-center justify-center text-2xl text-brand-300 lg:flex" aria-hidden="true">→</div>;
+function Section({
+  id,
+  title,
+  subtitle,
+  children,
+}: {
+  id: string;
+  title: string;
+  subtitle?: string;
+  children: ReactNode;
+}) {
+  return (
+    <section id={id} aria-labelledby={`${id}-heading`} className="scroll-mt-8">
+      <h2 id={`${id}-heading`} className="section-title">
+        {title}
+      </h2>
+      {subtitle && <p className="mt-1.5 max-w-3xl text-sm text-slate-500">{subtitle}</p>}
+      <div className="mt-5">{children}</div>
+    </section>
+  );
 }
 
-function Boundary({ icon, title, text }: { icon: ReactNode; title: string; text: string }) {
-  return <li className="flex items-start gap-3"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white text-emerald-700 shadow-sm ring-1 ring-emerald-100">{icon}</span><div><h3 className="text-sm font-bold text-slate-900">{title}</h3><p className="mt-1 text-sm leading-relaxed text-slate-600">{text}</p></div></li>;
+function Panel({ children, className }: { children: ReactNode; className?: string }) {
+  return (
+    <div
+      className={classNames(
+        "rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6",
+        className
+      )}
+    >
+      {children}
+    </div>
+  );
+}
+
+function Overview() {
+  const { t } = useI18n();
+  const principles = ["p1", "p2", "p3", "p4", "p5"];
+  return (
+    <Section id="overview" title={t("about.overviewTitle")}>
+      <Panel>
+        <h3 className="text-sm font-bold uppercase tracking-wider text-slate-500">
+          {t("about.overviewSubtitle")}
+        </h3>
+        <ul className="mt-4 grid gap-4 sm:grid-cols-2">
+          {principles.map((key) => (
+            <li key={key} className="flex gap-3">
+              <span
+                className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-brand-50 text-brand-600"
+                aria-hidden="true"
+              >
+                <CheckIcon className="h-3.5 w-3.5" />
+              </span>
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-slate-900">{t(`about.${key}Title`)}</p>
+                <p className="mt-0.5 text-sm leading-relaxed text-slate-600">
+                  {t(`about.${key}Body`)}
+                </p>
+              </div>
+            </li>
+          ))}
+        </ul>
+      </Panel>
+    </Section>
+  );
+}
+
+const FEATURES: Array<{
+  key: string;
+  Icon: (p: { className?: string }) => ReactNode;
+  tone: string;
+}> = [
+  { key: "f1", Icon: FileIcon, tone: "bg-sky-50 text-sky-600" },
+  { key: "f2", Icon: PillIcon, tone: "bg-emerald-50 text-emerald-600" },
+  { key: "f3", Icon: BeakerIcon, tone: "bg-violet-50 text-violet-600" },
+  { key: "f4", Icon: ShieldIcon, tone: "bg-amber-50 text-amber-600" },
+  { key: "f5", Icon: ChatIcon, tone: "bg-brand-50 text-brand-600" },
+  { key: "f6", Icon: LocationIcon, tone: "bg-rose-50 text-rose-600" },
+  { key: "f7", Icon: ChangesIcon, tone: "bg-indigo-50 text-indigo-700" },
+  { key: "f8", Icon: IntegrityIcon, tone: "bg-orange-50 text-orange-700" },
+  { key: "f9", Icon: AppointmentIcon, tone: "bg-cyan-50 text-cyan-800" },
+  { key: "f10", Icon: ReminderIcon, tone: "bg-fuchsia-50 text-fuchsia-700" },
+];
+
+function Features() {
+  const { t } = useI18n();
+  return (
+    <Section id="features" title={t("about.featuresTitle")} subtitle={t("about.featuresSubtitle")}>
+      <div className="grid gap-4 md:grid-cols-2">
+        {FEATURES.map(({ key, Icon, tone }) => (
+          <article
+            key={key}
+            className="flex flex-col rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+          >
+            <span
+              className={classNames("flex h-10 w-10 items-center justify-center rounded-xl", tone)}
+              aria-hidden="true"
+            >
+              <Icon className="h-5 w-5" />
+            </span>
+            <h3 className="mt-3.5 text-base font-bold text-slate-900">{t(`about.${key}Title`)}</h3>
+            <p className="mt-1.5 text-sm leading-relaxed text-slate-600">{t(`about.${key}Body`)}</p>
+          </article>
+        ))}
+      </div>
+    </Section>
+  );
+}
+
+const LAYERS = [
+  { key: "l1", tech: "React 18 · TypeScript · Vite · Tailwind · Leaflet", tone: "brand" },
+  { key: "l2", tech: "FastAPI · Uvicorn · JWT (HS256)", tone: "sky" },
+  { key: "l3", tech: "pdfplumber · PyMuPDF · Pillow · vision model", tone: "violet" },
+  { key: "l4", tech: "Supabase (PostgreSQL) · Cloudinary", tone: "emerald" },
+  { key: "l5", tech: "Chroma / Supabase chunks · MiniLM or OpenAI embeddings", tone: "amber" },
+  { key: "l6", tech: "OpenAI-compatible providers (Groq / Gemini)", tone: "rose" },
+  { key: "l7", tech: "Server-side citation validation", tone: "slate" },
+] as const;
+
+const TONE_CLASSES: Record<string, string> = {
+  brand: "border-brand-200 bg-brand-50 text-brand-900",
+  sky: "border-sky-200 bg-sky-50 text-sky-900",
+  violet: "border-violet-200 bg-violet-50 text-violet-900",
+  emerald: "border-emerald-200 bg-emerald-50 text-emerald-900",
+  amber: "border-amber-200 bg-amber-50 text-amber-900",
+  rose: "border-rose-200 bg-rose-50 text-rose-900",
+  slate: "border-slate-200 bg-slate-50 text-slate-800",
+};
+
+function Architecture() {
+  const { t } = useI18n();
+  return (
+    <Section id="architecture" title={t("about.archTitle")} subtitle={t("about.archSubtitle")}>
+      <Panel>
+        <Figure label={t("about.archDiagram")}>
+          <Flow>
+            {LAYERS.map((layer) => (
+              <div
+                key={layer.key}
+                className={classNames("rounded-xl border p-4", TONE_CLASSES[layer.tone])}
+              >
+                <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+                  <p className="text-sm font-bold">{t(`about.${layer.key}Name`)}</p>
+                  <p className="font-mono text-[11px] leading-relaxed opacity-75">{layer.tech}</p>
+                </div>
+                <p className="mt-1.5 text-sm leading-relaxed opacity-90">
+                  {t(`about.${layer.key}Body`)}
+                </p>
+              </div>
+            ))}
+          </Flow>
+        </Figure>
+      </Panel>
+    </Section>
+  );
+}
+
+function Pipeline() {
+  const { t } = useI18n();
+  const ingest = ["s1", "s2", "s3", "s4", "s5", "s6"];
+  const answer = ["s7", "s8", "s9"];
+  return (
+    <Section id="pipeline" title={t("about.pipeTitle")} subtitle={t("about.pipeSubtitle")}>
+      <Panel>
+        <Figure label={t("about.pipeDiagram")}>
+          <div className="grid gap-6 lg:grid-cols-2">
+            <PipelineColumn title={t("about.pipeIngest")} keys={ingest} tone="sky" startAt={1} />
+            <PipelineColumn
+              title={t("about.pipeAnswer")}
+              keys={answer}
+              tone="brand"
+              startAt={ingest.length + 1}
+            />
+          </div>
+        </Figure>
+
+        <div className="mt-6 rounded-xl border border-slate-200 bg-slate-50 p-4">
+          <h4 className="text-sm font-bold text-slate-900">{t("about.selfHealTitle")}</h4>
+          <p className="mt-1 text-sm leading-relaxed text-slate-600">{t("about.selfHealBody")}</p>
+        </div>
+      </Panel>
+    </Section>
+  );
+}
+
+function PipelineColumn({
+  title,
+  keys,
+  tone,
+  startAt,
+}: {
+  title: string;
+  keys: string[];
+  tone: "sky" | "brand";
+  startAt: number;
+}) {
+  const { t } = useI18n();
+  return (
+    <div>
+      <h4
+        className={classNames(
+          "mb-3 inline-block rounded-full px-2.5 py-1 text-xs font-bold uppercase tracking-wider",
+          tone === "sky" ? "bg-sky-100 text-sky-800" : "bg-brand-100 text-brand-800"
+        )}
+      >
+        {title}
+      </h4>
+      <Flow>
+        {keys.map((key, index) => (
+          <Node
+            key={key}
+            tone={tone}
+            title={`${startAt + index}. ${t(`about.${key}Title`)}`}
+            subtitle={t(`about.${key}Body`)}
+          />
+        ))}
+      </Flow>
+    </div>
+  );
+}
+
+const CONSUMER_KEYS = [
+  "nav.dashboard",
+  "nav.documents",
+  "nav.medicines",
+  "nav.labs",
+  "nav.history",
+  "nav.changes",
+  "nav.appointmentPrep",
+  "nav.actionCenter",
+  "nav.recordCheck",
+  "nav.safety",
+  "nav.ask",
+];
+
+function DataFlow() {
+  const { t } = useI18n();
+  return (
+    <Section id="data-flow" title={t("about.flowTitle")} subtitle={t("about.flowSubtitle")}>
+      <Panel>
+        <Figure label={t("about.flowDiagram")}>
+          <Flow>
+            <Node tone="brand" title={t("about.flowYouTitle")} subtitle={t("about.flowYouBody")} />
+            <Node tone="sky" title={t("about.flowStoreTitle")} subtitle={t("about.flowStoreBody")} />
+            <div>
+              <Node
+                tone="emerald"
+                title={t("about.flowUseTitle")}
+                subtitle={t("about.flowUseBody")}
+              />
+              {/* Fans out to each feature: a grid on desktop, a stack on mobile. */}
+              <ul className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {CONSUMER_KEYS.map((key) => (
+                  <li
+                    key={key}
+                    className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-800"
+                  >
+                    {t(key)}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </Flow>
+        </Figure>
+
+        <div className="mt-6 rounded-xl border border-brand-200 bg-brand-50 p-4">
+          <h4 className="text-sm font-bold text-brand-900">{t("about.groundingTitle")}</h4>
+          <p className="mt-1 text-sm leading-relaxed text-brand-900/80">
+            {t("about.groundingBody")}
+          </p>
+        </div>
+      </Panel>
+    </Section>
+  );
+}
+
+function Security() {
+  const { t } = useI18n();
+  const implemented = ["i1", "i2", "i3", "i4", "i5", "i6"];
+  const notClaimed = ["n1", "n2", "n3", "n4"];
+  const planned = ["pl1", "pl2", "pl3"];
+  return (
+    <Section id="security" title={t("about.secTitle")} subtitle={t("about.secSubtitle")}>
+      <div className="space-y-4">
+        <Panel>
+          <h3 className="flex items-center gap-2 text-sm font-bold uppercase tracking-wider text-emerald-700">
+            <ShieldIcon className="h-4 w-4" aria-hidden="true" />
+            {t("about.secImplemented")}
+          </h3>
+          <ul className="mt-4 grid gap-4 sm:grid-cols-2">
+            {implemented.map((key) => (
+              <li key={key} className="flex gap-3">
+                <span
+                  className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-emerald-600"
+                  aria-hidden="true"
+                >
+                  <CheckIcon className="h-3.5 w-3.5" />
+                </span>
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-slate-900">{t(`about.${key}Title`)}</p>
+                  <p className="mt-0.5 text-sm leading-relaxed text-slate-600">
+                    {t(`about.${key}Body`)}
+                  </p>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </Panel>
+
+        {/* Stated as plainly as the implemented list — an honest boundary is
+            more credible than an inflated feature list. */}
+        <Panel className="border-amber-200 bg-amber-50/50">
+          <h3 className="text-sm font-bold uppercase tracking-wider text-amber-800">
+            {t("about.secNotClaimed")}
+          </h3>
+          <p className="mt-1 text-sm text-amber-900/80">{t("about.secNotClaimedBody")}</p>
+          <ul className="mt-3 space-y-2">
+            {notClaimed.map((key) => (
+              <li key={key} className="flex gap-2.5 text-sm leading-relaxed text-amber-900/90">
+                <span className="mt-2 h-1 w-1 shrink-0 rounded-full bg-amber-400" aria-hidden="true" />
+                <span className="min-w-0">{t(`about.${key}`)}</span>
+              </li>
+            ))}
+          </ul>
+        </Panel>
+
+        <Panel>
+          <h3 className="text-sm font-bold uppercase tracking-wider text-slate-500">
+            {t("about.secPlanned")}
+          </h3>
+          <ul className="mt-3 flex flex-wrap gap-2">
+            {planned.map((key) => (
+              <li
+                key={key}
+                className="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-3 py-1.5 text-sm text-slate-600"
+              >
+                {t(`about.${key}`)}
+              </li>
+            ))}
+          </ul>
+        </Panel>
+      </div>
+    </Section>
+  );
+}
+
+/** Verified against backend/api.py — see test_about_docs_accuracy.py. */
+const API_GROUPS: Array<{
+  titleKey: string;
+  endpoints: Array<{ method: string; path: string; bodyKey: string }>;
+}> = [
+  {
+    titleKey: "about.apiDocuments",
+    endpoints: [
+      { method: "POST", path: "/api/v1/documents", bodyKey: "about.e1" },
+      { method: "GET", path: "/api/v1/timeline", bodyKey: "about.e2" },
+      { method: "GET", path: "/api/v1/patient-snapshot", bodyKey: "about.e3" },
+    ],
+  },
+  {
+    titleKey: "about.apiJobs",
+    endpoints: [
+      { method: "GET", path: "/api/v1/jobs", bodyKey: "about.e4" },
+      { method: "GET", path: "/api/v1/jobs/{job_id}", bodyKey: "about.e5" },
+    ],
+  },
+  {
+    titleKey: "about.apiClinical",
+    endpoints: [
+      { method: "GET", path: "/api/v1/cross-check", bodyKey: "about.e6" },
+      { method: "GET", path: "/api/v1/lab-trends", bodyKey: "about.e7" },
+      { method: "GET", path: "/api/v1/changes", bodyKey: "about.e16" },
+      { method: "GET", path: "/api/v1/record-integrity", bodyKey: "about.e17" },
+      { method: "GET", path: "/api/v1/appointment-prep", bodyKey: "about.e18" },
+      { method: "GET", path: "/api/v1/follow-up", bodyKey: "about.e19" },
+    ],
+  },
+  {
+    titleKey: "about.apiAsk",
+    endpoints: [
+      { method: "POST", path: "/api/v1/qa", bodyKey: "about.e8" },
+      { method: "POST", path: "/api/v1/sessions", bodyKey: "about.e9" },
+      { method: "POST", path: "/api/v1/sessions/{session_id}/messages", bodyKey: "about.e10" },
+      { method: "GET", path: "/api/v1/sessions/{session_id}", bodyKey: "about.e11" },
+      { method: "DELETE", path: "/api/v1/sessions/{session_id}", bodyKey: "about.e12" },
+    ],
+  },
+  {
+    titleKey: "about.apiCare",
+    endpoints: [{ method: "GET", path: "/api/v1/care/facilities", bodyKey: "about.e13" }],
+  },
+  {
+    titleKey: "about.apiWorkspace",
+    endpoints: [
+      { method: "POST", path: "/api/v1/anonymous/session", bodyKey: "about.e14" },
+      { method: "GET", path: "/api/v1/health", bodyKey: "about.e15" },
+    ],
+  },
+];
+
+const METHOD_TONES: Record<string, string> = {
+  GET: "bg-sky-100 text-sky-800",
+  POST: "bg-emerald-100 text-emerald-800",
+  DELETE: "bg-rose-100 text-rose-800",
+};
+
+function ApiOverview() {
+  const { t } = useI18n();
+  return (
+    <Section id="api" title={t("about.apiTitle")} subtitle={t("about.apiSubtitle")}>
+      <div className="space-y-4">
+        <Panel className="bg-slate-50">
+          <h3 className="text-sm font-bold text-slate-900">{t("about.apiAuthTitle")}</h3>
+          <p className="mt-1 text-sm leading-relaxed text-slate-600">{t("about.apiAuthBody")}</p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <TechChip>Authorization: Bearer &lt;token&gt;</TechChip>
+            <TechChip>X-User-Id: &lt;workspace id&gt;</TechChip>
+          </div>
+        </Panel>
+
+        {API_GROUPS.map((group) => (
+          <Panel key={group.titleKey} className="p-0 sm:p-0">
+            <h3 className="border-b border-slate-100 px-5 py-3 text-sm font-bold text-slate-900">
+              {t(group.titleKey)}
+            </h3>
+            <ul className="divide-y divide-slate-100">
+              {group.endpoints.map((endpoint) => (
+                <li key={`${endpoint.method}-${endpoint.path}`} className="px-5 py-3.5">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span
+                      className={classNames(
+                        "rounded-md px-2 py-0.5 font-mono text-[11px] font-bold",
+                        METHOD_TONES[endpoint.method] || "bg-slate-100 text-slate-700"
+                      )}
+                    >
+                      {endpoint.method}
+                    </span>
+                    {/* break-all keeps a long path inside the card on mobile. */}
+                    <code className="min-w-0 break-all font-mono text-xs text-slate-800">
+                      {endpoint.path}
+                    </code>
+                  </div>
+                  <p className="mt-1.5 text-sm leading-relaxed text-slate-600">
+                    {t(endpoint.bodyKey)}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          </Panel>
+        ))}
+      </div>
+    </Section>
+  );
+}
+
+function Disclaimer() {
+  const { t } = useI18n();
+  return (
+    <aside
+      className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-900"
+      role="note"
+    >
+      <p className="font-semibold">{t("about.disclaimerTitle")}</p>
+      <p className="mt-1 leading-relaxed text-amber-900/90">{t("about.disclaimerBody")}</p>
+    </aside>
+  );
+}
+
+function InfoIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      <circle cx="12" cy="12" r="10" />
+      <path d="M12 16v-4M12 8h.01" />
+    </svg>
+  );
 }

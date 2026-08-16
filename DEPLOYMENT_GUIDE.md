@@ -84,9 +84,13 @@ USE_BACKGROUND_JOBS=true
 UPLOAD_FILE_CONCURRENCY=1
 CORS_ORIGINS=https://your-project.vercel.app
 
-# ── Optional Find Care directory ─────────────────────
-CARE_PROVIDER=google
-GOOGLE_MAPS_API_KEY=AIza...your-server-key...
+# ── Find Care directory ──────────────────────────────
+# Nothing to set: it defaults to keyless OpenStreetMap.
+# Only set these to prefer Google Places API (New)
+# (needs Places API (New) + billing on the key's project;
+# OpenStreetMap covers Google failures automatically):
+# CARE_PROVIDER=google
+# GOOGLE_MAPS_API_KEY=AIza...your-server-key...
 ```
 
 #### How to generate JWT_SECRET:
@@ -202,8 +206,9 @@ Then **redeploy** the backend (SnapDeploy usually auto-redeploys on env var chan
 | `UPLOAD_FILE_CONCURRENCY` | ✅ | `1` | Max simultaneous LLM calls |
 | `CORS_ORIGINS` | ✅ | `https://xxx.vercel.app` | Your frontend URL |
 | `OPENAI_API_KEY` | ❌ | `sk-...` | Only for better embeddings (optional) |
-| `CARE_PROVIDER` | ❌ | `google` | Enables the optional Find Care directory |
-| `GOOGLE_MAPS_API_KEY` | ❌ | `AIza...` | Server-only key with Places API (New) enabled and billing attached |
+| `CARE_PROVIDER` | ❌ | `osm` (default) or `google` | Find Care directory source. Unset = keyless OpenStreetMap |
+| `GOOGLE_MAPS_API_KEY` | ❌ | `AIza...` | Only for `CARE_PROVIDER=google`. Server-only key with Places API (New) enabled and billing attached |
+| `CARE_FALLBACK` | ❌ | `on` (default) | Keep `on` so Google failures fall back to OpenStreetMap instead of 503 |
 
 ### Frontend (Vercel)
 
@@ -251,12 +256,17 @@ SnapDeploy dashboard env vars  →  injected into container  →  os.environ.get
 - Check Gemini API key is valid
 - Free tier SnapDeploy may have cold starts (~30s)
 
-### Find Care says "facility directory is temporarily unavailable" (503)
-- Confirm the variables are set on the **backend service**, not Vercel/frontend: `CARE_PROVIDER=google` and a complete `GOOGLE_MAPS_API_KEY=AIza...` value. `AI` by itself is not a valid key.
-- In the key's Google Cloud project, enable **Places API (New)** and attach an active billing account.
-- Use API restrictions that allow **Places API (New)**. Browser HTTP-referrer restrictions do not work for backend requests from Render/SnapDeploy; use an appropriate server-side restriction strategy.
-- Save the variables and redeploy/restart the backend. Startup should log `Care directory configured: provider=google`.
-- If Google rejects a call, backend logs now include the HTTP status and Google error status/message while the browser receives a neutral error with no key details.
+### Find Care says "Nearby search didn't load" / "facility directory is temporarily unavailable" (503)
+
+Since the keyless-directory change this should no longer happen from missing Google configuration — Find Care falls back to OpenStreetMap automatically. If you still see it:
+
+- **Fastest fix:** remove `CARE_PROVIDER` and `GOOGLE_MAPS_API_KEY` from the backend service entirely, then redeploy. Startup logs `Care directory ready: provider=openstreetmap` and search works with no key and no billing.
+- If you *want* Google results, set the variables on the **backend service** (not Vercel/frontend): `CARE_PROVIDER=google` and a complete `GOOGLE_MAPS_API_KEY=AIza...` value. `AI` by itself is not a valid key.
+  - In the key's Google Cloud project, enable **Places API (New)** and attach an active billing account, otherwise Google answers `PERMISSION_DENIED: The caller does not have permission`.
+  - Use API restrictions that allow **Places API (New)**. Browser HTTP-referrer restrictions do not work for backend requests from Render/SnapDeploy; use a server-side restriction strategy.
+  - With `CARE_FALLBACK=on` (the default) a rejected Google call is logged as `care directory: google failed (...); falling back to openstreetmap` and the user still gets results.
+- A 503 now means *both* providers failed — usually outbound network egress is blocked from the host. Check that the backend can reach `overpass-api.de`, or point `OVERPASS_API_URL` at a reachable mirror.
+- Provider errors are logged with HTTP status and message for operators; the browser only ever receives a neutral message with no key details.
 
 ### "No timeline found" (404)
 - This is normal before first upload — the page handles it gracefully

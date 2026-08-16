@@ -12,6 +12,8 @@ const base = (props: IconProps) => ({
   strokeWidth: 1.8,
   strokeLinecap: "round" as const,
   strokeLinejoin: "round" as const,
+  focusable: false as const,
+  "aria-hidden": props["aria-label"] ? undefined : true,
   ...props,
 });
 
@@ -178,6 +180,13 @@ export const AlertIcon = (p: IconProps) => (
     <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
     <line x1="12" y1="9" x2="12" y2="13" />
     <line x1="12" y1="17" x2="12.01" y2="17" />
+  </svg>
+);
+
+export const MapPinIcon = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
+    <circle cx="12" cy="10" r="3" />
   </svg>
 );
 

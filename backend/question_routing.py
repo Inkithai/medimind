@@ -24,7 +24,7 @@ INTENTS: Dict[str, Dict[str, Any]] = {
     },
     "record_change": {
         "label": "Record change",
-        "chunk_types": ["medication", "lab_result", "clinical_note", "allergy"],
+        "chunk_types": ["medication", "lab_result", "clinical_note", "allergy", "diagnosis"],
         "minimum_evidence": 2,
     },
     "lab_result": {
@@ -44,12 +44,12 @@ INTENTS: Dict[str, Dict[str, Any]] = {
     },
     "timeline": {
         "label": "Timeline or visit",
-        "chunk_types": ["clinical_note", "medication", "lab_result"],
+        "chunk_types": ["clinical_note", "medication", "lab_result", "diagnosis"],
         "minimum_evidence": 1,
     },
     "general": {
         "label": "General record question",
-        "chunk_types": ["medication", "lab_result", "clinical_note", "allergy"],
+        "chunk_types": ["medication", "lab_result", "clinical_note", "allergy", "diagnosis"],
         "minimum_evidence": 1,
     },
 }

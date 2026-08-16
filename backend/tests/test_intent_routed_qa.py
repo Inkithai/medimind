@@ -92,7 +92,9 @@ def test_hallucinated_citation_is_removed_and_confidence_is_capped():
     assert result["sources"] == []
     assert result["evidence_sufficiency"]["citation_validation"] == "no_valid_citations"
     assert result["evidence_sufficiency"]["level"] == "limited"
-    assert result["confidence"] == 0.65
+    # The upstream groundedness validator applies the stricter no-citation
+    # ceiling (0.5) before the intent-aware evidence cap.
+    assert result["confidence"] == 0.5
 
 
 def test_safety_intent_enforces_professional_consult_even_if_model_does_not():
