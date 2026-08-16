@@ -158,13 +158,26 @@ def insert_documents(user_id: str, docs: List[Dict[str, Any]]) -> None:
 def load_patient_snapshot(user_id: str) -> Optional[Dict[str, Any]]:
     """Loads the {"patient_timeline", "cross_check_report"} snapshot last
     saved for this user, or None if they've never been processed."""
-    response = (
-        _snapshots()
-        .select("user_id, patient_timeline, cross_check_report, lab_trends, updated_at")
-        .eq("user_id", user_id)
-        .limit(1)
-        .execute()
-    )
+    try:
+        response = (
+            _snapshots()
+            .select("user_id, patient_timeline, cross_check_report, lab_trends, derived_reports, updated_at")
+            .eq("user_id", user_id)
+            .limit(1)
+            .execute()
+        )
+    except Exception as e:
+        # Older deployments predate the derived_reports column (PGRST204 /
+        # column-missing) — retry with the legacy column list.
+        if "derived_reports" not in str(e):
+            raise
+        response = (
+            _snapshots()
+            .select("user_id, patient_timeline, cross_check_report, lab_trends, updated_at")
+            .eq("user_id", user_id)
+            .limit(1)
+            .execute()
+        )
     rows = response.data or []
     if not rows:
         return None
@@ -173,6 +186,12 @@ def load_patient_snapshot(user_id: str) -> Optional[Dict[str, Any]]:
     # so callers' `"lab_trends" in snapshot` checks behave the same way.
     if snapshot.get("lab_trends") is None:
         snapshot.pop("lab_trends", None)
+    # Flatten derived_reports back out for callers.
+    derived = snapshot.pop("derived_reports", None) or {}
+    if derived.get("dosage_report") is not None:
+        snapshot["dosage_report"] = derived["dosage_report"]
+    if derived.get("consult_triage") is not None:
+        snapshot["consult_triage"] = derived["consult_triage"]
     return snapshot
 
 
@@ -182,9 +201,16 @@ def save_patient_snapshot(
     timeline: Dict[str, Any],
     cross_check: Dict[str, Any],
     lab_trends: Optional[Dict[str, Any]] = None,
+    dosage_report: Optional[Dict[str, Any]] = None,
+    consult_triage: Optional[Dict[str, Any]] = None,
 ) -> None:
-    """Upserts the merged timeline + cross-check report (+ lab trends, if
-    computed) for this user."""
+    """Upserts the merged timeline + cross-check report (+ lab trends,
+    dosage report, and consult triage, if computed) for this user.
+
+    dosage_report / consult_triage are written into the derived_reports
+    JSONB column (added by supabase_schema.sql) so older deployments whose
+    table predates the column keep working: the upsert retries without
+    derived_reports if PostgREST reports the column missing."""
     fields: Dict[str, Any] = {
         "user_id": user_id,
         "patient_timeline": timeline,
@@ -193,4 +219,21 @@ def save_patient_snapshot(
     }
     if lab_trends is not None:
         fields["lab_trends"] = lab_trends
+    derived: Dict[str, Any] = {}
+    if dosage_report is not None:
+        derived["dosage_report"] = dosage_report
+    if consult_triage is not None:
+        derived["consult_triage"] = consult_triage
+    if derived:
+        fields["derived_reports"] = derived
+        try:
+            _snapshots().upsert(fields, on_conflict="user_id").execute()
+            return
+        except Exception as e:
+            # PGRST204 = unknown column in schema cache (table predates the
+            # derived_reports migration). Fall back to the legacy shape so
+            # the snapshot itself is never lost over a derived report.
+            if "derived_reports" not in str(e):
+                raise
+            fields.pop("derived_reports", None)
     _snapshots().upsert(fields, on_conflict="user_id").execute()

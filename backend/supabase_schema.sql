@@ -25,14 +25,18 @@ create table if not exists public.documents (
 create index if not exists documents_user_id_idx
     on public.documents (user_id, uploaded_at);
 
--- One row per user: the last-built timeline + cross-check (+ lab trends).
+-- One row per user: the last-built timeline + cross-check (+ lab trends,
+-- and derived_reports holding {dosage_report, consult_triage}).
 create table if not exists public.patient_snapshots (
     user_id            text        primary key,
     patient_timeline   jsonb       not null,
     cross_check_report jsonb       not null,
     lab_trends         jsonb,
+    derived_reports    jsonb,
     updated_at         timestamptz not null default now()
 );
+-- Existing deployments: add the column if the table predates it.
+alter table public.patient_snapshots add column if not exists derived_reports jsonb;
 
 -- Deny all access through the anon/authenticated keys; only the
 -- service-role key (used by the backend) can reach these tables. Explicit

@@ -188,3 +188,72 @@ See table 1.6. Confirmed absent from all diagrams: external clinical knowledge b
    - **Record export / interoperability** (`export.py` + `GET /api/v1/export`): lossless native-JSON export, and a **FHIR R4 collection Bundle** (Patient, MedicationStatement, Observation with valueQuantity/valueString honesty, AllergyIntolerance, Provenance) mapping only fields the extractor actually produced. Deterministic, no LLM calls. Tests: `tests/test_export.py` + `tests/test_audit_and_export_endpoint.py` (15 passing).
 
 **Verification:** full backend suite passes — **78 tests, 0 failures** (`python -m pytest backend/tests/`). New schema objects (`conversation_sessions`, `audit_log`) are additive in `supabase_schema.sql`; every new capability degrades gracefully when its table is absent, so existing deployments keep working unchanged.
+
+---
+
+## 5. Safety pipeline implementation — Phase 1 status
+
+Following the prioritized plan (safety gaps first, architectural alternatives skipped), the
+backend now implements the coherent safety pipeline:
+
+> Identity → Extraction → Language validation → Clinical normalization →
+> Deterministic safety rules (interactions + dosage) → Risk → Consult triage →
+> Grounded AI explanation → Provider recommendation → Audit trail
+
+**Phase 1 — Safety: ✅ ALL DONE**
+
+1. ✅ **DONE — Identity Guard** (`identity_guard.py`). Compares each upload's extracted patient
+   identity (name, age→birth-year, gender) against the account's **document history** (not the
+   profile name). Fuzzy name matching tolerates OCR/transliteration variance; birth years are
+   estimated from printed age + document date so age drift across years never false-positives;
+   one strong signal or two corroborating weak signals are required to hold a document — never
+   a single borderline spelling. **Never silently merges**: mismatched files are HELD before
+   storage/persistence (batch is partially accepted, not all-or-nothing), returned under
+   `identity_review_needed`, and only added when resubmitted with `confirm_identity_mismatch=true`.
+   New accounts are checked for batch self-consistency (largest name-group wins). Every hold is
+   audit-logged. Extraction schema extended with `patient_age` / `patient_gender`.
+   Tests: `tests/test_identity_guard.py` (16).
+2. ✅ **DONE — Consult Triage** (`consult_triage.py` + `GET /api/v1/consult-triage`). A
+   deterministic **clinical routing layer** between risk assessment and care search — a table,
+   not a model call. Routes every finding (cross-check, dosage, lab trends) to pharmacist vs
+   doctor with urgency (routine/soon/urgent), scope-of-practice rationale, and for doctors a
+   specialty resolved from a lab-test keyword map with GP fallback — a failed API call can never
+   cost a referral. Safety properties enforced in code: **never de-escalates** ("no trigger
+   found" ≠ "you're fine") and **low confidence never lowers urgency** (a `confidence_caveat` is
+   attached instead). No "emergency" level exists — documents describe the past; a standing
+   `emergency_advice` field covers the present. Feeds the existing `care/` provider search
+   downstream. Tests: `tests/test_consult_triage.py` (13).
+3. ✅ **DONE — Dosage Rules** (`dosage_rules.py` + `GET /api/v1/dosage-report`). Deterministic
+   validation of each medication's normalized dose (`dosage_value`/`dosage_unit`/
+   `frequency_per_day`) against a curated table of published adult limits (~27 ingredients:
+   max single dose, max daily total, max frequency, sub-therapeutic minimums). **The rule is
+   the source of truth, never the LLM.** Honest scope: combination products, non-mass units,
+   and unknown ingredients are reported in `skipped` — never guessed. PRN meds skip daily
+   ceilings. Findings feed consult triage (ceiling violations → doctor/urgent; sub-therapeutic
+   → pharmacist/routine). Tests: `tests/test_dosage_rules.py` (12).
+4. ✅ **DONE — Language/Translation Guard** (`language_guard.py`). Two graduated layers:
+   (a) **hard rejection** only on positive evidence normalization failed — a non-Latin
+   "ingredient" (INN names are always Latin) or a non-Latin drug name with nothing resolved —
+   never on an unfamiliar language that normalized correctly; (b) **graded risk banner**:
+   `ocr_confidence` and `translation_confidence` are extracted as independent scores (different
+   failure modes, different fixes) and **multiplied** into `effective_confidence`, catching
+   documents where each axis passes alone but the pair doesn't (0.65 × 0.75 = 0.49 → high).
+   The flag warns, never blocks; documents without metadata stay silent. Returned as
+   `translation_risk` on every upload. Tests: `tests/test_language_guard.py` (12).
+
+All four are wired into the upload pipeline in order (extract → medical filter → language guard
+→ identity guard → timeline → cross-check+KB → dosage rules → lab trends → consult triage →
+index → persist → audit), persisted in the snapshot (`derived_reports` column, additive with
+legacy-schema fallback), recomputed on the fly for pre-feature snapshots, and included in
+`/patient-snapshot`. End-to-end endpoint tests: `tests/test_safety_pipeline_endpoints.py` (9).
+
+**Verification:** full backend suite — **143 tests, 0 failures**.
+
+**Remaining phases (not yet implemented, in recommended order):**
+- *Phase 2 — Reliability:* entity focus carry-over, richer QA response contract
+  (`cross_document`, `low_confidence`, `consult_reason`, `document_url` in sources),
+  document deduplication, risk timeline + evidence grading.
+- *Phase 3 — Platform maturity:* medication safety history, Alembic migrations, registered
+  user accounts, OSM provider fallback.
+- *Phase 4 — Interoperability/advanced:* extend the existing FHIR R4 export (Condition,
+  DiagnosticReport, Encounter), poisoning/antidote knowledge graph.
