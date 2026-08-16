@@ -135,6 +135,20 @@ def _chroma_delete(patient_key: str):
     except Exception:
         pass
 
+def _chroma_prune(patient_key: str, keep_ids: List[str]):
+    db = _get_chroma_client()
+    name = _sanitize_collection_name(patient_key)
+    try:
+        col = db.get_collection(name=name)
+        existing = col.get()  # ids-only fetch
+        stale = [cid for cid in (existing.get("ids") or []) if cid not in set(keep_ids)]
+        if stale:
+            col.delete(ids=stale)
+            logger.info("Chroma pruned %d stale chunk(s) for %s", len(stale), patient_key)
+    except Exception as e:
+        # Best-effort: never fail a successful re-index over stale cleanup.
+        logger.warning("Chroma prune failed for %s: %s", patient_key, e)
+
 # --- Supabase backend (brute-force) ---
 
 def _supabase_client():
@@ -243,6 +257,20 @@ def _supabase_delete(patient_key: str):
     except Exception:
         pass
 
+def _supabase_prune(patient_key: str, keep_ids: List[str]):
+    keep = set(keep_ids)
+    client = _supabase_client()
+    try:
+        res = client.table("chunks").select("id").eq("patient_key", patient_key).execute()
+        stale = [row["id"] for row in (res.data or []) if row.get("id") not in keep]
+        if stale:
+            client.table("chunks").delete().in_("id", stale).execute()
+            logger.info("Supabase pruned %d stale chunk(s) for %s", len(stale), patient_key)
+    except Exception as e:
+        # Best-effort: stale rows only degrade retrieval quality, they must
+        # never fail an otherwise successful re-index.
+        logger.warning("Supabase prune failed for %s: %s", patient_key, e)
+
 # --- Public facade ---
 
 def upsert(patient_key: str, ids: List[str], embeddings: List[List[float]], documents: List[str], metadatas: List[Dict[str, Any]]):
@@ -264,6 +292,18 @@ def delete_collection(patient_key: str):
     if VECTOR_STORE == "supabase":
         return _supabase_delete(patient_key)
     return _chroma_delete(patient_key)
+
+def prune(patient_key: str, keep_ids: List[str]):
+    """Remove chunks whose IDs are NOT in keep_ids (stale after re-index).
+
+    Chunk IDs are content-derived, so when a document is edited/superseded
+    its old chunks stop being produced but would otherwise linger in the
+    store and surface in retrieval. Called after every successful upsert
+    with the full fresh ID set. Best-effort on both backends.
+    """
+    if VECTOR_STORE == "supabase":
+        return _supabase_prune(patient_key, keep_ids)
+    return _chroma_prune(patient_key, keep_ids)
 
 def get_store_name() -> str:
     return VECTOR_STORE

@@ -32,8 +32,8 @@ export const FACILITY_TYPES: Array<{ value: string; label: string }> = [
 interface SpecialtySelectorProps {
   /** Current selected specialty key. */
   value: string;
-  /** Called when the user picks a specialty. */
-  onChange: (key: string) => void;
+  /** Called when the user picks a specialty (or clears it with key ""). */
+  onChange: (key: string, name: string) => void;
   /** Recommendations from the backend, used to populate the "Suggested" section. */
   recommendations?: CareRecommendation[];
 }
@@ -86,11 +86,12 @@ export function SpecialtySelector({ value, onChange, recommendations }: Specialt
     );
   }, [query, recommendedOptions, browseOptions]);
 
-  // The currently selected name
+  // The currently selected name ("" = nothing selected → show placeholder)
   const selectedName = useMemo(() => {
+    if (!value) return "";
     const all = [...recommendedOptions, ...browseOptions];
     return all.find((o) => o.key === value)?.name || value;
-  }, [value, recommendedOptions, browseOptions, value]);
+  }, [value, recommendedOptions, browseOptions]);
 
   // Is the selected value from a recommendation?
   const isRecommended = recommendedOptions.some((o) => o.key === value);
@@ -112,7 +113,7 @@ export function SpecialtySelector({ value, onChange, recommendations }: Specialt
       event.preventDefault();
       const opt = filteredOptions[activeIndex];
       if (opt) {
-        onChange(opt.key);
+        onChange(opt.key, opt.name);
         setOpen(false);
         setQuery("");
       }
@@ -130,7 +131,7 @@ export function SpecialtySelector({ value, onChange, recommendations }: Specialt
   }
 
   function selectOption(opt: SpecialtyOption) {
-    onChange(opt.key);
+    onChange(opt.key, opt.name);
     setOpen(false);
     setQuery("");
   }
@@ -160,10 +161,35 @@ export function SpecialtySelector({ value, onChange, recommendations }: Specialt
           )}
         >
           <SearchIcon className="h-5 w-5 shrink-0 text-slate-400" />
-          <span className="flex-1 truncate text-slate-800">{selectedName}</span>
+          {selectedName ? (
+            <span className="flex-1 truncate text-slate-800">{selectedName}</span>
+          ) : (
+            <span className="flex-1 truncate text-slate-400">Any specialty — search or browse</span>
+          )}
           {isRecommended && (
             <span className="shrink-0 rounded-full bg-brand-50 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-brand-700 ring-1 ring-brand-200">
               ✨ Suggested
+            </span>
+          )}
+          {selectedName && (
+            <span
+              role="button"
+              tabIndex={0}
+              aria-label="Clear specialty"
+              onClick={(event) => {
+                event.stopPropagation();
+                onChange("", "");
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onChange("", "");
+                }
+              }}
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+            >
+              <CloseIcon className="h-4 w-4" />
             </span>
           )}
           <span className="text-sm text-slate-400">▾</span>

@@ -17,11 +17,19 @@ import type { CareRecommendation } from "../types/recommendations";
 import { classNames } from "../utils/format";
 
 const STORAGE_KEY = "medimind.find-care.location.v1";
-const SEARCH_RADIUS_METRES = 5_000;
+const DEFAULT_RADIUS_KM = 5;
 
 type SearchStatus = "idle" | "loading" | "success" | "error";
 type FacilityFilter = "all" | FacilityKind;
 type SearchKind = Exclude<FacilityFilter, "healthcare">;
+type Availability = "any" | "today";
+
+interface SearchOptions {
+  kind: SearchKind;
+  specialty: string;
+  radiusKm: number;
+  availability: Availability;
+}
 
 function readSavedLocation(): ConfirmedLocation | null {
   try {
@@ -57,6 +65,9 @@ export function FindCarePage() {
   const [error, setError] = useState<string | null>(null);
   const [searchKind, setSearchKind] = useState<SearchKind>("all");
   const [specialty, setSpecialty] = useState<string>("");
+  const [specialtyLabel, setSpecialtyLabel] = useState<string>("");
+  const [radiusKm, setRadiusKm] = useState<number>(DEFAULT_RADIUS_KM);
+  const [availability, setAvailability] = useState<Availability>("any");
   const [filter, setFilter] = useState<FacilityFilter>("all");
   const requestRef = useRef<AbortController | null>(null);
   const resultsRef = useRef<HTMLDivElement | null>(null);
@@ -72,8 +83,17 @@ export function FindCarePage() {
 
   const recsRequestRef = useRef<AbortController | null>(null);
 
-  // Load care recommendations on mount
+  // Load care recommendations on mount.
+  //
+  // IMPORTANT: do NOT return `() => controller.abort()` from useStrictEffect.
+  // Under React 18 StrictMode the mount cycle is setup → cleanup → setup,
+  // and useStrictEffect deliberately skips the second setup (same deps).
+  // An abort-on-cleanup therefore cancelled the ONLY request this hook
+  // would ever fire, leaving the page stuck on "Analysing your records…"
+  // forever in dev. Instead, abort any PREVIOUS in-flight request when the
+  // effect re-runs (credentials changed), and abort on real unmount below.
   useStrictEffect(() => {
+    recsRequestRef.current?.abort();
     const controller = new AbortController();
     recsRequestRef.current = controller;
     setRecsLoading(true);
@@ -95,15 +115,74 @@ export function FindCarePage() {
       .finally(() => {
         if (!controller.signal.aborted) setRecsLoading(false);
       });
-
-    return () => controller.abort();
   }, [credentials]);
 
+  // Abort a pending facilities search on unmount. Safe under StrictMode's
+  // simulated remount because requestRef is only populated after a user
+  // confirms a location — never during mount. The recommendations request
+  // is deliberately NOT aborted here: StrictMode runs this cleanup while
+  // that request is in flight, and aborting it would re-create the
+  // stuck-loading bug this page had. A completed response after unmount is
+  // a harmless no-op in React 18.
   useEffect(() => () => requestRef.current?.abort(), []);
 
+  // Availability filtering happens client-side: the directory returns
+  // open_now per facility, so "Available today" keeps facilities that are
+  // open now (unknown hours are kept — absence of data isn't "closed").
   const visibleFacilities = useMemo(
-    () => facilities.filter((facility) => filter === "all" || facility.kind === filter),
-    [facilities, filter]
+    () =>
+      facilities.filter(
+        (facility) =>
+          (filter === "all" || facility.kind === filter) &&
+          (availability === "any" || facility.openNow !== false)
+      ),
+    [facilities, filter, availability]
+  );
+
+  const loadFacilities = useCallback(
+    async (location: ConfirmedLocation, options: SearchOptions) => {
+      requestRef.current?.abort();
+      const controller = new AbortController();
+      requestRef.current = controller;
+      setStatus("loading");
+      setError(null);
+      setFacilities([]);
+
+      try {
+        const nearby = await api.getCareFacilities(credentials, {
+          location: location.displayName || location.name,
+          kind: options.kind === "all" ? "any" : options.kind,
+          radiusKm: options.radiusKm,
+          latitude: location.latitude,
+          longitude: location.longitude,
+          specialty: options.specialty || undefined,
+          signal: controller.signal,
+        });
+        if (controller.signal.aborted) return;
+        setFacilities(nearby);
+        setStatus("success");
+      } catch (requestError) {
+        if (controller.signal.aborted) return;
+        setError(
+          requestError instanceof Error
+            ? requestError.message
+            : "We couldn't load nearby facilities. Please try again."
+        );
+        setStatus("error");
+      }
+    },
+    [credentials]
+  );
+
+  const currentOptions = useCallback(
+    (overrides?: Partial<SearchOptions>): SearchOptions => ({
+      kind: searchKind,
+      specialty: specialtyLabel,
+      radiusKm,
+      availability,
+      ...overrides,
+    }),
+    [searchKind, specialtyLabel, radiusKm, availability]
   );
 
   const handleConfirm = useCallback(
@@ -111,45 +190,14 @@ export function FindCarePage() {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(location));
       setSavedLocation(location);
       setFilter(searchKind);
-      void loadFacilities(location, searchKind);
+      void loadFacilities(location, currentOptions());
       window.setTimeout(
         () => resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }),
         150
       );
     },
-    [searchKind]
+    [searchKind, currentOptions, loadFacilities]
   );
-
-  async function loadFacilities(location: ConfirmedLocation, requestedKind: SearchKind) {
-    requestRef.current?.abort();
-    const controller = new AbortController();
-    requestRef.current = controller;
-    setStatus("loading");
-    setError(null);
-    setFacilities([]);
-
-    try {
-      const nearby = await api.getCareFacilities(credentials, {
-        location: location.displayName || location.name,
-        kind: requestedKind === "all" ? "any" : requestedKind,
-        radiusKm: SEARCH_RADIUS_METRES / 1_000,
-        latitude: location.latitude,
-        longitude: location.longitude,
-        signal: controller.signal,
-      });
-      if (controller.signal.aborted) return;
-      setFacilities(nearby);
-      setStatus("success");
-    } catch (requestError) {
-      if (controller.signal.aborted) return;
-      setError(
-        requestError instanceof Error
-          ? requestError.message
-          : "We couldn't load nearby facilities. Please try again."
-      );
-      setStatus("error");
-    }
-  }
 
   function clearLocation() {
     requestRef.current?.abort();
@@ -162,11 +210,31 @@ export function FindCarePage() {
     setPickerKey((value) => value + 1);
   }
 
+  /** Re-run the search with the current form values (location already set). */
+  function rerunSearch(overrides?: Partial<SearchOptions>) {
+    if (!savedLocation) return;
+    const options = currentOptions(overrides);
+    setFilter(options.kind);
+    void loadFacilities(savedLocation, options);
+  }
+
   /** Called when user clicks "Find nearby" on a recommendation card. */
   function handleUseRecommendation(rec: CareRecommendation) {
     setSpecialty(rec.specialty_key);
+    setSpecialtyLabel(rec.specialty);
     setSearchKind("doctor");
-    // Scroll to the search form
+    if (savedLocation) {
+      // Location already confirmed — run the refined search immediately
+      // instead of making the user re-confirm the map pin.
+      setFilter("doctor");
+      void loadFacilities(savedLocation, currentOptions({ kind: "doctor", specialty: rec.specialty }));
+      window.setTimeout(
+        () => resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }),
+        150
+      );
+      return;
+    }
+    // No location yet — take the user to the search form to pick one.
     window.setTimeout(() => {
       document.getElementById("care-search-form")?.scrollIntoView({ behavior: "smooth", block: "start" });
     }, 100);
@@ -282,7 +350,11 @@ export function FindCarePage() {
             <select
               id="care-facility-type"
               value={searchKind}
-              onChange={(event) => setSearchKind(event.target.value as SearchKind)}
+              onChange={(event) => {
+                const kind = event.target.value as SearchKind;
+                setSearchKind(kind);
+                rerunSearch({ kind });
+              }}
               className="min-h-[52px] w-full rounded-2xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-800 outline-none focus:border-brand-500 focus:ring-4 focus:ring-brand-100"
             >
               {FACILITY_TYPES.map((option) => (
@@ -296,7 +368,11 @@ export function FindCarePage() {
           {/* Specialty selector */}
           <SpecialtySelector
             value={specialty}
-            onChange={setSpecialty}
+            onChange={(key, name) => {
+              setSpecialty(key);
+              setSpecialtyLabel(name);
+              rerunSearch({ specialty: name });
+            }}
             recommendations={recommendations.length > 0 ? recommendations : undefined}
           />
         </div>
@@ -309,12 +385,12 @@ export function FindCarePage() {
             </label>
             <select
               id="care-availability"
+              value={availability}
+              onChange={(event) => setAvailability(event.target.value as Availability)}
               className="min-h-[52px] w-full rounded-2xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-800 outline-none focus:border-brand-500 focus:ring-4 focus:ring-brand-100"
-              defaultValue="any"
             >
               <option value="any">Any time</option>
-              <option value="today">Available today</option>
-              <option value="week">This week</option>
+              <option value="today">Open now</option>
             </select>
           </div>
           <div>
@@ -323,8 +399,13 @@ export function FindCarePage() {
             </label>
             <select
               id="care-radius"
+              value={String(radiusKm)}
+              onChange={(event) => {
+                const next = Number(event.target.value) || DEFAULT_RADIUS_KM;
+                setRadiusKm(next);
+                rerunSearch({ radiusKm: next });
+              }}
               className="min-h-[52px] w-full rounded-2xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-800 outline-none focus:border-brand-500 focus:ring-4 focus:ring-brand-100"
-              defaultValue="5"
             >
               <option value="2">2 km</option>
               <option value="5">5 km</option>
@@ -359,17 +440,17 @@ export function FindCarePage() {
             </p>
           </section>
         ) : status === "loading" ? (
-          <FacilityLoading locationName={savedLocation?.name || "your location"} />
+          <FacilityLoading
+            locationName={savedLocation?.name || "your location"}
+            radiusKm={radiusKm}
+            specialty={specialtyLabel}
+          />
         ) : status === "error" ? (
           <section className="rounded-2xl border border-red-200 bg-red-50 p-6 text-center">
             <h2 className="text-lg font-semibold text-red-900">Nearby search didn't load</h2>
             <p className="mx-auto mt-1 max-w-lg text-sm text-red-700">{error}</p>
             {savedLocation && (
-              <button
-                type="button"
-                onClick={() => void loadFacilities(savedLocation, searchKind)}
-                className="btn-secondary mt-5"
-              >
+              <button type="button" onClick={() => rerunSearch()} className="btn-secondary mt-5">
                 <RefreshIcon className="h-4 w-4" /> Try again
               </button>
             )}
@@ -381,6 +462,8 @@ export function FindCarePage() {
             filter={filter}
             onFilterChange={setFilter}
             location={savedLocation}
+            radiusKm={radiusKm}
+            specialty={specialtyLabel}
           />
         )}
       </div>
@@ -500,14 +583,24 @@ function RecommendationCard({
 
 // ─── Facility sub-components ────────────────────────────────────────────────
 
-function FacilityLoading({ locationName }: { locationName: string }) {
+function FacilityLoading({
+  locationName,
+  radiusKm,
+  specialty,
+}: {
+  locationName: string;
+  radiusKm: number;
+  specialty?: string;
+}) {
   return (
     <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm" aria-live="polite">
       <div className="flex items-center gap-3">
         <span className="h-5 w-5 animate-spin rounded-full border-2 border-brand-200 border-t-brand-600" />
         <div>
-          <h2 className="font-semibold text-slate-900">Finding care near {locationName}…</h2>
-          <p className="text-sm text-slate-500">Searching within 5 km</p>
+          <h2 className="font-semibold text-slate-900">
+            Finding {specialty ? `${specialty.toLowerCase()} care` : "care"} near {locationName}…
+          </h2>
+          <p className="text-sm text-slate-500">Searching within {radiusKm} km</p>
         </div>
       </div>
       <div className="mt-6 grid gap-4 md:grid-cols-2">
@@ -525,12 +618,16 @@ function FacilityResults({
   filter,
   onFilterChange,
   location,
+  radiusKm,
+  specialty,
 }: {
   facilities: CareFacility[];
   visibleFacilities: CareFacility[];
   filter: FacilityFilter;
   onFilterChange: (filter: FacilityFilter) => void;
   location: ConfirmedLocation | null;
+  radiusKm: number;
+  specialty?: string;
 }) {
   const sources = [...new Set(facilities.map((facility) => facility.source))].join(", ");
   return (
@@ -542,7 +639,7 @@ function FacilityResults({
           </p>
           <h2 className="section-title mt-1">
             {facilities.length
-              ? `${facilities.length} care ${facilities.length === 1 ? "option" : "options"} found`
+              ? `${facilities.length} ${specialty ? `${specialty.toLowerCase()} ` : ""}care ${facilities.length === 1 ? "option" : "options"} found`
               : "No facilities found nearby"}
           </h2>
         </div>
@@ -582,9 +679,10 @@ function FacilityResults({
       {!facilities.length ? (
         <div className="rounded-2xl border border-slate-200 bg-white px-6 py-10 text-center shadow-sm">
           <CareIcon className="mx-auto h-8 w-8 text-slate-300" />
-          <p className="mt-3 font-semibold text-slate-800">Try a different area</p>
+          <p className="mt-3 font-semibold text-slate-800">Try a different area or a wider radius</p>
           <p className="mt-1 text-sm text-slate-500">
-            The selected directory doesn't list any supported healthcare facilities within 5 km of this pin.
+            The selected directory doesn't list any matching healthcare facilities within {radiusKm} km of
+            this pin{specialty ? ` for “${specialty}”` : ""}.
           </p>
         </div>
       ) : !visibleFacilities.length ? (

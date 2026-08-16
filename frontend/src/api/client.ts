@@ -346,6 +346,8 @@ export const api = {
       radiusKm?: number;
       latitude?: number;
       longitude?: number;
+      /** Free-text practitioner specialty (e.g. "Cardiologist") to refine the search. */
+      specialty?: string;
       signal?: AbortSignal;
     }
   ): Promise<CareFacility[]> {
@@ -356,6 +358,7 @@ export const api = {
     });
     if (options.latitude !== undefined) params.set("latitude", String(options.latitude));
     if (options.longitude !== undefined) params.set("longitude", String(options.longitude));
+    if (options.specialty?.trim()) params.set("specialty", options.specialty.trim());
     const facilities = await request<CareFacilityResponse[]>(
       credentials,
       `/api/v1/care/facilities?${params.toString()}`,

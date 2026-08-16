@@ -79,10 +79,21 @@ def _get_local_embedding_function():
 # 1. Chunking — turn a patient timeline into retrievable text chunks
 # ---------------------------------------------------------------------------
 
-def _chunk_id(patient_key: str, source_file: Optional[str], chunk_type: str, index: int) -> str:
+def _chunk_id(patient_key: str, chunk_type: str, text: str, occurrence: int) -> str:
     """Stable, deterministic chunk ID so re-indexing the same documents
-    upserts in place instead of creating duplicates."""
-    raw = f"{patient_key}|{source_file or 'unknown'}|{chunk_type}|{index}"
+    upserts in place instead of creating duplicates.
+
+    The ID is derived from the chunk's CONTENT, not its position in the
+    merged timeline. Positional IDs (patient|source|type|index) were
+    unstable: uploading an earlier-dated document shifted every later
+    entry's index in the date-sorted timeline, minting new IDs for
+    unchanged content while the old rows stayed behind as stale
+    duplicates that retrieval could return alongside the fresh ones.
+    Content-derived IDs mean unchanged content re-upserts in place no
+    matter how the timeline is reordered. `occurrence` disambiguates
+    genuinely identical repeated entries (same text appearing twice).
+    """
+    raw = f"{patient_key}|{chunk_type}|{occurrence}|{text}"
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
@@ -149,11 +160,21 @@ def build_chunks_from_timeline(patient_key: str, timeline: Dict[str, Any]) -> Li
     same documents upserts instead of duplicating.
     """
     chunks: List[Dict[str, Any]] = []
+    # Tracks repeats of identical (chunk_type, text) so true duplicates in
+    # the records still get distinct, deterministic IDs.
+    occurrences: Dict[tuple, int] = {}
 
-    for i, med in enumerate(timeline.get("medications_timeline", [])):
+    def _next_id(chunk_type: str, text: str) -> str:
+        key = (chunk_type, text)
+        occurrence = occurrences.get(key, 0)
+        occurrences[key] = occurrence + 1
+        return _chunk_id(patient_key, chunk_type, text, occurrence)
+
+    for med in timeline.get("medications_timeline", []):
+        text = _medication_chunk_text(med)
         chunks.append({
-            "id": _chunk_id(patient_key, med.get("source_file"), "medication", i),
-            "text": _medication_chunk_text(med),
+            "id": _next_id("medication", text),
+            "text": text,
             "metadata": {
                 "patient_key": patient_key,
                 "date": med.get("date") or "",
@@ -162,10 +183,11 @@ def build_chunks_from_timeline(patient_key: str, timeline: Dict[str, Any]) -> Li
             },
         })
 
-    for i, lab in enumerate(timeline.get("lab_results_timeline", [])):
+    for lab in timeline.get("lab_results_timeline", []):
+        text = _lab_result_chunk_text(lab)
         chunks.append({
-            "id": _chunk_id(patient_key, lab.get("source_file"), "lab_result", i),
-            "text": _lab_result_chunk_text(lab),
+            "id": _next_id("lab_result", text),
+            "text": text,
             "metadata": {
                 "patient_key": patient_key,
                 "date": lab.get("date") or "",
@@ -174,13 +196,14 @@ def build_chunks_from_timeline(patient_key: str, timeline: Dict[str, Any]) -> Li
             },
         })
 
-    for i, visit in enumerate(timeline.get("visits", [])):
+    for visit in timeline.get("visits", []):
         if not visit.get("clinical_notes"):
             continue
         source_file = visit.get("_source", {}).get("file")
+        text = _clinical_note_chunk_text(visit)
         chunks.append({
-            "id": _chunk_id(patient_key, source_file, "clinical_note", i),
-            "text": _clinical_note_chunk_text(visit),
+            "id": _next_id("clinical_note", text),
+            "text": text,
             "metadata": {
                 "patient_key": patient_key,
                 "date": visit.get("date") or "",
@@ -191,9 +214,10 @@ def build_chunks_from_timeline(patient_key: str, timeline: Dict[str, Any]) -> Li
 
     allergies = timeline.get("known_allergies") or []
     if allergies:
+        text = _allergy_chunk_text(allergies)
         chunks.append({
-            "id": _chunk_id(patient_key, None, "allergy", 0),
-            "text": _allergy_chunk_text(allergies),
+            "id": _next_id("allergy", text),
+            "text": text,
             "metadata": {
                 "patient_key": patient_key,
                 "date": "",
@@ -305,24 +329,37 @@ def index_patient_timeline(patient_key: str, timeline: Dict[str, Any]) -> int:
 
     embeddings = embed_texts([c["text"] for c in chunks])
 
+    fresh_ids = [c["id"] for c in chunks]
     if vector_store.get_store_name() == "supabase":
         vector_store.upsert(
             patient_key,
-            ids=[c["id"] for c in chunks],
+            ids=fresh_ids,
             embeddings=embeddings,
             documents=[c["text"] for c in chunks],
             metadatas=[c["metadata"] for c in chunks],
         )
+        # Drop rows the fresh index no longer produces (superseded content).
+        vector_store.prune(patient_key, fresh_ids)
         logger.info("Indexed %d chunk(s) for patient '%s' into supabase (supabase).", len(chunks), patient_key)
     else:
         # Chroma path (kept for backward compat with tests that mock _get_patient_collection)
         collection = _get_patient_collection(patient_key, create=True)
         collection.upsert(
-            ids=[c["id"] for c in chunks],
+            ids=fresh_ids,
             embeddings=embeddings,
             documents=[c["text"] for c in chunks],
             metadatas=[c["metadata"] for c in chunks],
         )
+        # Drop rows the fresh index no longer produces. Best-effort: a mock
+        # collection in tests (or an old Chroma) may not support get/delete.
+        try:
+            existing = collection.get()
+            stale = [cid for cid in (existing.get("ids") or []) if cid not in set(fresh_ids)]
+            if stale:
+                collection.delete(ids=stale)
+                logger.info("Pruned %d stale chunk(s) for patient '%s'.", len(stale), patient_key)
+        except Exception as exc:
+            logger.warning("Stale-chunk prune skipped for patient '%s': %s", patient_key, exc)
         logger.info("Indexed %d chunk(s) for patient '%s' into Chroma (%s).", len(chunks), patient_key, CHROMA_DIR)
     return len(chunks)
 

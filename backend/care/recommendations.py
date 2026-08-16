@@ -20,8 +20,9 @@ already extracted by medical_extractor.py and lab_trends.py.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -84,33 +85,20 @@ class CareRecommendation:
 
 # ─── Recommendation engine ──────────────────────────────────────────────────
 
-def _evidence_from_visit(visit: Dict[str, Any]) -> List[EvidenceItem]:
-    """Build evidence items from a visit/visit page."""
-    items: List[EvidenceItem] = []
-    date = visit.get("date")
-    source = visit.get("_source", {})
-    source_file = source.get("file") if isinstance(source, dict) else None
+def _contains_word(text: str, keyword: str) -> bool:
+    """True if `keyword` appears in `text` as a whole word/token.
 
-    for med in visit.get("medications", []):
-        items.append(EvidenceItem(
-            date=date,
-            source_file=source_file,
-            description=f"Medication: {med.get('name', 'unknown')} ({med.get('dosage', '')})",
-        ))
-    for lr in visit.get("lab_results", []):
-        flag = lr.get("flag", "unknown")
-        items.append(EvidenceItem(
-            date=date,
-            source_file=source_file,
-            description=f"Lab result: {lr.get('test_name', '')} = {lr.get('value', '')} {lr.get('unit', '')} [{flag}]",
-        ))
-    for allergy in visit.get("allergies_noted", []):
-        items.append(EvidenceItem(
-            date=date,
-            source_file=source_file,
-            description=f"Allergy noted: {allergy}",
-        ))
-    return items
+    Plain substring matching caused clinically wrong recommendations:
+    "ast" matched "F-AST-ing Glucose" (liver referral for a glucose test),
+    "alt" matched "Cholesterol, Total" via other substrings, "bp" matched
+    unrelated names, etc. Word-boundary matching keeps "AST", "ALT",
+    "eGFR", "LDL" working while rejecting accidental substrings.
+    """
+    return re.search(rf"(?<![a-z0-9]){re.escape(keyword)}(?![a-z0-9])", text) is not None
+
+
+def _matches_any_word(text: str, keywords: Iterable[str]) -> bool:
+    return any(_contains_word(text, kw) for kw in keywords)
 
 
 def _collect_allergy_conflicts(cross_check: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -244,7 +232,7 @@ def generate_care_recommendations(
             evidence_items.append(EvidenceItem(
                 description=f"Conflicting dosage: {cd.get('medication', '')}. {cd.get('explanation', '')}",
             ))
-        relevance = "high" if med_safety_issues >= 3 else "moderate" if med_safety_issues >= 2 else "moderate"
+        relevance = "high" if med_safety_issues >= 3 else "moderate"
         _upsert(
             "general_physician",
             relevance,
@@ -279,11 +267,24 @@ def generate_care_recommendations(
         )
 
     # ── 4. Diabetes medications → Endocrinologist ────────────────────────
-    medications = _collect_medications(medications_raw=timeline) if False else _collect_medications(timeline)
-    diabetes_keywords = {"metformin", "insulin", "glipizide", "glyburide", "pioglitazone", "sitagliptin", "empagliflozin", "dapagliflozin", "semaglutide", "liraglutide", "canagliflozin", "atorvastatin", "diabetes", "hba1c", "glucose"}
-    diabetes_meds = [m for m in medications if any(
-        kw in (m.get("name", "").lower()) for kw in diabetes_keywords
-    )]
+    medications = _collect_medications(timeline)
+    # Antidiabetic agents only. Atorvastatin (a statin, previously listed
+    # here by mistake) treats cholesterol, not diabetes — a patient on a
+    # statin alone must not be told their records contain diabetes drugs.
+    diabetes_keywords = {
+        "metformin", "insulin", "glipizide", "glyburide", "gliclazide",
+        "glimepiride", "pioglitazone", "sitagliptin", "linagliptin",
+        "vildagliptin", "empagliflozin", "dapagliflozin", "canagliflozin",
+        "semaglutide", "liraglutide", "dulaglutide", "acarbose",
+    }
+    diabetes_meds = [
+        m for m in medications
+        if _matches_any_word((m.get("name") or "").lower(), diabetes_keywords)
+        or any(
+            _matches_any_word((ing or "").lower(), diabetes_keywords)
+            for ing in (m.get("ingredients") or [])
+        )
+    ]
     if diabetes_meds:
         evidence_items = [EvidenceItem(
             date=m.get("date"),
@@ -306,9 +307,19 @@ def generate_care_recommendations(
         direction = (trend.get("direction", "") or "").lower()
         explanation = trend.get("explanation", "")
 
-        # eGFR / kidney-related
-        if "egfr" in test_name or "creatinine" in test_name or "kidney" in test_name:
-            if direction in ("decreasing", "fluctuating (net decreasing)"):
+        # Kidney function. Directionality differs per marker: a FALLING
+        # eGFR/GFR means declining filtration, while RISING creatinine/
+        # urea/BUN means declining clearance. The concerning direction gets
+        # "moderate"; the opposite (usually improvement) gets "possible".
+        is_egfr = _matches_any_word(test_name, ("egfr", "gfr"))
+        is_kidney_waste = _matches_any_word(test_name, ("creatinine", "urea", "bun", "kidney"))
+        if is_egfr or is_kidney_waste:
+            concerning = (
+                direction in ("decreasing", "fluctuating (net decreasing)")
+                if is_egfr
+                else direction in ("increasing", "fluctuating (net increasing)")
+            )
+            if concerning:
                 _upsert(
                     "nephrologist",
                     "moderate",
@@ -317,7 +328,7 @@ def generate_care_recommendations(
                     [EvidenceItem(description=f"{trend.get('test_name', '')}: direction={direction}, explanation={explanation}")],
                     record_count=1,
                 )
-            elif direction in ("increasing", "fluctuating (net increasing)"):
+            elif direction not in ("stable", ""):
                 _upsert(
                     "nephrologist",
                     "possible",
@@ -328,7 +339,7 @@ def generate_care_recommendations(
                 )
 
         # HbA1c / glucose / diabetes labs
-        if "hba1c" in test_name or "glucose" in test_name or "a1c" in test_name:
+        if _matches_any_word(test_name, ("hba1c", "a1c", "glucose", "glycated")):
             if direction in ("increasing", "fluctuating (net increasing)"):
                 _upsert(
                     "endocrinologist",
@@ -348,20 +359,28 @@ def generate_care_recommendations(
                     record_count=1,
                 )
 
-        # Lipid / cholesterol / cardiovascular
-        if any(kw in test_name for kw in ("cholesterol", "lipid", "triglyceride", "ldl", "hdl")):
-            if direction in ("increasing", "fluctuating (net increasing)"):
-                _upsert(
-                    "cardiologist",
-                    "possible",
-                    "Cardiovascular monitoring",
-                    f"Your {trend.get('test_name', '')} trend ({direction}) may indicate cardiovascular risk factors. {explanation}",
-                    [EvidenceItem(description=f"{trend.get('test_name', '')}: direction={direction}, explanation={explanation}")],
-                    record_count=1,
-                )
+        # Lipid / cholesterol / cardiovascular. HDL is the protective
+        # ("good") cholesterol: RISING HDL is an improvement and must not
+        # be flagged as risk — only a FALLING HDL is concerning. For LDL /
+        # total cholesterol / triglycerides, rising is the risk direction.
+        is_hdl = _contains_word(test_name, "hdl")
+        is_other_lipid = _matches_any_word(test_name, ("cholesterol", "lipid", "triglyceride", "triglycerides", "ldl", "vldl")) and not is_hdl
+        lipid_concerning = (
+            (is_hdl and direction in ("decreasing", "fluctuating (net decreasing)"))
+            or (is_other_lipid and direction in ("increasing", "fluctuating (net increasing)"))
+        )
+        if lipid_concerning:
+            _upsert(
+                "cardiologist",
+                "possible",
+                "Cardiovascular monitoring",
+                f"Your {trend.get('test_name', '')} trend ({direction}) may indicate cardiovascular risk factors. {explanation}",
+                [EvidenceItem(description=f"{trend.get('test_name', '')}: direction={direction}, explanation={explanation}")],
+                record_count=1,
+            )
 
         # Blood pressure / hypertension
-        if any(kw in test_name for kw in ("blood pressure", "bp", "hypertension", "systolic", "diastolic")):
+        if _matches_any_word(test_name, ("blood pressure", "bp", "hypertension", "systolic", "diastolic")):
             if direction in ("increasing", "fluctuating (net increasing)"):
                 _upsert(
                     "cardiologist",
@@ -372,8 +391,10 @@ def generate_care_recommendations(
                     record_count=1,
                 )
 
-        # Liver function
-        if any(kw in test_name for kw in ("alt", "ast", "liver", "bilirubin", "hepatic")):
+        # Liver function. Word-boundary matching is essential here: plain
+        # substring "ast" matched "Fasting Glucose" and produced a liver
+        # recommendation for a rising glucose reading.
+        if _matches_any_word(test_name, ("alt", "ast", "sgpt", "sgot", "ggt", "alp", "liver", "bilirubin", "hepatic", "transaminase")):
             if direction in ("increasing", "fluctuating (net increasing)"):
                 _upsert(
                     "gastroenterologist",
@@ -408,11 +429,11 @@ def generate_care_recommendations(
             record_count=0,
         )
 
-    # ── Sort by relevance (high first) ──────────────────────────────────
+    # ── Sort by relevance (high first), then most supporting records ────
     relevance_order = {"high": 0, "moderate": 1, "possible": 2, "needs_clinical_review": 3}
     sorted_recs = sorted(
         recommendations.values(),
-        key=lambda r: (relevance_order.get(r.relevance, 99), r.source_records),
+        key=lambda r: (relevance_order.get(r.relevance, 99), -r.source_records),
     )
 
     return [r.to_dict() for r in sorted_recs]

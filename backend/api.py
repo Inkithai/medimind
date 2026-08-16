@@ -1025,14 +1025,17 @@ async def get_care_facilities(
     radius_km: float = Query(default=8.0, ge=1.0, le=50.0),
     latitude: Optional[float] = Query(default=None, ge=-90.0, le=90.0),
     longitude: Optional[float] = Query(default=None, ge=-180.0, le=180.0),
+    specialty: str = Query(default="", max_length=80),
     user_id: str = Depends(get_current_user),
 ) -> List[Dict[str, Any]]:
     """Return normalized public healthcare listings near an area or point.
 
     The Google key stays server-side. Supplying coordinates uses Places API
     (New) Nearby Search and gives distance ordering; legacy clients that send
-    only ``location=Jaffna`` use Places Text Search. Results are directory
-    listings, not clinical referrals or a claim that a facility is "best".
+    only ``location=Jaffna`` use Places Text Search. An optional ``specialty``
+    (e.g. "Cardiologist") refines the search to that kind of practitioner.
+    Results are directory listings, not clinical referrals or a claim that a
+    facility is "best".
     """
     del user_id  # Authentication protects the optional directory from abuse.
     if not location.strip() and (latitude is None or longitude is None):
@@ -1047,19 +1050,20 @@ async def get_care_facilities(
 
     try:
         provider = get_care_provider()
+        search_kwargs: Dict[str, Any] = {"latitude": latitude, "longitude": longitude}
+        if specialty.strip():
+            # Only forwarded when present, so providers (and tests) written
+            # before the specialty parameter keep working unchanged.
+            search_kwargs["specialty"] = specialty.strip()
         facilities = await asyncio.to_thread(
-            provider.search,
-            location,
-            normalized_kind,
-            radius_km,
-            latitude=latitude,
-            longitude=longitude,
+            lambda: provider.search(location, normalized_kind, radius_km, **search_kwargs)
         )
         logger.info(
-            "care navigation: provider=%s kind=%s coordinate_search=%s results=%d",
+            "care navigation: provider=%s kind=%s coordinate_search=%s specialty=%s results=%d",
             provider.name,
             normalized_kind,
             latitude is not None,
+            bool(specialty.strip()),
             len(facilities),
         )
         return [facility.to_dict() for facility in facilities]

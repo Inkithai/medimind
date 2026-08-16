@@ -8,6 +8,7 @@ Google key remains on the server and every response is normalized to
 import json
 import math
 import os
+import re
 import socket
 from typing import Any, Dict, List, Optional
 from urllib.error import HTTPError, URLError
@@ -98,6 +99,7 @@ class GoogleProvider:
         *,
         latitude: Optional[float] = None,
         longitude: Optional[float] = None,
+        specialty: Optional[str] = None,
     ) -> List[Facility]:
         normalized_kind = (kind or "any").strip().lower()
         if normalized_kind not in _KIND_QUERY:
@@ -105,18 +107,29 @@ class GoogleProvider:
                 "Unsupported facility type. Use any, hospital, clinic, pharmacy, laboratory, or doctor."
             )
         radius = min(max(float(radius_km), 1.0), 50.0)
+        specialty_query = _sanitize_specialty(specialty)
 
         if (latitude is None) != (longitude is None):
             raise ValueError("latitude and longitude must be supplied together.")
         if latitude is not None and longitude is not None:
-            payload = self._nearby_payload(normalized_kind, radius, latitude, longitude)
-            response = self._request_json("places:searchNearby", payload)
+            if specialty_query:
+                # Nearby Search only filters by place type; a specialty like
+                # "cardiologist" needs a text query. Text Search with a
+                # circular location bias keeps the results near the pin, and
+                # the distance filter below enforces the requested radius.
+                payload = self._specialty_payload(
+                    specialty_query, normalized_kind, radius, latitude, longitude
+                )
+                response = self._request_json("places:searchText", payload)
+            else:
+                payload = self._nearby_payload(normalized_kind, radius, latitude, longitude)
+                response = self._request_json("places:searchNearby", payload)
             origin = (latitude, longitude)
         else:
             place = location.strip()
             if not place:
                 raise ValueError("A city/area or latitude/longitude is required.")
-            payload = self._text_payload(place, normalized_kind)
+            payload = self._text_payload(place, normalized_kind, specialty_query)
             response = self._request_json("places:searchText", payload)
             origin = None
 
@@ -135,6 +148,14 @@ class GoogleProvider:
         # ordering is distance-only; text searches retain Google's relevance
         # order and are presented as public listings.
         if origin is not None:
+            if specialty_query:
+                # Text Search's location bias is a preference, not a
+                # restriction — drop anything outside the requested radius
+                # so "within N km" in the UI stays truthful.
+                facilities = [
+                    item for item in facilities
+                    if item.distance_km is None or item.distance_km <= radius
+                ]
             facilities.sort(key=lambda item: item.distance_km if item.distance_km is not None else math.inf)
         return facilities
 
@@ -170,10 +191,36 @@ class GoogleProvider:
         return payload
 
     @staticmethod
-    def _text_payload(location: str, kind: str) -> Dict[str, Any]:
+    def _text_payload(location: str, kind: str, specialty: Optional[str] = None) -> Dict[str, Any]:
+        subject = specialty or _KIND_QUERY[kind]
         payload: Dict[str, Any] = {
-            "textQuery": f"{_KIND_QUERY[kind]} in {location}",
+            "textQuery": f"{subject} in {location}",
             "pageSize": 20,
+        }
+        if kind != "any":
+            payload["includedType"] = _KIND_TO_GOOGLE_TYPES[kind][0]
+            payload["strictTypeFiltering"] = False
+        return payload
+
+    @staticmethod
+    def _specialty_payload(
+        specialty: str,
+        kind: str,
+        radius_km: float,
+        latitude: float,
+        longitude: float,
+    ) -> Dict[str, Any]:
+        """Text Search biased to a circle around the user's pin, for
+        specialty-refined searches ("cardiologist near me")."""
+        payload: Dict[str, Any] = {
+            "textQuery": specialty,
+            "pageSize": 20,
+            "locationBias": {
+                "circle": {
+                    "center": {"latitude": latitude, "longitude": longitude},
+                    "radius": radius_km * 1000,
+                }
+            },
         }
         if kind != "any":
             payload["includedType"] = _KIND_TO_GOOGLE_TYPES[kind][0]
@@ -290,6 +337,20 @@ def _normalized_kind(primary_type: Any, google_types: List[Any], fallback: str) 
 
 def _optional_string(value: Any) -> Optional[str]:
     return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def _sanitize_specialty(specialty: Optional[str]) -> Optional[str]:
+    """Normalize a free-text specialty into a safe, short query fragment.
+
+    The value ends up inside a Places textQuery, so strip anything that
+    isn't a plain word character and cap the length — the API treats the
+    query as opaque text, but we don't want header-sized garbage in it.
+    """
+    if not specialty or not isinstance(specialty, str):
+        return None
+    cleaned = re.sub(r"[^A-Za-z0-9 /&'.-]+", " ", specialty).strip()
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    return cleaned[:80] or None
 
 
 def _timeout_from_env() -> float:
