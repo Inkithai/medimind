@@ -2,12 +2,16 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { Figure, Flow, Node, TechChip } from "../components/about/Diagram";
 import {
+  AppointmentIcon,
   BeakerIcon,
+  ChangesIcon,
   ChatIcon,
   CheckIcon,
   FileIcon,
+  IntegrityIcon,
   LocationIcon,
   PillIcon,
+  ReminderIcon,
   ShieldIcon,
 } from "../components/icons";
 import { useI18n } from "../i18n/I18nContext";
@@ -212,6 +216,10 @@ const FEATURES: Array<{
   { key: "f4", Icon: ShieldIcon, tone: "bg-amber-50 text-amber-600" },
   { key: "f5", Icon: ChatIcon, tone: "bg-brand-50 text-brand-600" },
   { key: "f6", Icon: LocationIcon, tone: "bg-rose-50 text-rose-600" },
+  { key: "f7", Icon: ChangesIcon, tone: "bg-indigo-50 text-indigo-700" },
+  { key: "f8", Icon: IntegrityIcon, tone: "bg-orange-50 text-orange-700" },
+  { key: "f9", Icon: AppointmentIcon, tone: "bg-cyan-50 text-cyan-800" },
+  { key: "f10", Icon: ReminderIcon, tone: "bg-fuchsia-50 text-fuchsia-700" },
 ];
 
 function Features() {
@@ -357,6 +365,10 @@ const CONSUMER_KEYS = [
   "nav.medicines",
   "nav.labs",
   "nav.history",
+  "nav.changes",
+  "nav.appointmentPrep",
+  "nav.actionCenter",
+  "nav.recordCheck",
   "nav.safety",
   "nav.ask",
 ];
@@ -497,6 +509,10 @@ const API_GROUPS: Array<{
     endpoints: [
       { method: "GET", path: "/api/v1/cross-check", bodyKey: "about.e6" },
       { method: "GET", path: "/api/v1/lab-trends", bodyKey: "about.e7" },
+      { method: "GET", path: "/api/v1/changes", bodyKey: "about.e16" },
+      { method: "GET", path: "/api/v1/record-integrity", bodyKey: "about.e17" },
+      { method: "GET", path: "/api/v1/appointment-prep", bodyKey: "about.e18" },
+      { method: "GET", path: "/api/v1/follow-up", bodyKey: "about.e19" },
     ],
   },
   {

@@ -30,11 +30,14 @@ build_patient_timeline() dict
 
 question (+ optional chat_history)
   → effective retrieval query (original or rewritten by conversation.py)
+  → classify_question() (medication / lab trend / safety / allergy / timeline / change / general)
   → embed_texts([retrieval_query])
-  → collection.query(n_results=min(top_k,count))
+  → over-fetch vector candidates → route_chunks() by structured chunk type
+  → assess_evidence() (sufficient / limited / insufficient)
   → context blocks [date | source_file | type]\ntext
-  → chat.completions.create(response_format=ANSWER_RESPONSE_FORMAT)
-  → parsed JSON answer
+  → chat completion only when matching evidence exists
+  → validate returned citations + cap confidence when evidence is limited
+  → parsed JSON answer + intent/evidence metadata
 ```
 
 ### Chunking
@@ -49,7 +52,7 @@ question (+ optional chat_history)
 | `medication` | each med entry | `_medication_chunk_text()` includes INN + normalized dose/freq + printed dose + date + source |
 | `lab_result` | each lab entry | `_lab_result_chunk_text()` test, value+unit, flag, ref range, date, source |
 | `clinical_note` | visit with non-null notes | `_clinical_note_chunk_text()` date + source + notes |
-| `allergy` | whole list (0/1 chunk) | `_allergy_chunk_text()` |
+| `allergy` | each visit with allergies (aggregate fallback for legacy timelines) | `_allergy_chunk_text()` + date/source |
 
 Chunk: `{id: sha256 hex, text: natural language, metadata: {patient_key, date, source_file, chunk_type}}`. Date/source_file empty string not None (Chroma metadata restriction).
 
@@ -101,10 +104,13 @@ make the medical record disappear.
 
 - Validates non-empty key/question.
 - Effective query = `retrieval_query` if provided and non-empty else `question` — allows conversation module to rewrite ambiguous follow-ups while final prompt still shows original question.
-- If no collection or count 0 → returns `_NO_INFO_ANSWER` no API calls.
-- Else embed query, `collection.query(query_embeddings=[...], n_results=min(top_k,count))`, build context blocks tagged with date/source/type, splice optional `chat_history` (list of `{role, content}` passed straight through), final user message `Retrieved patient records:\n\n{context}\n\nQuestion: {question}`.
-- System prompt rules: answer only from retrieved context else "I don't have enough information", never diagnose, force `recommend_professional_consult=true` for risk/interaction/allergy/dosage, cite sources.
-- Strict `ANSWER_RESPONSE_FORMAT` JSON schema: `{answer, confidence, sources[{date, source_file}], recommend_professional_consult}`.
+- If no collection or count 0, self-heals from persisted documents when possible; otherwise returns a truthful no-record/no-indexable-content response.
+- `classify_question()` deterministically chooses an intent and compatible chunk types. Vector candidates are over-fetched, then `route_chunks()` removes unrelated categories while preserving similarity rank.
+- `assess_evidence()` requires two distinct dated source entries for trend/change questions. If zero intent-compatible chunks exist, Q&A returns an explicit insufficiency response without calling the chat model.
+- Else build context blocks tagged with date/source/type, include intent + evidence coverage in the prompt, and splice optional `chat_history`.
+- System prompt rules: answer only from retrieved context, never diagnose, never treat a historical medication mention as confirmed current use, force professional consultation for risk/interaction/allergy/dosage, and acknowledge limited evidence.
+- Strict model schema remains `{answer, confidence, sources[{date, source_file}], recommend_professional_consult}`. Server-added fields are `question_intent` and `evidence_sufficiency`.
+- Returned citations are validated against retrieved metadata. Invented citations are removed; missing valid citations or limited evidence cap answer confidence at 0.65.
 - Raises `RuntimeError` on chat failure; embedding failures bubble as `RuntimeError`.
 
 ### Conversation integration — Phase 2

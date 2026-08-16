@@ -2,6 +2,7 @@ import { Link } from "react-router-dom";
 import type { QAResponse, QASource } from "../types/api";
 import { useI18n } from "../i18n/I18nContext";
 import { classNames, confidenceTone, formatConfidence, formatDate } from "../utils/format";
+import { Alert } from "./Alert";
 import { ConsiderProfessionalCare } from "./ConsiderProfessionalCare";
 
 export function QAResultCard({
@@ -29,6 +30,32 @@ export function QAResultCard({
     >
       {result.recommend_professional_consult && (
         <ConsiderProfessionalCare message={t("ask.consult")} />
+      )}
+
+      {result.evidence_sufficiency && result.evidence_sufficiency.level !== "sufficient" && (
+        <Alert
+          variant="warning"
+          title={
+            result.evidence_sufficiency.level === "insufficient"
+              ? "Not enough matching evidence"
+              : "Evidence is limited"
+          }
+        >
+          {result.evidence_sufficiency.reason}
+        </Alert>
+      )}
+
+      {result.question_intent && (
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <span className="rounded-full bg-brand-50 px-2.5 py-1 font-semibold text-brand-700 ring-1 ring-brand-100">
+            Intent · {result.question_intent.label}
+          </span>
+          {result.evidence_sufficiency?.level === "sufficient" && (
+            <span className="rounded-full bg-emerald-50 px-2.5 py-1 font-semibold text-emerald-700 ring-1 ring-emerald-100">
+              Evidence coverage sufficient
+            </span>
+          )}
+        </div>
       )}
 
       {/* break-words stops a long unbroken token (a URL or lab code) from

@@ -78,8 +78,8 @@ export function SettingsPage() {
                   🔒 {t("settings.ready")}
                 </p>
                 <p className="mt-1 text-sm leading-relaxed text-brand-800/80">
-                  MediMind works without an account. Your workspace was created automatically the
-                  first time you opened the app, and only this browser can see your records.
+                  MediMind works without an account. This browser stores the anonymous key used to access
+                  records held by MediMind's connected storage services. See About MediMind for the full data model.
                 </p>
               </div>
 

@@ -221,6 +221,161 @@ export interface LabTrendsReport {
   note: string;
 }
 
+// ---- Deterministic record changes (change_detection.py) ------------------
+
+export interface ChangeEvidence {
+  date: string | null;
+  source_file: string | null;
+  document_url?: string | null;
+}
+
+export interface RecordChange {
+  category: "lab" | "medication" | "allergy";
+  kind: "status_changed" | "value_changed" | "newly_measured" | "instruction_changed" | "newly_documented";
+  importance: "attention" | "review" | "info";
+  title: string;
+  description: string;
+  before: string | null;
+  after: string | null;
+  evidence: ChangeEvidence[];
+}
+
+export interface RecordComparison {
+  from_date: string;
+  to_date: string;
+  from_source: ChangeEvidence;
+  to_source: ChangeEvidence;
+  changes: RecordChange[];
+  change_count: number;
+}
+
+export interface RecordChangesReport {
+  latest: RecordComparison | null;
+  comparisons: RecordComparison[];
+  summary: {
+    dated_records: number;
+    comparisons: number;
+    changes_found: number;
+    attention_items: number;
+  };
+  method: string;
+  note: string;
+}
+
+// ---- Follow-up action center (follow_up.py) -------------------------------
+
+export interface FollowUpTask {
+  id: string;
+  kind: "record_verification" | "clinical_question";
+  category: string;
+  priority: "high" | "medium" | "low";
+  title: string;
+  action: string;
+  reason: string;
+  evidence: Array<{
+    date: string | null;
+    source_file: string | null;
+    document_url?: string | null;
+  }>;
+  timing_guardrail: string;
+}
+
+export interface FollowUpPlan {
+  tasks: FollowUpTask[];
+  summary: {
+    total: number;
+    high_priority: number;
+    medium_priority: number;
+    record_verification: number;
+  };
+  method: string;
+  note: string;
+}
+
+// ---- Cross-document record integrity (record_integrity.py) ---------------
+
+export interface IntegrityEvidence {
+  date: string | null;
+  source_file: string | null;
+  document_url?: string | null;
+}
+
+export interface IntegrityVariant {
+  label: string;
+  value: string;
+  evidence: IntegrityEvidence[];
+}
+
+export interface IntegrityIssue {
+  id: string;
+  category: "identity" | "allergy" | "medication" | "lab";
+  severity: "important" | "review";
+  title: string;
+  explanation: string;
+  variants: IntegrityVariant[];
+  suggested_action: string;
+  confidence: number;
+}
+
+export interface RecordIntegrityReport {
+  status: "needs_verification" | "no_discrepancies_found";
+  summary: {
+    records_checked: number;
+    issues_found: number;
+    important_issues: number;
+  };
+  issues: IntegrityIssue[];
+  checks_performed: string[];
+  method: string;
+  note: string;
+}
+
+// ---- Appointment preparation (appointment_prep.py) -----------------------
+
+export interface AppointmentEvidence {
+  date: string | null;
+  source_file: string | null;
+  document_url?: string | null;
+}
+
+export interface AppointmentPriority {
+  id: string;
+  level: "important" | "review" | "routine";
+  category: string;
+  title: string;
+  question: string;
+  rationale: string;
+  evidence: AppointmentEvidence[];
+}
+
+export interface HandoffMedication {
+  name: string;
+  ingredients: string[];
+  dosage: string | null;
+  frequency: string | null;
+  source: AppointmentEvidence;
+}
+
+export interface AppointmentPrepReport {
+  handoff: {
+    record_count: number;
+    record_period: { from: string | null; to: string | null };
+    providers_documented: string[];
+    known_allergies: string[];
+    latest_medication_record: AppointmentEvidence | null;
+    latest_documented_medications: HandoffMedication[];
+    key_findings: Array<{
+      level: "important" | "review" | "routine";
+      text: string;
+      evidence: AppointmentEvidence[];
+    }>;
+  };
+  priorities: AppointmentPriority[];
+  checklist: Array<{ id: string; text: string }>;
+  method: string;
+  note: string;
+}
+
 // ---- Q&A / conversation (retrieval.py, conversation.py) ------------------
 
 export interface QASource {
@@ -242,6 +397,21 @@ export interface QAResponse {
   confidence_reason?: string;
   sources: QASource[];
   recommend_professional_consult: boolean;
+  question_intent?: {
+    key: string;
+    label: string;
+    retrieval_types: string[];
+    safety_sensitive: boolean;
+  };
+  evidence_sufficiency?: {
+    level: "sufficient" | "limited" | "insufficient";
+    reason: string;
+    retrieved_chunks: number;
+    distinct_sources: number;
+    expected_minimum: number;
+    evidence_types: string[];
+    citation_validation?: "passed" | "no_valid_citations";
+  };
   rewritten_query?: string;
 }
 

@@ -6,6 +6,12 @@
 - Multilingual document extraction (Tamil/Arabic/etc., INN normalization)
 - Non-medical document filter (early rejection before LLM/Chroma)
 - Patient timeline + longitudinal lab trends (threshold approach detection)
+- “What Changed?” comparison across consecutive records, with before/after values and source evidence
+- Conservative medication change semantics: newly documented is never mislabeled as started, and omission is never treated as stopped
+- Appointment Prep: printable clinician handoff, prioritized questions, source evidence, and visit checklist
+- Record Integrity: source-linked identity, allergy, same-date lab, and medication-instruction discrepancy checks
+- Intent-routed Ask AI with category-targeted retrieval, citation validation, and explicit evidence sufficiency
+- Action Center with grounded follow-up tasks, user-chosen browser reminders, completion tracking, and calendar export
 - Patient-grounded RAG / Ask AI
 - English, Sinhala, and Tamil UI with persisted/browser-detected language and locale-aware formatting
 - WCAG-oriented keyboard, screen-reader, focus, contrast, reduced-motion, table, chart, form, and responsive-navigation support
@@ -38,10 +44,42 @@
 
 - Language-independent medical structure (multilingual → English INN)
 - Longitudinal trend intelligence (not just extraction)
+- Deterministic, citation-backed change detection across labs, medication instructions, and allergies
+- Clinical action layer that converts safety findings and trends into record-grounded appointment questions
+- Contradiction-aware record integrity workflow that shows both sources and never silently chooses a winner
+- Deterministic question-intent routing and evidence-coverage gates before generative answering
+- Follow-up intelligence that prioritizes record-backed work without inventing clinical deadlines
 - Safety-first AI (interpretation ≠ diagnosis; professional-care cues)
 - Provider-decoupled Care Navigation with pluggable server-side adapters (Google Places, OpenStreetMap) and graceful degradation between them
 - Location accuracy through saved latitude/longitude rather than city text alone
 - Neutral distance/category presentation with no “best hospital” or clinical referral claim
+
+## Pending / Next Build Priorities
+
+### Priority 0 — Trust and correction
+
+- [ ] Persisted extraction correction with audit history
+- [ ] Explicit discrepancy resolution: select/confirm a source without deleting evidence
+- [ ] Rebuild timelines, analytics, and vector indexes after an approved correction
+- [ ] Quarantine unresolved identity/fact conflicts from trends and Q&A
+- [ ] Page-level and region-level evidence highlighting for extracted facts and answer claims
+- [ ] Evidence hierarchy / source-quality ranking beyond extraction confidence
+
+### Priority 1 — Data governance and clinical breadth
+
+- [ ] Full structured-data/file export and server-side workspace deletion
+- [ ] Retention controls, account recovery, and optional multi-device access
+- [ ] Diagnoses, symptoms, procedures, vitals, and imaging longitudinal tracking
+- [ ] Validated terminology and unit normalization (for example RxNorm/LOINC/SNOMED-aligned mappings where appropriate)
+- [ ] Medication + lab + diagnosis cross-analysis after clinical validation
+- [ ] Formal clinical evaluation set, audit logging, monitoring, and security/privacy assessment
+
+### Priority 2 — Care coordination
+
+- [ ] Consented, expiring clinician handoff links
+- [ ] Optional push/email reminders; current reminders are browser/calendar only
+- [ ] Verified provider availability and booking integration; current Find Care is a public directory
+- [ ] Multilingual patient UI and accessibility evaluation beyond multilingual extraction
 
 ## Round 1 (Core System — Verified)
 

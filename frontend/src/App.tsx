@@ -15,6 +15,10 @@ import { UploadPage } from "./pages/UploadPage";
 import { DocumentsPage } from "./pages/DocumentsPage";
 import { MedicinesPage } from "./pages/MedicinesPage";
 import { HistoryPage } from "./pages/HistoryPage";
+import { ChangesPage } from "./pages/ChangesPage";
+import { AppointmentPrepPage } from "./pages/AppointmentPrepPage";
+import { RecordIntegrityPage } from "./pages/RecordIntegrityPage";
+import { FollowUpPage } from "./pages/FollowUpPage";
 import { Spinner } from "./components/Spinner";
 import { useI18n } from "./i18n/I18nContext";
 
@@ -124,6 +128,38 @@ export default function App() {
           element={
             <RequireAuth>
               <HistoryPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/changes"
+          element={
+            <RequireAuth>
+              <ChangesPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/follow-up"
+          element={
+            <RequireAuth>
+              <FollowUpPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/record-integrity"
+          element={
+            <RequireAuth>
+              <RecordIntegrityPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/appointment-prep"
+          element={
+            <RequireAuth>
+              <AppointmentPrepPage />
             </RequireAuth>
           }
         />

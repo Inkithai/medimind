@@ -47,8 +47,10 @@ Vision+text use the same Gemini model; Groq needs two. All three are OpenAI-comp
 |---|---|
 | `medical_extractor.py` | `LLM_PROVIDER` layer, vision / text extraction, patient grouping, timeline creation, safety LLM call plus deterministic duplicate detection, local CLI persistence |
 | `document_filter.py` | Fast post-extraction filter for non-medical files (no extra LLM call, reuses `document_type` + clinical fields) |
-| `lab_trends.py` | Pure Python trend engine — direction, crossings, recovery (`returned_to_normal`), unit-clash decline, thousands-aware parse |
-| `retrieval.py` | Chunks timeline into Medication / Lab / ClinicalNote / Allergy texts, embeds (OpenAI `text-embedding-3-small` if set else local ONNX MiniLM), indexes via `vector_store` abstraction, single-shot Q&A |
+| `lab_trends.py` | Pure Python trend engine — direction, crossings, recovery (`returned_to_normal`), unit-clash decline, and thousands-aware parsing |
+| `change_detection.py` / `record_integrity.py` | Deterministic longitudinal change detection and source-linked cross-document discrepancy checks |
+| `appointment_prep.py` / `follow_up.py` | Printable clinician handoff plus a stable, grounded follow-up queue without inferred clinical deadlines |
+| `retrieval.py` | Chunks timelines into source-linked medication, lab, diagnosis, note, and allergy evidence; embeds/indexes through `vector_store`; then runs intent-routed Q&A with injection resistance, evidence-sufficiency gates, page-aware citation validation, and confidence caps |
 | `vector_store.py` | Abstraction over Chroma (`VECTOR_STORE=chroma`, local `CHROMA_DIR`) and Supabase `chunks` table (`VECTOR_STORE=supabase`, no volume, brute-force cosine) |
 | `jobs.py` | Thread-safe parent jobs with independent per-file progress (`queued → reading → extracting → saving → ready/failed`) and optional Supabase persistence |
 | `conversation.py` | In-memory conversation store, rewrites follow-ups like “was that safe?” into self-contained retrieval queries, summarizes older turns to keep context bounded |
@@ -150,7 +152,11 @@ Zero-login anonymous model:
 - **My Medicines** `/medicines` — current per ingredient (most recent) + historical log table, filterable, source file traceable (now fixed to original filename, not temp sanitized path).
 - **Test Results / Lab Trends** `/labs` — per-test direction, flag sequence, crossing / recovery badge (green when the latest reading is back to normal), approaching-threshold, SVG sparkline with reference band. Thousands-aware values; mixed units (`mg/dL` vs `mmol/L`) are declined rather than trended.
 - **Safety** `/safety` — allergy conflicts (danger), interactions with severity, dosage conflicts, duplicates, overall recommendation.
-- **Ask** `/ask` — single-shot RAG, configurable `top_k`, confidence, clickable sources, `recommend_professional_consult`.
+- **What Changed** `/changes` — deterministic consecutive-record comparisons with before/after source evidence.
+- **Appointment Prep** `/appointment-prep` — printable handoff and prioritized record-grounded clinician questions.
+- **Action Center** `/follow-up` — combined follow-up queue with browser-only completion state, user-selected reminder dates, and `.ics` calendar export.
+- **Record Check** `/record-integrity` — side-by-side identity, allergy, same-date lab, and medication-instruction discrepancies.
+- **Ask** `/ask` — intent-routed RAG with evidence sufficiency, clickable page-aware citations, injection resistance, citation validation, and confidence caps.
 
 ##### Ask AI groundedness
 
@@ -168,6 +174,7 @@ Citations resolve to documents by **exact** filename match (`frontend/src/utils/
 - **Conversations** `/conversations` — multi-turn, query rewriting (`rewritten_query`), session resume by ID, 404 handling when in-memory session expired after restart.
 - **Find Local Care** `/care` — evidence-to-care pathway: clinical flags → specialty → live directory (**Geoapify** primary, **OpenStreetMap** fallback) → ranked provider cards → consultation pack.
 - **Find Care** `/find-care` — search-as-you-type or current location → map confirmation → provider-neutral hospitals, clinics, pharmacies, laboratories, and doctors within the selected radius.
+- **About MediMind** `/about` — current capabilities, hybrid architecture, safety/data boundaries, and an honest prioritized roadmap.
 
 States distinguished: loading, empty 404 (no record), 401 auth, 422 validation/non-medical, 502 ML pipeline, network/CORS.
 
@@ -283,10 +290,18 @@ X-User-Id: <user_id>
 
 `GET /api/v1/timeline`, `/cross-check`, `/lab-trends` — 404 if no snapshot yet. Lab trends recomputed on-the-fly for old snapshots lacking field.
 
+#### Intelligence and action layer
+- `GET /api/v1/changes` — consecutive-record changes with both sources.
+- `GET /api/v1/record-integrity` — cross-document discrepancies requiring verification.
+- `GET /api/v1/appointment-prep` — printable clinician handoff and question agenda.
+- `GET /api/v1/follow-up` — stable action queue; reminder dates/completion stay browser-side and are never clinically inferred.
+
 #### Single-shot Q&A
 `POST /api/v1/qa {question, chat_history?, top_k}` → `{answer, confidence, sources[], recommend_professional_consult}`
 
-Q&A self-heals: if the patient's vector index is empty but their documents are saved in the DB (e.g. a local `chroma_db` wiped by a redeploy with no volume, or a Supabase `chunks` table migrated after the last upload), the index is rebuilt from those saved documents on the next question, so it answers normally instead of reporting "no indexed records". If `VECTOR_STORE=supabase` and the `chunks` table is missing entirely, Q&A returns 502 with instructions to run `supabase_schema.sql` rather than a misleading empty answer.
+Q&A classifies each question as medication, medication safety, lab result, lab trend, allergy, timeline, record change, or general. Vector candidates are filtered to compatible structured evidence; trend/change questions require at least two distinct dated source entries. With no matching evidence, MediMind responds without calling the answer model. Returned citations are validated against retrieved metadata, and limited/uncited answers have confidence capped.
+
+Q&A also self-heals: if the patient's vector index is empty but their documents are saved in the DB (e.g. a local `chroma_db` wiped by a redeploy with no volume, or a Supabase `chunks` table migrated after the last upload), the index is rebuilt from those saved documents on the next question, so it answers normally instead of reporting "no indexed records". If `VECTOR_STORE=supabase` and the `chunks` table is missing entirely, Q&A returns 502 with instructions to run `supabase_schema.sql` rather than a misleading empty answer.
 
 #### Conversations
 `POST /api/v1/sessions` → `{user_id, session_id}`

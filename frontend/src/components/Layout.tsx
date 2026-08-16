@@ -4,11 +4,15 @@ import { useAuth } from "../context/AuthContext";
 import { useI18n } from "../i18n/I18nContext";
 import { classNames } from "../utils/format";
 import {
+  AppointmentIcon,
   BeakerIcon,
+  ChangesIcon,
   ChatIcon,
   FileIcon,
   PillIcon,
   LocationIcon,
+  IntegrityIcon,
+  ReminderIcon,
   SettingsIcon,
   ShieldIcon,
   TimelineIcon,
@@ -29,6 +33,10 @@ const NAV: NavItem[] = [
   { to: "/medicines", labelKey: "nav.medications", icon: PillIcon, chip: "bg-emerald-50 text-emerald-700" },
   { to: "/labs", labelKey: "nav.labs", icon: BeakerIcon, chip: "bg-violet-50 text-violet-700" },
   { to: "/history", labelKey: "nav.timeline", icon: TimelineIcon, chip: "bg-sky-50 text-sky-700" },
+  { to: "/changes", labelKey: "nav.changes", icon: ChangesIcon, chip: "bg-indigo-50 text-indigo-700" },
+  { to: "/appointment-prep", labelKey: "nav.appointmentPrep", icon: AppointmentIcon, chip: "bg-cyan-50 text-cyan-800" },
+  { to: "/follow-up", labelKey: "nav.actionCenter", icon: ReminderIcon, chip: "bg-fuchsia-50 text-fuchsia-700" },
+  { to: "/record-integrity", labelKey: "nav.recordCheck", icon: IntegrityIcon, chip: "bg-orange-50 text-orange-700" },
   { to: "/safety", labelKey: "nav.safety", icon: ShieldIcon, chip: "bg-amber-50 text-amber-800" },
   { to: "/ask", labelKey: "nav.ask", icon: ChatIcon, chip: "bg-brand-50 text-brand-700" },
   { to: "/find-care", labelKey: "nav.care", icon: LocationIcon, chip: "bg-rose-50 text-rose-700" },

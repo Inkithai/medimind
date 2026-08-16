@@ -182,13 +182,13 @@ const tests: Array<[string, () => void]> = [
     "the sidebar entry is secondary and does not join the workflow nav",
     () => {
       assert.ok(layoutSource.includes('to="/about"'), "sidebar links to /about");
-      // The nine workflow items live in the NAV array; About must not be there.
+      // Patient workflow items live in the NAV array; About must not be there.
       const navArray = layoutSource.slice(
         layoutSource.indexOf("const NAV:"),
         layoutSource.indexOf("export function Layout")
       );
       assert.ok(!navArray.includes("/about"), "About must not be in the workflow NAV array");
-      assert.equal((navArray.match(/to: "/g) || []).length, 9, "the 9 nav items are unchanged");
+      assert.equal((navArray.match(/to: "/g) || []).length, 13, "all 13 workflow items are present");
     },
   ],
   [

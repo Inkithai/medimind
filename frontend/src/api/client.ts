@@ -6,15 +6,19 @@ import type {
   FacilityKind as DirectoryFacilityKind,
 } from "../types/facility";
 import type {
+  AppointmentPrepReport,
   CareFacilitiesResponse,
   CareRecommendationContext,
   CareProviderSearchResponse,
   CrossCheckReport,
+  FollowUpPlan,
   FacilityKind,
   HealthResponse,
   LabTrendsReport,
   PatientSnapshot,
   QAResponse,
+  RecordChangesReport,
+  RecordIntegrityReport,
   SessionHistory,
   SessionInfo,
   Timeline,
@@ -448,6 +452,22 @@ export const api = {
 
   getLabTrends(credentials: Credentials): Promise<LabTrendsReport> {
     return request<LabTrendsReport>(credentials, "/api/v1/lab-trends");
+  },
+
+  getRecordChanges(credentials: Credentials): Promise<RecordChangesReport> {
+    return request<RecordChangesReport>(credentials, "/api/v1/changes");
+  },
+
+  getFollowUpPlan(credentials: Credentials): Promise<FollowUpPlan> {
+    return request<FollowUpPlan>(credentials, "/api/v1/follow-up");
+  },
+
+  getRecordIntegrity(credentials: Credentials): Promise<RecordIntegrityReport> {
+    return request<RecordIntegrityReport>(credentials, "/api/v1/record-integrity");
+  },
+
+  getAppointmentPrep(credentials: Credentials): Promise<AppointmentPrepReport> {
+    return request<AppointmentPrepReport>(credentials, "/api/v1/appointment-prep");
   },
 
   getCareRecommendation(credentials: Credentials): Promise<CareRecommendation> {
