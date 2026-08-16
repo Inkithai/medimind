@@ -44,6 +44,33 @@
 - Location accuracy through saved latitude/longitude rather than city text alone
 - Neutral distance/category presentation with no “best hospital” or clinical referral claim
 
+## Pending / Next Build Priorities
+
+### Priority 0 — Trust and correction
+
+- [ ] Persisted extraction correction with audit history
+- [ ] Explicit discrepancy resolution: select/confirm a source without deleting evidence
+- [ ] Rebuild timelines, analytics, and vector indexes after an approved correction
+- [ ] Quarantine unresolved identity/fact conflicts from trends and Q&A
+- [ ] Page-level and region-level evidence highlighting for extracted facts and answer claims
+- [ ] Evidence hierarchy / source-quality ranking beyond extraction confidence
+
+### Priority 1 — Data governance and clinical breadth
+
+- [ ] Full structured-data/file export and server-side workspace deletion
+- [ ] Retention controls, account recovery, and optional multi-device access
+- [ ] Diagnoses, symptoms, procedures, vitals, and imaging longitudinal tracking
+- [ ] Validated terminology and unit normalization (for example RxNorm/LOINC/SNOMED-aligned mappings where appropriate)
+- [ ] Medication + lab + diagnosis cross-analysis after clinical validation
+- [ ] Formal clinical evaluation set, audit logging, monitoring, and security/privacy assessment
+
+### Priority 2 — Care coordination
+
+- [ ] Consented, expiring clinician handoff links
+- [ ] Optional push/email reminders; current reminders are browser/calendar only
+- [ ] Verified provider availability and booking integration; current Find Care is a public directory
+- [ ] Multilingual patient UI and accessibility evaluation beyond multilingual extraction
+
 ## Round 1 (Core System — Verified)
 
 - [x] Multi-document extraction

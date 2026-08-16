@@ -69,11 +69,11 @@ export function SettingsPage() {
             <>
               <div className="rounded-xl bg-brand-50 p-5 ring-1 ring-brand-100">
                 <p className="text-base font-semibold text-brand-900">
-                  🔒 Your records only live in this browser
+                  🔒 Your workspace access key lives in this browser
                 </p>
                 <p className="mt-1 text-sm leading-relaxed text-brand-800/80">
-                  MediMind works without an account. Your workspace was created automatically the
-                  first time you opened the app, and only this browser can see your records.
+                  MediMind works without an account. This browser stores the anonymous key used to access
+                  records held by MediMind's connected storage services. See About MediMind for the full data model.
                 </p>
               </div>
 

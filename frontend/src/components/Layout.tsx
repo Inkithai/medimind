@@ -12,6 +12,7 @@ import {
   LocationIcon,
   IntegrityIcon,
   ReminderIcon,
+  InfoIcon,
   SettingsIcon,
   ShieldIcon,
   TimelineIcon,
@@ -39,6 +40,7 @@ const NAV: NavItem[] = [
   { to: "/safety", label: "Safety Alerts", icon: ShieldIcon, chip: "bg-amber-50 text-amber-600" },
   { to: "/ask", label: "Ask AI", icon: ChatIcon, chip: "bg-brand-50 text-brand-600" },
   { to: "/find-care", label: "Find Care", icon: LocationIcon, chip: "bg-rose-50 text-rose-600" },
+  { to: "/about", label: "About MediMind", icon: InfoIcon, chip: "bg-slate-100 text-slate-600" },
   { to: "/settings", label: "Settings", icon: SettingsIcon, chip: "bg-slate-100 text-slate-500" },
 ];
 
@@ -102,7 +104,7 @@ export function Layout() {
           <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-2 scroll-thin">
             {NAV.map((item) => {
               const Icon = item.icon;
-              const worksWithoutWorkspace = item.to === "/settings";
+              const worksWithoutWorkspace = item.to === "/settings" || item.to === "/about";
               const disabled = !worksWithoutWorkspace && !isConfigured;
               return (
                 <NavLink
@@ -151,7 +153,7 @@ export function Layout() {
               <div className="rounded-xl bg-brand-50 p-4 ring-1 ring-brand-100">
                 <p className="text-sm font-semibold text-brand-900">Private — no account needed</p>
                 <p className="mt-1 text-xs leading-relaxed text-brand-800/80">
-                  Your records are tied to this browser only. Nothing to sign up for.
+                  Your anonymous access key stays in this browser. Nothing to sign up for.
                 </p>
               </div>
               <div className="mt-3 grid grid-cols-2 gap-2">

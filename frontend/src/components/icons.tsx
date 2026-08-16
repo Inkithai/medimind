@@ -101,6 +101,14 @@ export const SessionIcon = (p: IconProps) => (
   </svg>
 );
 
+export const InfoIcon = (p: IconProps) => (
+  <svg {...base(p)}>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M12 11v6" />
+    <path d="M12 7h.01" />
+  </svg>
+);
+
 export const SettingsIcon = (p: IconProps) => (
   <svg {...base(p)}>
     <circle cx="12" cy="12" r="3" />

@@ -17,6 +17,7 @@ import { ChangesPage } from "./pages/ChangesPage";
 import { AppointmentPrepPage } from "./pages/AppointmentPrepPage";
 import { RecordIntegrityPage } from "./pages/RecordIntegrityPage";
 import { FollowUpPage } from "./pages/FollowUpPage";
+import { AboutPage } from "./pages/AboutPage";
 import { Spinner } from "./components/Spinner";
 
 const FindCarePage = lazy(() =>
@@ -63,6 +64,7 @@ export default function App() {
       <Route path="/" element={<LandingPage />} />
       <Route element={<Layout />}>
         <Route index element={<Navigate to="/dashboard" replace />} />
+        <Route path="/about" element={<AboutPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route
           path="/find-care"

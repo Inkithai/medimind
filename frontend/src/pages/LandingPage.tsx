@@ -29,10 +29,10 @@ export function LandingPage() {
         </div>
         <div className="flex items-center gap-2">
           <button
-            onClick={() => navigate("/find-care")}
-            className={`rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 ${isConfigured ? "hidden sm:block" : ""}`}
+            onClick={() => navigate("/about")}
+            className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
           >
-            Find care
+            About
           </button>
           {isConfigured && (
             <button
@@ -50,7 +50,7 @@ export function LandingPage() {
           <div className="space-y-8">
             <div className="inline-flex items-center gap-2 rounded-full border border-brand-200 bg-brand-50 px-3 py-1 text-xs font-medium text-brand-700">
               <span className="h-2 w-2 animate-pulse rounded-full bg-brand-600" />
-              No sign-up • Private — lives in this browser
+              No sign-up • Anonymous browser-held workspace
             </div>
 
             <div className="space-y-4">
@@ -60,7 +60,7 @@ export function LandingPage() {
               <p className="max-w-xl text-lg leading-relaxed text-slate-600">
                 Upload prescriptions, lab reports, and discharge summaries. MediMind finds the medicines,
                 test results, and allergies inside, builds your personal health history, watches for safety
-                issues, and answers your questions — all private to this browser.
+                issues, and answers your questions inside an anonymous workspace whose access key stays in this browser.
               </p>
             </div>
 
@@ -129,7 +129,7 @@ export function LandingPage() {
 
               <div className="mt-5 space-y-3">
                 <Step done label="Open MediMind" sub="Nothing to install, nothing to sign up for" />
-                <Step done label="Your private workspace is ready" sub="Created automatically, only in this browser" />
+                <Step done label="Your private workspace is ready" sub="Created automatically; its access key stays in this browser" />
                 <Step active label="Upload medical documents" sub="Prescriptions • Lab reports • Discharge summaries" />
                 <Step label="We read them for you" sub="Medicines, lab results, allergies, safety alerts" />
                 <Step label="Your health record comes together" />
