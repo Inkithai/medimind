@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api/client";
 import { LocationPicker } from "../components/location";
-import { LocationIcon, RefreshIcon } from "../components/icons";
+import { SpecialtySelector } from "../components/SpecialtySelector";
+import { LocationIcon, RefreshIcon, SparkleIcon } from "../components/icons";
 import { useAuth } from "../context/AuthContext";
 import { useStrictEffect } from "../hooks/useStrictEffect";
 import { useI18n } from "../i18n/I18nContext";
@@ -11,6 +12,7 @@ import type {
   CareRecommendation,
   FacilityKind,
 } from "../types/facility";
+import type { CareSpecialtyOption, CareSuggestion } from "../types/api";
 import type { ConfirmedLocation } from "../types/location";
 import { classNames } from "../utils/format";
 
@@ -102,8 +104,12 @@ export function FindCarePage() {
   const [availability, setAvailability] = useState<CareAvailability>(() => readPreferences().availability);
   const [radiusKm, setRadiusKm] = useState(() => readPreferences().radiusKm);
   const [recommendation, setRecommendation] = useState<CareRecommendation | null>(null);
+  const [suggestion, setSuggestion] = useState<CareSuggestion | null>(null);
+  const [suggestionLoading, setSuggestionLoading] = useState(true);
+  const [suggestionError, setSuggestionError] = useState<string | null>(null);
   const requestRef = useRef<AbortController | null>(null);
   const resultsRef = useRef<HTMLDivElement | null>(null);
+  const formRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => () => requestRef.current?.abort(), []);
   useEffect(() => {
@@ -111,8 +117,10 @@ export function FindCarePage() {
   }, [availability, radiusKm, specialty]);
 
   useStrictEffect(() => {
+    let cancelled = false;
     api.getCareRecommendation(credentials)
       .then((value) => {
+        if (cancelled) return;
         setRecommendation(value);
         if (!specialty.trim()) setSpecialty(value.specialty_query);
         if (value.triggered) {
@@ -123,6 +131,27 @@ export function FindCarePage() {
       .catch(() => {
         // No patient snapshot yet: manual care search remains fully available.
       });
+    // Catalog + record-derived specialty suggestions drive the grouped
+    // combobox. The page still works without them.
+    setSuggestionLoading(true);
+    setSuggestionError(null);
+    api.getCareSuggestion(credentials)
+      .then((value) => {
+        if (cancelled) return;
+        setSuggestion(value);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setSuggestionError(
+          error instanceof Error ? error.message : "Could not load specialty suggestions.",
+        );
+      })
+      .finally(() => {
+        if (!cancelled) setSuggestionLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [credentials]);
 
   const visibleFacilities = useMemo(
@@ -200,6 +229,19 @@ export function FindCarePage() {
     setPickerKey((value) => value + 1);
   }
 
+  /** "Find nearby" on a suggested-specialty card. */
+  function handleUseSuggestion(option: CareSpecialtyOption) {
+    setSpecialty(option.id);
+    setSearchKind("doctor");
+    setFilter("doctor");
+    window.setTimeout(() => {
+      formRef.current?.scrollIntoView({
+        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+        block: "start",
+      });
+    }, 100);
+  }
+
   return (
     <div className="space-y-7">
       <header className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
@@ -207,8 +249,10 @@ export function FindCarePage() {
           <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-brand-200 bg-brand-50 px-3 py-1 text-xs font-bold uppercase tracking-wider text-brand-700">
             <CareIcon className="h-3.5 w-3.5" /> Find care
           </div>
-          <h1 className="page-title">{t("care.title")}</h1>
-          <p className="secondary-text mt-2 max-w-2xl leading-relaxed">{t("care.subtitle")}</p>
+          <h1 className="page-title">Find care based on your records</h1>
+          <p className="secondary-text mt-2 max-w-2xl leading-relaxed">
+            MediMind found care options that may be relevant to the information in your medical records.
+          </p>
         </div>
         {savedLocation && (
           <button type="button" onClick={clearLocation} className="btn-secondary shrink-0">
@@ -221,6 +265,13 @@ export function FindCarePage() {
         <p className="font-semibold">{t("care.urgentTitle")}</p>
         <p className="mt-0.5 text-amber-900">{t("care.urgentBody")}</p>
       </div>
+
+      <SpecialtySuggestionsSection
+        loading={suggestionLoading}
+        error={suggestionError}
+        suggestion={suggestion}
+        onFindNearby={handleUseSuggestion}
+      />
 
       {lowConfidenceReferral && (!recommendation || !recommendation.triggered) && (
         <section className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-900">
@@ -249,7 +300,11 @@ export function FindCarePage() {
         </section>
       )}
 
-      <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <section
+        ref={formRef}
+        id="care-search-form"
+        className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm scroll-mt-8"
+      >
         <h2 className="text-sm font-semibold text-slate-900">{t("care.preferences")}</h2>
         <p className="mt-1 text-xs text-slate-600">{t("care.preferencesBody")}</p>
         <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -271,30 +326,17 @@ export function FindCarePage() {
             </select>
           </label>
 
-          <label className="text-sm font-semibold text-slate-800">
-            {t("care.specialty")}
-            <span className="relative mt-2 block">
-              <input
-                value={specialty}
-                onChange={(event) => setSpecialty(event.target.value.slice(0, 80))}
-                onBlur={() => {
-                  if (savedLocation) void loadFacilities(savedLocation, searchKind, specialty, availability);
-                }}
-                list="care-specialties"
-                placeholder={t("care.specialtyPlaceholder")}
-                className="min-h-[48px] w-full appearance-none rounded-xl border border-slate-300 bg-white py-2.5 pl-4 pr-10 text-sm font-medium text-slate-800 outline-none focus:border-brand-500 focus:ring-4 focus:ring-brand-100"
-              />
-              <SelectChevron className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-            </span>
-            <datalist id="care-specialties">
-              <option value="cardiology" />
-              <option value="clinical pharmacist" />
-              <option value="dermatology" />
-              <option value="gastroenterology" />
-              <option value="hematology" />
-              <option value="general physician" />
-            </datalist>
-          </label>
+          <SpecialtySelector
+            value={specialty}
+            onChange={(id) => {
+              setSpecialty(id);
+              if (savedLocation) void loadFacilities(savedLocation, searchKind, id, availability);
+            }}
+            suggestions={suggestion ? [suggestion.suggested, ...suggestion.alternatives] : undefined}
+            allSpecialties={suggestion?.all ?? []}
+            label="What type of care do you need?"
+            placeholder="Search specialty or type of care…"
+          />
 
           <label className="text-sm font-semibold text-slate-800">
             {t("care.availability")}
@@ -655,11 +697,118 @@ function distanceLabel(
   return `${formatNumber(distanceKm, { maximumFractionDigits: distanceKm < 10 ? 1 : 0 })} km`;
 }
 
-function SelectChevron({ className }: { className?: string }) {
+function SpecialtySuggestionsSection({
+  loading,
+  error,
+  suggestion,
+  onFindNearby,
+}: {
+  loading: boolean;
+  error: string | null;
+  suggestion: CareSuggestion | null;
+  onFindNearby: (option: CareSpecialtyOption) => void;
+}) {
+  if (loading) {
+    return (
+      <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="flex items-center gap-3">
+          <span className="h-5 w-5 animate-spin rounded-full border-2 border-brand-200 border-t-brand-600" />
+          <p className="text-sm font-medium text-slate-600">Analysing your records for care options…</p>
+        </div>
+        <div className="mt-4 grid gap-3 md:grid-cols-2">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="h-28 animate-pulse rounded-2xl bg-slate-100" />
+          ))}
+        </div>
+      </section>
+    );
+  }
+
+  if (error || !suggestion) {
+    return (
+      <section className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-900">
+        <p className="font-semibold">Specialty suggestions unavailable</p>
+        <p className="mt-0.5 text-amber-800">
+          {error || "You can still search for nearby care below."}
+        </p>
+      </section>
+    );
+  }
+
+  const cards = [suggestion.suggested, ...suggestion.alternatives];
+
+  if (!suggestion.has_records) {
+    return (
+      <section className="rounded-2xl border border-slate-200 bg-white px-6 py-10 text-center shadow-sm">
+        <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-brand-50 text-brand-700">
+          <SparkleIcon className="h-6 w-6" />
+        </span>
+        <h2 className="mt-4 text-lg font-semibold text-slate-900">No specific care needs detected</h2>
+        <p className="mx-auto mt-1 max-w-md text-sm text-slate-500">
+          Upload medical records to receive personalised care recommendations based on your health history.
+        </p>
+      </section>
+    );
+  }
+
   return (
-    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.8} className={className} aria-hidden="true">
-      <path d="m6 8 4 4 4-4" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
+    <section className="space-y-4">
+      <div>
+        <h2 className="section-title">Care recommendations</h2>
+        <p className="secondary-text mt-1">
+          Based on diagnoses, medications, allergies, and lab results in your records.
+        </p>
+      </div>
+      <div className="grid gap-4 md:grid-cols-2">
+        {cards.map((option, idx) => (
+          <article
+            key={option.id}
+            className="flex flex-col rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span
+                    className={classNames(
+                      "inline-flex items-center rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide",
+                      idx === 0
+                        ? "bg-red-50 text-red-700 ring-1 ring-red-200"
+                        : "bg-sky-50 text-sky-700 ring-1 ring-sky-200",
+                    )}
+                  >
+                    {idx === 0 ? "Top suggestion" : "Alternative"}
+                  </span>
+                </div>
+                <h3 className="mt-2 text-base font-bold text-slate-900">{option.label}</h3>
+              </div>
+            </div>
+            {option.reasons && option.reasons.length > 0 ? (
+              <ul className="mt-3 flex-1 space-y-1 text-sm leading-relaxed text-slate-500">
+                {option.reasons.slice(0, 3).map((reason, i) => (
+                  <li key={i} className="flex gap-2">
+                    <span aria-hidden="true" className="select-none text-brand-500">•</span>
+                    <span>{reason}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-3 flex-1 text-sm text-slate-500">
+                General practice can review your full record and refer if needed.
+              </p>
+            )}
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => onFindNearby(option)}
+                className="btn-primary min-h-[40px] px-4 py-2 text-sm"
+              >
+                <LocationIcon className="h-4 w-4" /> Find nearby
+              </button>
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
   );
 }
 
