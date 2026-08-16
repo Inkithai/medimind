@@ -340,7 +340,7 @@ export const si = {
     preferences: "ප්‍රතිකාර සෙවුම් කැමැත්ත",
     preferencesBody: "විශේෂඥතාව සහ ලබාගත හැකි වේලාව ශ්‍රේණිගත කිරීමට පමණි. සැපයුම්කරු සමඟ තහවුරු කරන්න.",
     facilityType: "ආයතන වර්ගය",
-    specialty: "අවශ්‍ය විශේෂඥතාව",
+    specialty: "විශේෂඥතාව",
     specialtyPlaceholder: "උදාහරණය: හෘද රෝග විශේෂඥ",
     availability: "ඔබට හැකි වේලාව කවදාද?",
     radius: "සෙවුම් අරය",

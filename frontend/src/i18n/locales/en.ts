@@ -340,7 +340,7 @@ export const en = {
     preferences: "Care search preferences",
     preferencesBody: "Specialty and availability improve directory ranking only. Verify both with the provider.",
     facilityType: "Facility type",
-    specialty: "Required specialty",
+    specialty: "Specialty",
     specialtyPlaceholder: "For example: cardiology",
     availability: "When are you available?",
     radius: "Search radius",
