@@ -197,6 +197,44 @@ export interface RecordChangesReport {
   note: string;
 }
 
+// ---- Cross-document record integrity (record_integrity.py) ---------------
+
+export interface IntegrityEvidence {
+  date: string | null;
+  source_file: string | null;
+  document_url?: string | null;
+}
+
+export interface IntegrityVariant {
+  label: string;
+  value: string;
+  evidence: IntegrityEvidence[];
+}
+
+export interface IntegrityIssue {
+  id: string;
+  category: "identity" | "allergy" | "medication" | "lab";
+  severity: "important" | "review";
+  title: string;
+  explanation: string;
+  variants: IntegrityVariant[];
+  suggested_action: string;
+  confidence: number;
+}
+
+export interface RecordIntegrityReport {
+  status: "needs_verification" | "no_discrepancies_found";
+  summary: {
+    records_checked: number;
+    issues_found: number;
+    important_issues: number;
+  };
+  issues: IntegrityIssue[];
+  checks_performed: string[];
+  method: string;
+  note: string;
+}
+
 // ---- Appointment preparation (appointment_prep.py) -----------------------
 
 export interface AppointmentEvidence {

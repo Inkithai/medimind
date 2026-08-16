@@ -8,6 +8,7 @@ import type {
   PatientSnapshot,
   QAResponse,
   RecordChangesReport,
+  RecordIntegrityReport,
   SessionHistory,
   SessionInfo,
   Timeline,
@@ -342,6 +343,10 @@ export const api = {
 
   getRecordChanges(credentials: Credentials): Promise<RecordChangesReport> {
     return request<RecordChangesReport>(credentials, "/api/v1/changes");
+  },
+
+  getRecordIntegrity(credentials: Credentials): Promise<RecordIntegrityReport> {
+    return request<RecordIntegrityReport>(credentials, "/api/v1/record-integrity");
   },
 
   getAppointmentPrep(credentials: Credentials): Promise<AppointmentPrepReport> {

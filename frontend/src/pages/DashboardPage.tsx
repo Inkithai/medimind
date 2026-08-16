@@ -13,6 +13,7 @@ import {
   FileIcon,
   ChatIcon,
   ChangesIcon,
+  IntegrityIcon,
 } from "../components/icons";
 import { useAuth } from "../context/AuthContext";
 import { useStrictEffect } from "../hooks/useStrictEffect";
@@ -194,20 +195,36 @@ export function DashboardPage() {
         </Link>
       )}
 
-      <Link
-        to="/appointment-prep"
-        className="group flex flex-col gap-4 rounded-2xl border border-cyan-200 bg-white p-5 shadow-sm transition hover:border-cyan-300 hover:shadow-md sm:flex-row sm:items-center"
-      >
-        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-cyan-700 text-white shadow-sm">
-          <AppointmentIcon className="h-6 w-6" />
-        </div>
-        <div className="min-w-0 flex-1">
-          <p className="text-xs font-bold uppercase tracking-[0.12em] text-cyan-700">Turn insight into action</p>
-          <h2 className="mt-1 text-lg font-bold text-slate-900">Prepare for your next appointment</h2>
-          <p className="mt-1 text-sm text-slate-600">Create a printable handoff and prioritized, evidence-backed questions for your clinician.</p>
-        </div>
-        <span className="shrink-0 text-sm font-semibold text-cyan-800 transition group-hover:translate-x-1">Prepare visit →</span>
-      </Link>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Link
+          to="/appointment-prep"
+          className="group flex flex-col gap-4 rounded-2xl border border-cyan-200 bg-white p-5 shadow-sm transition hover:border-cyan-300 hover:shadow-md sm:flex-row sm:items-center"
+        >
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-cyan-700 text-white shadow-sm">
+            <AppointmentIcon className="h-6 w-6" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-bold uppercase tracking-[0.12em] text-cyan-700">Turn insight into action</p>
+            <h2 className="mt-1 text-lg font-bold text-slate-900">Prepare for your appointment</h2>
+            <p className="mt-1 text-sm text-slate-600">Create a printable handoff and evidence-backed questions.</p>
+            <p className="mt-2 text-sm font-semibold text-cyan-800 transition group-hover:translate-x-1">Prepare visit →</p>
+          </div>
+        </Link>
+        <Link
+          to="/record-integrity"
+          className="group flex flex-col gap-4 rounded-2xl border border-orange-200 bg-white p-5 shadow-sm transition hover:border-orange-300 hover:shadow-md sm:flex-row sm:items-center"
+        >
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-orange-600 text-white shadow-sm">
+            <IntegrityIcon className="h-6 w-6" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-bold uppercase tracking-[0.12em] text-orange-700">Trust your clinical memory</p>
+            <h2 className="mt-1 text-lg font-bold text-slate-900">Cross-check record integrity</h2>
+            <p className="mt-1 text-sm text-slate-600">Find conflicting facts and compare both source documents.</p>
+            <p className="mt-2 text-sm font-semibold text-orange-800 transition group-hover:translate-x-1">Run record checks →</p>
+          </div>
+        </Link>
+      </div>
 
       {allergyCount > 0 && (
         <div className="rounded-2xl border border-red-100 bg-red-50/60 p-5">
