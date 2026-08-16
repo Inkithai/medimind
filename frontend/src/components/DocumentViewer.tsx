@@ -1,19 +1,36 @@
-import { useState } from "react";
+import { forwardRef, useId, useRef, useState, type KeyboardEvent } from "react";
+import { useI18n } from "../i18n/I18nContext";
 import type { Visit } from "../types/api";
 import { documentTypeLabel, formatConfidence, formatDate } from "../utils/format";
 import { StatusBadge } from "./StatusBadge";
 import { BeakerIcon, FileIcon, LinkIcon, PillIcon } from "./icons";
 
 export function DocumentViewer({ visit, onClose }: { visit: Visit; onClose?: () => void }) {
+  const { t } = useI18n();
   const [tab, setTab] = useState<"original" | "structured">("structured");
+  const titleId = useId();
+  const originalTabId = useId();
+  const structuredTabId = useId();
+  const originalPanelId = useId();
+  const structuredPanelId = useId();
+  const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
+
+  const onTabKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight" && event.key !== "Home" && event.key !== "End") return;
+    event.preventDefault();
+    const current = tab === "original" ? 0 : 1;
+    const next = event.key === "Home" ? 0 : event.key === "End" ? 1 : event.key === "ArrowRight" ? (current + 1) % 2 : (current + 1) % 2;
+    setTab(next === 0 ? "original" : "structured");
+    tabRefs.current[next]?.focus();
+  };
 
   return (
-    <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg">
+    <section role="region" aria-labelledby={titleId} className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg">
       <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
         <div>
           <div className="flex items-center gap-2">
             <StatusBadge tone="brand">{documentTypeLabel(visit.document_type)}</StatusBadge>
-            <span className="text-sm font-semibold text-slate-800">{visit._source.file}</span>
+            <h2 id={titleId} className="text-sm font-semibold text-slate-900">{visit._source.file}</h2>
           </div>
           <p className="mt-1 text-xs text-slate-500">
             {formatDate(visit.date)} {visit.provider_or_doctor ? `• ${visit.provider_or_doctor}` : ""} • confidence{" "}
@@ -28,45 +45,47 @@ export function DocumentViewer({ visit, onClose }: { visit: Visit; onClose?: () 
               rel="noreferrer"
               className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
             >
-              <LinkIcon className="h-3.5 w-3.5" /> Open original
+              <LinkIcon className="h-3.5 w-3.5" /> {t("viewer.openOriginal")}
+              <span className="sr-only"> ({t("common.opensNewWindow")})</span>
             </a>
           )}
           {onClose && (
             <button
+              type="button"
               onClick={onClose}
-              className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50"
+              aria-label={t("a11y.closeDocument")}
+              className="min-h-[44px] min-w-[44px] rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
             >
-              ✕
+              <span aria-hidden="true">✕</span>
             </button>
           )}
         </div>
       </div>
 
       <div className="border-b border-slate-100 bg-slate-50 px-2">
-        <div className="flex gap-1 p-1">
-          <TabButton active={tab === "original"} onClick={() => setTab("original")}>
-            Original
+        <div role="tablist" aria-label={t("a11y.tabs")} onKeyDown={onTabKeyDown} className="flex gap-1 p-1">
+          <TabButton ref={(node) => { tabRefs.current[0] = node; }} id={originalTabId} controls={originalPanelId} active={tab === "original"} onClick={() => setTab("original")}>
+            {t("viewer.original")}
           </TabButton>
-          <TabButton active={tab === "structured"} onClick={() => setTab("structured")}>
-            What We Found
+          <TabButton ref={(node) => { tabRefs.current[1] = node; }} id={structuredTabId} controls={structuredPanelId} active={tab === "structured"} onClick={() => setTab("structured")}>
+            {t("viewer.structured")}
           </TabButton>
         </div>
       </div>
 
       {tab === "original" ? (
-        <div className="p-4">
+        <div id={originalPanelId} role="tabpanel" aria-labelledby={originalTabId} tabIndex={0} className="p-4">
           {visit.document_url ? (
             <div className="overflow-hidden rounded-lg border border-slate-200 bg-slate-50">
               {visit._source.method === "text_layer" || visit.document_url.toLowerCase().split("?")[0].endsWith(".pdf") ? (
-                <iframe src={visit.document_url} title="Original document" className="h-[600px] w-full bg-white" />
+                <iframe src={visit.document_url} title={t("viewer.originalDocument")} className="h-[600px] w-full bg-white" />
               ) : (
-                <img src={visit.document_url} alt="Original document" className="max-h-[600px] w-full object-contain bg-white" />
+                <img src={visit.document_url} alt={t("viewer.originalDocument")} className="max-h-[600px] w-full object-contain bg-white" />
               )}
             </div>
           ) : (
             <p className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-8 text-center text-sm text-slate-500">
-              The original file isn't available for this record, but everything we found in it is still
-              here — switch to the extraction view.
+              {t("viewer.unavailable")}
             </p>
           )}
           <div className="mt-3 flex items-center gap-2 text-xs text-slate-500">
@@ -76,15 +95,15 @@ export function DocumentViewer({ visit, onClose }: { visit: Visit; onClose?: () 
           </div>
         </div>
       ) : (
-        <div className="space-y-5 p-5">
+        <div id={structuredPanelId} role="tabpanel" aria-labelledby={structuredTabId} tabIndex={0} className="space-y-5 p-5">
           {visit.patient_name && (
-            <Section title="Patient">
+            <Section title={t("viewer.patient")}>
               <p className="text-sm text-slate-700">{visit.patient_name}</p>
             </Section>
           )}
 
           {visit.medications.length > 0 && (
-            <Section title={`Medications (${visit.medications.length})`} icon={<PillIcon className="h-4 w-4" />}>
+            <Section title={`${t("common.medications")} (${visit.medications.length})`} icon={<PillIcon className="h-4 w-4" />}>
               <div className="grid gap-2 sm:grid-cols-2">
                 {visit.medications.map((med, i) => (
                   <div key={i} className="rounded-lg border border-slate-200 bg-slate-50/60 px-3 py-2.5 text-sm">
@@ -102,7 +121,7 @@ export function DocumentViewer({ visit, onClose }: { visit: Visit; onClose?: () 
                     </p>
                     {(med.dosage_value != null || med.frequency_per_day != null) && (
                       <p className="mt-1 text-[11px] text-slate-500">
-                        normalized:{" "}
+                        {t("viewer.normalized")}:{" "}
                         {med.dosage_value != null && med.dosage_unit ? `${med.dosage_value} ${med.dosage_unit}` : "—"}
                         {med.frequency_per_day != null ? ` • ${med.frequency_per_day}x/day` : ""}
                         {med.is_as_needed ? " • PRN" : ""}
@@ -115,15 +134,16 @@ export function DocumentViewer({ visit, onClose }: { visit: Visit; onClose?: () 
           )}
 
           {visit.lab_results.length > 0 && (
-            <Section title={`Lab Results (${visit.lab_results.length})`} icon={<BeakerIcon className="h-4 w-4" />}>
+            <Section title={`${t("common.labResults")} (${visit.lab_results.length})`} icon={<BeakerIcon className="h-4 w-4" />}>
               <div className="overflow-x-auto rounded-lg border border-slate-200">
                 <table className="min-w-full text-sm">
+                  <caption className="sr-only">{t("common.labResults")} — {visit._source.file}</caption>
                   <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
                     <tr>
-                      <th className="px-3 py-2 font-medium">Test</th>
-                      <th className="px-3 py-2 font-medium">Value</th>
-                      <th className="px-3 py-2 font-medium">Range</th>
-                      <th className="px-3 py-2 font-medium">Flag</th>
+                      <th scope="col" className="px-3 py-2 font-medium">{t("common.test")}</th>
+                      <th scope="col" className="px-3 py-2 font-medium">{t("common.value")}</th>
+                      <th scope="col" className="px-3 py-2 font-medium">{t("common.range")}</th>
+                      <th scope="col" className="px-3 py-2 font-medium">{t("common.flag")}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -153,7 +173,7 @@ export function DocumentViewer({ visit, onClose }: { visit: Visit; onClose?: () 
           )}
 
           {visit.allergies_noted.length > 0 && (
-            <Section title="Allergies noted">
+            <Section title={t("common.allergies")}>
               <div className="flex flex-wrap gap-1.5">
                 {visit.allergies_noted.map((a) => (
                   <StatusBadge key={a} tone="danger">
@@ -165,42 +185,55 @@ export function DocumentViewer({ visit, onClose }: { visit: Visit; onClose?: () 
           )}
 
           {visit.clinical_notes && (
-            <Section title="Clinical notes">
+            <Section title={t("common.clinicalNotes")}>
               <p className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-700">{visit.clinical_notes}</p>
             </Section>
           )}
 
           {visit.illegible_or_low_confidence_fields.length > 0 && (
             <div className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800 ring-1 ring-amber-200">
-              <span className="font-semibold">Low-confidence fields:</span> {visit.illegible_or_low_confidence_fields.join("; ")}
+              <span className="font-semibold">{t("viewer.lowConfidence")}:</span> {visit.illegible_or_low_confidence_fields.join("; ")}
             </div>
           )}
         </div>
       )}
-    </div>
+    </section>
   );
 }
 
-function TabButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+const TabButton = forwardRef<HTMLButtonElement, {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+  id: string;
+  controls: string;
+}>(function TabButton({ active, onClick, children, id, controls }, ref) {
   return (
     <button
+      ref={ref}
+      id={id}
+      type="button"
+      role="tab"
+      aria-selected={active}
+      aria-controls={controls}
+      tabIndex={active ? 0 : -1}
       onClick={onClick}
-      className={`rounded-lg px-3 py-1.5 text-sm font-medium transition ${
-        active ? "bg-white text-slate-900 shadow-sm ring-1 ring-slate-200" : "text-slate-600 hover:bg-white hover:text-slate-900"
+      className={`min-h-[44px] rounded-lg px-3 py-1.5 text-sm font-medium transition ${
+        active ? "bg-white text-slate-950 shadow-sm ring-1 ring-slate-300" : "text-slate-700 hover:bg-white hover:text-slate-950"
       }`}
     >
       {children}
     </button>
   );
-}
+});
 
 function Section({ title, children, icon }: { title: string; children: React.ReactNode; icon?: React.ReactNode }) {
   return (
     <div>
-      <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
+      <h3 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-700">
         {icon}
         {title}
-      </p>
+      </h3>
       <div className="mt-2">{children}</div>
     </div>
   );

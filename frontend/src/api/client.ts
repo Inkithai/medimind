@@ -1,7 +1,16 @@
-import type { CareFacility, CareFacilityResponse, FacilityKind } from "../types/facility";
-import type { CareRecommendationsResponse } from "../types/recommendations";
 import type {
+  CareAvailability,
+  CareFacility,
+  CareFacilityResponse,
+  CareRecommendation,
+  FacilityKind as DirectoryFacilityKind,
+} from "../types/facility";
+import type {
+  CareFacilitiesResponse,
+  CareRecommendationContext,
+  CareProviderSearchResponse,
   CrossCheckReport,
+  FacilityKind,
   HealthResponse,
   LabTrendsReport,
   PatientSnapshot,
@@ -10,7 +19,17 @@ import type {
   SessionInfo,
   Timeline,
   UploadResponse,
+  CareSuggestion,
+  CareSearchResponse,
+  CareDay,
+  CareTimeOfDay,
 } from "../types/api";
+
+export interface DocumentsResponse {
+  user_id: string;
+  count: number;
+  documents: Record<string, unknown>[];
+}
 
 export type JobFileStatus = "queued" | "processing" | "completed" | "failed";
 
@@ -42,6 +61,15 @@ export interface JobProgress {
   retryable?: boolean;
   retry_after_seconds?: number | null;
   http_status?: number;
+  // Failure-aware indexing metadata. `records_saved` is the important one:
+  // it tells the UI the medical record is durable in Supabase even when
+  // the derived search index did not finish.
+  stage?: string;
+  error?: string;
+  error_detail?: string;
+  records_saved?: boolean;
+  indexing_completed?: boolean;
+  files_completed?: number;
 }
 
 export interface Job {
@@ -170,10 +198,22 @@ async function publicRequest<T>(
   return data as T;
 }
 
+function safeExternalUrl(value: string | null): string | undefined {
+  if (!value) return undefined;
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "https:" || parsed.protocol === "http:" ? parsed.toString() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function normalizeCareFacility(facility: CareFacilityResponse): CareFacility {
   return {
     id: facility.id,
-    name: facility.name,
+    // The provider name is the facility's identity: never substitute a
+    // category label such as "Clinic" for a missing name.
+    name: facility.name?.trim() || "Unnamed listing",
     kind: facility.kind,
     latitude: facility.latitude,
     longitude: facility.longitude,
@@ -182,10 +222,17 @@ function normalizeCareFacility(facility: CareFacilityResponse): CareFacility {
     rating: facility.rating ?? undefined,
     userRatingCount: facility.user_rating_count ?? undefined,
     phone: facility.phone || undefined,
-    website: facility.website || undefined,
-    mapsUrl: facility.maps_url || undefined,
+    // URLs originate in an external directory. Never pass non-web schemes
+    // (for example javascript:) through to rendered links.
+    website: safeExternalUrl(facility.website),
+    mapsUrl: safeExternalUrl(facility.maps_url),
     openingHours: facility.opening_hours || undefined,
     openNow: facility.open_now ?? undefined,
+    specialty: facility.specialty || undefined,
+    specialtyMatch: facility.specialty_match ?? undefined,
+    availabilityMatch: facility.availability_match ?? undefined,
+    rankingScore: facility.ranking_score ?? undefined,
+    rankingReason: facility.ranking_reason || undefined,
     source: facility.source || "Public listing",
   };
 }
@@ -297,19 +344,76 @@ export const api = {
   },
 
   // Helper: poll job until completed/failed (used by UploadPage for real progress)
+  //
+  // Server restarts are expected (a redeploy, or the platform recycling the
+  // container after a memory spike). A single failed poll therefore must NOT
+  // fail the upload: the work continues server-side and the job row is the
+  // source of truth. Transient errors are tolerated for a grace window and
+  // reported through onUnreachable so the UI can say "still processing,
+  // reconnecting" instead of the misleading "Can't reach the server".
   async pollJobUntilDone(
     credentials: Credentials,
     jobId: string,
     onProgress?: (job: Job) => void,
-    intervalMs = 1500,
-    timeoutMs = 10 * 60 * 1000
+    intervalMs = 4000,
+    timeoutMs = 10 * 60 * 1000,
+    options: {
+      onUnreachable?: (info: { consecutiveFailures: number; error: ApiError }) => void;
+      onReconnected?: () => void;
+      unreachableGraceMs?: number;
+    } = {}
   ): Promise<Job> {
     const start = Date.now();
+    const graceMs = options.unreachableGraceMs ?? 90 * 1000;
+    let firstFailureAt: number | null = null;
+    let consecutiveFailures = 0;
+    // Exponential backoff on transient failures (4s -> 8s -> 16s -> ...
+    // capped at 30s) so a redeploy or a slow server doesn't get hammered
+    // with hundreds of /api/v1/jobs/{id} requests in a few seconds. Reset
+    // to the base interval after any successful poll.
+    let pollInterval = intervalMs;
+
     while (Date.now() - start < timeoutMs) {
-      const job = await api.getJob(credentials, jobId);
-      if (onProgress) onProgress(job);
-      if (job.status === "completed" || job.status === "failed") return job;
-      await new Promise((r) => setTimeout(r, intervalMs));
+      try {
+        const job = await api.getJob(credentials, jobId);
+        pollInterval = intervalMs; // backoff reset after a successful poll
+        if (firstFailureAt !== null) {
+          firstFailureAt = null;
+          consecutiveFailures = 0;
+          options.onReconnected?.();
+        }
+        if (onProgress) onProgress(job);
+        if (job.status === "completed" || job.status === "failed") return job;
+      } catch (err) {
+        const apiError =
+          err instanceof ApiError
+            ? err
+            : new ApiError(0, err instanceof Error ? err.message : "Polling failed");
+
+        // A 401 means the session is invalid — retrying cannot help.
+        // A 404 after the job existed means the server lost it (restart with
+        // in-memory jobs); that is still worth waiting out briefly, because
+        // the record may already be saved and reload will show it.
+        if (apiError.status === 401) throw apiError;
+
+        consecutiveFailures += 1;
+        if (firstFailureAt === null) firstFailureAt = Date.now();
+        options.onUnreachable?.({ consecutiveFailures, error: apiError });
+
+        // Back off harder as failures pile up so a sustained outage isn't
+        // turned into a request flood.
+        pollInterval = Math.min(pollInterval * 2, 30000);
+
+        if (Date.now() - firstFailureAt > graceMs) {
+          throw new ApiError(
+            apiError.status,
+            "Your files finished uploading, but the server stopped responding while we were tracking progress. Your records are saved — reopen this page in a moment to see them.",
+            apiError.detail,
+            { code: "job_status_unavailable", retryable: true }
+          );
+        }
+      }
+      await new Promise((r) => setTimeout(r, pollInterval));
     }
     throw new ApiError(
       408,
@@ -317,6 +421,13 @@ export const api = {
       undefined,
       { code: "job_poll_timeout", retryable: false }
     );
+  },
+
+  // Every document page persisted in Supabase for this user. Authoritative
+  // across restarts — used to verify/reconstruct the record independently
+  // of any in-process state.
+  listDocuments(credentials: Credentials): Promise<DocumentsResponse> {
+    return request<DocumentsResponse>(credentials, "/api/v1/documents");
   },
 
   // One request returns timeline + cross-check + lab trends together (the
@@ -338,14 +449,35 @@ export const api = {
     return request<LabTrendsReport>(credentials, "/api/v1/lab-trends");
   },
 
+  getCareRecommendation(credentials: Credentials): Promise<CareRecommendation> {
+    return request<CareRecommendation>(credentials, "/api/v1/care/recommendation");
+  },
+
+  getCareRecommendationContext(credentials: Credentials): Promise<CareRecommendationContext> {
+    return request<CareRecommendationContext>(credentials, "/api/v1/care-recommendations");
+  },
+
+  searchCareProviders(
+    credentials: Credentials,
+    body: { flag_id: string; location: string; availability: "any" | "today" | "this_week" | "evenings" | "weekends" }
+  ): Promise<CareProviderSearchResponse> {
+    return request<CareProviderSearchResponse>(credentials, "/api/v1/care-recommendations/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  },
+
   async getCareFacilities(
     credentials: Credentials,
     options: {
       location: string;
-      kind?: "any" | FacilityKind;
+      kind?: "any" | DirectoryFacilityKind;
       radiusKm?: number;
       latitude?: number;
       longitude?: number;
+      specialty?: string;
+      availability?: CareAvailability;
       signal?: AbortSignal;
     }
   ): Promise<CareFacility[]> {
@@ -356,6 +488,10 @@ export const api = {
     });
     if (options.latitude !== undefined) params.set("latitude", String(options.latitude));
     if (options.longitude !== undefined) params.set("longitude", String(options.longitude));
+    if (options.specialty?.trim()) params.set("specialty", options.specialty.trim());
+    if (options.availability && options.availability !== "any") {
+      params.set("availability", options.availability);
+    }
     const facilities = await request<CareFacilityResponse[]>(
       credentials,
       `/api/v1/care/facilities?${params.toString()}`,
@@ -364,22 +500,17 @@ export const api = {
     return facilities.map(normalizeCareFacility);
   },
 
-  async getCareRecommendations(
+  ask(
     credentials: Credentials,
+    question: string,
+    topK = 8,
     signal?: AbortSignal
-  ): Promise<CareRecommendationsResponse> {
-    return request<CareRecommendationsResponse>(
-      credentials,
-      "/api/v1/care/recommendations",
-      { signal }
-    );
-  },
-
-  ask(credentials: Credentials, question: string, topK = 8): Promise<QAResponse> {
+  ): Promise<QAResponse> {
     return request<QAResponse>(credentials, "/api/v1/qa", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ question, top_k: topK }),
+      signal,
     });
   },
 
@@ -417,5 +548,40 @@ export const api = {
       `/api/v1/sessions/${encodeURIComponent(sessionId)}`,
       { method: "DELETE" }
     );
+  },
+
+  searchFacilities(
+    credentials: Credentials,
+    location: string,
+    kind: FacilityKind = "any",
+    radiusKm = 8
+  ): Promise<CareFacilitiesResponse> {
+    const params = new URLSearchParams({
+      location,
+      kind,
+      radius_km: String(radiusKm),
+    });
+    return request<CareFacilitiesResponse>(credentials, `/api/v1/care/facilities?${params}`);
+  },
+
+  getCareSuggestion(credentials: Credentials): Promise<CareSuggestion> {
+    return request<CareSuggestion>(credentials, "/api/v1/care/suggestion");
+  },
+
+  searchCare(
+    credentials: Credentials,
+    body: {
+      city: string;
+      specialty?: string;
+      days?: CareDay[];
+      time_of_day?: CareTimeOfDay;
+      radius_km?: number;
+    }
+  ): Promise<CareSearchResponse> {
+    return request<CareSearchResponse>(credentials, "/api/v1/care/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
   },
 };

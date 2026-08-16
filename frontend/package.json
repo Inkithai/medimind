@@ -8,8 +8,17 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "lint": "tsc --noEmit",
+    "test": "npm run test:hook && npm run test:auth && npm run test:i18n && npm run test:a11y && npm run test:geolocation && npm run test:care && npm run test:sources && npm run test:qacard && npm run test:format && npm run test:about",
     "test:hook": "NODE_ENV=development tsx src/hooks/__tests__/useStrictEffect.test.tsx",
-    "test:smoke": "tsx src/components/__smoke__/care-recommendations.smoke.tsx"
+    "test:auth": "NODE_ENV=development tsx src/context/__tests__/AuthContext.test.tsx",
+    "test:i18n": "NODE_ENV=development tsx src/i18n/__tests__/i18n.test.tsx",
+    "test:a11y": "NODE_ENV=development tsx src/accessibility/__tests__/accessibility.test.tsx",
+    "test:geolocation": "tsx src/services/__tests__/geolocation.test.ts",
+    "test:care": "tsx src/components/__tests__/CareEvidencePanel.test.tsx && tsx src/components/__tests__/ConsultationPack.test.tsx && tsx src/components/__tests__/ProviderResultCard.test.tsx",
+    "test:sources": "tsx src/utils/__tests__/sources.test.ts",
+    "test:qacard": "tsx src/components/__tests__/QAResultCard.test.tsx",
+    "test:format": "TZ=Asia/Colombo tsx src/utils/__tests__/format.test.ts && TZ=America/New_York tsx src/utils/__tests__/format.test.ts && TZ=Pacific/Honolulu tsx src/utils/__tests__/format.test.ts && TZ=UTC tsx src/utils/__tests__/format.test.ts",
+    "test:about": "tsx src/pages/__tests__/AboutPage.test.tsx"
   },
   "dependencies": {
     "leaflet": "^1.9.4",
@@ -24,6 +33,7 @@
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.1",
     "autoprefixer": "^10.4.20",
+    "axe-core": "^4.13.0",
     "jsdom": "^30.0.1",
     "postcss": "^8.4.45",
     "tailwindcss": "^3.4.10",

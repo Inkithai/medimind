@@ -17,8 +17,13 @@ export interface LocationPlace extends Coordinates {
   type?: string;
 }
 
+/** How the coordinates were obtained, so the UI never implies the user
+ *  deliberately chose a location they never picked. */
+export type LocationSource = "search" | "geolocation" | "pin" | "saved";
+
 /** The durable value emitted only after the user confirms the pin. */
 export interface ConfirmedLocation extends LocationPlace {
   addressDetails?: string;
   confirmedAt: string;
+  source?: LocationSource;
 }

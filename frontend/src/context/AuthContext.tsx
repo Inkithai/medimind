@@ -92,13 +92,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [initializing, setInitializing] = useState<boolean>(() => !state.configured);
   const [initError, setInitError] = useState<string | null>(null);
 
-  // React 18 <StrictMode> (see main.tsx) mounts components twice in dev:
-  // effect → cleanup → effect on the SAME fiber. Without this guard, the
-  // auto-provisioning effect below would POST /anonymous/session twice on
-  // every fresh page load, creating two anon_* users (the "anonymous
-  // session created" log appearing twice at startup). Refs survive the
-  // StrictMode double-invoke, so the second run is skipped.
+  // React 18 <StrictMode> (see main.tsx) runs mount effects as
+  // setup → cleanup → setup on the SAME fiber. The first ref prevents a
+  // duplicate POST; the second tells the in-flight first setup that the
+  // provider is live again after StrictMode's synthetic cleanup. A local
+  // `cancelled` variable cannot do that: it remains true forever and leaves
+  // isInitializing stuck after the one provisioning request succeeds.
   const provisioningStarted = useRef(false);
+  const providerMounted = useRef(false);
 
   const createAnonymous = useCallback(async (apiBase = "") => {
     const res = await api.createAnonymousSession(apiBase);
@@ -114,48 +115,49 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return next;
   }, []);
 
-  // Auto-provision on first load if no session exists
+  // Auto-provision on first load if no session exists.
   useEffect(() => {
+    providerMounted.current = true;
+    const markUnmounted = () => {
+      providerMounted.current = false;
+    };
+
     if (state.configured) {
       setInitializing(false);
-      return;
+      return markUnmounted;
     }
     if (provisioningStarted.current) {
       // StrictMode re-ran this effect; the first invocation is already
-      // provisioning — don't create a second anonymous session.
-      return;
+      // provisioning. Keep this setup's cleanup so a real unmount is still
+      // distinguished from StrictMode's temporary cleanup.
+      return markUnmounted;
     }
     provisioningStarted.current = true;
-    let cancelled = false;
     (async () => {
       setInitializing(true);
       setInitError(null);
       try {
-        // Use VITE_API_URL if set (production), else empty string (same-origin/Vite proxy)
-        const apiBase = (import.meta.env.VITE_API_URL as string) || "";
+        // Use VITE_API_URL if set (production), else empty string (same-origin/Vite proxy).
+        // Optional chaining also keeps non-Vite test runners from crashing here.
+        const apiBase = (import.meta.env?.VITE_API_URL as string) || "";
         // Quick health check before creating session
         try {
           await api.healthUnauthenticated(apiBase);
         } catch {
           // health failed but try session creation anyway (maybe proxy misconfig)
         }
-        const session = await createAnonymous(apiBase);
-        if (!cancelled) {
-          setState(session);
-        }
+        await createAnonymous(apiBase);
       } catch (err) {
-        if (!cancelled) {
+        if (providerMounted.current) {
           const msg =
             err instanceof Error ? err.message : "Failed to create workspace";
           setInitError(msg);
         }
       } finally {
-        if (!cancelled) setInitializing(false);
+        if (providerMounted.current) setInitializing(false);
       }
     })();
-    return () => {
-      cancelled = true;
-    };
+    return markUnmounted;
     // only run once on mount
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

@@ -23,13 +23,18 @@ Env:
     export GEMINI_API_KEY="AIza..."  (or GROQ_API_KEY="gsk_..." for groq)
 """
 
+import logging
+import os
+import threading
+import time
+from collections import OrderedDict
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
-from openai import OpenAIError
-
-from medical_extractor import client, MODEL, _chat_completion
+from medical_extractor import MODEL, _chat_completion
 import retrieval
+
+logger = logging.getLogger("conversation")
 
 # Cheap/fast model for query rewriting and summarization — these are short,
 # low-stakes generations, not the main answer synthesis.
@@ -60,6 +65,12 @@ class ConversationSession:
         self.turns: List[Dict[str, str]] = []  # full, untrimmed transcript
         self._summary: Optional[str] = None
         self._summary_covers_up_to = 0  # index into self.turns the cached summary accounts for
+        # Monotonic so TTL is immune to wall-clock adjustments.
+        self.last_used_at: float = time.monotonic()
+
+    def touch(self) -> None:
+        """Marks the session as recently used, deferring its eviction."""
+        self.last_used_at = time.monotonic()
 
     def add_user_turn(self, text: str) -> None:
         """Appends a user turn with the current UTC timestamp."""
@@ -111,18 +122,47 @@ class ConversationSession:
         return list(self.turns)
 
 
-_SESSIONS: Dict[Tuple[str, str], ConversationSession] = {}
+#: Sessions are per-process and never expire on their own, so without a
+#: bound this dict grows for the life of the server — every abandoned
+#: conversation keeps its full transcript resident. Evict least-recently-used
+#: sessions past this many, and drop ones untouched for the TTL.
+MAX_SESSIONS = int(os.environ.get("MAX_CONVERSATION_SESSIONS", "500"))
+SESSION_TTL_SECONDS = int(os.environ.get("CONVERSATION_SESSION_TTL_SECONDS", str(24 * 3600)))
+
+#: OrderedDict = insertion/most-recent order, so eviction is O(1) from the
+#: front. Guarded by a lock because FastAPI serves requests from a thread
+#: pool: two concurrent turns in the same session would otherwise race.
+_SESSIONS: "OrderedDict[Tuple[str, str], ConversationSession]" = OrderedDict()
+_SESSIONS_LOCK = threading.RLock()
+
+
+def _evict_locked() -> None:
+    """Drop expired, then oldest, sessions. Caller must hold the lock."""
+    now = time.monotonic()
+    expired = [
+        key
+        for key, session in _SESSIONS.items()
+        if now - session.last_used_at > SESSION_TTL_SECONDS
+    ]
+    for key in expired:
+        _SESSIONS.pop(key, None)
+    while len(_SESSIONS) > MAX_SESSIONS:
+        _SESSIONS.popitem(last=False)
 
 
 def get_or_create_session(patient_key: str, session_id: str) -> ConversationSession:
     """Fetches the ConversationSession for (patient_key, session_id),
     creating and registering a new empty one if it doesn't exist yet."""
     key = (patient_key, session_id)
-    session = _SESSIONS.get(key)
-    if session is None:
-        session = ConversationSession(patient_key, session_id)
-        _SESSIONS[key] = session
-    return session
+    with _SESSIONS_LOCK:
+        session = _SESSIONS.get(key)
+        if session is None:
+            session = ConversationSession(patient_key, session_id)
+            _SESSIONS[key] = session
+        session.touch()
+        _SESSIONS.move_to_end(key)
+        _evict_locked()
+        return session
 
 
 def get_session(patient_key: str, session_id: str) -> Optional[ConversationSession]:
@@ -130,14 +170,33 @@ def get_session(patient_key: str, session_id: str) -> Optional[ConversationSessi
     creating one. Returns None if no such session exists — used by callers
     (e.g. the HTTP API) that need to distinguish "unknown session" (404)
     from "brand new session" (auto-create)."""
-    return _SESSIONS.get((patient_key, session_id))
+    key = (patient_key, session_id)
+    with _SESSIONS_LOCK:
+        session = _SESSIONS.get(key)
+        if session is None:
+            return None
+        # An expired session is indistinguishable from an unknown one, so the
+        # API returns the same 404 and the user starts a fresh conversation.
+        if time.monotonic() - session.last_used_at > SESSION_TTL_SECONDS:
+            _SESSIONS.pop(key, None)
+            return None
+        session.touch()
+        _SESSIONS.move_to_end(key)
+        return session
 
 
 def delete_session(patient_key: str, session_id: str) -> bool:
     """Removes a session from the in-memory registry, freeing its turn
     history. Returns True if a session was found and removed, False if it
     didn't exist."""
-    return _SESSIONS.pop((patient_key, session_id), None) is not None
+    with _SESSIONS_LOCK:
+        return _SESSIONS.pop((patient_key, session_id), None) is not None
+
+
+def session_count() -> int:
+    """Number of live sessions — used by tests and operational checks."""
+    with _SESSIONS_LOCK:
+        return len(_SESSIONS)
 
 
 # ---------------------------------------------------------------------------
@@ -198,8 +257,12 @@ def rewrite_query_with_context(question: str, history: List[Dict[str, str]]) -> 
         response = _chat_completion(model=REWRITE_MODEL, messages=messages)
         rewritten = (response.choices[0].message.content or "").strip()
         return rewritten if rewritten else question
-    except OpenAIError as e:
-        print(f"  Query rewrite failed, falling back to raw question for retrieval: {e}")
+    except Exception as e:
+        # _chat_completion raises ProviderRateLimitError (a RuntimeError),
+        # APIError, and connection errors — not just OpenAIError. Swallowing
+        # only OpenAIError let the common 429/quota path crash the whole turn
+        # instead of falling back to the raw question as documented.
+        logger.warning("Query rewrite failed, falling back to raw question for retrieval: %s", e)
         return question
 
 
@@ -247,8 +310,10 @@ def summarize_old_turns(turns: List[Dict[str, str]]) -> str:
     try:
         response = _chat_completion(model=REWRITE_MODEL, messages=messages)
         return (response.choices[0].message.content or "").strip()
-    except OpenAIError as e:
-        print(f"  Conversation summarization failed, using raw fallback: {e}")
+    except Exception as e:
+        # Same as rewrite_query_with_context: a hard quota / 429 must not
+        # take down get_history() (and therefore ask()) on a long session.
+        logger.warning("Conversation summarization failed, using raw fallback: %s", e)
         return transcript[:2000]
 
 

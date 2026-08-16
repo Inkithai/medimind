@@ -62,7 +62,7 @@ PERSISTED_DOCS = [{
 ANSWER_JSON = json.dumps({
     "answer": "You are taking Paracetamol 500 mg three times daily.",
     "confidence": 0.95,
-    "sources": [{"date": "2024-03-15", "source_file": "rx.pdf"}],
+    "sources": [{"date": "2024-03-15", "source_file": "rx.pdf", "page": 1}],
     "recommend_professional_consult": False,
 })
 
@@ -102,6 +102,9 @@ def _make_fake_chromadb():
                 raise ValueError(f"Collection {name} does not exist")
             return state["collections"][name]
 
+        def delete_collection(self, name):
+            state["collections"].pop(name, None)
+
     fake_module = types.ModuleType("chromadb")
     fake_module.PersistentClient = FakeClient
     return fake_module, state
@@ -136,9 +139,19 @@ def test_index_lost_but_documents_exist_self_heals_and_answers():
 
         assert "Paracetamol" in out["answer"], out
         assert out["confidence"] == 0.95
-        assert out["sources"] == [{"date": "2024-03-15", "source_file": "rx.pdf"}]
+        assert out["sources"] == [
+            {
+                "date": "2024-03-15",
+                "dates": ["2024-03-15"],
+                "source_file": "rx.pdf",
+                # The fixture timeline has no _source.page, so the validator
+                # attaches None rather than trusting the model's "page": 1.
+                "page": None,
+            }
+        ]
         # The store must now actually contain the rebuilt index.
-        assert state["collections"]["anon_self_heal"].count() == 3  # med + lab + allergy
+        heal_collection = vector_store._sanitize_collection_name("anon_self_heal")
+        assert state["collections"][heal_collection].count() == 3  # med + lab + allergy
     finally:
         vector_store._chroma_client = None
         _restore_chromadb(saved)
