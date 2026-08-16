@@ -29,10 +29,12 @@ import os
 import io
 import re
 import json
+import copy
 import time
 import base64
 import threading
 from collections import deque
+from datetime import timezone
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple, Callable
 
@@ -50,6 +52,9 @@ from openai import (
 )
 from dotenv import load_dotenv
 import logging
+
+from clinical_events import CLINICAL_EVENT_COLLECTIONS, CLINICAL_EVENT_DATE_FIELDS, CLINICAL_TIMELINE_KEYS
+from evidence import first_evidence, locate_pdf_text_evidence, normalize_document_evidence
 
 load_dotenv(override=True)
 
@@ -1009,7 +1014,7 @@ def _format_ladder(
         # Compact JSON materially reduces prompt tokens on the 8K TPM tier.
         f"{json.dumps(schema, separators=(',', ':'))}\n"
         "Example of the required shape (illustrative values, adapt to the actual document):\n"
-        '{\n  "document_type": "prescription",\n  "date": "2024-03-15",\n  "provider_or_doctor": "Dr. Smith",\n  "patient_name": "John Doe",\n  "medications": [],\n  "lab_results": [],\n  "allergies_noted": [],\n  "clinical_notes": null,\n  "illegible_or_low_confidence_fields": [],\n  "overall_confidence": 0.92\n}\n'
+        '{\n  "document_type": "prescription",\n  "date": "2024-03-15",\n  "provider_or_doctor": "Dr. Smith",\n  "patient_name": "John Doe",\n  "medications": [],\n  "lab_results": [],\n  "diagnoses": [],\n  "symptoms": [],\n  "procedures": [],\n  "vital_signs": [],\n  "imaging_results": [],\n  "allergies_noted": [],\n  "diagnoses_or_conditions": [],\n  "clinical_notes": null,\n  "field_evidence": {"date": [], "provider_or_doctor": [], "patient_name": [], "allergies_noted": [], "clinical_notes": []},\n  "illegible_or_low_confidence_fields": [],\n  "overall_confidence": 0.92\n}\n'
     )
     if model in _STRICT_SCHEMA_MODELS:
         return [
@@ -1721,8 +1726,9 @@ def _parse_json_object(raw: str) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 EXTRACTION_SCHEMA_PROMPT = """
-You are a medical document extraction engine. You will be shown an image of
-a medical document (prescription, lab report, or discharge summary).
+You are a medical document extraction engine. You will be shown an image or
+text from a medical document (prescription, lab or imaging report, discharge
+summary, consultation note, or procedure report).
 
 **CRITICAL INSTRUCTION — FOLLOW EXACTLY:**
 - Output **ONLY** a single valid JSON object. Nothing else.
@@ -1789,25 +1795,210 @@ the same regardless of what language or units each was printed in:
   into the medication's confidence the same way an inferred brand-to-
   generic mapping is.
 
+LONGITUDINAL CLINICAL EVENTS — extract only what the document explicitly
+states, preserving separate event dates when printed:
+- `diagnoses`: documented problem-list/assessment diagnoses only. Never infer
+  a diagnosis from symptoms, medication, labs, or imaging. `status` describes
+  how the source presents it: confirmed, suspected, history, resolved, or
+  unknown. Keep any printed ICD/code in `code`; otherwise null.
+- `symptoms`: patient-reported symptoms or documented signs. Do not turn a
+  symptom into a diagnosis. Use only printed severity/status information.
+- `procedures`: completed, planned, cancelled, or historical operations,
+  interventions, therapies, or bedside procedures. Keep outcome/body site
+  only when documented.
+- `vital_signs`: one object per printed measurement (blood pressure, pulse,
+  temperature, respiratory rate, oxygen saturation, height, weight, BMI,
+  etc.). Keep `value` exactly as printed and never guess or convert a unit.
+- `imaging_results`: one object per radiology/imaging study. Keep the study,
+  body site, findings, and impression as documented; never promote an imaging
+  finding into a diagnosis.
+- Use null for an event-specific date when the document does not print one;
+  the timeline will fall back to the enclosing document date.
+
+PAGE-LEVEL EVIDENCE — every extracted fact must point back to the document:
+- Include a short VERBATIM quote for every date, identity, provider, allergy,
+  clinical note, medication, lab result, diagnosis, symptom, procedure, vital
+  sign, and imaging result. Never paraphrase the quote.
+- `page` is 1-based. Text PDFs contain explicit `--- Page N ---` markers;
+  use that N. For a single image use page 1.
+- For image input, return `bbox` as [left, top, right, bottom] in a 0..1000
+  coordinate frame around the smallest readable line/row supporting the
+  fact. For text input, set bbox to null; deterministic PDF text search will
+  calculate the exact rectangle after extraction.
+- If a fact is inferred rather than printed (for example a generic ingredient
+  inferred from a brand), cite the printed brand line and lower evidence
+  confidence. If no supporting text exists, use an empty evidence array.
+
+PATIENT IDENTITY FIELDS — used to detect a document that belongs to a
+different patient than this account's other documents:
+- patient_age: the patient's age as printed on the document (a number), or
+  null if not printed. Never estimate an age that isn't stated.
+- patient_gender: "male", "female", or the document's own wording,
+  lowercased; null if not stated.
+
+LANGUAGE / CONFIDENCE METADATA — used to grade OCR risk vs translation
+risk separately (they have different fixes):
+- document_language: the main language the document is printed in, as an
+  English name (e.g. "English", "Japanese", "Sinhala"); null only if
+  genuinely indeterminate.
+- additional_languages: other languages that appear on the document
+  (mixed-language documents are common); empty array if none.
+- ocr_confidence: 0.0-1.0 — could you READ the characters off the page?
+  Low for handwriting, blur, glare, cut-off edges. Independent of language.
+- translation_confidence: 0.0-1.0 — did you convert what you read into the
+  normalized English fields (ingredients as INN names, units, frequencies)
+  faithfully? Low for transliterated drug names, unfamiliar regional
+  brands, ambiguous dosing phrases. A crisply printed foreign-language
+  document can score HIGH on ocr_confidence and lower on
+  translation_confidence; a blurry English note is the opposite. Report
+  them independently — do not blend them.
+
 Rules:
+- Extract diagnoses_or_conditions only when the document explicitly names
+  them. Preserve the printed wording; do not infer a diagnosis from a test,
+  symptom, or medication.
 - If handwriting is unclear, make your best guess but LOWER the confidence
   score for that field and add a note to illegible_or_low_confidence_fields.
 - Never invent data. Use null for missing string fields (per the schema).
-- Do not provide medical advice or diagnosis — extraction only.
+- Do not provide medical advice or infer a new diagnosis — extraction of documented facts only.
 """
 
+# One supporting region. Vision returns 0..1000 coordinates which are
+# normalized to 0..1 after parsing; digital PDFs return null and are resolved
+# exactly with PyMuPDF text search against the original page.
+EVIDENCE_REGION_JSON_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "page": {"type": "integer", "minimum": 1},
+        "quote": {"type": "string"},
+        "bbox": {
+            "type": ["array", "null"],
+            "items": {"type": "number", "minimum": 0, "maximum": 1000},
+            "minItems": 4,
+            "maxItems": 4,
+        },
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+    },
+    "required": ["page", "quote", "bbox", "confidence"],
+    "additionalProperties": False,
+}
+
+EVIDENCE_LIST_JSON_SCHEMA = {
+    "type": "array",
+    "items": EVIDENCE_REGION_JSON_SCHEMA,
+}
+
+# Longitudinal events must be explicitly documented, so accepting an event
+# without at least one source locator would violate the record's trust model.
+CLINICAL_EVIDENCE_LIST_JSON_SCHEMA = {
+    **EVIDENCE_LIST_JSON_SCHEMA,
+    "minItems": 1,
+}
+
+DIAGNOSIS_JSON_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "name": {"type": "string"},
+        "code": {"type": ["string", "null"]},
+        "status": {
+            "type": "string",
+            "enum": ["active", "confirmed", "suspected", "history", "resolved", "unknown"],
+        },
+        "onset_date": {"type": ["string", "null"]},
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        "evidence": CLINICAL_EVIDENCE_LIST_JSON_SCHEMA,
+    },
+    "required": ["name", "code", "status", "onset_date", "confidence", "evidence"],
+    "additionalProperties": False,
+}
+
+SYMPTOM_JSON_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "name": {"type": "string"},
+        "severity": {"type": "string", "enum": ["mild", "moderate", "severe", "unknown"]},
+        "status": {
+            "type": "string",
+            "enum": ["current", "resolved", "intermittent", "historical", "unknown"],
+        },
+        "onset_date": {"type": ["string", "null"]},
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        "evidence": CLINICAL_EVIDENCE_LIST_JSON_SCHEMA,
+    },
+    "required": ["name", "severity", "status", "onset_date", "confidence", "evidence"],
+    "additionalProperties": False,
+}
+
+PROCEDURE_JSON_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "name": {"type": "string"},
+        "procedure_date": {"type": ["string", "null"]},
+        "body_site": {"type": ["string", "null"]},
+        "status": {
+            "type": "string",
+            "enum": ["completed", "planned", "cancelled", "historical", "unknown"],
+        },
+        "outcome": {"type": ["string", "null"]},
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        "evidence": CLINICAL_EVIDENCE_LIST_JSON_SCHEMA,
+    },
+    "required": ["name", "procedure_date", "body_site", "status", "outcome", "confidence", "evidence"],
+    "additionalProperties": False,
+}
+
+VITAL_SIGN_JSON_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "name": {"type": "string"},
+        "value": {"type": "string"},
+        "unit": {"type": ["string", "null"]},
+        "measured_at": {"type": ["string", "null"]},
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        "evidence": CLINICAL_EVIDENCE_LIST_JSON_SCHEMA,
+    },
+    "required": ["name", "value", "unit", "measured_at", "confidence", "evidence"],
+    "additionalProperties": False,
+}
+
+IMAGING_RESULT_JSON_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "study_type": {"type": "string"},
+        "body_site": {"type": ["string", "null"]},
+        "study_date": {"type": ["string", "null"]},
+        "findings": {"type": "string"},
+        "impression": {"type": ["string", "null"]},
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        "evidence": CLINICAL_EVIDENCE_LIST_JSON_SCHEMA,
+    },
+    "required": [
+        "study_type", "body_site", "study_date", "findings", "impression", "confidence", "evidence",
+    ],
+    "additionalProperties": False,
+}
+
 # Strict JSON Schema (OpenAI Structured Outputs) — guarantees every field,
-# including "ingredients", is always present in the response.
+# including evidence links, is always present in the response.
 EXTRACTION_JSON_SCHEMA = {
     "type": "object",
     "properties": {
         "document_type": {
             "type": "string",
-            "enum": ["prescription", "lab_report", "discharge_summary", "other"],
+            "enum": [
+                "prescription", "lab_report", "discharge_summary", "imaging_report",
+                "consultation_note", "procedure_report", "other",
+            ],
         },
         "date": {"type": ["string", "null"]},
         "provider_or_doctor": {"type": ["string", "null"]},
         "patient_name": {"type": ["string", "null"]},
+        "patient_age": {"type": ["number", "null"]},
+        "patient_gender": {"type": ["string", "null"]},
+        "document_language": {"type": ["string", "null"]},
+        "additional_languages": {"type": "array", "items": {"type": "string"}},
+        "ocr_confidence": {"type": ["number", "null"]},
+        "translation_confidence": {"type": ["number", "null"]},
         "medications": {
             "type": "array",
             "items": {
@@ -1823,11 +2014,12 @@ EXTRACTION_JSON_SCHEMA = {
                     "frequency_per_day": {"type": ["number", "null"]},
                     "is_as_needed": {"type": "boolean"},
                     "confidence": {"type": "number"},
+                    "evidence": EVIDENCE_LIST_JSON_SCHEMA,
                 },
                 "required": [
                     "name", "ingredients", "dosage", "frequency", "duration",
                     "dosage_value", "dosage_unit", "frequency_per_day", "is_as_needed",
-                    "confidence",
+                    "confidence", "evidence",
                 ],
                 "additionalProperties": False,
             },
@@ -1843,20 +2035,46 @@ EXTRACTION_JSON_SCHEMA = {
                     "reference_range": {"type": ["string", "null"]},
                     "flag": {"type": "string", "enum": ["normal", "high", "low", "unknown"]},
                     "confidence": {"type": "number"},
+                    "evidence": EVIDENCE_LIST_JSON_SCHEMA,
                 },
-                "required": ["test_name", "value", "unit", "reference_range", "flag", "confidence"],
+                "required": ["test_name", "value", "unit", "reference_range", "flag", "confidence", "evidence"],
                 "additionalProperties": False,
             },
         },
+        "diagnoses": {"type": "array", "items": DIAGNOSIS_JSON_SCHEMA},
+        "symptoms": {"type": "array", "items": SYMPTOM_JSON_SCHEMA},
+        "procedures": {"type": "array", "items": PROCEDURE_JSON_SCHEMA},
+        "vital_signs": {"type": "array", "items": VITAL_SIGN_JSON_SCHEMA},
+        "imaging_results": {"type": "array", "items": IMAGING_RESULT_JSON_SCHEMA},
         "allergies_noted": {"type": "array", "items": {"type": "string"}},
+        "diagnoses_or_conditions": {"type": "array", "items": {"type": "string"}},
         "clinical_notes": {"type": ["string", "null"]},
+        "field_evidence": {
+            "type": "object",
+            "properties": {
+                "date": EVIDENCE_LIST_JSON_SCHEMA,
+                "provider_or_doctor": EVIDENCE_LIST_JSON_SCHEMA,
+                "patient_name": EVIDENCE_LIST_JSON_SCHEMA,
+                "allergies_noted": EVIDENCE_LIST_JSON_SCHEMA,
+                "clinical_notes": EVIDENCE_LIST_JSON_SCHEMA,
+            },
+            "required": [
+                "date", "provider_or_doctor", "patient_name",
+                "allergies_noted", "clinical_notes",
+            ],
+            "additionalProperties": False,
+        },
         "illegible_or_low_confidence_fields": {"type": "array", "items": {"type": "string"}},
         "overall_confidence": {"type": "number"},
     },
     "required": [
         "document_type", "date", "provider_or_doctor", "patient_name",
-        "medications", "lab_results", "allergies_noted", "clinical_notes",
-        "illegible_or_low_confidence_fields", "overall_confidence",
+        "patient_age", "patient_gender",
+        "document_language", "additional_languages",
+        "ocr_confidence", "translation_confidence",
+        "medications", "lab_results", "diagnoses", "symptoms", "procedures",
+        "vital_signs", "imaging_results", "allergies_noted", "diagnoses_or_conditions",
+        "clinical_notes", "field_evidence", "illegible_or_low_confidence_fields", "overall_confidence",
     ],
     "additionalProperties": False,
 }
@@ -1895,18 +2113,59 @@ def extract_text_from_pdf(pdf_path: str) -> str:
     return "\n\n".join(chunks)
 
 
-def pdf_pages_to_images(pdf_path: str, dpi: int = 200) -> List[Image.Image]:
-    """Render each page of a scanned/image-only PDF into a PIL image."""
+def pdf_pages_to_images(
+    pdf_path: str,
+    dpi: int = 200,
+    page_indices: Optional[List[int]] = None,
+) -> List[Image.Image]:
+    """Render PDF pages into PIL images.
+
+    ``page_indices`` (0-based) limits rendering to those pages so a hybrid
+    PDF does not rasterize digital text pages that will be extracted as
+    text. When omitted, every page is rendered (scanned-PDF path).
+    """
     images = []
     doc = pymupdf.open(pdf_path)
     zoom = dpi / 72
     matrix = pymupdf.Matrix(zoom, zoom)
-    for page in doc:
+    indices = list(page_indices) if page_indices is not None else list(range(len(doc)))
+    for i in indices:
+        page = doc[i]
         pix = page.get_pixmap(matrix=matrix)
         img = Image.open(io.BytesIO(pix.tobytes("png")))
         images.append(img)
     doc.close()
     return images
+
+
+# A page with fewer than this many extracted characters is treated as
+# scanned/image-only and sent through vision OCR. 40 is high enough that
+# a digital letterhead-only cover (hospital name + address) still counts
+# as text, but a junk OCR layer of a few random glyphs does not.
+PAGE_TEXT_MIN_CHARS = 40
+
+
+def _pdf_page_texts(pdf_path: str) -> List[str]:
+    """Return stripped text for every page, in order."""
+    texts: List[str] = []
+    with pdfplumber.open(pdf_path) as pdf:
+        for page in pdf.pages:
+            texts.append((page.extract_text() or "").strip())
+    return texts
+
+
+def classify_pdf_pages(
+    page_texts: List[str], min_chars: int = PAGE_TEXT_MIN_CHARS
+) -> Tuple[List[int], List[int]]:
+    """Split page indices into (has_usable_text, needs_vision)."""
+    text_idx: List[int] = []
+    image_idx: List[int] = []
+    for i, text in enumerate(page_texts):
+        if len((text or "").strip()) >= min_chars:
+            text_idx.append(i)
+        else:
+            image_idx.append(i)
+    return text_idx, image_idx
 
 
 def image_to_base64(img: Image.Image) -> str:
@@ -1931,6 +2190,18 @@ def image_to_base64(img: Image.Image) -> str:
 # ---------------------------------------------------------------------------
 # 3. Vision extraction call
 # ---------------------------------------------------------------------------
+
+def _normalize_extraction_result(result: Dict[str, Any]) -> Dict[str, Any]:
+    """Backfill fields when a provider falls back from strict JSON schema."""
+    diagnoses = result.get("diagnoses_or_conditions")
+    if not isinstance(diagnoses, list):
+        result["diagnoses_or_conditions"] = []
+    else:
+        result["diagnoses_or_conditions"] = [
+            value.strip() for value in diagnoses if isinstance(value, str) and value.strip()
+        ]
+    return result
+
 
 def extract_from_image(img: Image.Image, model: str = VISION_MODEL) -> Dict[str, Any]:
     """Send a single page image to the vision model and parse structured JSON.
@@ -1959,7 +2230,7 @@ def extract_from_image(img: Image.Image, model: str = VISION_MODEL) -> Dict[str,
         ],
         strict_format=EXTRACTION_RESPONSE_FORMAT,
     )
-    return _parse_json_object(raw)
+    return _normalize_extraction_result(_parse_json_object(raw))
 
 
 def extract_from_text(text: str, model: str = MODEL) -> Dict[str, Any]:
@@ -1973,7 +2244,7 @@ def extract_from_text(text: str, model: str = MODEL) -> Dict[str, Any]:
         user_content=f"Extract structured data from this document text:\n\n{text}",
         strict_format=EXTRACTION_RESPONSE_FORMAT,
     )
-    return _parse_json_object(raw)
+    return _normalize_extraction_result(_parse_json_object(raw))
 
 
 VISION_OCR_CONFIDENCE_CEILING = 0.85  # a vision/handwriting read is never "fully certain"
@@ -1990,12 +2261,10 @@ def _apply_confidence_ceiling(result: Dict[str, Any], ceiling: float) -> Dict[st
     """
     if "overall_confidence" in result and isinstance(result["overall_confidence"], (int, float)):
         result["overall_confidence"] = min(result["overall_confidence"], ceiling)
-    for med in result.get("medications", []) or []:
-        if isinstance(med.get("confidence"), (int, float)):
-            med["confidence"] = min(med["confidence"], ceiling)
-    for lab in result.get("lab_results", []) or []:
-        if isinstance(lab.get("confidence"), (int, float)):
-            lab["confidence"] = min(lab["confidence"], ceiling)
+    for collection in ("medications", "lab_results", *CLINICAL_EVENT_COLLECTIONS):
+        for fact in result.get(collection, []) or []:
+            if isinstance(fact, dict) and isinstance(fact.get("confidence"), (int, float)):
+                fact["confidence"] = min(fact["confidence"], ceiling)
     return result
 
 
@@ -2009,8 +2278,13 @@ def looks_like_medical_text(text: str, filename: str) -> bool:
     text_lower = text.lower()
     fn_lower = filename.lower()
     
-    # 1. Filename-based non-medical indicators
-    has_cv_filename = any(p in fn_lower for p in ("cv", "resume", "portfolio"))
+    # 1. Filename-based non-medical indicators.
+    # Must be token-aware: a substring check for "cv" falsely flags
+    # cardiovascular_report.pdf, recovery.pdf, coverage.pdf, etc.
+    has_cv_filename = bool(re.search(
+        r"(?:^|[^a-z0-9])(cv|resume|curriculum|portfolio)(?:[^a-z0-9]|$)",
+        fn_lower,
+    ))
     
     # 2. Text-based non-medical indicators (e.g. CV / Resume keywords)
     cv_keywords = [
@@ -2028,8 +2302,9 @@ def looks_like_medical_text(text: str, filename: str) -> bool:
         "prescription", "rx", "medication", "medicine", "drug", "tablet", "capsule",
         "dosage", "dose", "frequency", "mg", "g", "ml", "lab", "laboratory", "report",
         "test", "results", "analysis", "allergy", "allergies", "clinical", "hospital",
-        "clinic", "treatment", "diagnosis", "discharge", "summary", "patient", "doctor",
-        "physician"
+        "clinic", "treatment", "diagnosis", "symptom", "procedure", "surgery", "discharge",
+        "summary", "patient", "doctor", "physician", "imaging", "radiology", "x-ray", "ultrasound",
+        "blood pressure", "pulse", "temperature", "oxygen saturation"
     ]
     medical_matches = 0
     for kw in medical_keywords:
@@ -2131,16 +2406,31 @@ def process_document(
     # --- End diagnostics ---
 
     if suffix == ".pdf":
-        if pdf_has_text_layer(file_path):
+        # Classify EACH page. The old all-or-nothing check sampled only the
+        # first 3 pages: a digital coversheet in front of scanned labs made
+        # the whole file take the text-layer path, so every image page was
+        # silently dropped.
+        page_texts = _pdf_page_texts(file_path)
+        text_idx, image_idx = classify_pdf_pages(page_texts)
+
+        if text_idx and not image_idx:
             text = extract_text_from_pdf(file_path)
             # deterministic check on the text layer before calling the LLM
             assert_text_looks_medical(text, path.name)
             _emit_document_progress(progress_callback, "extracting", "Finding medical details in the text")
             result = extract_from_text(text, model=model)
+            result = normalize_document_evidence(result, default_page=1, vision=False)
+            try:
+                result = locate_pdf_text_evidence(file_path, result)
+            except Exception as exc:
+                # Evidence enrichment must never discard an otherwise valid
+                # extraction. Keep its page/quote fallback if PDF geometry
+                # cannot be resolved (encrypted/irregular PDFs, etc.).
+                logger.warning("Could not locate PDF evidence rectangles for '%s': %s", path.name, exc)
             result["_source"] = {"file": path.name, "method": "text_layer"}
             return result
-        else:
-            # Scanned PDF -> render pages -> vision extraction per page
+
+        if image_idx and not text_idx:
             pages = pdf_pages_to_images(file_path)
             page_results = []
             for i, img in enumerate(pages):
@@ -2151,6 +2441,7 @@ def process_document(
                 )
                 res = extract_from_image(img, model=vision_model)
                 res = _apply_confidence_ceiling(res, VISION_OCR_CONFIDENCE_CEILING)
+                res = normalize_document_evidence(res, default_page=i + 1, vision=True)
                 res["_source"] = {
                     "file": path.name,
                     "method": "vision_ocr",
@@ -2159,16 +2450,55 @@ def process_document(
                 page_results.append(res)
             return {"multi_page": True, "pages": page_results}
 
+        # Hybrid: digital pages via text extraction, scanned pages via vision.
+        page_results = []
+        if text_idx:
+            combined = "\n\n".join(
+                f"--- Page {i + 1} ---\n{page_texts[i]}" for i in text_idx
+            )
+            assert_text_looks_medical(combined, path.name)
+            _emit_document_progress(
+                progress_callback,
+                "extracting",
+                f"Finding medical details in {len(text_idx)} text page(s)",
+            )
+            text_result = extract_from_text(combined, model=model)
+            text_result["_source"] = {"file": path.name, "method": "text_layer"}
+            page_results.append(text_result)
+        if image_idx:
+            images = pdf_pages_to_images(file_path, page_indices=image_idx)
+            for page_i, img in zip(image_idx, images):
+                _emit_document_progress(
+                    progress_callback,
+                    "extracting",
+                    f"Finding medical details on scanned page {page_i + 1} of {len(page_texts)}",
+                )
+                res = extract_from_image(img, model=vision_model)
+                res = _apply_confidence_ceiling(res, VISION_OCR_CONFIDENCE_CEILING)
+                res["_source"] = {
+                    "file": path.name,
+                    "method": "vision_ocr",
+                    "page": page_i + 1,
+                }
+                page_results.append(res)
+        if len(page_results) == 1:
+            return page_results[0]
+        return {"multi_page": True, "pages": page_results}
+
     else:  # image types
         img = Image.open(file_path)
         # Phone photos carry an EXIF orientation tag instead of rotated
         # pixels — apply it, or the vision model reads the document
         # sideways/upside-down and extraction silently degrades.
-        img = ImageOps.exif_transpose(img)
+        # Older Pillow builds returned None when no EXIF orientation was
+        # present; never pass that through to extract_from_image.
+        transposed = ImageOps.exif_transpose(img)
+        img = transposed if transposed is not None else img
         _emit_document_progress(progress_callback, "extracting", "Finding medical details in the image")
         result = extract_from_image(img, model=vision_model)
         result = _apply_confidence_ceiling(result, VISION_OCR_CONFIDENCE_CEILING)
-        result["_source"] = {"file": path.name, "method": "vision_ocr"}
+        result = normalize_document_evidence(result, default_page=1, vision=True)
+        result["_source"] = {"file": path.name, "method": "vision_ocr", "page": 1}
         return result
 
 
@@ -2225,16 +2555,98 @@ def _flatten_documents(raw_results: List[Dict[str, Any]]) -> List[Dict[str, Any]
     return flat
 
 
+# Placeholder/template markers, per script.
+#
+# Why this is not English-only: the extraction prompt's LANGUAGE AND UNIT
+# NORMALIZATION section normalizes medication `ingredients` to the English
+# INN, but `patient_name` and medication `name` are deliberately kept
+# exactly as printed, in the source language. So an English-only check
+# silently misses a demo/template page printed in Tamil or Sinhala — which
+# for a Sri Lanka deployment is the common case, not an exotic one. A
+# missed template page is ingested as real patient data and pollutes the
+# timeline, the safety cross-check and the lab trends.
+#
+# Two sets, because matching rules differ by script:
+#
+#   _DEMO_MARKERS_WORD — scripts that delimit words with whitespace. These
+#     are matched on word boundaries, so a legitimate name that merely
+#     *contains* the letters (e.g. Spanish surname "Muestras", or an English
+#     "Sampleton") is not falsely rejected. False-rejecting a real document
+#     is worse than admitting a demo one, so precision matters more here.
+#
+#   _DEMO_MARKERS_SUBSTRING — scripts with no whitespace word delimiters
+#     (Japanese), where \b cannot work because adjacent kana are all word
+#     characters. Substring matching is the only option; these strings are
+#     distinctive enough that the false-positive risk is acceptable.
+#
+# Matching is casefold()-based, not .upper(). .upper() is a no-op for
+# Tamil/Sinhala/Japanese/Arabic (they are caseless), so it only ever
+# normalized the Latin entries; casefold() is the correct Unicode-aware
+# operation and handles e.g. "ÉCHANTILLON"/"échantillon" uniformly.
+#
+# This list is a pragmatic net, not a guarantee — it cannot cover every
+# language. The structural `_source.method == "synthetic"` check below is
+# the reliable signal; these markers are the best-effort fallback for
+# vendor sample packs we did not generate ourselves.
+_DEMO_MARKERS_WORD = frozenset({
+    "demo", "sample", "dummy", "placeholder", "specimen",   # English
+    "test patient", "demo patient", "sample patient",        # English phrases
+    "மாதிரி", "டெமோ",                                        # Tamil (sample / demo)
+    "නියැදිය", "ආදර්ශ",                                       # Sinhala (sample / model-example)
+    "डेमो", "नमूना", "उदाहरण",                                 # Hindi (demo / sample / example)
+    "muestra", "ejemplo", "prueba",                          # Spanish
+    "exemple", "échantillon",                                # French
+    "تجريبي", "عينة", "نموذج",                                # Arabic (trial / sample / model)
+})
+
+_DEMO_MARKERS_SUBSTRING = frozenset({
+    "デモ", "サンプル",                                        # Japanese (demo / sample)
+})
+
+# Built once at import: alternation of word-boundary-anchored markers.
+# re.UNICODE \b is script-aware, so it works for Tamil/Sinhala/Hindi/Arabic
+# (all of which use spaces) as well as Latin.
+_DEMO_MARKER_RE = re.compile(
+    r"(?<!\w)(?:" + "|".join(re.escape(m) for m in sorted(_DEMO_MARKERS_WORD)) + r")(?!\w)",
+    re.UNICODE,
+)
+
+
+def _has_demo_marker(value: Any) -> bool:
+    """True if `value` contains a placeholder marker in any supported
+    script. Caseless via casefold(); word-anchored for space-delimited
+    scripts, substring for CJK."""
+    if not value or not isinstance(value, str):
+        return False
+    folded = value.casefold()
+    if _DEMO_MARKER_RE.search(folded):
+        return True
+    return any(marker in folded for marker in _DEMO_MARKERS_SUBSTRING)
+
+
 def _is_demo_document(d: Dict[str, Any]) -> bool:
     """Detect placeholder/template documents (e.g. sample datasets that
     include a 'DEMO PATIENT' / 'DEMO MEDICINE' mock page) so they don't get
-    silently treated as real patient data."""
-    name = (d.get("patient_name") or "").upper()
-    if "DEMO" in name or "SAMPLE" in name or "DUMMY" in name:
+    silently treated as real patient data.
+
+    Checks, in order of reliability:
+      1. `_source.method == "synthetic"` — documents produced by
+         generate_lab_test_data.py. Structural and exact, no guessing.
+      2. Placeholder markers in patient_name / medication names, across
+         every script in _DEMO_MARKERS_* (patient and medication names are
+         never translated during extraction, so English-only would miss
+         non-English template pages)."""
+    source = d.get("_source")
+    if isinstance(source, dict) and str(source.get("method") or "").strip().lower() == "synthetic":
         return True
+
+    if _has_demo_marker(d.get("patient_name")):
+        return True
+
     for med in d.get("medications", []):
-        med_name = (med.get("name") or "").upper()
-        if "DEMO" in med_name or "SAMPLE" in med_name:
+        if not isinstance(med, dict):
+            continue
+        if _has_demo_marker(med.get("name")):
             return True
     return False
 
@@ -2294,7 +2706,12 @@ def _parse_timeline_date(date_str: Optional[str]):
         return None
     try:
         from dateutil import parser as _date_parser
-        return _date_parser.parse(date_str, fuzzy=True)
+        parsed = _date_parser.parse(date_str, fuzzy=True)
+        # Extracted event dates may mix date-only values with ISO timestamps.
+        # Normalize aware values to UTC-naive so Python can sort both safely.
+        if parsed.tzinfo is not None:
+            parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+        return parsed
     except Exception:
         return None
 
@@ -2303,8 +2720,8 @@ def build_patient_timeline(raw_results: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
     Merge extracted documents (output of process_document, one per file) into
     a single chronological patient timeline: one entry per visit/document,
-    sorted by date, plus flattened rollups of all medications and lab
-    results for easy downstream cross-checking.
+    sorted by date, plus flattened evidence-linked rollups of medications,
+    labs, diagnoses, symptoms, procedures, vital signs, and imaging results.
 
     NOTE: assumes all documents passed in already belong to ONE patient.
     Use group_documents_by_patient() first if a batch might mix patients
@@ -2333,33 +2750,146 @@ def build_patient_timeline(raw_results: List[Dict[str, Any]]) -> Dict[str, Any]:
 
     all_medications = []
     all_lab_results = []
+    clinical_rollups: Dict[str, List[Dict[str, Any]]] = {
+        timeline_key: [] for timeline_key in CLINICAL_TIMELINE_KEYS.values()
+    }
     all_allergies = set()
+    allergy_evidence = []
+    trusted_visits = []
 
     for d in docs_sorted:
         visit_date = d.get("date")
-        source_file = d.get("_source", {}).get("file")
+        source = d.get("_source", {}) if isinstance(d.get("_source"), dict) else {}
+        source_file = source.get("file")
+        source_page = source.get("page")
+        doc_id = str(d.get("_document_id") or "")
+        if bool((d.get("_trust") or {}).get("quarantined")):
+            continue
 
-        for med in d.get("medications", []):
+        safe_visit = copy.deepcopy(d)
+        fact_collections = ("medications", "lab_results", *CLINICAL_EVENT_COLLECTIONS)
+        has_quarantined_fact = any(
+            isinstance(fact, dict) and (fact.get("_trust") or {}).get("quarantined")
+            for collection in fact_collections
+            for fact in safe_visit.get(collection, []) or []
+        )
+        for collection in fact_collections:
+            safe_visit[collection] = [
+                fact for fact in safe_visit.get(collection, [])
+                if isinstance(fact, dict) and not (fact.get("_trust") or {}).get("quarantined")
+            ]
+        if has_quarantined_fact:
+            # Notes and legacy diagnosis strings are unstructured mirrors of
+            # extracted facts. If a competing fact is quarantined, retaining
+            # the same value here would leak it back into RAG and analytics.
+            safe_visit["clinical_notes"] = None
+            safe_visit["diagnoses_or_conditions"] = []
+        trusted_visits.append(safe_visit)
+
+        for index, med in enumerate(d.get("medications", [])):
+            if not isinstance(med, dict) or (med.get("_trust") or {}).get("quarantined"):
+                continue
+            medication_evidence = first_evidence(med) or {}
             all_medications.append({
                 **med,
                 "date": visit_date,
                 "source_file": source_file,
+                "source_page": medication_evidence.get("page") or source_page,
+                "source_method": source.get("method"),
+                "document_id": doc_id,
+                "fact_path": f"/medications/{index}",
+                "document_type": d.get("document_type"),
                 "prescription_group": d.get("prescription_group"),
             })
 
-        for lab in d.get("lab_results", []):
-            all_lab_results.append({**lab, "date": visit_date, "source_file": source_file})
+        for index, lab in enumerate(d.get("lab_results", [])):
+            if not isinstance(lab, dict) or (lab.get("_trust") or {}).get("quarantined"):
+                continue
+            lab_evidence = first_evidence(lab) or {}
+            all_lab_results.append({
+                **lab,
+                "date": visit_date,
+                "source_file": source_file,
+                "source_page": lab_evidence.get("page") or source_page,
+                "source_method": source.get("method"),
+                "document_id": doc_id,
+                "fact_path": f"/lab_results/{index}",
+                "document_type": d.get("document_type"),
+            })
 
+        # Legacy generic diagnoses remain available as low-detail events.
+        for index, diagnosis in enumerate((d.get("diagnoses_or_conditions", []) or []) if not has_quarantined_fact else []):
+            if isinstance(diagnosis, str) and diagnosis.strip():
+                clinical_rollups["diagnoses_timeline"].append({
+                    "name": diagnosis.strip(),
+                    # The enclosing document date is provenance, not an
+                    # explicitly documented diagnosis/onset date.
+                    "date": None,
+                    "document_date": visit_date,
+                    "source_file": source_file,
+                    "source_page": source_page,
+                    "source_method": source.get("method"),
+                    "document_id": doc_id,
+                    "fact_path": f"/diagnoses_or_conditions/{index}",
+                    "document_type": d.get("document_type"),
+                })
+
+        for collection in CLINICAL_EVENT_COLLECTIONS:
+            timeline_key = CLINICAL_TIMELINE_KEYS[collection]
+            event_date_field = CLINICAL_EVENT_DATE_FIELDS[collection]
+            for index, fact in enumerate(d.get(collection, [])):
+                if not isinstance(fact, dict) or (fact.get("_trust") or {}).get("quarantined"):
+                    continue
+                fact_evidence = first_evidence(fact) or {}
+                clinical_rollups[timeline_key].append({
+                    **fact,
+                    # Never relabel the enclosing document date as the event
+                    # date. Undated facts remain undated and retain the source
+                    # date separately for provenance.
+                    "date": fact.get(event_date_field) or None,
+                    "document_date": visit_date,
+                    "source_file": source_file,
+                    "source_page": fact_evidence.get("page") or source.get("page"),
+                    "source_method": source.get("method"),
+                    "document_id": doc_id,
+                    "fact_path": f"/{collection}/{index}",
+                    "document_type": d.get("document_type"),
+                })
+
+        allergy_regions = (d.get("field_evidence") or {}).get("allergies_noted") or []
         for allergy in d.get("allergies_noted", []) or []:
             all_allergies.add(allergy)
+            allergy_evidence.append({
+                "allergy": allergy,
+                "document_id": doc_id,
+                "date": visit_date,
+                "source_file": source_file,
+                "source_method": source.get("method"),
+                "document_type": d.get("document_type"),
+                "confidence": d.get("overall_confidence"),
+                "evidence": copy.deepcopy(allergy_regions),
+                "_trust": copy.deepcopy(d.get("_trust")),
+            })
+
+    # Event-specific dates (for example a historical procedure date printed
+    # in a recent discharge summary) can differ from the enclosing document
+    # date, so sort every clinical rollup independently.
+    for values in clinical_rollups.values():
+        values.sort(key=lambda item: (
+            _parse_timeline_date(item.get("date")) is None,
+            _parse_timeline_date(item.get("date")) or item.get("date") or "9999-99-99",
+        ))
 
     from document_dedup import find_duplicate_document_groups
 
     return {
-        "visits": docs_sorted,               # one entry per document, chronological
+        "visits": trusted_visits,
+        "documents": docs_sorted,
         "medications_timeline": all_medications,
         "lab_results_timeline": all_lab_results,
+        **clinical_rollups,
         "known_allergies": sorted(all_allergies),
+        "allergy_evidence": allergy_evidence,
         # Documents that record the SAME physical prescription (re-uploads,
         # scan + photo of one page). Nothing was removed from the timeline —
         # this is the review list explaining which files collapse into one
@@ -2671,6 +3201,24 @@ def cross_check_prescriptions(
         dup_sources = frozenset((occ["date"], occ["source_file"]) for occ in dup["occurrences"])
         if dup_sources not in existing_source_sets:
             existing.append(dup)
+
+    # Deterministic curated drug-interaction pass (never LLM-dependent):
+    # well-established, textbook-level interaction pairs are matched on
+    # normalized ingredients in code, so catching them never depends on the
+    # LLM noticing on any given run. The LLM remains the broad-coverage
+    # pass; the KB is the guaranteed floor.
+    try:
+        from drug_interactions import check_known_interactions, merge_into_report
+        merge_into_report(result, check_known_interactions(timeline))
+    except Exception as e:
+        # A KB failure must never take down the whole safety report — the
+        # LLM findings above are still valid on their own.
+        logger.warning("Deterministic interaction check failed (LLM findings kept): %s", e)
+
+    from medication_history import detect_medication_transitions, enrich_cross_check_sources
+
+    result.update(detect_medication_transitions(timeline))
+    enrich_cross_check_sources(result, timeline)
 
     # Grade every finding by what actually backs it. The model scores its own
     # findings, and it scores a verifiable arithmetic fact and a half-recalled

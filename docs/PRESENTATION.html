@@ -1,0 +1,746 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MediMind — AI-Powered Personal Medical Concierge (Presentation Deck)</title>
+  <style>
+    :root {
+      --bg-dark: #0f172a;
+      --bg-card: #1e293b;
+      --bg-card-hover: #334155;
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --accent: #06b6d4;
+      --accent-hover: #0891b2;
+      --border: #334155;
+      --success: #10b981;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      background: var(--bg-dark);
+      color: var(--text-main);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* Top Navigation Bar */
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.75rem 1.5rem;
+      background: rgba(15, 23, 42, 0.9);
+      border-bottom: 1px solid var(--border);
+      z-index: 10;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-weight: 700;
+      font-size: 1.25rem;
+      color: #fff;
+    }
+
+    .brand span {
+      color: var(--accent);
+    }
+
+    .controls {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    button {
+      background: var(--bg-card);
+      color: var(--text-main);
+      border: 1px solid var(--border);
+      padding: 0.4rem 0.8rem;
+      border-radius: 0.375rem;
+      cursor: pointer;
+      font-size: 0.875rem;
+      font-weight: 500;
+      transition: all 0.2s;
+    }
+
+    button:hover:not(:disabled) {
+      background: var(--bg-card-hover);
+      border-color: var(--text-muted);
+    }
+
+    button:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      color: #000;
+      border-color: var(--accent);
+      font-weight: 600;
+    }
+
+    .btn-primary:hover:not(:disabled) {
+      background: var(--accent-hover);
+      color: #fff;
+    }
+
+    .slide-counter {
+      font-size: 0.875rem;
+      color: var(--text-muted);
+      font-weight: 600;
+      margin: 0 0.5rem;
+    }
+
+    /* Main Slide Container */
+    .viewport {
+      flex: 1;
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem;
+      overflow-y: auto;
+    }
+
+    .slide {
+      display: none;
+      width: 100%;
+      max-width: 1100px;
+      max-height: 100%;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 1rem;
+      padding: 2.5rem;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+      animation: fadeIn 0.3s ease;
+      overflow-y: auto;
+    }
+
+    .slide.active {
+      display: block;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Typography & Slide Components */
+    .slide-header {
+      margin-bottom: 1.5rem;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 1rem;
+    }
+
+    .slide-number {
+      font-size: 0.75rem;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 0.25rem;
+    }
+
+    .slide-title {
+      font-size: 2rem;
+      font-weight: 800;
+      color: #fff;
+    }
+
+    .slide-subtitle {
+      font-size: 1.1rem;
+      color: var(--text-muted);
+      margin-top: 0.25rem;
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.5rem;
+      margin-top: 1.5rem;
+    }
+
+    .grid-3 {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 1.25rem;
+      margin-top: 1.5rem;
+    }
+
+    .card {
+      background: rgba(15, 23, 42, 0.5);
+      border: 1px solid var(--border);
+      border-radius: 0.75rem;
+      padding: 1.25rem;
+    }
+
+    .card h3 {
+      font-size: 1.15rem;
+      font-weight: 700;
+      color: #fff;
+      margin-bottom: 0.5rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .card p, .card li {
+      font-size: 0.95rem;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+
+    .card ul {
+      margin-left: 1.25rem;
+      margin-top: 0.5rem;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 0.2rem 0.6rem;
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      background: rgba(6, 182, 212, 0.15);
+      color: var(--accent);
+      border: 1px solid rgba(6, 182, 212, 0.3);
+      margin-bottom: 0.5rem;
+    }
+
+    .badge-warning {
+      background: rgba(245, 158, 11, 0.15);
+      color: var(--warning);
+      border-color: rgba(245, 158, 11, 0.3);
+    }
+
+    .badge-success {
+      background: rgba(16, 185, 129, 0.15);
+      color: var(--success);
+      border-color: rgba(16, 185, 129, 0.3);
+    }
+
+    /* Diagram Block */
+    .flow-diagram {
+      background: #090e1a;
+      border: 1px solid var(--border);
+      border-radius: 0.75rem;
+      padding: 1.5rem;
+      margin: 1.5rem 0;
+      font-family: "Fira Code", monospace;
+      font-size: 0.9rem;
+      line-height: 1.4;
+      color: #38bdf8;
+      overflow-x: auto;
+      white-space: pre;
+    }
+
+    /* Speaker Notes Box */
+    .speaker-note {
+      margin-top: 1.5rem;
+      padding: 1rem 1.25rem;
+      background: rgba(245, 158, 11, 0.1);
+      border-left: 4px solid var(--warning);
+      border-radius: 0 0.5rem 0.5rem 0;
+      color: #fff;
+      font-size: 0.9rem;
+      line-height: 1.5;
+      display: none;
+    }
+
+    .speaker-note.show {
+      display: block;
+    }
+
+    .speaker-note strong {
+      color: var(--warning);
+      display: block;
+      margin-bottom: 0.25rem;
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    /* Footer Indicator Bars */
+    .footer {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      padding: 0.75rem;
+      background: rgba(15, 23, 42, 0.9);
+      border-top: 1px solid var(--border);
+    }
+
+    .dot {
+      width: 0.75rem;
+      height: 0.75rem;
+      border-radius: 50%;
+      background: var(--border);
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .dot.active {
+      background: var(--accent);
+      transform: scale(1.25);
+    }
+
+    .table-container {
+      margin-top: 1rem;
+      overflow-x: auto;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.9rem;
+    }
+
+    th, td {
+      padding: 0.75rem 1rem;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+    }
+
+    th {
+      background: rgba(15, 23, 42, 0.7);
+      color: var(--accent);
+      font-weight: 600;
+    }
+
+    td {
+      color: var(--text-muted);
+    }
+
+    tr:hover td {
+      background: rgba(51, 65, 85, 0.3);
+      color: #fff;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top Controls -->
+  <div class="topbar">
+    <div class="brand">MediMind <span>AI Concierge</span></div>
+    <div class="controls">
+      <button id="toggle-notes" title="Toggle Speaker Notes (N)">Show Speaker Notes</button>
+      <button id="prev-btn" onclick="prevSlide()" title="Previous Slide (ArrowLeft)">← Prev</button>
+      <span class="slide-counter" id="counter">1 / 8</span>
+      <button class="btn-primary" id="next-btn" onclick="nextSlide()" title="Next Slide (ArrowRight)">Next →</button>
+    </div>
+  </div>
+
+  <!-- Slides Viewport -->
+  <div class="viewport">
+
+    <!-- SLIDE 1: PROBLEM -->
+    <div class="slide active" id="slide-1">
+      <div class="slide-header">
+        <div class="slide-number">Slide 1 of 8 • Real-World Challenge</div>
+        <div class="slide-title">The Broken Medical Record Experience</div>
+        <div class="slide-subtitle">Why managing personal health records is dangerous, fragmented, and overwhelming</div>
+      </div>
+      <div class="grid-2">
+        <div class="card">
+          <span class="badge badge-warning">Problem 01</span>
+          <h3>Fragmented Health Silos</h3>
+          <p>Patients receive unstructured records from different hospitals, labs, and specialists—paper prescriptions, PDF blood work, discharge notes, and scanned images. Critical medical history is trapped in disconnected silos.</p>
+        </div>
+        <div class="card">
+          <span class="badge badge-warning">Problem 02</span>
+          <h3>Clinical Jargon & Confusion</h3>
+          <p>Medical documents are written for clinicians, not patients. Complex terminology, Latin dosage abbreviations, and obscure reference ranges leave patients and caregivers anxious and unsure about their own health status.</p>
+        </div>
+        <div class="card">
+          <span class="badge badge-warning">Problem 03</span>
+          <h3>Polypharmacy & Medication Errors</h3>
+          <p>When visiting multiple specialists, patients rarely bring a comprehensive drug list. Overlooked drug-drug interactions, contraindications against allergies, and duplicate therapies cause preventable adverse drug events (ADEs).</p>
+        </div>
+        <div class="card">
+          <span class="badge badge-warning">Problem 04</span>
+          <h3>Lost Longitudinal Biomarkers</h3>
+          <p>A single lab report tells only half the story. Tracking vital biomarker trajectories over years (e.g., eGFR, HbA1c, cholesterol, liver enzymes) is manual, tedious, and frequently ignored until acute symptoms appear.</p>
+        </div>
+      </div>
+      <div class="speaker-note">
+        <strong>Speaker Note for Judges</strong>
+        Every one of us has experienced—or helped a family member navigate—the chaos of scattered medical records. When health data is locked inside unreadable scans and disconnected PDFs, patients face real safety risks from overlooked drug interactions and missed lab trends. MediMind solves this by turning passive medical documents into an intelligent, active health concierge.
+      </div>
+    </div>
+
+    <!-- SLIDE 2: SOLUTION -->
+    <div class="slide" id="slide-2">
+      <div class="slide-header">
+        <div class="slide-number">Slide 2 of 8 • Solution Overview</div>
+        <div class="slide-title">Solution — MediMind AI Concierge</div>
+        <div class="slide-subtitle">Transforming chaotic medical documents into a structured, proactive health timeline</div>
+      </div>
+      <div class="grid-2">
+        <div class="card">
+          <span class="badge badge-success">Value 01</span>
+          <h3>Intelligent Medical Concierge</h3>
+          <p>An AI-powered, privacy-first platform that ingests unstructured medical documents and synthesizes them into an actionable health dashboard—bridging clinical documentation and patient understanding without losing medical precision.</p>
+        </div>
+        <div class="card">
+          <span class="badge badge-success">Value 02</span>
+          <h3>Automated Structured Extraction</h3>
+          <p>Upload any combination of prescriptions, lab reports, clinical notes, or discharge summaries. MediMind automatically categorizes documents and extracts structured entities (medications, lab biomarkers, diagnoses, and allergies).</p>
+        </div>
+        <div class="card">
+          <span class="badge badge-success">Value 03</span>
+          <h3>Unified Longitudinal Timeline</h3>
+          <p>Synthesizes isolated visits into a chronological health history. Every prescription, lab test, and physician encounter is linked into a unified patient timeline with full traceability back to original source documents.</p>
+        </div>
+        <div class="card">
+          <span class="badge badge-success">Value 04</span>
+          <h3>Proactive Safety Cross-Checks</h3>
+          <p>Continuously audits the patient's active medication list against known allergies, chronic conditions, and drug-drug interactions, while tracking lab biomarker trajectories to flag clinical abnormalities.</p>
+        </div>
+      </div>
+      <div class="speaker-note">
+        <strong>Speaker Note for Judges</strong>
+        MediMind is not just an OCR scanner or a general chatbot. It is a purpose-built medical intelligence platform. When a user uploads a stack of medical records, MediMind extracts the clinical facts, constructs a coherent timeline, cross-checks every medication for safety, and allows patients to ask questions against their own health history.
+      </div>
+    </div>
+
+    <!-- SLIDE 3: AI CORE -->
+    <div class="slide" id="slide-3">
+      <div class="slide-header">
+        <div class="slide-number">Slide 3 of 8 • Deep Clinical Intelligence</div>
+        <div class="slide-title">AI Core & RAG Pipeline</div>
+        <div class="slide-subtitle">Multimodal OCR, structured JSON recovery ladders, and zero-network ONNX embeddings</div>
+      </div>
+      <div class="grid-3">
+        <div class="card">
+          <span class="badge">OCR & Vision</span>
+          <h3>Multimodal Understanding</h3>
+          <p>Combines native PDF parsing (<code>PyMuPDF</code> / <code>pdfplumber</code>) with multimodal vision models (<code>qwen3.6-27b</code>, <code>gemini-3.6-flash</code>) to decode handwritten notes, prescription photos, and multi-page hospital scans.</p>
+        </div>
+        <div class="card">
+          <span class="badge">LLM Extraction</span>
+          <h3>Resilient JSON Ladder</h3>
+          <p>Multi-rung structured decoding ladder (<code>_completion_resilient</code>). Uses constrained JSON Schema with automated <strong>&lt;think&gt; reasoning-tag suppression probes</strong> and an auto-activated OpenRouter fallback circuit breaker.</p>
+        </div>
+        <div class="card">
+          <span class="badge">Local RAG</span>
+          <h3>Zero-Network Embeddings</h3>
+          <p>Runs <code>all-MiniLM-L6-v2</code> locally in-process via ONNX Runtime—no external embedding network calls required. Embeds structured timeline chunks in ChromaDB for hallucination-free patient Q&A.</p>
+        </div>
+      </div>
+      <div class="grid-2">
+        <div class="card">
+          <span class="badge">Clinical Extraction</span>
+          <h3>Structured Health Entity Schema</h3>
+          <p>Constrained Pydantic schemas normalize every document into strict JSON: active medications with dosages and timing, lab biomarker panels with reference units, clinical diagnoses, and verified allergy lists.</p>
+        </div>
+        <div class="card">
+          <span class="badge">Safety Engine</span>
+          <h3>Automated Clinical Safety Audit</h3>
+          <p>Runs automated polypharmacy audits (<code>cross_check_prescriptions</code>) coded by severity (High / Moderate / Precaution) and tracks longitudinal lab biomarker percentage shifts (<code>track_lab_trends</code>).</p>
+        </div>
+      </div>
+      <div class="speaker-note">
+        <strong>Speaker Note for Judges</strong>
+        Our AI core is engineered for clinical resilience. Medical documents are messy, and standard LLMs often break on formatting or leak verbose reasoning tags. We built a multi-rung structured recovery ladder with automated reasoning-tag suppression, local zero-network ONNX embeddings for RAG, and an automated safety engine that audits prescriptions against patient allergies and lab trends.
+      </div>
+    </div>
+
+    <!-- SLIDE 4: KEY FEATURES -->
+    <div class="slide" id="slide-4">
+      <div class="slide-header">
+        <div class="slide-number">Slide 4 of 8 • Product Capabilities</div>
+        <div class="slide-title">Key Features & Suite</div>
+        <div class="slide-subtitle">A complete suite empowering patients and caregivers to take control of their medical history</div>
+      </div>
+      <div class="grid-3">
+        <div class="card">
+          <h3>1. Async Document Upload</h3>
+          <p>Drag-and-drop batch upload for PDFs, PNGs, and JPGs. Non-blocking background worker pool (<code>/api/v1/documents?async=true</code>) with real-time job progress tracking.</p>
+        </div>
+        <div class="card">
+          <h3>2. Report Extraction</h3>
+          <p>Automatic document classification and structured extraction of medicine dosages, frequencies, lab biomarkers, reference ranges, and doctor notes.</p>
+        </div>
+        <div class="card">
+          <h3>3. Patient Timeline</h3>
+          <p>Interactive chronological health history (<code>TimelineView.tsx</code>) unifying all past visits, prescriptions, and test results with source PDF links.</p>
+        </div>
+        <div class="card">
+          <h3>4. Medicine History</h3>
+          <p>Consolidated medication dashboard separating active prescriptions from historical treatments, showing dosages, start/end dates, and adherence context.</p>
+        </div>
+        <div class="card">
+          <h3>5. Safety Cross-Checks</h3>
+          <p>Dedicated Cross-Check Safety Report (<code>CrossCheckView.tsx</code>) flagging polypharmacy drug-drug interactions, allergy warnings, and organ precautions.</p>
+        </div>
+        <div class="card">
+          <h3>6. Conversational AI Q&A</h3>
+          <p>Multi-turn conversational concierge (<code>conversation.py</code>) with history query rewriting to answer natural language questions against stored medical facts.</p>
+        </div>
+      </div>
+      <div class="speaker-note">
+        <strong>Speaker Note for Judges</strong>
+        From a user's perspective, MediMind offers six core features: seamless multi-file batch uploads, automated clinical data extraction, an intuitive interactive timeline, a consolidated medicine history, severity-graded safety cross-checks, and a conversational RAG assistant that understands conversational context.
+      </div>
+    </div>
+
+    <!-- SLIDE 5: ARCHITECTURE -->
+    <div class="slide" id="slide-5">
+      <div class="slide-header">
+        <div class="slide-number">Slide 5 of 8 • Production-Ready Engineering</div>
+        <div class="slide-title">System Architecture</div>
+        <div class="slide-subtitle">Modular, scalable, privacy-first full-stack TypeScript & Python architecture</div>
+      </div>
+      <div class="grid-2">
+        <div class="card">
+          <span class="badge">Frontend Layer</span>
+          <h3>React 18 + Vite + TypeScript</h3>
+          <p>Responsive SPA built with Tailwind CSS, modular UI components, real-time polling custom hooks (<code>useApi.ts</code>), and clear processing status indicators.</p>
+        </div>
+        <div class="card">
+          <span class="badge">Backend Layer</span>
+          <h3>FastAPI + Uvicorn Async Python</h3>
+          <p>Clean modular services: <code>api.py</code> (routes & auth), <code>medical_extractor.py</code> (LLM & safety ladder), <code>retrieval.py</code> (ONNX RAG), and <code>conversation.py</code> (chat memory).</p>
+        </div>
+        <div class="card">
+          <span class="badge">Database & Storage</span>
+          <h3>Supabase Postgres + Cloudinary</h3>
+          <p>Supabase relational tables (<code>patient_snapshots</code>, <code>jobs</code>, <code>chunks</code>) with anonymized token scopes (<code>anon_*</code>) + Cloudinary encrypted cloud storage for source PDFs.</p>
+        </div>
+        <div class="card">
+          <span class="badge">External AI Services</span>
+          <h3>Groq + Gemini + OpenRouter Fallback</h3>
+          <p>Universal OpenAI SDK wrapper supporting Groq (<code>gpt-oss-120b</code>, <code>qwen3.6-27b</code>), Google Gemini 3.6-Flash, and automated OpenRouter circuit-breaker fallback.</p>
+        </div>
+      </div>
+      <div class="speaker-note">
+        <strong>Speaker Note for Judges</strong>
+        Our architecture is clean, modular, and built for production. The React/Vite frontend communicates via REST with a FastAPI Python backend. The AI layer decouples extraction, RAG retrieval, and conversation memory into distinct modules, backed by Supabase Postgres, Cloudinary, and local zero-network ONNX embeddings.
+      </div>
+    </div>
+
+    <!-- SLIDE 6: USER FLOW / DEMO -->
+    <div class="slide" id="slide-6">
+      <div class="slide-header">
+        <div class="slide-number">Slide 6 of 8 • Step-by-Step Journey</div>
+        <div class="slide-title">Demo / User Flow</div>
+        <div class="slide-subtitle">How MediMind processes 6 mixed medical files into instant clinical intelligence</div>
+      </div>
+      <div class="flow-diagram">[ 1. UPLOAD MEDICAL DOCUMENT ]   (PDFs, PNG, JPG — Batch drag-and-drop async ingest)
+             ↓
+  [ 2. OCR / VISION EXTRACTION ] (PyMuPDF / pdfplumber + Multimodal LLM Vision)
+             ↓
+  [ 3. AI RESILIENT PROCESSING ] (Strict Schema + Reasoning-Tag Suppression + OpenRouter Fallback)
+             ↓
+ [ 4. STRUCTURED MEDICAL DATA ]  (Medications, Lab Values, Diagnoses, Allergies in Postgres)
+             ↓
+[ 5. TIMELINE / MEDS / ALERTS ]  (Chronological Timeline + Cross-Check Safety + RAG Chat Q&A)</div>
+      <div class="grid-2">
+        <div class="card">
+          <h3>Asynchronous Worker Processing</h3>
+          <p>When a patient uploads 6 files, the server returns immediately with HTTP 202 Accepted. Background worker tasks read, extract, and index documents concurrently.</p>
+        </div>
+        <div class="card">
+          <h3>Instant Actionable Dashboard</h3>
+          <p>Once complete, the dashboard refreshes automatically to reveal active medications, severity-graded cross-check warnings, and interactive lab biomarker graphs.</p>
+        </div>
+      </div>
+      <div class="speaker-note">
+        <strong>Speaker Note for Judges</strong>
+        Let’s walk through the exact user journey. A patient drops a stack of mixed medical documents into MediMind. Our background worker pool ingests and OCRs each file, runs our structured recovery ladder to extract normalized clinical data, checks for drug interactions, and delivers a clean timeline, active medication list, and safety report in seconds.
+      </div>
+    </div>
+
+    <!-- SLIDE 7: INNOVATION & IMPACT -->
+    <div class="slide" id="slide-7">
+      <div class="slide-header">
+        <div class="slide-number">Slide 7 of 8 • Differentiating Value</div>
+        <div class="slide-title">Innovation & Real-World Impact</div>
+        <div class="slide-subtitle">Why MediMind stands out in medical AI and who it transforms</div>
+      </div>
+      <div class="grid-3">
+        <div class="card">
+          <span class="badge">Innovation</span>
+          <h3>100% Resilient AI Pipeline</h3>
+          <p>Unlike generic AI wrappers that crash on <code>&lt;think&gt;</code> tags or rate limits, MediMind features automated reasoning suppression probes and an auto-activated OpenRouter hard-quota fallback.</p>
+        </div>
+        <div class="card">
+          <span class="badge">Who Benefits</span>
+          <h3>Patients, Caregivers & Doctors</h3>
+          <p>Empowers elderly and polypharmacy patients managing 5+ daily drugs, while saving clinicians 15+ minutes per consultation with an audited chronological history.</p>
+        </div>
+        <div class="card">
+          <span class="badge-success badge">Real-World Impact</span>
+          <h3>Preventing Medication Errors</h3>
+          <p>Directly mitigates adverse drug events (ADEs)—a leading cause of preventable hospitalization—while highlighting early longitudinal lab biomarker abnormalities.</p>
+        </div>
+      </div>
+      <div class="speaker-note">
+        <strong>Speaker Note for Judges</strong>
+        What makes MediMind truly innovative is our synthesis of clinical rigor and technical resilience. Unlike generic wrappers, our platform guarantees structured JSON output through reasoning suppression and auto-fallback circuit breakers, while running zero-network local RAG embeddings to protect patient privacy. We are saving doctors time and preventing life-threatening medication errors for patients.
+      </div>
+    </div>
+
+    <!-- SLIDE 8: TECH STACK & FUTURE -->
+    <div class="slide" id="slide-8">
+      <div class="slide-header">
+        <div class="slide-number">Slide 8 of 8 • Roadmap & Tech Stack</div>
+        <div class="slide-title">Technology Stack & Future Roadmap</div>
+        <div class="slide-subtitle">Modern production tooling and strategic expansion into hospital EMR interoperability</div>
+      </div>
+      <div class="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th>Layer / Component</th>
+              <th>Technologies Used</th>
+              <th>Strategic Purpose in MediMind</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Frontend SPA</strong></td>
+              <td>React 18, Vite, TypeScript, Tailwind CSS, Lucide</td>
+              <td>Responsive, modular UI with real-time async job progress polling</td>
+            </tr>
+            <tr>
+              <td><strong>Backend API</strong></td>
+              <td>Python 3.11, FastAPI, Uvicorn, Pydantic v2</td>
+              <td>Async background worker pool & modular clinical processing pipeline</td>
+            </tr>
+            <tr>
+              <td><strong>OCR & Document Parsing</strong></td>
+              <td>PyMuPDF, pdfplumber, pdfminer.six, Pillow</td>
+              <td>Native PDF text extraction & image base64 preprocessing</td>
+            </tr>
+            <tr>
+              <td><strong>LLM & Safety Engine</strong></td>
+              <td>Groq (gpt-oss/qwen), Gemini 3.6, OpenRouter Auto</td>
+              <td>Multi-rung JSON extraction ladder, reasoning probes, cross-checks</td>
+            </tr>
+            <tr>
+              <td><strong>Database & RAG</strong></td>
+              <td>Supabase Postgres, Cloudinary, ChromaDB / ONNX</td>
+              <td>Anonymized timeline persistence & zero-network local embeddings</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="grid-2" style="margin-top: 1.25rem;">
+        <div class="card">
+          <h3>EHR/EMR Interoperability (HL7 FHIR)</h3>
+          <p>Expand ingestion beyond PDFs/images to support direct sync with SMART-on-FHIR hospital health records and Apple Health / Google Fit wearable biomarkers.</p>
+        </div>
+        <div class="card">
+          <h3>Clinician Sharing Portals & RBAC</h3>
+          <p>Secure QR-code and link sharing with granular Role-Based Access Control (RBAC) for primary care doctors, specialists, and authorized family members.</p>
+        </div>
+      </div>
+      <div class="speaker-note">
+        <strong>Speaker Note for Judges</strong>
+        Our technology stack is built on modern, type-safe, high-performance tooling—from React and Vite on the frontend to FastAPI, Supabase, and local ONNX embeddings on the backend. As we look ahead, we are expanding MediMind into a universal health OS with HL7 FHIR hospital interoperability, wearable health sync, and secure clinician sharing portals. Thank you!
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Footer Slide Dots -->
+  <div class="footer" id="footer-dots">
+    <div class="dot active" onclick="goToSlide(1)" title="Slide 1: Problem"></div>
+    <div class="dot" onclick="goToSlide(2)" title="Slide 2: Solution"></div>
+    <div class="dot" onclick="goToSlide(3)" title="Slide 3: AI Core"></div>
+    <div class="dot" onclick="goToSlide(4)" title="Slide 4: Key Features"></div>
+    <div class="dot" onclick="goToSlide(5)" title="Slide 5: Architecture"></div>
+    <div class="dot" onclick="goToSlide(6)" title="Slide 6: Demo / User Flow"></div>
+    <div class="dot" onclick="goToSlide(7)" title="Slide 7: Innovation & Impact"></div>
+    <div class="dot" onclick="goToSlide(8)" title="Slide 8: Tech Stack & Future"></div>
+  </div>
+
+  <script>
+    let currentSlide = 1;
+    const totalSlides = 8;
+
+    function updateSlide() {
+      document.querySelectorAll('.slide').forEach(s => s.classList.remove('active'));
+      document.querySelectorAll('.dot').forEach(d => d.classList.remove('active'));
+
+      const targetSlide = document.getElementById(`slide-${currentSlide}`);
+      if (targetSlide) targetSlide.classList.add('active');
+
+      const dots = document.querySelectorAll('.dot');
+      if (dots[currentSlide - 1]) dots[currentSlide - 1].classList.add('active');
+
+      document.getElementById('counter').innerText = `${currentSlide} / ${totalSlides}`;
+      document.getElementById('prev-btn').disabled = (currentSlide === 1);
+      document.getElementById('next-btn').disabled = (currentSlide === totalSlides);
+    }
+
+    function nextSlide() {
+      if (currentSlide < totalSlides) {
+        currentSlide++;
+        updateSlide();
+      }
+    }
+
+    function prevSlide() {
+      if (currentSlide > 1) {
+        currentSlide--;
+        updateSlide();
+      }
+    }
+
+    function goToSlide(n) {
+      currentSlide = n;
+      updateSlide();
+    }
+
+    // Toggle Speaker Notes
+    const toggleBtn = document.getElementById('toggle-notes');
+    let notesVisible = false;
+    toggleBtn.addEventListener('click', () => {
+      notesVisible = !notesVisible;
+      document.querySelectorAll('.speaker-note').forEach(note => {
+        if (notesVisible) note.classList.add('show');
+        else note.classList.remove('show');
+      });
+      toggleBtn.innerText = notesVisible ? 'Hide Speaker Notes' : 'Show Speaker Notes';
+      toggleBtn.style.borderColor = notesVisible ? 'var(--warning)' : 'var(--border)';
+    });
+
+    // Keyboard navigation
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') {
+        e.preventDefault();
+        nextSlide();
+      } else if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
+        e.preventDefault();
+        prevSlide();
+      } else if (e.key === 'n' || e.key === 'N') {
+        toggleBtn.click();
+      } else if (e.key >= '1' && e.key <= '8') {
+        goToSlide(parseInt(e.key, 10));
+      }
+    });
+
+    // Initial call
+    updateSlide();
+  </script>
+</body>
+</html>

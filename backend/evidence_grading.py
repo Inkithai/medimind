@@ -109,10 +109,18 @@ def grade_finding(
 
     A finding that already declares `evidence_source` (as the deterministic
     duplicate detector does) keeps it — this never downgrades a finding that
-    code produced into one that looks like model output.
+    code produced into one that looks like model output. Findings produced
+    by other deterministic passes (e.g. the curated drug-interaction
+    knowledge base, which tags itself `source: curated_knowledge_base`) are
+    likewise graded deterministic rather than capped as model recall.
     """
     existing = finding.get("evidence_source")
     if existing == DETERMINISTIC:
+        finding["grounded"] = True
+        finding.setdefault("evidence_note", DETERMINISTIC_NOTE)
+        return finding
+    if finding.get("source") == "curated_knowledge_base":
+        finding["evidence_source"] = DETERMINISTIC
         finding["grounded"] = True
         finding.setdefault("evidence_note", DETERMINISTIC_NOTE)
         return finding

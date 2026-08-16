@@ -231,15 +231,41 @@ def test_focus_context_pins_established_facts():
 # ---------------------------------------------------------------------------
 
 class FakeCollection:
+    """Minimal Chroma stand-in shaped for the merged answer_question flow."""
+
+    def __init__(self, count_value=0):
+        self.count_value = count_value
+
     def count(self):
-        return 1
+        return self.count_value
+
+    def upsert(self, ids, embeddings, documents, metadatas):
+        self.count_value = len(ids)
 
     def query(self, query_embeddings, n_results):
         return {
-            "documents": [["Medication: Metformin. Prescribed on 2026-01-01 "
-                           "(source: rx_metformin.pdf)."]],
-            "metadatas": [[{"date": "2026-01-01", "source_file": "rx_metformin.pdf",
-                            "chunk_type": "medication"}]],
+            "documents": [
+                "Medication: Metformin 500 mg twice daily. Prescribed on "
+                "2026-01-01 (source: rx_metformin.pdf).",
+                "Lab result: Fasting Glucose = 105 mg/dL (flag: high). "
+                "Recorded on 2026-02-01 (source: labs_feb.pdf).",
+            ],
+            "metadatas": [[
+                {
+                    "date": "2026-01-01", "source_file": "rx_metformin.pdf",
+                    "source_page": 1, "document_id": "doc_1", "chunk_type": "medication",
+                    "evidence_id": "ev_1", "evidence_quote": "Metformin 500 mg",
+                    "evidence_bbox": None, "verification_status": "extracted",
+                    "evidence_tier": "B",
+                },
+                {
+                    "date": "2026-02-01", "source_file": "labs_feb.pdf",
+                    "source_page": 1, "document_id": "doc_2", "chunk_type": "lab_result",
+                    "evidence_id": "ev_2", "evidence_quote": "Fasting Glucose 105",
+                    "evidence_bbox": None, "verification_status": "extracted",
+                    "evidence_tier": "B",
+                },
+            ]],
         }
 
 
@@ -250,13 +276,17 @@ def _run_answer(question, answer_json, focus=None):
         captured["user_content"] = user_content
         return answer_json
 
-    with mock.patch.object(retrieval, "_get_patient_collection",
-                           return_value=FakeCollection()), \
+    collection = FakeCollection(
+        count_value=len(retrieval.build_chunks_from_timeline("anon_contract", TIMELINE))
+    )
+    with mock.patch.object(retrieval, "_trusted_timeline_from_persisted_documents",
+                           return_value=(TIMELINE, list(TIMELINE["visits"]))), \
+         mock.patch.object(retrieval, "_get_patient_collection", return_value=collection), \
+         mock.patch.object(retrieval.vector_store, "get_index_fingerprint", return_value=None), \
          mock.patch.object(retrieval, "embed_texts",
                            side_effect=lambda texts: [[0.1] * 384 for _ in texts]), \
          mock.patch.object(retrieval, "_completion_resilient",
-                           side_effect=capture_completion), \
-         mock.patch("db.load_documents", return_value=list(TIMELINE["visits"])):
+                           side_effect=capture_completion):
         out = retrieval.answer_question("anon_contract", question, focus=focus)
     return out, captured
 
@@ -267,6 +297,7 @@ def test_answer_contract_risk_question_end_to_end():
     answer_json = json.dumps({
         "answer": "Metformin can interact with alcohol.",
         "confidence": 0.9,
+        "confidence_reason": "Direct record evidence.",
         "sources": [{"date": "2026-01-01", "source_file": "rx_metformin.pdf"}],
         "cross_document": False,
         "recommend_professional_consult": False,
@@ -284,9 +315,9 @@ def test_answer_contract_cross_document_passthrough_and_defaults():
     answer_json = json.dumps({
         "answer": "Your glucose was high in the Feb report while Metformin was prescribed in Jan.",
         "confidence": 0.8,
+        "confidence_reason": "Combined records.",
         "sources": [
             {"date": "2026-01-01", "source_file": "rx_metformin.pdf"},
-            {"date": "2026-02-01", "source_file": "labs_feb.pdf"},
         ],
         "cross_document": True,
         "recommend_professional_consult": False,
@@ -308,6 +339,7 @@ def test_answer_contract_cross_document_passthrough_and_defaults():
 def test_focus_block_reaches_the_prompt():
     answer_json = json.dumps({
         "answer": "You are on Metformin 500 mg.", "confidence": 0.95,
+        "confidence_reason": "Direct record evidence.",
         "sources": [{"date": "2026-01-01", "source_file": "rx_metformin.pdf"}],
         "cross_document": False, "recommend_professional_consult": False,
     })
