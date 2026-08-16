@@ -1,22 +1,35 @@
 import { useId, useMemo, useRef, useState, type FocusEvent, type KeyboardEvent } from "react";
-import type { CareRecommendation, SpecialtyOption } from "../types/recommendations";
+import {
+  type CareRecommendation,
+  SPECIALTY_DISPLAY,
+  type SpecialtyOption,
+} from "../types/recommendations";
 import { classNames } from "../utils/format";
-import { CheckIcon, CloseIcon, SearchIcon } from "./icons";
+import { CheckIcon, CloseIcon, SearchIcon, SparkleIcon } from "./icons";
 
-/** Patient-facing specialty taxonomy (browseable section). */
+/** Patient-facing specialty taxonomy (browseable section).
+ *
+ * The order here is the order the user sees them in the dropdown.
+ * The most common / first-line specialties appear at the top so a
+ * user who ignores the AI suggestions still gets a sensible default.
+ */
 const BROWSE_SPECIALTIES: Array<{ key: string; name: string }> = [
-  { key: "cardiologist", name: "Cardiologist" },
-  { key: "dermatologist", name: "Dermatologist" },
-  { key: "gastroenterologist", name: "Gastroenterologist" },
-  { key: "hematologist", name: "Hematologist" },
-  { key: "neurologist", name: "Neurologist" },
-  { key: "oncologist", name: "Oncologist" },
-  { key: "ophthalmologist", name: "Ophthalmologist" },
-  { key: "orthopedic", name: "Orthopedic Specialist" },
-  { key: "psychiatrist", name: "Psychiatrist" },
-  { key: "pulmonologist", name: "Pulmonologist" },
-  { key: "rheumatologist", name: "Rheumatologist" },
-  { key: "clinical_pharmacist", name: "Clinical Pharmacist" },
+  { key: "general_physician", name: SPECIALTY_DISPLAY.general_physician },
+  { key: "clinical_pharmacist", name: SPECIALTY_DISPLAY.clinical_pharmacist },
+  { key: "allergist", name: SPECIALTY_DISPLAY.allergist },
+  { key: "endocrinologist", name: SPECIALTY_DISPLAY.endocrinologist },
+  { key: "nephrologist", name: SPECIALTY_DISPLAY.nephrologist },
+  { key: "cardiologist", name: SPECIALTY_DISPLAY.cardiologist },
+  { key: "dermatologist", name: SPECIALTY_DISPLAY.dermatologist },
+  { key: "gastroenterologist", name: SPECIALTY_DISPLAY.gastroenterologist },
+  { key: "hematologist", name: SPECIALTY_DISPLAY.hematologist },
+  { key: "neurologist", name: SPECIALTY_DISPLAY.neurologist },
+  { key: "oncologist", name: SPECIALTY_DISPLAY.oncologist },
+  { key: "ophthalmologist", name: SPECIALTY_DISPLAY.ophthalmologist },
+  { key: "orthopedic", name: SPECIALTY_DISPLAY.orthopedic },
+  { key: "psychiatrist", name: SPECIALTY_DISPLAY.psychiatrist },
+  { key: "pulmonologist", name: SPECIALTY_DISPLAY.pulmonologist },
+  { key: "rheumatologist", name: SPECIALTY_DISPLAY.rheumatologist },
 ];
 
 /** Facility types for the top-level dropdown. */
@@ -40,7 +53,8 @@ interface SpecialtySelectorProps {
 
 /**
  * A searchable, grouped specialty combobox that shows:
- *   1. Suggested from patient records (AI recommendations)
+ *   1. Suggested from patient records (AI recommendations) with the
+ *      relevance score and a short note explaining the suggestion
  *   2. Browse all specialties (full taxonomy)
  *
  * Mimics a command-palette interaction — search first, grouped results.
@@ -52,15 +66,19 @@ export function SpecialtySelector({ value, onChange, recommendations }: Specialt
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(-1);
 
-  // Build recommended options from backend data
+  // Build recommended options from backend data. Use the
+  // patient-facing display name (e.g. "Endocrinology / Diabetes")
+  // rather than the verbose recommendation name, so the dropdown
+  // reads naturally.
   const recommendedOptions: SpecialtyOption[] = useMemo(() => {
     if (!recommendations?.length) return [];
     return recommendations.map((rec) => ({
       key: rec.specialty_key,
-      name: rec.specialty,
+      name: SPECIALTY_DISPLAY[rec.specialty_key] || rec.specialty,
       group: "recommended" as const,
       recommendationNote: rec.title,
       relevance: rec.relevance,
+      relevanceScore: rec.relevance_score,
     }));
   }, [recommendations]);
 
@@ -90,7 +108,7 @@ export function SpecialtySelector({ value, onChange, recommendations }: Specialt
   const selectedName = useMemo(() => {
     const all = [...recommendedOptions, ...browseOptions];
     return all.find((o) => o.key === value)?.name || value;
-  }, [value, recommendedOptions, browseOptions, value]);
+  }, [value, recommendedOptions, browseOptions]);
 
   // Is the selected value from a recommendation?
   const isRecommended = recommendedOptions.some((o) => o.key === value);
@@ -145,7 +163,7 @@ export function SpecialtySelector({ value, onChange, recommendations }: Specialt
   return (
     <div className="relative" onBlur={handleBlur}>
       <label htmlFor={`${listboxId}-specialty`} className="mb-2 block text-sm font-semibold text-slate-800">
-        What type of care do you need?
+        Specialty or care type
       </label>
 
       {/* Closed state: show selected value as a button */}
@@ -153,20 +171,23 @@ export function SpecialtySelector({ value, onChange, recommendations }: Specialt
         <button
           type="button"
           id={`${listboxId}-specialty`}
-          onClick={() => { setOpen(true); setActiveIndex(-1); }}
+          onClick={() => {
+            setOpen(true);
+            setActiveIndex(-1);
+          }}
           className={classNames(
             "flex min-h-[52px] w-full items-center gap-3 rounded-2xl border bg-white px-4 py-3 text-left text-base transition",
-            "border-slate-300 hover:border-slate-400 focus:border-brand-500 focus:ring-4 focus:ring-brand-100",
+            "border-slate-300 hover:border-slate-400 focus:border-brand-500 focus:ring-4 focus:ring-brand-100"
           )}
         >
           <SearchIcon className="h-5 w-5 shrink-0 text-slate-400" />
           <span className="flex-1 truncate text-slate-800">{selectedName}</span>
           {isRecommended && (
-            <span className="shrink-0 rounded-full bg-brand-50 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-brand-700 ring-1 ring-brand-200">
-              ✨ Suggested
+            <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-brand-50 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-brand-700 ring-1 ring-brand-200">
+              <SparkleIcon className="h-3 w-3" /> Suggested
             </span>
           )}
-          <span className="text-sm text-slate-400">▾</span>
+          <span className="text-sm text-slate-400" aria-hidden="true">▾</span>
         </button>
       )}
 
@@ -179,9 +200,12 @@ export function SpecialtySelector({ value, onChange, recommendations }: Specialt
               ref={inputRef}
               id={`${listboxId}-specialty`}
               value={query}
-              onChange={(event) => { setQuery(event.target.value); setActiveIndex(-1); }}
+              onChange={(event) => {
+                setQuery(event.target.value);
+                setActiveIndex(-1);
+              }}
               onKeyDown={handleInputKeyDown}
-              placeholder="Search specialty or type of care..."
+              placeholder="Search specialty or care type…"
               role="combobox"
               aria-autocomplete="list"
               aria-expanded={showSuggestions}
@@ -194,7 +218,10 @@ export function SpecialtySelector({ value, onChange, recommendations }: Specialt
             />
             <button
               type="button"
-              onClick={() => { setOpen(false); setQuery(""); }}
+              onClick={() => {
+                setOpen(false);
+                setQuery("");
+              }}
               className="absolute right-2 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-xl text-slate-400 hover:bg-slate-100 hover:text-slate-700"
               aria-label="Close specialty selector"
             >
@@ -203,10 +230,18 @@ export function SpecialtySelector({ value, onChange, recommendations }: Specialt
           </div>
 
           {/* Results list */}
-          <ul id={`${listboxId}-listbox`} role="listbox" aria-label="Specialty suggestions" className="max-h-[360px] overflow-y-auto py-1.5 scroll-thin">
+          <ul
+            id={`${listboxId}-listbox`}
+            role="listbox"
+            aria-label="Specialty suggestions"
+            className="max-h-[360px] overflow-y-auto py-1.5 scroll-thin"
+          >
             {groupedOptions.recommended.length > 0 && (
               <>
-                <li className="px-4 py-2 text-[11px] font-bold uppercase tracking-[0.14em] text-brand-600" role="presentation">
+                <li
+                  className="px-4 py-2 text-[11px] font-bold uppercase tracking-[0.14em] text-brand-600"
+                  role="presentation"
+                >
                   Suggested from your records
                 </li>
                 {groupedOptions.recommended.map((opt, idx) => {
@@ -226,28 +261,32 @@ export function SpecialtySelector({ value, onChange, recommendations }: Specialt
                         value === opt.key && "bg-brand-50/60"
                       )}
                     >
-                      <span className={classNames(
-                        "mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-lg",
-                        activeIndex === globalIdx ? "bg-brand-600 text-white" : "bg-brand-50 text-brand-600"
-                      )}>
-                        🩺
+                      <span
+                        className={classNames(
+                          "mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl",
+                          activeIndex === globalIdx ? "bg-brand-600 text-white" : "bg-brand-50 text-brand-600"
+                        )}
+                      >
+                        <SparkleIcon className="h-5 w-5" />
                       </span>
                       <span className="min-w-0 flex-1">
                         <span className="flex items-center gap-2">
                           <span className="text-sm font-semibold text-slate-900">{opt.name}</span>
                           {value === opt.key && <CheckIcon className="h-4 w-4 text-brand-600" />}
+                          {typeof opt.relevanceScore === "number" && (
+                            <span
+                              className={classNames(
+                                "inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ring-1",
+                                relevanceTone(opt.relevance)
+                              )}
+                            >
+                              {opt.relevance} · {opt.relevanceScore}%
+                            </span>
+                          )}
                         </span>
                         {opt.recommendationNote && (
                           <span className="mt-0.5 block text-xs text-slate-500">
                             {opt.recommendationNote}
-                            {opt.relevance && (
-                              <span className={classNames(
-                                "ml-1.5 inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide",
-                                relevanceTone(opt.relevance)
-                              )}>
-                                {opt.relevance}
-                              </span>
-                            )}
                           </span>
                         )}
                       </span>
@@ -259,7 +298,10 @@ export function SpecialtySelector({ value, onChange, recommendations }: Specialt
 
             {groupedOptions.browse.length > 0 && (
               <>
-                <li className="px-4 py-2 text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500" role="presentation">
+                <li
+                  className="px-4 py-2 text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500"
+                  role="presentation"
+                >
                   Browse all specialties
                 </li>
                 {groupedOptions.browse.map((opt, idx) => {
@@ -279,11 +321,13 @@ export function SpecialtySelector({ value, onChange, recommendations }: Specialt
                         value === opt.key && "bg-slate-50"
                       )}
                     >
-                      <span className={classNames(
-                        "mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl",
-                        activeIndex === globalIdx ? "bg-slate-200 text-slate-600" : "bg-slate-100 text-slate-400"
-                      )}>
-                        📋
+                      <span
+                        className={classNames(
+                          "mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl",
+                          activeIndex === globalIdx ? "bg-slate-200 text-slate-600" : "bg-slate-100 text-slate-400"
+                        )}
+                      >
+                        <SearchIcon className="h-5 w-5" />
                       </span>
                       <span className="min-w-0 flex-1">
                         <span className="flex items-center gap-2">
@@ -303,15 +347,15 @@ export function SpecialtySelector({ value, onChange, recommendations }: Specialt
   );
 }
 
-function relevanceTone(relevance: string): string {
+function relevanceTone(relevance: string | undefined): string {
   switch (relevance) {
     case "high":
-      return "bg-red-50 text-red-700 ring-1 ring-red-200";
+      return "bg-red-50 text-red-700 ring-red-200";
     case "moderate":
-      return "bg-amber-50 text-amber-700 ring-1 ring-amber-200";
+      return "bg-amber-50 text-amber-800 ring-amber-200";
     case "possible":
-      return "bg-sky-50 text-sky-700 ring-1 ring-sky-200";
+      return "bg-sky-50 text-sky-700 ring-sky-200";
     default:
-      return "bg-slate-100 text-slate-600 ring-1 ring-slate-200";
+      return "bg-slate-100 text-slate-600 ring-slate-200";
   }
 }
