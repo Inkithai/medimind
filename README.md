@@ -50,7 +50,8 @@ Vision+text use the same Gemini model; Groq needs two. All three are OpenAI-comp
 | `lab_trends.py` | Pure Python trend engine — direction, crossings, recovery (`returned_to_normal`), unit-clash decline, and thousands-aware parsing |
 | `change_detection.py` / `record_integrity.py` | Deterministic longitudinal change detection and source-linked cross-document discrepancy checks |
 | `appointment_prep.py` / `follow_up.py` | Printable clinician handoff plus a stable, grounded follow-up queue without inferred clinical deadlines |
-| `retrieval.py` | Chunks timelines into source-linked medication, lab, diagnosis, note, and allergy evidence; embeds/indexes through `vector_store`; then runs intent-routed Q&A with injection resistance, evidence-sufficiency gates, page-aware citation validation, and confidence caps |
+| `record_trust.py` | Immutable correction replay, deterministic conflict detection, authoritative-source state merge, and fail-closed fact/document quarantine |
+| `retrieval.py` | Chunks only trusted timelines into source-linked medication, lab, diagnosis, note, and allergy evidence; embeds/indexes through `vector_store`; then runs intent-routed Q&A with injection resistance, evidence-sufficiency gates, stale-index repair, page-aware citation validation, and confidence caps |
 | `vector_store.py` | Abstraction over Chroma (`VECTOR_STORE=chroma`, local `CHROMA_DIR`) and Supabase `chunks` table (`VECTOR_STORE=supabase`, no volume, brute-force cosine) |
 | `jobs.py` | Thread-safe parent jobs with independent per-file progress (`queued → reading → extracting → saving → ready/failed`) and optional Supabase persistence |
 | `conversation.py` | In-memory conversation store, rewrites follow-ups like “was that safe?” into self-contained retrieval queries, summarizes older turns to keep context bounded |
@@ -125,7 +126,7 @@ If you switch `LLM_PROVIDER`, no code change needed — just env + restart.
 #### Supabase one-time setup
 
 1. Create project at supabase.com.
-2. SQL Editor → paste `backend/supabase_schema.sql` → Run (creates `documents`, `patient_snapshots`, indexes, RLS).
+2. SQL Editor → paste `backend/supabase_schema.sql` → Run. Re-run the idempotent file after upgrades; it creates `documents`, `patient_snapshots`, `chunks`, `extraction_corrections`, `record_conflicts`, `conflict_resolution_events`, indexes, grants, and RLS.
 3. Copy Project URL + service_role key into `.env`.
 
 ### Running backend
@@ -147,7 +148,8 @@ Zero-login anonymous model:
 - **Landing** `/` — hero, anonymous session explanation, Start My Health Record → auto-creates workspace via `POST /anonymous/session` (token stored in `localStorage.medimind.session.v1`).
 - **Overview / Dashboard** `/dashboard` — documents / medicines / labs / safety counts, latest safety warnings, recent history, pipeline hint.
 - **Upload** `/upload` — drag-drop and dedup (`name-size-lastModified`); shows each document's independent queue/read/extract/save state, then clearly separates the one-time record finalization steps (history → safety → search).
-- **My Documents** `/documents` — list + `DocumentViewer` with Original (iframe/img via Cloudinary, `split("?")[0]` fixes PDF query-param urls) vs Structured tabs.
+- **My Documents** `/documents` — original and structured extraction plus **Correct & Audit**. Corrections are append-only and preserve every original/before/after value.
+- **Trust Review** `/review` — quarantines conflicting evidence, records an authoritative source decision, supports reopening, and rebuilds all derived views.
 - **My History** `/history` — year-grouped timeline (2026 → Jul 20 🧪 Blood Test etc.) + full `TimelineView`.
 - **My Medicines** `/medicines` — current per ingredient (most recent) + historical log table, filterable, source file traceable (now fixed to original filename, not temp sanitized path).
 - **Test Results / Lab Trends** `/labs` — per-test direction, flag sequence, crossing / recovery badge (green when the latest reading is back to normal), approaching-threshold, SVG sparkline with reference band. Thousands-aware values; mixed units (`mg/dL` vs `mmol/L`) are declined rather than trended.
@@ -288,7 +290,14 @@ X-User-Id: <user_id>
 #### Documents
 `POST /api/v1/documents` — multipart `files` field. Merges with prior uploads. Validates non-medical via `document_filter.py` (422 if `other` with no clinical content). Fixes `_source.file` to original filename (not temp path). Returns timeline + cross-check + lab_trends + indexed flag. If `indexed:false` includes `index_error`. Failures are per-file: one unreadable/non-medical file no longer fails the whole batch — kept files are merged normally and response includes `failed_files: [{file, file_id, file_index, error, kind, code, retryable, retry_after_seconds}]`. Provider traces are logged server-side; clients receive short, actionable messages. The request only fails outright when nothing was kept: 422 for content problems, 502 for a provider/storage interruption.
 
-`GET /api/v1/timeline`, `/cross-check`, `/lab-trends` — 404 if no snapshot yet. Lab trends recomputed on-the-fly for old snapshots lacking field.
+`GET /api/v1/timeline`, `/cross-check`, `/lab-trends` — 404 if no snapshot yet. Reads replay current corrections and quarantine policy so an older snapshot cannot leak conflicting facts.
+
+#### Corrections and source conflicts
+
+- `GET /api/v1/documents/{document_id}/corrections` returns immutable original/effective extraction and audit events.
+- `POST /api/v1/documents/{document_id}/corrections` appends allowlisted field changes and rebuilds timeline, safety, trends, snapshots, and vectors.
+- `GET /api/v1/conflicts?include_inactive=true` returns active and superseded conflict state plus resolution history.
+- `POST /api/v1/conflicts/{id}/resolve` selects an authoritative source; `POST /api/v1/conflicts/{id}/reopen` quarantines it again.
 
 #### Intelligence and action layer
 - `GET /api/v1/changes` — consecutive-record changes with both sources.
@@ -301,7 +310,7 @@ X-User-Id: <user_id>
 
 Q&A classifies each question as medication, medication safety, lab result, lab trend, allergy, timeline, record change, or general. Vector candidates are filtered to compatible structured evidence; trend/change questions require at least two distinct dated source entries. With no matching evidence, MediMind responds without calling the answer model. Returned citations are validated against retrieved metadata, and limited/uncited answers have confidence capped.
 
-Q&A also self-heals: if the patient's vector index is empty but their documents are saved in the DB (e.g. a local `chroma_db` wiped by a redeploy with no volume, or a Supabase `chunks` table migrated after the last upload), the index is rebuilt from those saved documents on the next question, so it answers normally instead of reporting "no indexed records". If `VECTOR_STORE=supabase` and the `chunks` table is missing entirely, Q&A returns 502 with instructions to run `supabase_schema.sql` rather than a misleading empty answer.
+Q&A self-heals when the vector index is empty, stale after a correction/source decision, or incomplete. The current trusted timeline fingerprint and chunk count are checked before retrieval; unresolved and non-authoritative evidence never enters the prompt. If `VECTOR_STORE=supabase` and the `chunks` table is missing entirely, Q&A returns 502 with instructions to run `supabase_schema.sql` rather than a misleading empty answer.
 
 #### Conversations
 `POST /api/v1/sessions` → `{user_id, session_id}`

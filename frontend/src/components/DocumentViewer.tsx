@@ -4,23 +4,41 @@ import type { Visit } from "../types/api";
 import { documentTypeLabel, formatConfidence, formatDate } from "../utils/format";
 import { StatusBadge } from "./StatusBadge";
 import { BeakerIcon, FileIcon, LinkIcon, PillIcon } from "./icons";
+import { CorrectionEditor } from "./CorrectionEditor";
 
-export function DocumentViewer({ visit, onClose }: { visit: Visit; onClose?: () => void }) {
+export function DocumentViewer({
+  visit,
+  onClose,
+  onUpdated,
+}: {
+  visit: Visit;
+  onClose?: () => void;
+  onUpdated?: () => void;
+}) {
   const { t } = useI18n();
-  const [tab, setTab] = useState<"original" | "structured">("structured");
+  const [tab, setTab] = useState<"original" | "structured" | "correct">("structured");
   const titleId = useId();
   const originalTabId = useId();
   const structuredTabId = useId();
+  const correctTabId = useId();
   const originalPanelId = useId();
   const structuredPanelId = useId();
+  const correctPanelId = useId();
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
   const onTabKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight" && event.key !== "Home" && event.key !== "End") return;
     event.preventDefault();
-    const current = tab === "original" ? 0 : 1;
-    const next = event.key === "Home" ? 0 : event.key === "End" ? 1 : event.key === "ArrowRight" ? (current + 1) % 2 : (current + 1) % 2;
-    setTab(next === 0 ? "original" : "structured");
+    const tabs = ["original", "structured", "correct"] as const;
+    const current = tabs.indexOf(tab);
+    const next = event.key === "Home"
+      ? 0
+      : event.key === "End"
+        ? tabs.length - 1
+        : event.key === "ArrowRight"
+          ? (current + 1) % tabs.length
+          : (current - 1 + tabs.length) % tabs.length;
+    setTab(tabs[next]);
     tabRefs.current[next]?.focus();
   };
 
@@ -30,6 +48,11 @@ export function DocumentViewer({ visit, onClose }: { visit: Visit; onClose?: () 
         <div>
           <div className="flex items-center gap-2">
             <StatusBadge tone="brand">{documentTypeLabel(visit.document_type)}</StatusBadge>
+            {visit._trust?.quarantined ? (
+              <StatusBadge tone="danger">Quarantined</StatusBadge>
+            ) : visit._corrections?.paths.length ? (
+              <StatusBadge tone="success">Corrected</StatusBadge>
+            ) : null}
             <h2 id={titleId} className="text-sm font-semibold text-slate-900">{visit._source.file}</h2>
           </div>
           <p className="mt-1 text-xs text-slate-500">
@@ -70,6 +93,9 @@ export function DocumentViewer({ visit, onClose }: { visit: Visit; onClose?: () 
           <TabButton ref={(node) => { tabRefs.current[1] = node; }} id={structuredTabId} controls={structuredPanelId} active={tab === "structured"} onClick={() => setTab("structured")}>
             {t("viewer.structured")}
           </TabButton>
+          <TabButton ref={(node) => { tabRefs.current[2] = node; }} id={correctTabId} controls={correctPanelId} active={tab === "correct"} onClick={() => setTab("correct")}>
+            Correct & Audit
+          </TabButton>
         </div>
       </div>
 
@@ -93,6 +119,10 @@ export function DocumentViewer({ visit, onClose }: { visit: Visit; onClose?: () 
             {visit._source.file} • {visit._source.method === "text_layer" ? "Digital PDF" : "Scanned or photo"}
             {visit._source.page ? ` • page ${visit._source.page}` : ""}
           </div>
+        </div>
+      ) : tab === "correct" ? (
+        <div id={correctPanelId} role="tabpanel" aria-labelledby={correctTabId} tabIndex={0} className="p-5">
+          <CorrectionEditor visit={visit} onSaved={() => onUpdated?.()} />
         </div>
       ) : (
         <div id={structuredPanelId} role="tabpanel" aria-labelledby={structuredTabId} tabIndex={0} className="space-y-5 p-5">

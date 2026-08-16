@@ -30,6 +30,7 @@ interface NavItem {
 const NAV: NavItem[] = [
   { to: "/dashboard", labelKey: "nav.dashboard", icon: TimelineIcon, chip: "bg-brand-50 text-brand-700" },
   { to: "/documents", labelKey: "nav.records", icon: FileIcon, chip: "bg-sky-50 text-sky-700" },
+  { to: "/review", labelKey: "nav.trustReview", icon: ShieldIcon, chip: "bg-amber-50 text-amber-700" },
   { to: "/medicines", labelKey: "nav.medications", icon: PillIcon, chip: "bg-emerald-50 text-emerald-700" },
   { to: "/labs", labelKey: "nav.labs", icon: BeakerIcon, chip: "bg-violet-50 text-violet-700" },
   { to: "/history", labelKey: "nav.timeline", icon: TimelineIcon, chip: "bg-sky-50 text-sky-700" },

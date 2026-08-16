@@ -88,6 +88,9 @@ summary {
   .btn-ghost {
     @apply btn text-slate-500 hover:bg-slate-100 hover:text-slate-700;
   }
+  .input {
+    @apply block min-h-[40px] w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500;
+  }
 }
 
 /* Keyboard navigation must always be visible and must not be clipped by cards. */

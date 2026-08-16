@@ -11,6 +11,8 @@ import type {
   CareRecommendationContext,
   CareProviderSearchResponse,
   CrossCheckReport,
+  ConflictsResponse,
+  DocumentCorrectionsResponse,
   FollowUpPlan,
   FacilityKind,
   HealthResponse,
@@ -19,6 +21,7 @@ import type {
   QAResponse,
   RecordChangesReport,
   RecordIntegrityReport,
+  RecordRebuildResponse,
   SessionHistory,
   SessionInfo,
   Timeline,
@@ -444,6 +447,76 @@ export const api = {
 
   getTimeline(credentials: Credentials): Promise<Timeline> {
     return request<Timeline>(credentials, "/api/v1/timeline");
+  },
+
+  getDocumentCorrections(
+    credentials: Credentials,
+    documentId: string
+  ): Promise<DocumentCorrectionsResponse> {
+    return request<DocumentCorrectionsResponse>(
+      credentials,
+      `/api/v1/documents/${encodeURIComponent(documentId)}/corrections`
+    );
+  },
+
+  correctDocument(
+    credentials: Credentials,
+    documentId: string,
+    changes: Array<{ field_path: string; corrected_value: unknown; expected_previous_value?: unknown }>,
+    reason: string
+  ): Promise<RecordRebuildResponse> {
+    return request<RecordRebuildResponse>(
+      credentials,
+      `/api/v1/documents/${encodeURIComponent(documentId)}/corrections`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ changes, reason }),
+      }
+    );
+  },
+
+  getConflicts(credentials: Credentials, includeInactive = false): Promise<ConflictsResponse> {
+    return request<ConflictsResponse>(
+      credentials,
+      `/api/v1/conflicts?include_inactive=${includeInactive ? "true" : "false"}`
+    );
+  },
+
+  resolveConflict(
+    credentials: Credentials,
+    conflictId: string,
+    authoritativeDocumentId: string,
+    note?: string
+  ): Promise<RecordRebuildResponse> {
+    return request<RecordRebuildResponse>(
+      credentials,
+      `/api/v1/conflicts/${encodeURIComponent(conflictId)}/resolve`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          authoritative_document_id: authoritativeDocumentId,
+          note: note || null,
+        }),
+      }
+    );
+  },
+
+  reopenConflict(
+    credentials: Credentials,
+    conflictId: string,
+    note?: string
+  ): Promise<RecordRebuildResponse> {
+    return request<RecordRebuildResponse>(
+      credentials,
+      `/api/v1/conflicts/${encodeURIComponent(conflictId)}/reopen`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ note: note || null }),
+      }
+    );
   },
 
   getCrossCheck(credentials: Credentials): Promise<CrossCheckReport> {

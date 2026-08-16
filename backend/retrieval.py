@@ -38,7 +38,8 @@ import re
 import json
 import hashlib
 import logging
-from typing import Any, Dict, Iterator, List, Optional
+from datetime import datetime
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from openai import OpenAI, OpenAIError
 
@@ -198,6 +199,59 @@ def _chunk_id(patient_key: str, source_file: Optional[str], chunk_type: str, pay
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
+def timeline_fingerprint(timeline: Dict[str, Any]) -> str:
+    """Fingerprint trusted content so stale indexes can be replaced safely."""
+    notes = [
+        {
+            "document_id": visit.get("_document_id"),
+            "date": visit.get("date"),
+            "note": visit.get("clinical_notes"),
+            "trust": visit.get("_trust"),
+        }
+        for visit in timeline.get("visits", [])
+        if visit.get("clinical_notes") and not (visit.get("_trust") or {}).get("quarantined")
+    ]
+    payload = {
+        "medications": timeline.get("medications_timeline", []),
+        "labs": timeline.get("lab_results_timeline", []),
+        "diagnoses": timeline.get("diagnoses_timeline", []),
+        "allergies": timeline.get("known_allergies", []),
+        "notes": notes,
+        "trust_summary": timeline.get("trust_summary", {}),
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _evidence_metadata(fact: Dict[str, Any], *, document_type: str = "other") -> Dict[str, Any]:
+    trust_status = str((fact.get("_trust") or {}).get("status") or "extracted")
+    verification_weight = {"source_confirmed": 1.0, "user_corrected": 0.98, "extracted": 0.72}.get(
+        trust_status, 0.5
+    )
+    source_method = str(fact.get("source_method") or "")
+    source_weight = 0.9 if source_method == "text_layer" else 0.72 if source_method == "vision_ocr" else 0.65
+    type_weight = {
+        "lab_report": 0.96,
+        "prescription": 0.94,
+        "discharge_summary": 0.86,
+        "other": 0.65,
+    }.get(document_type or "other", 0.65)
+    confidence = fact.get("confidence")
+    if not isinstance(confidence, (int, float)):
+        confidence = 0.65
+    score = round(
+        0.35 * verification_weight + 0.25 * source_weight + 0.25 * type_weight + 0.15 * float(confidence),
+        4,
+    )
+    return {
+        "verification_status": trust_status,
+        "source_method": source_method,
+        "extraction_confidence": float(confidence),
+        "evidence_score": score,
+        "evidence_tier": "A" if score >= 0.9 else "B" if score >= 0.78 else "C",
+    }
+
+
 def _medication_chunk_text(med: Dict[str, Any]) -> str:
     ingredients = ", ".join(med.get("ingredients") or []) or "unknown"
     duration = med.get("duration") or "not specified"
@@ -270,6 +324,7 @@ def build_chunks_from_timeline(patient_key: str, timeline: Dict[str, Any]) -> Li
     upserts instead of duplicating.
     """
     chunks: List[Dict[str, Any]] = []
+    fingerprint = timeline.get("_record_fingerprint") or timeline_fingerprint(timeline)
 
     for med in timeline.get("medications_timeline", []):
         text = _medication_chunk_text(med)
@@ -281,7 +336,11 @@ def build_chunks_from_timeline(patient_key: str, timeline: Dict[str, Any]) -> Li
                 "date": med.get("date") or "",
                 "source_file": med.get("source_file") or "",
                 "source_page": med.get("source_page") or 0,
+                "document_id": med.get("document_id") or "",
+                "fact_path": med.get("fact_path") or "",
                 "chunk_type": "medication",
+                "record_fingerprint": fingerprint,
+                **_evidence_metadata(med, document_type=str(med.get("document_type") or "prescription")),
             },
         })
 
@@ -295,14 +354,19 @@ def build_chunks_from_timeline(patient_key: str, timeline: Dict[str, Any]) -> Li
                 "date": lab.get("date") or "",
                 "source_file": lab.get("source_file") or "",
                 "source_page": lab.get("source_page") or 0,
+                "document_id": lab.get("document_id") or "",
+                "fact_path": lab.get("fact_path") or "",
                 "chunk_type": "lab_result",
+                "record_fingerprint": fingerprint,
+                **_evidence_metadata(lab, document_type=str(lab.get("document_type") or "lab_report")),
             },
         })
 
     for visit in timeline.get("visits", []):
-        if not visit.get("clinical_notes"):
+        if not visit.get("clinical_notes") or (visit.get("_trust") or {}).get("quarantined"):
             continue
-        source_file = visit.get("_source", {}).get("file")
+        source = visit.get("_source", {}) if isinstance(visit.get("_source"), dict) else {}
+        source_file = source.get("file")
         text = _clinical_note_chunk_text(visit)
         chunks.append({
             "id": _chunk_id(patient_key, source_file, "clinical_note", text),
@@ -311,8 +375,19 @@ def build_chunks_from_timeline(patient_key: str, timeline: Dict[str, Any]) -> Li
                 "patient_key": patient_key,
                 "date": visit.get("date") or "",
                 "source_file": source_file or "",
-                "source_page": visit.get("_source", {}).get("page") or 0,
+                "source_page": source.get("page") or 0,
+                "document_id": visit.get("_document_id") or "",
+                "fact_path": "/clinical_notes",
                 "chunk_type": "clinical_note",
+                "record_fingerprint": fingerprint,
+                **_evidence_metadata(
+                    {
+                        "confidence": visit.get("overall_confidence"),
+                        "source_method": source.get("method"),
+                        "_trust": visit.get("_trust"),
+                    },
+                    document_type=str(visit.get("document_type") or "other"),
+                ),
             },
         })
 
@@ -326,7 +401,11 @@ def build_chunks_from_timeline(patient_key: str, timeline: Dict[str, Any]) -> Li
                 "date": diagnosis.get("date") or "",
                 "source_file": diagnosis.get("source_file") or "",
                 "source_page": diagnosis.get("source_page") or 0,
+                "document_id": diagnosis.get("document_id") or "",
+                "fact_path": diagnosis.get("fact_path") or "/diagnoses_or_conditions",
                 "chunk_type": "diagnosis",
+                "record_fingerprint": fingerprint,
+                **_evidence_metadata(diagnosis, document_type=str(diagnosis.get("document_type") or "other")),
             },
         })
 
@@ -354,7 +433,18 @@ def build_chunks_from_timeline(patient_key: str, timeline: Dict[str, Any]) -> Li
                 "date": visit.get("date") or "",
                 "source_file": source_file or "",
                 "source_page": visit.get("_source", {}).get("page") or 0,
+                "document_id": visit.get("_document_id") or "",
+                "fact_path": "/allergies_noted",
                 "chunk_type": "allergy",
+                "record_fingerprint": fingerprint,
+                **_evidence_metadata(
+                    {
+                        "confidence": visit.get("overall_confidence"),
+                        "source_method": (visit.get("_source") or {}).get("method"),
+                        "_trust": visit.get("_trust"),
+                    },
+                    document_type=str(visit.get("document_type") or "other"),
+                ),
             },
         })
 
@@ -372,7 +462,15 @@ def build_chunks_from_timeline(patient_key: str, timeline: Dict[str, Any]) -> Li
                 "date": "",
                 "source_file": "",
                 "source_page": 0,
+                "document_id": "",
+                "fact_path": "/allergies_noted",
                 "chunk_type": "allergy",
+                "record_fingerprint": fingerprint,
+                "verification_status": "extracted",
+                "source_method": "",
+                "extraction_confidence": 0.65,
+                "evidence_score": 0.68,
+                "evidence_tier": "C",
             },
         })
 
@@ -497,7 +595,12 @@ def _iter_batches(chunks: List[Dict[str, Any]], size: int) -> Iterator[List[Dict
         yield chunks[start:start + size]
 
 
-def index_patient_timeline(patient_key: str, timeline: Dict[str, Any]) -> int:
+def index_patient_timeline(
+    patient_key: str,
+    timeline: Dict[str, Any],
+    *,
+    replace: bool = False,
+) -> int:
     """
     Entry point for indexing: chunks a patient's timeline, embeds every
     chunk, and upserts them into that patient's local Chroma collection
@@ -525,16 +628,25 @@ def index_patient_timeline(patient_key: str, timeline: Dict[str, Any]) -> int:
     if not patient_key or not patient_key.strip():
         raise ValueError("patient_key is required and cannot be empty.")
 
+    timeline["_record_fingerprint"] = timeline_fingerprint(timeline)
     chunks = build_chunks_from_timeline(patient_key, timeline)
     if not chunks:
+        if replace:
+            vector_store.delete_collection(patient_key)
         logger.warning(
-            "No indexable content found for patient '%s' — skipping indexing "
-            "(nothing to retrieve for Q&A).",
+            "No indexable trusted content found for patient '%s' — skipping indexing "
+            "(quarantined or nothing to retrieve for Q&A).",
             patient_key,
         )
         return 0
 
     total = len(chunks)
+    for chunk in chunks:
+        chunk["metadata"]["record_chunk_count"] = total
+    if replace:
+        # Content-addressed IDs prevent most duplication, but facts removed by
+        # a correction/quarantine still have to be deleted explicitly.
+        vector_store.delete_collection(patient_key)
     store_name = vector_store.get_store_name()
     batch_size = EMBEDDING_BATCH_SIZE
     log_rss(logger, "indexing_start", chunks=total, batch_size=batch_size, store=store_name)
@@ -719,6 +831,17 @@ _NO_INDEXABLE_CONTENT_ANSWER = {
     "recommend_professional_consult": False,
 }
 
+_QUARANTINED_CONTENT_ANSWER = {
+    "answer": (
+        "I found records, but I cannot use the conflicting facts as settled evidence yet. "
+        "Review the unresolved conflict and confirm the authoritative source before asking again."
+    ),
+    "confidence": 0.0,
+    "sources": [],
+    "recommend_professional_consult": False,
+    "trust_notice": "Unresolved evidence was quarantined from this answer.",
+}
+
 
 def _with_evidence_metadata(
     answer: Dict[str, Any], intent: Dict[str, Any], evidence: Dict[str, Any]
@@ -813,27 +936,80 @@ def _persisted_documents(patient_key: str) -> Optional[List[Dict[str, Any]]]:
         return None
 
 
-def _reindex_from_persisted_documents(patient_key: str) -> Optional[int]:
-    """Self-healing re-index: rebuilds the patient's vector index from the
-    documents already persisted in Supabase (documents + patient_snapshots
-    survive deploys/restarts, while a local Chroma store or a freshly
-    migrated `chunks` table may not).
+def _trusted_timeline_from_persisted_documents(
+    patient_key: str,
+) -> Tuple[Optional[Dict[str, Any]], Optional[List[Dict[str, Any]]]]:
+    """Build the current corrected, conflict-quarantined timeline.
 
-    Returns:
-        int  — number of chunks indexed (0 = documents exist but contain no
-               indexable content)
-        None — the patient has no persisted documents (nothing to re-index)
-
-    Raises RuntimeError (embedding/store failure) — callers surface that as
-    an actionable error rather than masking it as "no records".
+    Conflict detection runs even if the conflict tables are temporarily
+    unavailable. That fail-closed fallback is important during migration:
+    unresolved contradictions are excluded from RAG before they have a
+    chance to be presented as settled evidence.
     """
     docs = _persisted_documents(patient_key)
     if not docs:
-        return None
-
+        return None, docs
+    persisted_conflicts: List[Dict[str, Any]] = []
+    # Real DB-loaded documents always carry a stable _document_id. Legacy
+    # unit/CLI payloads often do not and cannot have persisted resolutions;
+    # avoiding a pointless Supabase query keeps those offline paths offline.
+    if any(doc.get("_document_id") for doc in docs):
+        try:
+            import db
+            persisted_conflicts = db.load_conflicts(patient_key)
+        except Exception:
+            # Dynamic detections remain unresolved and therefore quarantined.
+            persisted_conflicts = []
     from medical_extractor import build_patient_timeline
-    timeline = build_patient_timeline(docs)
-    return index_patient_timeline(patient_key, timeline)
+    from record_trust import prepare_trusted_documents
+    trusted_docs, conflicts, trust_summary = prepare_trusted_documents(docs, persisted_conflicts)
+    timeline = build_patient_timeline(trusted_docs)
+    timeline["trust_summary"] = trust_summary
+    timeline["conflicts"] = conflicts
+    timeline["_record_fingerprint"] = timeline_fingerprint(timeline)
+    return timeline, docs
+
+
+def _reindex_from_persisted_documents(patient_key: str) -> Optional[int]:
+    """Self-heal from immutable docs using corrections + quarantine policy."""
+    timeline, docs = _trusted_timeline_from_persisted_documents(patient_key)
+    if timeline is None or not docs:
+        return None
+    return index_patient_timeline(patient_key, timeline, replace=True)
+
+
+def _recency_score(value: Any) -> float:
+    if not value:
+        return 0.4
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        # 2000 -> 0, 2030 -> 1; bounded and used only as a light tiebreaker.
+        return max(0.0, min(1.0, (parsed.year - 2000) / 30.0))
+    except (TypeError, ValueError):
+        return 0.4
+
+
+def _rank_evidence(
+    documents: List[str], metadatas: List[Dict[str, Any]], top_k: int
+) -> Tuple[List[str], List[Dict[str, Any]]]:
+    ranked = []
+    total = max(1, len(documents))
+    for index, (text, raw_meta) in enumerate(zip(documents, metadatas)):
+        meta = dict(raw_meta or {})
+        semantic = meta.get("semantic_score")
+        if not isinstance(semantic, (int, float)):
+            # Both stores already return semantic order; retain that signal
+            # when the backend does not expose raw distance/similarity.
+            semantic = 1.0 - (index / total)
+        evidence = meta.get("evidence_score")
+        if not isinstance(evidence, (int, float)):
+            evidence = 0.45  # legacy chunks rank below trust-aware chunks
+        score = 0.70 * float(semantic) + 0.25 * float(evidence) + 0.05 * _recency_score(meta.get("date"))
+        meta["retrieval_rank_score"] = round(score, 4)
+        ranked.append((score, index, text, meta))
+    ranked.sort(key=lambda row: (-row[0], row[1]))
+    chosen = ranked[:top_k]
+    return [row[2] for row in chosen], [row[3] for row in chosen]
 
 
 def answer_question(
@@ -896,11 +1072,20 @@ def answer_question(
     # while preventing an allergy/lab question from being answered using a
     # semantically nearby but unrelated medication/note chunk.
     requested_top_k = max(1, top_k)
+    current_timeline, persisted_docs = _trusted_timeline_from_persisted_documents(patient_key)
+    trust_summary = (current_timeline or {}).get("trust_summary", {})
+    expected_fingerprint = (current_timeline or {}).get("_record_fingerprint")
+    expected_count = len(build_chunks_from_timeline(patient_key, current_timeline)) if current_timeline else None
 
     # Use vector_store abstraction when supabase, else Chroma directly (for test mocks)
     if vector_store.get_store_name() == "supabase":
         store_count = vector_store.count(patient_key)
-        if store_count == 0:
+        indexed_fingerprint = vector_store.get_index_fingerprint(patient_key) if store_count else None
+        if current_timeline is not None and (
+            store_count != expected_count or indexed_fingerprint != expected_fingerprint
+        ):
+            store_count = index_patient_timeline(patient_key, current_timeline, replace=True)
+        elif store_count == 0:
             # Empty index + persisted documents => the index is stale/missing
             # (ephemeral Chroma dir wiped by a redeploy, chunks table freshly
             # created, background job crashed before indexing). Rebuild it from
@@ -911,12 +1096,26 @@ def answer_question(
             if reindexed == 0:
                 return _with_evidence_metadata(dict(_NO_INDEXABLE_CONTENT_ANSWER), intent, assess_evidence(intent, []))
             store_count = reindexed
+        if store_count == 0:
+            empty = _QUARANTINED_CONTENT_ANSWER if trust_summary.get("unresolved_conflicts") else _NO_INDEXABLE_CONTENT_ANSWER
+            return _with_evidence_metadata(dict(empty), intent, assess_evidence(intent, []))
         query_embedding = embed_texts([effective_retrieval_query])[0]
         fetch_count = min(store_count, max(requested_top_k * 4, requested_top_k))
         _, docs, metadatas = vector_store.query(patient_key, query_embedding, fetch_count)
     else:
         collection = _get_patient_collection(patient_key, create=False)
-        if collection is None or collection.count() == 0:
+        collection_count = collection.count() if collection is not None else 0
+        indexed_fingerprint = vector_store.get_index_fingerprint(patient_key) if collection_count else None
+        if current_timeline is not None and (
+            collection_count != expected_count or indexed_fingerprint != expected_fingerprint
+        ):
+            reindexed = index_patient_timeline(patient_key, current_timeline, replace=True)
+            collection = _get_patient_collection(patient_key, create=False)
+            collection_count = collection.count() if collection is not None else 0
+            if reindexed == 0 or collection_count == 0:
+                empty = _QUARANTINED_CONTENT_ANSWER if trust_summary.get("unresolved_conflicts") else _NO_INDEXABLE_CONTENT_ANSWER
+                return _with_evidence_metadata(dict(empty), intent, assess_evidence(intent, []))
+        elif collection is None or collection_count == 0:
             reindexed = _reindex_from_persisted_documents(patient_key)
             if reindexed is None:
                 return _with_evidence_metadata(dict(_NO_INFO_ANSWER), intent, assess_evidence(intent, []))
@@ -943,7 +1142,8 @@ def answer_question(
             return _with_evidence_metadata(dict(_NO_INDEXABLE_CONTENT_ANSWER), intent, assess_evidence(intent, []))
         return _with_evidence_metadata(dict(_NO_INFO_ANSWER), intent, assess_evidence(intent, []))
 
-    docs, metadatas = route_chunks(docs, metadatas, intent, requested_top_k)
+    docs, metadatas = route_chunks(docs, metadatas, intent, max(requested_top_k * 3, requested_top_k))
+    docs, metadatas = _rank_evidence(docs, metadatas, requested_top_k)
     if not docs:
         return _no_matching_evidence_answer(intent)
     evidence = assess_evidence(intent, metadatas)
@@ -1014,7 +1214,17 @@ def answer_question(
     # Drop citations the model invented, then attach deterministic intent and
     # evidence-coverage metadata and apply the stricter confidence cap.
     validated = _validate_answer(parsed, metadatas)
-    return _finalize_answer(validated, intent, evidence, metadatas)
+    finalized = _finalize_answer(validated, intent, evidence, metadatas)
+    unresolved_count = int(trust_summary.get("unresolved_conflicts") or 0)
+    quarantined_count = int(trust_summary.get("quarantined_facts") or 0) + int(
+        trust_summary.get("quarantined_documents") or 0
+    )
+    if unresolved_count or quarantined_count:
+        finalized["trust_notice"] = (
+            "Conflicting evidence was excluded. This answer uses only non-conflicting or user-confirmed sources."
+        )
+        finalized["quarantined_conflict_count"] = unresolved_count
+    return finalized
 
 
 _INJECTION_PATTERNS = re.compile(

@@ -26,6 +26,7 @@ Object.assign(globalThis, {
 Object.defineProperty(globalThis, "navigator", { value: dom.window.navigator, configurable: true });
 
 const visit: Visit = {
+  _document_id: "doc-accessibility-test",
   document_type: "prescription",
   date: "2026-08-14",
   provider_or_doctor: "Dr. Test",

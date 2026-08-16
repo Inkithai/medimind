@@ -160,8 +160,28 @@ def _chroma_delete(patient_key: str):
     name = _sanitize_collection_name(patient_key)
     try:
         db.delete_collection(name=name)
+    except Exception as exc:
+        # Chroma uses backend/version-specific exception classes for a missing
+        # collection. A count of zero proves there is nothing to replace;
+        # otherwise do not hide a failed security-sensitive delete.
+        if _chroma_count(patient_key) == 0:
+            return
+        raise RuntimeError(f"Could not clear stale vector index for '{patient_key}': {exc}") from exc
+
+def _chroma_fingerprint(patient_key: str) -> Optional[str]:
+    db = _get_chroma_client()
+    try:
+        col = db.get_collection(name=_sanitize_collection_name(patient_key))
+        if col.count() == 0:
+            return None
+        result = col.get(limit=1, include=["metadatas"])
+        metadata = (result.get("metadatas") or [{}])[0] or {}
+        value = metadata.get("record_fingerprint")
+        return str(value) if value else None
     except Exception:
-        pass
+        # Old/fake Chroma clients may not support get(limit/include). Treat the
+        # index as stale; callers can rebuild from immutable documents.
+        return None
 
 # --- Supabase backend (brute-force) ---
 
@@ -244,7 +264,10 @@ def _supabase_query(patient_key: str, query_embedding: Any, n_results: int) -> T
     top = scored[:n_results]
     ids = [r["id"] for _, r in top]
     docs = [r["text"] for _, r in top]
-    metas = [r["metadata"] or {} for _, r in top]
+    metas = [
+        {**(r["metadata"] or {}), "semantic_score": float(similarity)}
+        for similarity, r in top
+    ]
     return ids, docs, metas
 
 def _supabase_count(patient_key: str) -> int:
@@ -268,8 +291,30 @@ def _supabase_delete(patient_key: str):
     client = _supabase_client()
     try:
         client.table("chunks").delete().eq("patient_key", patient_key).execute()
-    except Exception:
-        pass
+    except Exception as e:
+        if "chunks" in str(e).lower() or "PGRST205" in str(e):
+            raise VectorStoreSchemaError(_VECTOR_STORE_SCHEMA_MSG) from e
+        raise RuntimeError(f"Could not clear stale vector index for '{patient_key}': {e}") from e
+
+def _supabase_fingerprint(patient_key: str) -> Optional[str]:
+    client = _supabase_client()
+    try:
+        response = (
+            client.table("chunks")
+            .select("metadata")
+            .eq("patient_key", patient_key)
+            .limit(1)
+            .execute()
+        )
+    except Exception as e:
+        if "chunks" in str(e).lower() or "PGRST205" in str(e):
+            raise VectorStoreSchemaError(_VECTOR_STORE_SCHEMA_MSG) from e
+        raise
+    rows = response.data or []
+    if not rows:
+        return None
+    value = (rows[0].get("metadata") or {}).get("record_fingerprint")
+    return str(value) if value else None
 
 # --- Public facade ---
 
@@ -292,6 +337,11 @@ def delete_collection(patient_key: str):
     if VECTOR_STORE == "supabase":
         return _supabase_delete(patient_key)
     return _chroma_delete(patient_key)
+
+def get_index_fingerprint(patient_key: str) -> Optional[str]:
+    if VECTOR_STORE == "supabase":
+        return _supabase_fingerprint(patient_key)
+    return _chroma_fingerprint(patient_key)
 
 def get_store_name() -> str:
     return VECTOR_STORE

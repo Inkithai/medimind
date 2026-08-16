@@ -13,6 +13,11 @@
 - Intent-routed Ask AI with category-targeted retrieval, citation validation, and explicit evidence sufficiency
 - Action Center with grounded follow-up tasks, user-chosen browser reminders, completion tracking, and calendar export
 - Patient-grounded RAG / Ask AI
+- Persistent field-level extraction corrections with immutable original values and audit history
+- Conflict review workflow for identity, medication instructions, lab values, and document dates
+- Fail-closed evidence quarantine across RAG, timelines, lab trends, safety, and care analytics
+- Source-confirmed rebuilds of snapshots, trends, safety checks, and vector indexes
+- Evidence hierarchy using verification, source type/method, confidence, recency, and semantic relevance
 - English, Sinhala, and Tamil UI with persisted/browser-detected language and locale-aware formatting
 - WCAG-oriented keyboard, screen-reader, focus, contrast, reduced-motion, table, chart, form, and responsive-navigation support
 - Care Navigation with search-as-you-type, current location, map confirmation, and nearby facility results — works with no API key or billing account
@@ -110,6 +115,18 @@
 - [x] Double-submit guard — rapid Ask clicks issue exactly one request
 - [x] Friendly error copy for 401/422/429/500/502/offline, with technical detail collapsible
 - [x] Suggested questions fill the box for editing instead of auto-sending
+
+## Round 3 (Trust and Correction — Added)
+
+- [x] Keep source extraction rows immutable
+- [x] Append field-level correction events with original, previous, and corrected values
+- [x] Correct patient/provider identity, date, medication, and lab fields in the document UI
+- [x] Detect deterministic identity, same-date medication/lab, and same-file date conflicts
+- [x] Select and audit an authoritative source; reopen decisions when needed
+- [x] Quarantine unresolved/non-authoritative facts from all derived clinical views
+- [x] Replace stale vector chunks after corrections and source decisions
+- [x] Fingerprint indexes so Q&A self-heals rather than searching stale evidence
+- [x] Rank retrieved context by semantic relevance and evidence quality
 
 ## Round 2 (Care Navigation — Added)
 

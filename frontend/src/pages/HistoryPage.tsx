@@ -88,13 +88,20 @@ export function HistoryPage() {
           {timeline.visits.length === 0 ? (
             <Card>
               <CardBody className="py-12 text-center">
-                <p className="text-sm font-semibold text-slate-800">{t("history.empty")}</p>
-                <p className="mt-1 text-xs text-slate-600">{t("history.emptyBody")}</p>
+                <p className="text-sm font-semibold text-slate-800">
+                  {timeline.trust_summary?.unresolved_conflicts ? "History withheld pending source review" : t("history.empty")}
+                </p>
+                <p className="mt-1 text-xs text-slate-600">
+                  {timeline.trust_summary?.unresolved_conflicts
+                    ? "Conflicting records are available for review but are not shown as settled history."
+                    : t("history.emptyBody")}
+                </p>
                 <Link
-                  to="/upload"
+                  to={timeline.trust_summary?.unresolved_conflicts ? "/review" : "/upload"}
                   className="mt-4 inline-flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700"
                 >
-                  <UploadIcon className="h-4 w-4" /> Upload
+                  <UploadIcon className="h-4 w-4" />
+                  {timeline.trust_summary?.unresolved_conflicts ? "Review sources" : "Upload"}
                 </Link>
               </CardBody>
             </Card>

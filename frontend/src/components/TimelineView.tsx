@@ -41,8 +41,12 @@ export function TimelineView({ timeline }: { timeline: Timeline }) {
 
         {!hasVisits ? (
           <EmptyState
-            title={t("history.empty")}
-            description={t("history.emptyBody")}
+            title={timeline.trust_summary?.unresolved_conflicts ? "Timeline withheld pending source review" : t("history.empty")}
+            description={
+              timeline.trust_summary?.unresolved_conflicts
+                ? "Uploaded sources remain available in Medical Records, but conflicting facts are excluded until you confirm the authoritative source."
+                : t("history.emptyBody")
+            }
           />
         ) : (
           <ol className="relative space-y-6 border-l-2 border-slate-100 pl-6">

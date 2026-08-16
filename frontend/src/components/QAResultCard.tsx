@@ -28,6 +28,15 @@ export function QAResultCard({
           : "space-y-3 rounded-lg border border-slate-200 bg-white p-4"
       }
     >
+      {result.trust_notice && (
+        <Alert variant="warning" title="Some evidence was excluded">
+          {result.trust_notice}
+          {result.quarantined_conflict_count
+            ? ` ${result.quarantined_conflict_count} conflict(s) still need review.`
+            : ""}
+        </Alert>
+      )}
+
       {result.recommend_professional_consult && (
         <ConsiderProfessionalCare message={t("ask.consult")} />
       )}
@@ -120,6 +129,11 @@ export function QAResultCard({
                 {typeof src.page === "number" && (
                   <span className="shrink-0 text-slate-400">
                     {t("common.page")} {formatNumber(src.page)}
+                  </span>
+                )}
+                {src.evidence_tier && (
+                  <span className="shrink-0 rounded-full bg-white px-2 py-0.5 font-semibold text-slate-500 ring-1 ring-slate-200">
+                    Evidence {src.evidence_tier}
                   </span>
                 )}
               </>

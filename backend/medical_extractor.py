@@ -29,6 +29,7 @@ import os
 import io
 import re
 import json
+import copy
 import time
 import base64
 import threading
@@ -2515,27 +2516,51 @@ def build_patient_timeline(raw_results: List[Dict[str, Any]]) -> Dict[str, Any]:
     all_lab_results = []
     all_diagnoses = []
     all_allergies = set()
+    trusted_visits = []
 
     for d in docs_sorted:
         visit_date = d.get("date")
-        source = d.get("_source", {})
+        source = d.get("_source", {}) if isinstance(d.get("_source"), dict) else {}
         source_file = source.get("file")
         source_page = source.get("page")
+        doc_id = str(d.get("_document_id") or "")
+        if bool((d.get("_trust") or {}).get("quarantined")):
+            continue
 
-        for med in d.get("medications", []):
+        safe_visit = copy.deepcopy(d)
+        for collection in ("medications", "lab_results"):
+            safe_visit[collection] = [
+                fact for fact in safe_visit.get(collection, [])
+                if isinstance(fact, dict) and not (fact.get("_trust") or {}).get("quarantined")
+            ]
+        trusted_visits.append(safe_visit)
+
+        for index, med in enumerate(d.get("medications", [])):
+            if not isinstance(med, dict) or (med.get("_trust") or {}).get("quarantined"):
+                continue
             all_medications.append({
                 **med,
                 "date": visit_date,
                 "source_file": source_file,
                 "source_page": source_page,
+                "source_method": source.get("method"),
+                "document_id": doc_id,
+                "fact_path": f"/medications/{index}",
+                "document_type": d.get("document_type"),
             })
 
-        for lab in d.get("lab_results", []):
+        for index, lab in enumerate(d.get("lab_results", [])):
+            if not isinstance(lab, dict) or (lab.get("_trust") or {}).get("quarantined"):
+                continue
             all_lab_results.append({
                 **lab,
                 "date": visit_date,
                 "source_file": source_file,
                 "source_page": source_page,
+                "source_method": source.get("method"),
+                "document_id": doc_id,
+                "fact_path": f"/lab_results/{index}",
+                "document_type": d.get("document_type"),
             })
 
         for diagnosis in d.get("diagnoses_or_conditions", []) or []:
@@ -2545,13 +2570,15 @@ def build_patient_timeline(raw_results: List[Dict[str, Any]]) -> Dict[str, Any]:
                     "date": visit_date,
                     "source_file": source_file,
                     "source_page": source_page,
+                    "document_id": doc_id,
                 })
 
         for allergy in d.get("allergies_noted", []) or []:
             all_allergies.add(allergy)
 
     return {
-        "visits": docs_sorted,               # one entry per document, chronological
+        "visits": trusted_visits,
+        "documents": docs_sorted,
         "medications_timeline": all_medications,
         "lab_results_timeline": all_lab_results,
         "diagnoses_timeline": all_diagnoses,

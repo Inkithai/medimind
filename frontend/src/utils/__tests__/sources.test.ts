@@ -14,6 +14,7 @@ import { findVisitForSource } from "../sources";
 
 function visit(file: string, partial: Partial<Visit> = {}): Visit {
   return {
+    _document_id: `doc-${file}`,
     document_type: "prescription",
     date: "2026-08-07",
     provider_or_doctor: null,

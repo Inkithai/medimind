@@ -19,6 +19,7 @@ import { ChangesPage } from "./pages/ChangesPage";
 import { AppointmentPrepPage } from "./pages/AppointmentPrepPage";
 import { RecordIntegrityPage } from "./pages/RecordIntegrityPage";
 import { FollowUpPage } from "./pages/FollowUpPage";
+import { ReviewPage } from "./pages/ReviewPage";
 import { Spinner } from "./components/Spinner";
 import { useI18n } from "./i18n/I18nContext";
 
@@ -111,6 +112,14 @@ export default function App() {
           element={
             <RequireAuth>
               <HistoryPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/review"
+          element={
+            <RequireAuth>
+              <ReviewPage />
             </RequireAuth>
           }
         />
