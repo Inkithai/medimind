@@ -24,6 +24,7 @@ import type {
   CareDay,
   CareTimeOfDay,
 } from "../types/api";
+import type { ScoredCareRecommendationsResponse } from "../types/recommendations";
 
 export interface DocumentsResponse {
   user_id: string;
@@ -566,6 +567,17 @@ export const api = {
 
   getCareSuggestion(credentials: Credentials): Promise<CareSuggestion> {
     return request<CareSuggestion>(credentials, "/api/v1/care/suggestion");
+  },
+
+  getScoredCareRecommendations(
+    credentials: Credentials,
+    signal?: AbortSignal
+  ): Promise<ScoredCareRecommendationsResponse> {
+    return request<ScoredCareRecommendationsResponse>(
+      credentials,
+      "/api/v1/care/recommendations",
+      { signal }
+    );
   },
 
   searchCare(

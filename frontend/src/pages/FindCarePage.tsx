@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import { LocationPicker } from "../components/location";
 import { SpecialtySelector } from "../components/SpecialtySelector";
-import { LocationIcon, RefreshIcon, SparkleIcon } from "../components/icons";
+import { AlertIcon, LocationIcon, RefreshIcon, SparkleIcon } from "../components/icons";
 import { useAuth } from "../context/AuthContext";
 import { useStrictEffect } from "../hooks/useStrictEffect";
 import { useI18n } from "../i18n/I18nContext";
@@ -13,6 +14,8 @@ import type {
   FacilityKind,
 } from "../types/facility";
 import type { CareSpecialtyOption, CareSuggestion } from "../types/api";
+import type { ScoredCareRecommendation } from "../types/recommendations";
+import { finderSpecialtyFor } from "../types/recommendations";
 import type { ConfirmedLocation } from "../types/location";
 import { classNames } from "../utils/format";
 
@@ -107,7 +110,18 @@ export function FindCarePage() {
   const [suggestion, setSuggestion] = useState<CareSuggestion | null>(null);
   const [suggestionLoading, setSuggestionLoading] = useState(true);
   const [suggestionError, setSuggestionError] = useState<string | null>(null);
+
+  // Scored care recommendations (percentage-based ranking)
+  const [recommendations, setRecommendations] = useState<ScoredCareRecommendation[]>([]);
+  const [recsLoading, setRecsLoading] = useState(true);
+  const [recsError, setRecsError] = useState<string | null>(null);
+  const [recsNote, setRecsNote] = useState<string | null>(null);
+  const [showAllRecs, setShowAllRecs] = useState(false);
+  const [expandedFactors, setExpandedFactors] = useState<Set<number>>(new Set());
+  const [showHowCalculated, setShowHowCalculated] = useState(false);
+
   const requestRef = useRef<AbortController | null>(null);
+  const recsRequestRef = useRef<AbortController | null>(null);
   const resultsRef = useRef<HTMLDivElement | null>(null);
   const formRef = useRef<HTMLDivElement | null>(null);
 
@@ -153,6 +167,51 @@ export function FindCarePage() {
       cancelled = true;
     };
   }, [credentials]);
+
+  // Load the scored care recommendations (StrictMode-safe, cancellable
+  // without affecting the facility search).
+  useStrictEffect(() => {
+    const controller = new AbortController();
+    recsRequestRef.current = controller;
+    setRecsLoading(true);
+    setRecsError(null);
+
+    api
+      .getScoredCareRecommendations(credentials, controller.signal)
+      .then((res) => {
+        if (controller.signal.aborted) return;
+        setRecommendations(res.recommendations || []);
+        setRecsNote(res.note || null);
+      })
+      .catch((err) => {
+        if (controller.signal.aborted) return;
+        setRecsError(err instanceof Error ? err.message : "Could not load recommendations");
+        setRecommendations([]);
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setRecsLoading(false);
+      });
+
+    return () => controller.abort();
+  }, [credentials]);
+
+  // Split recommendations into the top one + the "other" list. Sorted by
+  // score, then safety-signal tiebreak, then key.
+  const { topRecommendation, otherRecommendations } = useMemo(() => {
+    if (recommendations.length === 0) {
+      return { topRecommendation: null, otherRecommendations: [] as ScoredCareRecommendation[] };
+    }
+    const sorted = [...recommendations].sort((a, b) => {
+      if (b.relevance_score !== a.relevance_score) {
+        return b.relevance_score - a.relevance_score;
+      }
+      if (a.has_safety_signal !== b.has_safety_signal) {
+        return a.has_safety_signal ? -1 : 1;
+      }
+      return a.specialty_key.localeCompare(b.specialty_key);
+    });
+    return { topRecommendation: sorted[0], otherRecommendations: sorted.slice(1) };
+  }, [recommendations]);
 
   const visibleFacilities = useMemo(
     () => facilities.filter((facility) => filter === "all" || facility.kind === filter),
@@ -242,6 +301,28 @@ export function FindCarePage() {
     }, 100);
   }
 
+  /** "Find nearby" on a scored recommendation card: seed the search form. */
+  function handleUseRecommendation(rec: ScoredCareRecommendation) {
+    setSpecialty(finderSpecialtyFor(rec.specialty_key));
+    setSearchKind("doctor");
+    setFilter("doctor");
+    window.setTimeout(() => {
+      formRef.current?.scrollIntoView({
+        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+        block: "start",
+      });
+    }, 100);
+  }
+
+  function toggleFactors(idx: number) {
+    setExpandedFactors((prev) => {
+      const next = new Set(prev);
+      if (next.has(idx)) next.delete(idx);
+      else next.add(idx);
+      return next;
+    });
+  }
+
   return (
     <div className="space-y-7">
       <header className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
@@ -266,12 +347,103 @@ export function FindCarePage() {
         <p className="mt-0.5 text-amber-900">{t("care.urgentBody")}</p>
       </div>
 
-      <SpecialtySuggestionsSection
-        loading={suggestionLoading}
-        error={suggestionError}
-        suggestion={suggestion}
-        onFindNearby={handleUseSuggestion}
-      />
+      {/* ─── Scored care recommendations (percentage relevance) ────────── */}
+      {recsLoading ? (
+        <section aria-busy="true" className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="flex items-center gap-3">
+            <span className="h-5 w-5 animate-spin rounded-full border-2 border-brand-200 border-t-brand-600" />
+            <p className="text-sm font-medium text-slate-600">Analysing your records for care options…</p>
+          </div>
+          <div className="mt-4 space-y-3">
+            <div className="h-32 animate-pulse rounded-2xl bg-slate-100" />
+            <div className="h-20 animate-pulse rounded-2xl bg-slate-100" />
+            <div className="h-20 animate-pulse rounded-2xl bg-slate-100" />
+          </div>
+        </section>
+      ) : recsError ? (
+        <SpecialtySuggestionsSection
+          loading={suggestionLoading}
+          error={suggestionError}
+          suggestion={suggestion}
+          onFindNearby={handleUseSuggestion}
+        />
+      ) : recommendations.length > 0 ? (
+        <section className="space-y-5" data-testid="care-recommendations">
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <h2 className="section-title">Care recommendations</h2>
+              <p className="secondary-text mt-1">
+                Based on diagnoses, medications, allergies, and lab results in your records.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowHowCalculated((v) => !v)}
+              className="text-sm font-medium text-brand-700 hover:text-brand-800 hover:underline"
+              aria-expanded={showHowCalculated}
+            >
+              How is relevance calculated?
+            </button>
+          </div>
+
+          {showHowCalculated && <HowIsRelevanceCalculated />}
+
+          {topRecommendation && (
+            <TopRecommendationCard
+              rec={topRecommendation}
+              expanded={expandedFactors.has(0)}
+              onToggleFactors={() => toggleFactors(0)}
+              onFindNearby={() => handleUseRecommendation(topRecommendation)}
+            />
+          )}
+
+          {otherRecommendations.length > 0 && (
+            <div className="space-y-3">
+              <h3 className="text-sm font-bold uppercase tracking-wider text-slate-500">
+                Other care options
+              </h3>
+              <ul className="space-y-2">
+                {(showAllRecs ? otherRecommendations : otherRecommendations.slice(0, 3)).map(
+                  (rec, idx) => (
+                    <li key={`${rec.specialty_key}-${idx}`}>
+                      <OtherCareCard
+                        rec={rec}
+                        onFindNearby={() => handleUseRecommendation(rec)}
+                      />
+                    </li>
+                  )
+                )}
+              </ul>
+              {otherRecommendations.length > 3 && (
+                <button
+                  type="button"
+                  onClick={() => setShowAllRecs((v) => !v)}
+                  className="text-sm font-semibold text-brand-700 hover:text-brand-800 hover:underline"
+                >
+                  {showAllRecs
+                    ? "Show fewer care options"
+                    : `Show all ${otherRecommendations.length} care options`}
+                </button>
+              )}
+            </div>
+          )}
+
+          {recsNote && <p className="text-xs text-slate-400">{recsNote}</p>}
+        </section>
+      ) : (
+        <section className="rounded-2xl border border-slate-200 bg-white px-6 py-10 text-center shadow-sm">
+          <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-brand-50 text-brand-700">
+            <SparkleIcon className="h-6 w-6" />
+          </span>
+          <h2 className="mt-4 text-lg font-semibold text-slate-900">No specific care needs detected</h2>
+          <p className="mx-auto mt-1 max-w-md text-sm text-slate-500">
+            Upload medical records to receive personalised care recommendations based on your health history.
+          </p>
+          <Link to="/upload" className="btn-primary mt-5">
+            Upload Documents
+          </Link>
+        </section>
+      )}
 
       {lowConfidenceReferral && (!recommendation || !recommendation.triggered) && (
         <section className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-900">
@@ -809,6 +981,251 @@ function SpecialtySuggestionsSection({
         ))}
       </div>
     </section>
+  );
+}
+
+// ─── Scored recommendations UI (percentage relevance) ──────────────────────
+
+function relevanceTone(relevance: string): string {
+  switch (relevance) {
+    case "high":
+      return "bg-red-50 text-red-700 ring-red-200";
+    case "moderate":
+      return "bg-amber-50 text-amber-800 ring-amber-200";
+    case "possible":
+      return "bg-sky-50 text-sky-700 ring-sky-200";
+    default:
+      return "bg-slate-100 text-slate-600 ring-slate-200";
+  }
+}
+
+function scoredRelevanceLabel(relevance: string): string {
+  switch (relevance) {
+    case "high":
+      return "High relevance";
+    case "moderate":
+      return "Moderate relevance";
+    case "possible":
+      return "Possible";
+    default:
+      return relevance;
+  }
+}
+
+function RelevanceBadge({
+  relevance,
+  score,
+  size = "md",
+}: {
+  relevance: ScoredCareRecommendation["relevance"];
+  score: number;
+  size?: "sm" | "md" | "lg";
+}) {
+  const sizeClasses =
+    size === "lg"
+      ? "px-3 py-1 text-sm"
+      : size === "sm"
+      ? "px-2 py-0.5 text-[11px]"
+      : "px-2.5 py-0.5 text-xs";
+  return (
+    <span
+      className={classNames(
+        "inline-flex items-center gap-1.5 rounded-full font-bold uppercase tracking-wide ring-1",
+        relevanceTone(relevance),
+        sizeClasses
+      )}
+    >
+      <span>{scoredRelevanceLabel(relevance)}</span>
+      <span className="font-mono text-current opacity-80">{score}%</span>
+    </span>
+  );
+}
+
+function HowIsRelevanceCalculated() {
+  return (
+    <div
+      className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-relaxed text-slate-600"
+      role="region"
+      aria-label="How relevance is calculated"
+    >
+      <p>
+        <strong className="text-slate-800">Relevance is an informational ranking, not a medical
+        probability or diagnosis.</strong> MediMind considers documented diagnoses, medications,
+        allergies, laboratory trends, explicit safety flags, and the strength of supporting evidence in
+        your records. Each recommendation's percentage is the sum of points from its contributing
+        factors (visible when you click <em>View supporting records</em>).
+      </p>
+      <p className="mt-2 text-xs text-slate-500">
+        Top suggestion picks the highest-scoring record-backed care type. Safety-flagged findings
+        (allergy conflicts, drug interactions, duplicate prescriptions) get a small tiebreaker.
+      </p>
+    </div>
+  );
+}
+
+function TopRecommendationCard({
+  rec,
+  expanded,
+  onToggleFactors,
+  onFindNearby,
+}: {
+  rec: ScoredCareRecommendation;
+  expanded: boolean;
+  onToggleFactors: () => void;
+  onFindNearby: () => void;
+}) {
+  return (
+    <article
+      className="relative overflow-hidden rounded-2xl border-2 border-brand-200 bg-gradient-to-br from-white via-white to-brand-50/60 p-6 shadow-sm"
+      aria-labelledby="top-rec-title"
+    >
+      {/* Soft top stripe so the top recommendation visually stands out */}
+      <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-brand-400 via-brand-500 to-brand-600" />
+
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <RelevanceBadge relevance={rec.relevance} score={rec.relevance_score} size="lg" />
+          <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wide text-amber-800 ring-1 ring-amber-200">
+            <SparkleIcon className="h-3 w-3" /> Top suggestion
+          </span>
+        </div>
+      </div>
+
+      <h3 id="top-rec-title" className="mt-3 text-xl font-bold text-slate-900">
+        {rec.specialty}
+      </h3>
+      <p className="mt-1 text-base font-semibold text-brand-800">{rec.title}</p>
+
+      {rec.has_safety_signal && rec.safety_message && (
+        <div
+          className="mt-3 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900"
+          role="note"
+        >
+          <AlertIcon className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" />
+          <div>
+            <p className="font-semibold">Medication/allergy conflict</p>
+            <p className="mt-0.5 text-amber-800">{rec.safety_message}</p>
+          </div>
+        </div>
+      )}
+
+      <p className="mt-4 text-sm leading-relaxed text-slate-700">{rec.reason}</p>
+
+      {rec.evidence.length > 0 && (
+        <div className="mt-4 border-t border-slate-200/70 pt-4">
+          <button
+            type="button"
+            onClick={onToggleFactors}
+            className="flex items-center gap-1.5 text-sm font-medium text-brand-700 hover:text-brand-800"
+            aria-expanded={expanded}
+          >
+            <span className="inline-flex items-center rounded-full bg-brand-50 px-2 py-0.5 text-[11px] font-bold text-brand-700 ring-1 ring-brand-200">
+              Evidence · {rec.evidence.length}
+            </span>
+            {expanded ? "Hide" : "View"} supporting records
+          </button>
+          {expanded && (
+            <div className="mt-3 space-y-3">
+              <ul className="space-y-1.5 text-sm text-slate-600">
+                {rec.evidence.slice(0, 5).map((e, i) => (
+                  <li key={i} className="leading-relaxed">
+                    {e.date && <span className="font-medium text-slate-700">{e.date}: </span>}
+                    {e.description}
+                    {e.source_file && (
+                      <span className="ml-1 text-xs text-slate-400">({e.source_file})</span>
+                    )}
+                  </li>
+                ))}
+                {rec.evidence.length > 5 && (
+                  <li className="text-xs text-slate-400">…and {rec.evidence.length - 5} more</li>
+                )}
+              </ul>
+
+              {rec.score_factors.length > 0 && (
+                <div className="rounded-xl border border-slate-200 bg-white p-3">
+                  <p className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                    How the {rec.relevance_score}% score was assembled
+                  </p>
+                  <ul className="mt-2 space-y-1.5">
+                    {rec.score_factors.map((f, i) => (
+                      <li key={i} className="flex items-baseline justify-between gap-3 text-sm">
+                        <span className="text-slate-700">
+                          <span className="font-semibold">{f.label}</span>
+                          {f.note && <span className="ml-1.5 text-xs text-slate-500">— {f.note}</span>}
+                        </span>
+                        <span className="shrink-0 font-mono text-xs font-semibold text-brand-700">
+                          +{f.points}
+                        </span>
+                      </li>
+                    ))}
+                    <li className="flex items-baseline justify-between gap-3 border-t border-slate-100 pt-1.5 text-sm">
+                      <span className="font-semibold text-slate-700">Total (capped at 100)</span>
+                      <span className="shrink-0 font-mono text-sm font-bold text-slate-900">
+                        {rec.relevance_score}%
+                      </span>
+                    </li>
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="mt-5 flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={onFindNearby}
+          className="btn-primary min-h-[40px] px-4 py-2 text-sm"
+        >
+          <LocationIcon className="h-4 w-4" /> Find nearby
+        </button>
+      </div>
+    </article>
+  );
+}
+
+function OtherCareCard({
+  rec,
+  onFindNearby,
+}: {
+  rec: ScoredCareRecommendation;
+  onFindNearby: () => void;
+}) {
+  return (
+    <div
+      className={classNames(
+        "group rounded-2xl border bg-white p-4 shadow-sm transition hover:border-brand-200 hover:shadow-md",
+        rec.has_safety_signal ? "border-amber-200" : "border-slate-200"
+      )}
+    >
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <RelevanceBadge relevance={rec.relevance} score={rec.relevance_score} size="sm" />
+            {rec.has_safety_signal && (
+              <span
+                className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-800 ring-1 ring-amber-200"
+                title={rec.safety_message || "Safety signal in records"}
+              >
+                <AlertIcon className="h-3 w-3" /> Safety signal
+              </span>
+            )}
+          </div>
+          <h4 className="mt-1.5 text-base font-bold text-slate-900">{rec.specialty}</h4>
+          <p className="text-sm font-medium text-slate-600">{rec.title}</p>
+          <p className="mt-1 line-clamp-2 text-sm leading-relaxed text-slate-500">{rec.reason}</p>
+        </div>
+        <button
+          type="button"
+          onClick={onFindNearby}
+          className="inline-flex min-h-[40px] shrink-0 items-center gap-1.5 rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:border-brand-300 hover:bg-brand-50 hover:text-brand-800"
+        >
+          <LocationIcon className="h-4 w-4" /> Find nearby
+          <span className="text-slate-400 group-hover:text-brand-600" aria-hidden="true">›</span>
+        </button>
+      </div>
+    </div>
   );
 }
 
