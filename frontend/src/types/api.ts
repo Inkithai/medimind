@@ -197,6 +197,36 @@ export interface RecordChangesReport {
   note: string;
 }
 
+// ---- Follow-up action center (follow_up.py) -------------------------------
+
+export interface FollowUpTask {
+  id: string;
+  kind: "record_verification" | "clinical_question";
+  category: string;
+  priority: "high" | "medium" | "low";
+  title: string;
+  action: string;
+  reason: string;
+  evidence: Array<{
+    date: string | null;
+    source_file: string | null;
+    document_url?: string | null;
+  }>;
+  timing_guardrail: string;
+}
+
+export interface FollowUpPlan {
+  tasks: FollowUpTask[];
+  summary: {
+    total: number;
+    high_priority: number;
+    medium_priority: number;
+    record_verification: number;
+  };
+  method: string;
+  note: string;
+}
+
 // ---- Cross-document record integrity (record_integrity.py) ---------------
 
 export interface IntegrityEvidence {

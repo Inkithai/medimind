@@ -11,6 +11,7 @@
 - Appointment Prep: printable clinician handoff, prioritized questions, source evidence, and visit checklist
 - Record Integrity: source-linked identity, allergy, same-date lab, and medication-instruction discrepancy checks
 - Intent-routed Ask AI with category-targeted retrieval, citation validation, and explicit evidence sufficiency
+- Action Center with grounded follow-up tasks, user-chosen browser reminders, completion tracking, and calendar export
 - Patient-grounded RAG / Ask AI
 - Optional Care Navigation with search-as-you-type, current location, map confirmation, and nearby facility results
 - Facility category filters for hospitals, clinics, pharmacies, laboratories, and doctors
@@ -37,6 +38,7 @@
 - Clinical action layer that converts safety findings and trends into record-grounded appointment questions
 - Contradiction-aware record integrity workflow that shows both sources and never silently chooses a winner
 - Deterministic question-intent routing and evidence-coverage gates before generative answering
+- Follow-up intelligence that prioritizes record-backed work without inventing clinical deadlines
 - Safety-first AI (interpretation ≠ diagnosis; professional-care cues)
 - Provider-decoupled Care Navigation with a server-side Google Places adapter
 - Location accuracy through saved latitude/longitude rather than city text alone

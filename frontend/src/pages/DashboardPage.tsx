@@ -14,6 +14,7 @@ import {
   ChatIcon,
   ChangesIcon,
   IntegrityIcon,
+  ReminderIcon,
 } from "../components/icons";
 import { useAuth } from "../context/AuthContext";
 import { useStrictEffect } from "../hooks/useStrictEffect";
@@ -195,10 +196,10 @@ export function DashboardPage() {
         </Link>
       )}
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid gap-4 lg:grid-cols-3">
         <Link
           to="/appointment-prep"
-          className="group flex flex-col gap-4 rounded-2xl border border-cyan-200 bg-white p-5 shadow-sm transition hover:border-cyan-300 hover:shadow-md sm:flex-row sm:items-center"
+          className="group flex flex-col gap-4 rounded-2xl border border-cyan-200 bg-white p-5 shadow-sm transition hover:border-cyan-300 hover:shadow-md sm:flex-row sm:items-center lg:flex-col lg:items-start"
         >
           <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-cyan-700 text-white shadow-sm">
             <AppointmentIcon className="h-6 w-6" />
@@ -211,8 +212,22 @@ export function DashboardPage() {
           </div>
         </Link>
         <Link
+          to="/follow-up"
+          className="group flex flex-col gap-4 rounded-2xl border border-fuchsia-200 bg-white p-5 shadow-sm transition hover:border-fuchsia-300 hover:shadow-md sm:flex-row sm:items-center lg:flex-col lg:items-start"
+        >
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-fuchsia-700 text-white shadow-sm">
+            <ReminderIcon className="h-6 w-6" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-bold uppercase tracking-[0.12em] text-fuchsia-700">Keep track</p>
+            <h2 className="mt-1 text-lg font-bold text-slate-900">Open your Action Center</h2>
+            <p className="mt-1 text-sm text-slate-600">Prioritize findings, choose reminders, and track completion.</p>
+            <p className="mt-2 text-sm font-semibold text-fuchsia-800 transition group-hover:translate-x-1">View actions →</p>
+          </div>
+        </Link>
+        <Link
           to="/record-integrity"
-          className="group flex flex-col gap-4 rounded-2xl border border-orange-200 bg-white p-5 shadow-sm transition hover:border-orange-300 hover:shadow-md sm:flex-row sm:items-center"
+          className="group flex flex-col gap-4 rounded-2xl border border-orange-200 bg-white p-5 shadow-sm transition hover:border-orange-300 hover:shadow-md sm:flex-row sm:items-center lg:flex-col lg:items-start"
         >
           <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-orange-600 text-white shadow-sm">
             <IntegrityIcon className="h-6 w-6" />

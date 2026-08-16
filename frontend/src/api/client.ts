@@ -3,6 +3,7 @@ import type { CareRecommendationsResponse } from "../types/recommendations";
 import type {
   AppointmentPrepReport,
   CrossCheckReport,
+  FollowUpPlan,
   HealthResponse,
   LabTrendsReport,
   PatientSnapshot,
@@ -343,6 +344,10 @@ export const api = {
 
   getRecordChanges(credentials: Credentials): Promise<RecordChangesReport> {
     return request<RecordChangesReport>(credentials, "/api/v1/changes");
+  },
+
+  getFollowUpPlan(credentials: Credentials): Promise<FollowUpPlan> {
+    return request<FollowUpPlan>(credentials, "/api/v1/follow-up");
   },
 
   getRecordIntegrity(credentials: Credentials): Promise<RecordIntegrityReport> {
