@@ -33,10 +33,13 @@ export function AboutPage() {
 
   const sections = [
     { id: "overview", title: t("about.overviewTitle") },
+    { id: "capabilities", title: t("about.capabilitiesTitle") },
     { id: "features", title: t("about.featuresTitle") },
     { id: "architecture", title: t("about.archTitle") },
     { id: "pipeline", title: t("about.pipeTitle") },
     { id: "data-flow", title: t("about.flowTitle") },
+    { id: "safety-intelligence", title: t("about.safetyIntelligenceTitle") },
+    { id: "interoperability", title: t("about.interoperabilityTitle") },
     { id: "security", title: t("about.secTitle") },
     { id: "api", title: t("about.apiTitle") },
   ];
@@ -63,10 +66,13 @@ export function AboutPage() {
         {/* min-w-0 stops a long endpoint path widening the grid column. */}
         <div className="min-w-0 space-y-10">
           <Overview />
+          <Capabilities />
           <Features />
           <Architecture />
           <Pipeline />
           <DataFlow />
+          <SafetyIntelligence />
+          <Interoperability />
           <Security />
           <ApiOverview />
           <Disclaimer />
@@ -201,6 +207,44 @@ function Overview() {
           ))}
         </ul>
       </Panel>
+    </Section>
+  );
+}
+
+const CAPABILITY_GROUPS = [
+  { key: "cg1", tone: "border-brand-200 bg-brand-50", badge: "bg-brand-600", items: ["c1", "c2", "c3", "c4"] },
+  { key: "cg2", tone: "border-emerald-200 bg-emerald-50", badge: "bg-emerald-600", items: ["c5", "c6", "c7", "c8"] },
+  { key: "cg3", tone: "border-violet-200 bg-violet-50", badge: "bg-violet-600", items: ["c9", "c10", "c11", "c12"] },
+  { key: "cg4", tone: "border-amber-200 bg-amber-50", badge: "bg-amber-600", items: ["c13", "c14", "c15", "c16"] },
+] as const;
+
+function Capabilities() {
+  const { t } = useI18n();
+  return (
+    <Section id="capabilities" title={t("about.capabilitiesTitle")} subtitle={t("about.capabilitiesSubtitle")}>
+      <div className="grid gap-4 sm:grid-cols-2">
+        {CAPABILITY_GROUPS.map((group) => (
+          <article key={group.key} className={classNames("rounded-2xl border p-5 shadow-sm", group.tone)}>
+            <div className="flex items-center gap-3">
+              <span className={classNames("flex h-9 w-9 items-center justify-center rounded-xl text-sm font-black text-white", group.badge)}>✓</span>
+              <div>
+                <h3 className="text-base font-bold text-slate-900">{t(`about.${group.key}Title`)}</h3>
+                <p className="text-xs font-medium text-slate-600">{t(`about.${group.key}Body`)}</p>
+              </div>
+            </div>
+            <ul className="mt-4 grid gap-2">
+              {group.items.map((item) => <li key={item} className="flex gap-2 text-sm leading-relaxed text-slate-700"><span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-current opacity-50" />{t(`about.${item}`)}</li>)}
+            </ul>
+          </article>
+        ))}
+      </div>
+      <div className="mt-4 rounded-2xl border border-slate-800 bg-slate-900 p-5 text-white shadow-lg">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div><p className="text-xs font-bold uppercase tracking-[0.18em] text-brand-300">{t("about.differentiatorEyebrow")}</p><h3 className="mt-1 text-lg font-bold">{t("about.differentiatorTitle")}</h3></div>
+          <span className="rounded-full border border-white/15 bg-white/10 px-3 py-1 text-xs font-semibold text-slate-200">{t("about.differentiatorBadge")}</span>
+        </div>
+        <p className="mt-3 max-w-4xl text-sm leading-relaxed text-slate-300">{t("about.differentiatorBody")}</p>
+      </div>
     </Section>
   );
 }
@@ -410,6 +454,54 @@ function DataFlow() {
           </p>
         </div>
       </Panel>
+    </Section>
+  );
+}
+
+const SAFETY_LANES = ["sl1", "sl2", "sl3", "sl4", "sl5", "sl6"];
+
+function SafetyIntelligence() {
+  const { t } = useI18n();
+  return (
+    <Section id="safety-intelligence" title={t("about.safetyIntelligenceTitle")} subtitle={t("about.safetyIntelligenceSubtitle")}>
+      <Panel className="overflow-hidden border-slate-800 bg-slate-900 text-white">
+        <div className="grid gap-3 md:grid-cols-3">
+          {SAFETY_LANES.map((key, index) => (
+            <div key={key} className="relative rounded-xl border border-white/10 bg-white/[0.06] p-4">
+              <span className="text-xs font-black text-brand-300">0{index + 1}</span>
+              <h3 className="mt-2 text-sm font-bold">{t(`about.${key}Title`)}</h3>
+              <p className="mt-1.5 text-xs leading-relaxed text-slate-300">{t(`about.${key}Body`)}</p>
+            </div>
+          ))}
+        </div>
+        <div className="mt-5 flex flex-wrap gap-2 border-t border-white/10 pt-4 text-xs font-semibold text-slate-300">
+          {["about.safetyBadge1", "about.safetyBadge2", "about.safetyBadge3", "about.safetyBadge4"].map((key) => <span key={key} className="rounded-full bg-white/10 px-3 py-1.5">{t(key)}</span>)}
+        </div>
+      </Panel>
+    </Section>
+  );
+}
+
+const INTEROP_RESOURCES = ["Patient", "MedicationStatement", "MedicationRequest", "Observation", "AllergyIntolerance", "Condition", "Encounter", "Provenance"];
+
+function Interoperability() {
+  const { t } = useI18n();
+  return (
+    <Section id="interoperability" title={t("about.interoperabilityTitle")} subtitle={t("about.interoperabilitySubtitle")}>
+      <div className="grid gap-4 lg:grid-cols-[1.2fr_.8fr]">
+        <Panel className="border-sky-200 bg-gradient-to-br from-sky-50 via-white to-brand-50">
+          <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-[0.18em] text-sky-700">FHIR R4-compatible</p><h3 className="mt-1 text-xl font-black text-slate-900">{t("about.fhirTitle")}</h3></div><span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-bold text-amber-800">{t("about.fhirStatus")}</span></div>
+          <div className="mt-5 flex flex-wrap items-center gap-2 text-xs font-semibold"><span className="rounded-lg bg-white px-3 py-2 shadow-sm ring-1 ring-slate-200">{t("about.fhirInput")}</span><span className="text-sky-500">→</span><span className="rounded-lg bg-white px-3 py-2 shadow-sm ring-1 ring-slate-200">{t("about.fhirBundle")}</span><span className="text-sky-500">→</span><span className="rounded-lg bg-emerald-100 px-3 py-2 text-emerald-800">{t("about.fhirValidation")}</span></div>
+          <p className="mt-4 text-sm leading-relaxed text-slate-600">{t("about.fhirBody")}</p>
+          <div className="mt-4 flex flex-wrap gap-2">{INTEROP_RESOURCES.map((resource) => <span key={resource} className="rounded-md border border-sky-200 bg-white/80 px-2 py-1 font-mono text-[11px] text-sky-900">{resource}</span>)}</div>
+        </Panel>
+        <Panel>
+          <h3 className="text-sm font-bold uppercase tracking-wider text-slate-500">{t("about.terminologyTitle")}</h3>
+          <div className="mt-4 space-y-3">{["LOINC", "SNOMED CT", "RxNorm", "ICD-10-CM"].map((code) => <div key={code} className="flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2.5"><span className="font-mono text-sm font-bold text-slate-800">{code}</span><span className="text-xs font-semibold text-emerald-700">{t("about.mappedWhenKnown")}</span></div>)}</div>
+          <p className="mt-4 text-xs leading-relaxed text-slate-500">{t("about.terminologyBody")}</p>
+          <Link to="/dashboard" className="mt-4 inline-flex text-sm font-bold text-brand-700 hover:text-brand-900">{t("about.fhirBackToWork")}</Link>
+        </Panel>
+      </div>
     </Section>
   );
 }
