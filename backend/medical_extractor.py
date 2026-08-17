@@ -3229,6 +3229,17 @@ def cross_check_prescriptions(
         # LLM findings above are still valid on their own.
         logger.warning("Deterministic interaction check failed (LLM findings kept): %s", e)
 
+    # Deterministic curated medication-allergy pass (never LLM-dependent):
+    # each medication's normalized ingredients are matched in code against
+    # the patient's recorded allergies (allergen classes + direct ingredient
+    # names), so catching e.g. "amoxicillin prescribed; penicillin allergy
+    # on record" never depends on the model noticing on any given run.
+    try:
+        from drug_allergy_rules import check_allergy_conflicts, merge_allergy_findings
+        merge_allergy_findings(result, check_allergy_conflicts(timeline))
+    except Exception as e:
+        logger.warning("Deterministic allergy check failed (LLM findings kept): %s", e)
+
     from medication_history import detect_medication_transitions, enrich_cross_check_sources
 
     result.update(detect_medication_transitions(timeline))

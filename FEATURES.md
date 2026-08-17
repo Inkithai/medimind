@@ -6,6 +6,8 @@
 - Multilingual document extraction (Tamil/Arabic/etc., INN normalization)
 - Non-medical document filter (early rejection before LLM/Chroma)
 - Patient timeline + longitudinal lab trends (threshold approach detection)
+- Deterministic medication-allergy contraindication KB — normalized ingredients matched in code against recorded allergies (allergen classes + direct ingredient names), so "amoxicillin prescribed; penicillin allergy on record" is caught even when the model misses it
+- Strict trend-value classification — censored/approximate/tolerance/scientific-notation lab readings are excluded from trend math rather than estimated, so a fabricated magnitude can never invert a trend direction
 - Patient-grounded RAG / Ask AI with conversational focus carry-over
 - Risk Timeline page — when each safety finding was actually live, graded by evidence strength
 - Duplicate re-upload detection — the same file or prescription is never counted twice
@@ -52,6 +54,8 @@
 - Reverse geocoding used for naming only—device coordinates are never overwritten by a feature centroid
 - Regression tests for GPS refinement, cache avoidance, permission/timeout handling, and accuracy labelling
 - Regression tests for reference-range formatting + trend direction
+- Curated medication-allergy KB runs alongside the LLM cross-check with fail-open semantics — a KB failure never takes down the report, and findings self-tag `source: curated_knowledge_base` so evidence grading treats them as deterministic (uncapped confidence)
+- Allergy-text resolution recognizes negative statements ("no known drug allergies") while still matching named exceptions ("…except penicillin")
 - Chroma collection sanitization; confidence-aware extraction
 - Early cost-protection gate (reject before downstream AI)
 
