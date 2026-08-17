@@ -54,7 +54,12 @@ from dotenv import load_dotenv
 import logging
 
 from clinical_events import CLINICAL_EVENT_COLLECTIONS, CLINICAL_EVENT_DATE_FIELDS, CLINICAL_TIMELINE_KEYS
-from evidence import first_evidence, locate_pdf_text_evidence, normalize_document_evidence
+from evidence import (
+    first_evidence,
+    locate_ocr_text_evidence,
+    locate_pdf_text_evidence,
+    normalize_document_evidence,
+)
 from ocr_service import (
     InvalidImageError,
     InvalidPDFError,
@@ -2517,6 +2522,7 @@ def process_document(
                 _emit_document_progress(progress_callback, "extracting", "Finding medical details in the OCR text")
                 result = extract_from_text(ocr_text, model=model)
                 result = normalize_document_evidence(result, default_page=1, vision=False)
+                result = locate_ocr_text_evidence(ocr_text, result)
                 result["_source"] = {
                     "file": path.name,
                     "method": "ocr_text_layer",
@@ -2576,6 +2582,8 @@ def process_document(
                     f"Finding medical details in the OCR text of {len(image_idx)} scanned page(s)",
                 )
                 ocr_result = extract_from_text(ocr_text, model=model)
+                ocr_result = normalize_document_evidence(ocr_result, default_page=1, vision=False)
+                ocr_result = locate_ocr_text_evidence(ocr_text, ocr_result)
                 ocr_result["_source"] = {
                     "file": path.name,
                     "method": "ocr_text_layer",
@@ -2616,6 +2624,7 @@ def process_document(
             _emit_document_progress(progress_callback, "extracting", "Finding medical details in the OCR text")
             result = extract_from_text(ocr_text, model=model)
             result = normalize_document_evidence(result, default_page=1, vision=False)
+            result = locate_ocr_text_evidence(ocr_text, result)
             result["_source"] = {
                 "file": path.name,
                 "method": "ocr_text_layer",
@@ -3368,18 +3377,26 @@ def cross_check_prescriptions(
         # Every documented course provably ended before the reference date
         # (or the timeline has no medications at all). There is no live
         # exposure to analyze — skip the LLM call entirely and say why.
-        result = {
-            "potential_drug_interactions": [],
-            "duplicate_prescriptions": [],
-            "conflicting_dosage_instructions": [],
-            "allergy_conflicts": [],
-            "overall_recommendation": (
+        if timeline.get("medications_timeline"):
+            recommendation = (
                 "No currently active prescriptions were found for safety analysis: "
                 "every documented medication course ended before the reference date "
                 f"({activity['reference_date']}). Historical courses remain listed in "
                 "your record, and any current medications should be uploaded. Consult a "
                 "doctor or pharmacist before making changes."
-            ),
+            )
+        else:
+            recommendation = (
+                "No medications are documented in this record yet, so there is no "
+                "prescription safety analysis to run. Upload your prescriptions to "
+                "enable interaction, allergy, duplicate, and dosage checks."
+            )
+        result = {
+            "potential_drug_interactions": [],
+            "duplicate_prescriptions": [],
+            "conflicting_dosage_instructions": [],
+            "allergy_conflicts": [],
+            "overall_recommendation": recommendation,
         }
 
     deterministic_duplicates = detect_exact_duplicate_medications(active_timeline)

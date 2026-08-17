@@ -13,15 +13,14 @@ prescription sitting next to it.
 
 from __future__ import annotations
 
-from typing import Optional, Tuple
+from typing import Optional
 
-# Kind name -> (magic prefix, human label).
-_MAGIC: Tuple[Tuple[str, bytes, str], ...] = (
-    ("pdf", b"%PDF", "PDF"),
-    ("png", b"\x89PNG\r\n\x1a\n", "PNG"),
-    ("jpeg", b"\xff\xd8\xff", "JPEG"),
-    ("webp", b"RIFF", "WEBP"),  # RIFF....WEBP — confirmed by the 8-byte tag below
-)
+_KIND_LABELS = {
+    "pdf": "PDF",
+    "png": "PNG",
+    "jpeg": "JPEG",
+    "webp": "WEBP",
+}
 
 _EXTENSION_TO_KIND = {
     ".pdf": "pdf",
@@ -31,8 +30,6 @@ _EXTENSION_TO_KIND = {
     ".webp": "webp",
 }
 
-_KIND_LABELS = {label: kind for kind, _, label in _MAGIC}
-
 
 def detect_content_kind(content: bytes) -> Optional[str]:
     """The sniffed file kind ('pdf' | 'png' | 'jpeg' | 'webp'), or None when
@@ -41,11 +38,15 @@ def detect_content_kind(content: bytes) -> Optional[str]:
         return None
     if content.startswith(b"RIFF") and len(content) >= 12 and content[8:12] == b"WEBP":
         return "webp"
-    for kind, magic, _label in _MAGIC:
-        if kind == "webp":
-            continue  # handled above with the stricter WEBP tag check
-        if content.startswith(magic):
-            return kind
+    # PDF header may be preceded by a BOM or junk per the spec (the "%PDF"
+    # header must appear within the first 1024 bytes), so search instead of
+    # requiring byte 0 — real-world PDFs with a leading BOM are common.
+    if b"%PDF" in content[:1024]:
+        return "pdf"
+    if content.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "png"
+    if content.startswith(b"\xff\xd8\xff"):
+        return "jpeg"
     return None
 
 

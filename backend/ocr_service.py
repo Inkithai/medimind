@@ -125,15 +125,23 @@ def ocr_image(image: Image.Image, page: int = 1, dpi: int = 200) -> OCRPageResul
 
     words = data.get("text") or []
     confidences = data.get("conf") or []
+    blocks = data.get("block_num") or []
+    pars = data.get("par_num") or []
+    lines = data.get("line_num") or []
+
+    def _safe_int(values: List[Any], index: int) -> int:
+        try:
+            return int(values[index])
+        except (IndexError, TypeError, ValueError):
+            return -1
+
     line_parts: List[str] = []
     last_block = last_par = last_line = -1
     for i, word in enumerate(words):
         word = str(word).strip()
         if not word:
             continue
-        block, par, line = (
-            int(data["block_num"][i]), int(data["par_num"][i]), int(data["line_num"][i]),
-        )
+        block, par, line = _safe_int(blocks, i), _safe_int(pars, i), _safe_int(lines, i)
         if (block, par, line) != (last_block, last_par, last_line):
             line_parts.append(word)
         else:

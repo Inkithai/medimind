@@ -232,8 +232,11 @@ def _resolve_allergy_classes(allergy: str) -> Set[str]:
         if named or member_named:
             resolved.add(class_key)
 
-    if not resolved and any(marker in text for marker in _NEGATIVE_MARKERS):
+    if not resolved and any(_contains_phrase(text, marker) for marker in _NEGATIVE_MARKERS):
         # A negative statement that names no allergen ("no known allergies").
+        # Phrase-matched with word boundaries so a real drug name that merely
+        # CONTAINS a marker (e.g. "sulfanilamide" contains "nil") is never
+        # misread as a negative statement.
         return set()
     return resolved
 

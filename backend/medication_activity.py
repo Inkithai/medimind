@@ -52,9 +52,6 @@ from typing import Any, Dict, List, Optional, Union
 
 from risk_timeline import build_treatment_windows
 
-ACTIVE = "active"
-INACTIVE = "inactive"
-
 
 def _parse_reference_date(reference_date: Optional[Union[str, date]]) -> date:
     """Normalizes the reference date: None -> today, ISO 'YYYY-MM-DD' ->

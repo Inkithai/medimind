@@ -186,3 +186,23 @@ def test_cross_check_scopes_llm_payload_and_kb_to_active_prescriptions(monkeypat
     assert active_names == ["Warfarin 5mg"]
     excluded_names = [e["medication"] for e in payload["excluded_inactive_medications"]]
     assert excluded_names == ["Brufen"]
+
+
+def test_cross_check_with_zero_medications_explains_differently(monkeypatch):
+    """A record with NO medications at all must not claim 'every course
+    ended' — there were no courses. The LLM is still skipped."""
+    os.environ.setdefault("GROQ_API_KEY", "gsk_test_123")
+    import medical_extractor
+
+    called = []
+
+    monkeypatch.setattr(
+        medical_extractor, "_completion_resilient",
+        lambda **kwargs: called.append(kwargs) or _llm_json(),
+    )
+    report = medical_extractor.cross_check_prescriptions(
+        {"medications_timeline": [], "known_allergies": []}
+    )
+    assert called == []
+    assert "No medications are documented" in report["overall_recommendation"]
+    assert report["medication_activity"]["active_count"] == 0

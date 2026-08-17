@@ -175,3 +175,18 @@ def test_findings_carry_llm_compatible_shape():
     f = check_allergy_conflicts(timeline)[0]
     assert set(f) >= {"medication", "allergy", "explanation", "confidence"}
     assert isinstance(f["confidence"], float)
+
+
+def test_drug_names_containing_negative_marker_substrings_are_not_misread():
+    # "sulfanilamide" contains "nil" — it is a substance, not a negative
+    # statement. The resolver must classify it as an unknown substance
+    # (no classes, not negative) so the direct-ingredient match still works.
+    from drug_allergy_rules import _resolve_allergy_classes
+    assert _resolve_allergy_classes("sulfanilamide") == set()
+    timeline = _timeline(
+        meds=[_med("Sulfanilamide", ["sulfanilamide"], source="a.pdf")],
+        allergies=["sulfanilamide"],
+    )
+    findings = check_allergy_conflicts(timeline)
+    assert len(findings) == 1
+    assert findings[0]["rule"] == "exact allergen match"

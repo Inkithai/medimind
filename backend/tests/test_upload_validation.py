@@ -134,3 +134,16 @@ def test_pipeline_rejects_mismatched_content_per_file():
         api.app.dependency_overrides.pop(api.get_current_user, None)
         for p in patchers:
             p.stop()
+
+
+def test_pdf_with_leading_bom_is_accepted():
+    # The PDF spec allows the %PDF header anywhere in the first 1024 bytes;
+    # real-world PDFs with a leading BOM must not be rejected.
+    bom_pdf = b"\xef\xbb\xbf%PDF-1.7\n1 0 obj\n"
+    assert detect_content_kind(bom_pdf) == "pdf"
+    assert validate_upload_content(bom_pdf, "rx.pdf") is None
+
+
+def test_pdf_header_past_first_1024_bytes_still_rejected():
+    junk = b"x" * 1100 + b"%PDF-1.7"
+    assert detect_content_kind(junk) is None

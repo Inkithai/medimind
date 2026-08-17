@@ -191,3 +191,101 @@ def test_ocr_failure_never_blocks_extraction(tmp_path, monkeypatch):
         result = medical_extractor.process_document(str(pdf))
     page = result["pages"][0] if result.get("multi_page") else result
     assert page["_source"]["method"] == "vision_ocr"
+
+
+def test_malformed_tesseract_rows_do_not_crash_ocr_image(monkeypatch):
+    """Tesseract output arrays can carry blank/absent row fields; the row
+    assembler must treat them as unreadable rather than raising."""
+
+    class FakePytesseract:
+        Output = type("Output", (), {"DICT": "dict"})
+
+        def image_to_data(self, *args, **kwargs):
+            return {
+                "text": ["word1", "word2"],
+                "conf": ["96", "-1"],
+                "block_num": ["1", ""],   # blank where an int is expected
+                "par_num": ["1", "1"],
+                "line_num": ["1", "1"],
+            }
+
+    monkeypatch.setattr(ocr_service.shutil, "which", lambda name: "/usr/bin/tesseract")
+    monkeypatch.setattr(ocr_service, "_require_tesseract", lambda: FakePytesseract())
+    import io as _io
+    from PIL import Image
+
+    img = Image.new("RGB", (40, 40), "white")
+    result = ocr_service.ocr_image(img)
+    # Crash-tolerance is the contract: a malformed row must not raise, and
+    # both recognized words must survive (the blank field degrades to a
+    # line break rather than killing the page).
+    assert "word1" in result.text and "word2" in result.text
+    assert result.confidence == 96.0
+
+
+def test_ocr_evidence_quotes_are_attributed_to_their_page():
+    """Multi-page OCR transcripts must not pin every quote to page 1."""
+    from evidence import locate_ocr_text_evidence
+
+    ocr_text = (
+        "--- Page 1 ---\nCity General Hospital\nPrescription\n"
+        "--- Page 2 ---\nAmoxicillin 500 mg three times daily for 7 days.\nDr. Smith\n"
+    )
+    document = {
+        "field_evidence": {
+            "provider_or_doctor": [
+                {"quote": "Dr. Smith", "page": 1, "locator": "page_quote"},
+            ],
+            "clinical_notes": [
+                {"quote": "Amoxicillin 500 mg three times daily", "page": 1, "locator": "page_quote"},
+            ],
+        },
+        "medications": [],
+        "lab_results": [],
+        "allergies_noted": [],
+    }
+    locate_ocr_text_evidence(ocr_text, document)
+
+    provider = document["field_evidence"]["provider_or_doctor"][0]
+    note = document["field_evidence"]["clinical_notes"][0]
+    assert provider["page"] == 2
+    assert provider["locator"] == "ocr_text_search"
+    assert note["page"] == 2
+    assert note["locator"] == "ocr_text_search"
+    assert note["confidence"] == 0.7  # page attribution, not geometry
+
+
+def test_ocr_evidence_quote_not_found_keeps_default_page():
+    from evidence import locate_ocr_text_evidence
+
+    ocr_text = "--- Page 1 ---\nCity General Hospital\nPrescription\n"
+    document = {
+        "field_evidence": {
+            "provider_or_doctor": [
+                {"quote": "Dr. Nowhere", "page": 1, "locator": "page_quote"},
+            ],
+        },
+    }
+    locate_ocr_text_evidence(ocr_text, document)
+    region = document["field_evidence"]["provider_or_doctor"][0]
+    assert region["page"] == 1  # unchanged — never guessed onto another page
+    assert region["locator"] == "page_quote"
+
+
+def test_ocr_quote_search_tolerates_ocr_line_breaks():
+    """A quote split across OCR lines must still be located."""
+    from evidence import locate_ocr_text_evidence
+
+    ocr_text = (
+        "--- Page 1 ---\nAmoxicillin 500 mg three times\ndaily for 7 days.\n"
+    )
+    document = {
+        "field_evidence": {
+            "clinical_notes": [
+                {"quote": "Amoxicillin 500 mg three times daily for 7 days", "page": 1},
+            ],
+        },
+    }
+    locate_ocr_text_evidence(ocr_text, document)
+    assert document["field_evidence"]["clinical_notes"][0]["page"] == 1
+    assert document["field_evidence"]["clinical_notes"][0]["locator"] == "ocr_text_search"

@@ -72,6 +72,7 @@
 - Referral-trail persistence is best-effort: a missing/unavailable referrals table never fails the live provider search; persisted trails are historical records OF searches (provenance + retrieved_at), never a provider directory
 - Ranking disclosure is numeric and additive: each provider's `ranking.components` lists signal weight, 0-1 score, and contribution to the 0-100 match score alongside the existing plain-language explanations
 - OCR layer fails open: engine absence, low confidence, or non-medical reads all fall back to the vision path; a transcript is only trusted above MEDIMIND_OCR_MIN_CONFIDENCE with real text volume
+- OCR evidence quotes are attributed to their source page from the transcript (whitespace-tolerant, `ocr_text_search` locator, no fabricated geometry); malformed Tesseract rows degrade to unreadable instead of crashing
 - Reprocess replaces every row sharing the file's content hash (multi-page docs are one physical file), preserves the stored document URL/identity, and replays corrections/conflicts through the standard trust-state rebuild
 - Chroma collection sanitization; confidence-aware extraction
 - Early cost-protection gate (reject before downstream AI)
