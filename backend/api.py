@@ -81,6 +81,7 @@ from language_guard import (
     assess_documents_translation_risk,
 )
 from follow_up import build_follow_up_plan
+import graph_db
 from lab_trends import track_lab_trends
 from record_integrity import check_record_integrity
 
@@ -199,6 +200,23 @@ async def lifespan(app: FastAPI):
         db.ensure_indexes()
     except Exception as e:
         logger.warning("ensure_indexes failed on startup: %s", e)
+
+    # The WHO antidote reference graph is an enrichment, not core: a missing
+    # NEO4J_* var or an unreachable instance must not stop the API from
+    # serving documents, timelines, cross-checks or Q&A. The upload read
+    # path is already fail-open, so this is the only place Neo4j could take
+    # the whole service down — and it cannot.
+    if graph_db.is_configured():
+        try:
+            graph_db.ensure_constraints()
+            logger.info("startup: antidote reference graph ready")
+        except Exception as e:
+            logger.warning(
+                "startup: antidote reference graph unavailable, continuing without it "
+                "(antidote reference notes will be empty on every upload): %s", e,
+            )
+    else:
+        logger.info("startup: antidote reference graph not configured — skipping")
 
     # Load the embedding model ONCE, at startup, outside any request. The
     # local ONNX MiniLM weights (~79 MB) were previously downloaded and the
@@ -364,17 +382,76 @@ def _empty_cross_check(reason: str) -> Dict[str, Any]:
     }
 
 
-async def _cross_check_trusted_timeline(timeline: Dict[str, Any]) -> Dict[str, Any]:
+def _antidote_context(
+    timeline: Dict[str, Any], user_id: str, operation: str
+) -> Tuple[Dict[str, Dict[str, Any]], List[Dict[str, Any]]]:
+    """Best-effort WHO antidote reference-graph lookup for a medication
+    timeline. Returns (graph_backed_findings, reference_notes).
+
+    Fail-open by design: an unconfigured, unreachable, or failing graph
+    never fails the upload — it just means no reference notes are attached
+    and findings grade as model knowledge (the honest default). One round
+    trip to the graph per record, reused for both evidence grading and the
+    patient-facing reference notes.
+    """
+    if not graph_db.is_configured():
+        logger.debug(
+            "%s: user=%s antidote graph not configured (NEO4J_* unset or driver "
+            "missing) — skipping reference lookup",
+            operation, user_id,
+        )
+        return {}, []
+
+    from evidence_grading import graph_backed_findings_from_antidotes
+    from poisoning_kg import lookup_antidote_references
+
+    med_names = sorted({
+        m.get("name") for m in timeline.get("medications_timeline", []) if m.get("name")
+    })
+    try:
+        logger.info(
+            "%s: user=%s querying antidote graph for %d medication name(s)",
+            operation, user_id, len(med_names),
+        )
+        references = lookup_antidote_references(med_names)
+    except Exception as e:
+        # graph_db/poisoning_kg have already logged the failing step and the
+        # (redacted) URI; this records that the operation CONTINUED without
+        # the enrichment — an empty reference_notes list means "not checked",
+        # not "checked and found nothing".
+        logger.warning(
+            "%s: user=%s antidote reference lookup skipped, continuing without it "
+            "(findings will grade as unverified model knowledge): %s",
+            operation, user_id, e,
+        )
+        return {}, []
+
+    notes = [
+        {"medication": name, **ref}
+        for name, ref in sorted(references.items())
+    ]
+    if notes:
+        logger.info(
+            "%s: user=%s antidote graph matched %d of %d medication(s): %s",
+            operation, user_id, len(notes), len(med_names),
+            ", ".join(n["medication"] for n in notes),
+        )
+    return graph_backed_findings_from_antidotes(references), notes
+
+
+async def _cross_check_trusted_timeline(
+    timeline: Dict[str, Any],
+    graph_backed_findings: Optional[Dict[str, Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
     if not timeline.get("medications_timeline"):
         return _empty_cross_check(
             "No trusted medication facts are currently available for safety analysis. "
             "Resolve quarantined conflicts and consult a doctor or pharmacist before making changes."
         )
-    return await asyncio.get_running_loop().run_in_executor(
-        _DOCUMENT_EXECUTOR,
-        cross_check_prescriptions,
-        timeline,
-    )
+    def _run() -> Dict[str, Any]:
+        return cross_check_prescriptions(timeline, graph_backed_findings=graph_backed_findings)
+
+    return await asyncio.get_running_loop().run_in_executor(_DOCUMENT_EXECUTOR, _run)
 
 
 class CareSearchRequest(BaseModel):
@@ -1076,9 +1153,18 @@ async def _execute_upload_pipeline(
         timeline["trust_summary"] = trust_summary
         timeline["conflicts"] = active_conflicts
         _progress("safety", "Checking medicines and allergies")
+        # Look the medication list up in the WHO antidote reference graph
+        # BEFORE cross-checking, so any finding about a drug the graph
+        # actually documents can be graded as evidence-backed and cite its
+        # source, instead of being capped as unverifiable model recall.
+        # Fail-open as always: no graph just means every finding grades as
+        # model_knowledge.
+        graph_backed_findings, antidote_reference_notes = _antidote_context(
+            timeline, user_id, "upload_documents"
+        )
         # Safety is another provider call, so it shares the same bounded pool
         # as extraction instead of bypassing load control or blocking polling.
-        cross_check = await _cross_check_trusted_timeline(timeline)
+        cross_check = await _cross_check_trusted_timeline(timeline, graph_backed_findings)
     except NonMedicalDocumentError as exc:
         raise UploadPipelineError(422, str(exc), code="not_medical", retryable=False) from exc
     except ProviderRateLimitError as exc:
@@ -1114,6 +1200,11 @@ async def _execute_upload_pipeline(
 
     issue_count = sum(len(value) for value in cross_check.values() if isinstance(value, list))
     logger.info("upload: user=%s timeline rebuilt, cross-check found %d issue(s)", user_id, issue_count)
+
+    # Attach the reference notes AFTER issue_count is computed so this
+    # enrichment list is never counted as safety findings. Persisted with
+    # the snapshot so later GET /cross-check reads include it too.
+    cross_check["antidote_reference_notes"] = antidote_reference_notes
     lab_trends = track_lab_trends(timeline)
     logger.info(
         "upload: user=%s lab trends: %d trends, %d insufficient",
@@ -1222,6 +1313,7 @@ async def _execute_upload_pipeline(
         "dosage_report": dosage_report,
         "consult_triage": consult_triage_report,
         "translation_risk": translation_risk,
+        "antidote_reference_notes": antidote_reference_notes,
         "indexed": indexed,
         "trust_summary": trust_summary,
         "conflicts": active_conflicts,
@@ -1481,7 +1573,7 @@ async def correct_document_extraction(
         trusted, conflicts, trust_summary, detected = _prepare_current_trust_state(
             user_id, prospective_docs
         )
-        timeline, cross_check, lab_trends = await _derive_record(trusted, conflicts, trust_summary)
+        timeline, cross_check, lab_trends = await _derive_record(trusted, conflicts, trust_summary, user_id)
     except CorrectionValidationError as exc:
         raise HTTPException(409, str(exc)) from exc
     except ProviderRateLimitError as exc:
@@ -1564,7 +1656,7 @@ async def _change_conflict_status(
         conflict_overrides={conflict_id: override},
     )
     try:
-        timeline, cross_check, lab_trends = await _derive_record(trusted, conflicts, trust_summary)
+        timeline, cross_check, lab_trends = await _derive_record(trusted, conflicts, trust_summary, user_id)
     except ProviderRateLimitError as exc:
         raise HTTPException(503, "The source decision was not saved because the safety rebuild is temporarily unavailable. Please retry.") from exc
     except RuntimeError as exc:
@@ -1663,9 +1755,14 @@ async def _derive_record(
     trusted_docs: List[Dict[str, Any]],
     conflicts: List[Dict[str, Any]],
     trust_summary: Dict[str, Any],
+    user_id: str,
 ) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
     timeline = _timeline_from_trust_state(trusted_docs, conflicts, trust_summary)
-    cross_check = await _cross_check_trusted_timeline(timeline)
+    graph_backed_findings, antidote_reference_notes = _antidote_context(
+        timeline, user_id, "record_rebuild"
+    )
+    cross_check = await _cross_check_trusted_timeline(timeline, graph_backed_findings)
+    cross_check["antidote_reference_notes"] = antidote_reference_notes
     lab_trends = track_lab_trends(timeline)
     return timeline, cross_check, lab_trends
 
@@ -1938,6 +2035,97 @@ async def get_dosage_report(user_id: str = Depends(get_current_user)) -> Dict[st
     result = check_dosages(snapshot["patient_timeline"])
     audit.record(user_id, "records.read", {"view": "dosage_report", "recomputed": True})
     return result
+
+
+# ---------------------------------------------------------------------------
+# Reference knowledge graph (Neo4j) — WHO antidote reference data
+# ---------------------------------------------------------------------------
+
+@app.post("/api/v1/knowledge-graph/antidotes", status_code=201)
+async def upload_antidote_reference(
+    file: UploadFile = File(...),
+    user_id: str = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """
+    Ingests the "Antidotes and other substances used in poisonings"
+    section of a WHO Model List of Essential Medicines PDF into the Neo4j
+    reference graph. Extraction is deterministic table parsing, so the
+    graph holds only what the document literally prints — notably NOT
+    which poison each antidote treats, which the source never states.
+
+    Accepts both WHO lists: the main EML (adults) and the EMLc (children).
+    Each is stored as its own :SourceDocument, so the two coexist and a
+    drug on both keeps a separate listing (and dosage form) per document.
+    Which population a PDF covers is read off its own title text.
+
+    Unlike every other route here, what this writes is shared reference
+    data, not per-patient data, so it is not scoped by user_id — a valid
+    token is still required to keep the write authenticated.
+    """
+    if not graph_db.is_configured():
+        raise HTTPException(
+            503,
+            "The antidote reference graph is not configured on this server "
+            "(NEO4J_URI / NEO4J_USERNAME / NEO4J_PASSWORD missing or the neo4j "
+            "driver is not installed).",
+        )
+    from poisoning_kg import extract_antidote_section, ingest_antidote_entries
+
+    suffix = Path(file.filename or "").suffix.lower()
+    if suffix != ".pdf":
+        raise HTTPException(
+            400,
+            f"Unsupported file type '{suffix or '(no extension)'}'. "
+            "Antidote reference ingestion requires a PDF (table extraction).",
+        )
+
+    with TemporaryDirectory() as tmp_dir:
+        tmp_path = Path(tmp_dir) / file.filename
+        tmp_path.write_bytes(await file.read())
+        logger.info(
+            "upload_antidote_reference: user=%s parsing '%s'", user_id, file.filename,
+        )
+        try:
+            section = extract_antidote_section(str(tmp_path))
+        except Exception as e:
+            logger.error(
+                "upload_antidote_reference: user=%s parse failed for '%s': %s",
+                user_id, file.filename, e, exc_info=True,
+            )
+            raise HTTPException(422, f"Could not parse '{file.filename}': {e}")
+
+    entries = section["entries"]
+    if not entries:
+        raise HTTPException(
+            422,
+            f"No 'Antidotes and other substances used in poisonings' section "
+            f"found in '{file.filename}'.",
+        )
+
+    try:
+        count = ingest_antidote_entries(section, source_document=file.filename)
+    except Exception as e:
+        logger.error(
+            "upload_antidote_reference: user=%s ingest failed for '%s': %s",
+            user_id, file.filename, e, exc_info=True,
+        )
+        raise HTTPException(503, f"The reference graph is unreachable: {e}")
+    categories = sorted({e["subsection"] for e in entries if e["subsection"]})
+    logger.info(
+        "upload_antidote_reference: user=%s ingested %d entrie(s) from '%s' (population=%s)",
+        user_id, count, file.filename, section["population"],
+    )
+    audit.record(user_id, "knowledge_graph.antidotes_ingested", {
+        "source_document": file.filename,
+        "entries_ingested": count,
+        "population": section["population"],
+    })
+    return {
+        "source_document": file.filename,
+        "population": section["population"],
+        "entries_ingested": count,
+        "categories": categories,
+    }
 
 
 @app.get("/api/v1/export")

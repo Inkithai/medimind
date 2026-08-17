@@ -111,7 +111,11 @@ Confirmed during the review — these only *look* like advantages:
 3. Dosage unit normalization (§1.4) — ✅ **implemented** (`backend/dosage_rules.py::_dose_to_mg`, tablet/mL/IU → mg with documented strengths + "not evaluated" fallback)
 4. Strict UNKNOWN lab-value handling (§1.6) — ✅ **implemented** (`backend/lab_trends.py::_parse_trend_value`, censored/approximate/tolerance/scientific-notation readings excluded from trend math)
 
-**Phase 1 complete.** Remaining phases: Clinical knowledge (WHO antidote KG), Doctor recommendation (finding → specialty → provider), Robustness (OCR fallback, document-type detection, upload hardening, retry endpoints).
+### Phase 2 — Clinical knowledge
+
+5. WHO antidote/poisoning knowledge graph → reference-graph evidence integration (§1.3) — ✅ **implemented** (`backend/graph_db.py` + `backend/poisoning_kg.py` + `graph_backed_findings_from_antidotes` in `evidence_grading.py`; optional Neo4j, fail-open, `POST /api/v1/knowledge-graph/antidotes` ingestion endpoint, per-upload lookup wired into upload + record-rebuild paths)
+
+**Phases 1–2 complete.** Remaining: Phase 3 (Doctor recommendation — finding → specialty → provider search → transparent ranking → persisted referral reason) and Phase 4 (Robustness — OCR fallback, document-type detection, upload hardening, retry endpoints).
 
 ### Phase 2 — Clinical knowledge
 

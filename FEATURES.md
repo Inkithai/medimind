@@ -10,6 +10,7 @@
 - Active-prescription scoping — interaction/allergy/duplicate/dosage checks run only against courses still active at the reference date; provably ended courses are listed with reasons, never silently dropped, and the LLM pass is skipped entirely when nothing is active
 - Dosage checks beyond mg — g/mcg converted exactly; tablet, mL and IU doses converted via documented standard strengths/exact factors with the assumption stated and a lower confidence; unconvertible doses reported "not evaluated"
 - Strict trend-value classification — censored/approximate/tolerance/scientific-notation lab readings are excluded from trend math rather than estimated, so a fabricated magnitude can never invert a trend direction
+- WHO antidote/poisoning reference knowledge graph — deterministic (non-LLM) ingestion of the WHO EML "Antidotes and other substances used in poisonings" section into Neo4j (adult EML + children's EMLc kept as independent listings), per-upload medication lookup, patient-facing reference notes, and reference-graph evidence grading that uncaps confidence on findings about WHO-listed antidotes
 - Patient-grounded RAG / Ask AI with conversational focus carry-over
 - Risk Timeline page — when each safety finding was actually live, graded by evidence strength
 - Duplicate re-upload detection — the same file or prescription is never counted twice
@@ -60,6 +61,9 @@
 - Allergy-text resolution recognizes negative statements ("no known drug allergies") while still matching named exceptions ("…except penicillin")
 - Activity windows reuse `risk_timeline.build_treatment_windows` — activity and concurrency can never disagree; open-ended/PRN/undated courses stay active (fail active, never fail silent)
 - Older snapshots without `medication_activity` are backfilled deterministically on read (no LLM call), mirroring the lab-trends recompute pattern
+- WHO antidote graph is optional and fail-open: unconfigured/missing NEO4J_* env never blocks uploads, endpoint ingestion requires auth, `POST /api/v1/knowledge-graph/antidotes` ingests a WHO EML PDF deterministically (pdfplumber table parsing — no LLM, nothing to hallucinate)
+- Antidote lookup is one bulk round trip per record, reused for both evidence grading and patient-facing notes; per-listing properties live on `:LISTED_IN` edges so adult EML and children's EMLc coexist without overwriting each other
+- Neo4j observability: step/completion/retry logging, redacted URIs, MERGE write counters distinguish "re-ingest changed nothing" from "load matched nothing"; driver connection-lifetime/liveness tuning for idle-pooled cloud instances
 - Chroma collection sanitization; confidence-aware extraction
 - Early cost-protection gate (reject before downstream AI)
 
