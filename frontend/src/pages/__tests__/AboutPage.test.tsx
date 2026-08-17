@@ -45,14 +45,17 @@ function occurrences(haystack: string, needle: string): number {
 
 const tests: Array<[string, () => void]> = [
   [
-    "renders all seven required sections with stable anchors",
+    "renders all ten required sections with stable anchors",
     () => {
       const sections: Array<[string, string]> = [
         ["overview", about.overviewTitle],
+        ["capabilities", about.capabilitiesTitle],
         ["features", about.featuresTitle],
         ["architecture", about.archTitle],
         ["pipeline", about.pipeTitle],
         ["data-flow", about.flowTitle],
+        ["safety-intelligence", about.safetyIntelligenceTitle],
+        ["interoperability", about.interoperabilityTitle],
         ["security", about.secTitle],
         ["api", about.apiTitle],
       ];
@@ -67,7 +70,7 @@ const tests: Array<[string, () => void]> = [
     () => {
       assert.equal(occurrences(html, "<h1"), 1, "exactly one h1");
       // Every section heading is an h2; no level is skipped.
-      assert.equal(occurrences(html, "<h2"), 7, "one h2 per section");
+      assert.equal(occurrences(html, "<h2"), 10, "one h2 per section");
       assert.ok(occurrences(html, "<h3") > 0, "h3 used under sections");
       assert.ok(!html.includes("<h5"), "no heading level skipped down to h5");
       assert.ok(!html.includes("<h6"), "no h6");
