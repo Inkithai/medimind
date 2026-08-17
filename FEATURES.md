@@ -7,6 +7,8 @@
 - Non-medical document filter (early rejection before LLM/Chroma)
 - Patient timeline + longitudinal lab trends (threshold approach detection)
 - Deterministic medication-allergy contraindication KB — normalized ingredients matched in code against recorded allergies (allergen classes + direct ingredient names), so "amoxicillin prescribed; penicillin allergy on record" is caught even when the model misses it
+- Active-prescription scoping — interaction/allergy/duplicate/dosage checks run only against courses still active at the reference date; provably ended courses are listed with reasons, never silently dropped, and the LLM pass is skipped entirely when nothing is active
+- Dosage checks beyond mg — g/mcg converted exactly; tablet, mL and IU doses converted via documented standard strengths/exact factors with the assumption stated and a lower confidence; unconvertible doses reported "not evaluated"
 - Strict trend-value classification — censored/approximate/tolerance/scientific-notation lab readings are excluded from trend math rather than estimated, so a fabricated magnitude can never invert a trend direction
 - Patient-grounded RAG / Ask AI with conversational focus carry-over
 - Risk Timeline page — when each safety finding was actually live, graded by evidence strength
@@ -56,6 +58,8 @@
 - Regression tests for reference-range formatting + trend direction
 - Curated medication-allergy KB runs alongside the LLM cross-check with fail-open semantics — a KB failure never takes down the report, and findings self-tag `source: curated_knowledge_base` so evidence grading treats them as deterministic (uncapped confidence)
 - Allergy-text resolution recognizes negative statements ("no known drug allergies") while still matching named exceptions ("…except penicillin")
+- Activity windows reuse `risk_timeline.build_treatment_windows` — activity and concurrency can never disagree; open-ended/PRN/undated courses stay active (fail active, never fail silent)
+- Older snapshots without `medication_activity` are backfilled deterministically on read (no LLM call), mirroring the lab-trends recompute pattern
 - Chroma collection sanitization; confidence-aware extraction
 - Early cost-protection gate (reject before downstream AI)
 

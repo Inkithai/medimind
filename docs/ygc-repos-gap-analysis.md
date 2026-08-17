@@ -107,9 +107,11 @@ Confirmed during the review — these only *look* like advantages:
 ### Phase 1 — Safety (start here)
 
 1. Deterministic allergy contraindication engine (§1.1) — ✅ **implemented** (`backend/drug_allergy_rules.py`, merged into the cross-check pipeline)
-2. Active prescription filtering for safety checks (§1.2)
-3. Dosage unit normalization (§1.4)
+2. Active prescription filtering for safety checks (§1.2) — ✅ **implemented** (`backend/medication_activity.py`, scoped cross-check + dosage checks, LLM skipped when nothing active)
+3. Dosage unit normalization (§1.4) — ✅ **implemented** (`backend/dosage_rules.py::_dose_to_mg`, tablet/mL/IU → mg with documented strengths + "not evaluated" fallback)
 4. Strict UNKNOWN lab-value handling (§1.6) — ✅ **implemented** (`backend/lab_trends.py::_parse_trend_value`, censored/approximate/tolerance/scientific-notation readings excluded from trend math)
+
+**Phase 1 complete.** Remaining phases: Clinical knowledge (WHO antidote KG), Doctor recommendation (finding → specialty → provider), Robustness (OCR fallback, document-type detection, upload hardening, retry endpoints).
 
 ### Phase 2 — Clinical knowledge
 

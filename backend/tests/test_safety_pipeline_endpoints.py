@@ -3,6 +3,7 @@ consult-triage / dosage-report endpoints, and snapshot enrichment."""
 
 import os
 import sys
+from datetime import date, timedelta
 from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -21,9 +22,13 @@ import api  # noqa: E402
 
 
 def _extracted_doc(patient_name="John Doe", overdose=False):
+    # Date-relative: the 5-day course must still be active when the safety
+    # pipeline runs (activity scoping excludes provably ended courses), on
+    # whatever day the test executes.
+    doc_date = (date.today() - timedelta(days=2)).isoformat()
     return {
         "document_type": "prescription",
-        "date": "2024-03-15",
+        "date": doc_date,
         "provider_or_doctor": "Dr. Smith",
         "patient_name": patient_name,
         "patient_age": 49,

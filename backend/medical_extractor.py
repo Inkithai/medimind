@@ -2972,6 +2972,12 @@ default to a high score:
   would be the more dangerous error, and mark it clearly as low-confidence.
 
 Rules:
+- The payload you receive is already scoped to the patient's CURRENTLY
+  ACTIVE medications. `reference_date` is the analysis date, and
+  `excluded_inactive_medications` lists courses whose explicit duration had
+  ended before that date — they are history, not live exposure, and must
+  not be flagged as live interactions or conflicts. An open-ended or
+  undated prescription is treated as active: flag it normally.
 - Every medication entry carries a `prescription_group`. Entries sharing a
   prescription_group came from THE SAME physical prescription, uploaded more
   than once (e.g. a scan and a phone photo of one page). Count them as ONE
@@ -3174,6 +3180,7 @@ def cross_check_prescriptions(
     timeline: Dict[str, Any],
     model: str = MODEL,
     graph_backed_findings: Optional[Dict[str, Dict[str, Any]]] = None,
+    reference_date: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Runs interaction / duplicate / dosage-conflict / allergy cross-checking
@@ -3183,29 +3190,61 @@ def cross_check_prescriptions(
     alongside the LLM's own duplicate detection, rather than relying on
     the LLM pass alone to catch exact cross-language matches.
 
+    Activity scoping (medication_activity.py): the live safety checks —
+    the LLM cross-check and every deterministic pass — run only against
+    medications whose courses are still active at `reference_date`
+    (default today). Entries whose course provably ended earlier are
+    excluded and listed with reasons in the report's `medication_activity`
+    block, so nothing is silently dropped; medication history and change
+    detection still cover the full record.
+
     After the findings are merged they are post-processed deterministically:
       * evidence grading (evidence_grading.py) — each finding is tagged by
         what actually backs it (computed-from-records vs model knowledge),
         and ungrounded model claims get their confidence capped;
       * timing (risk_timeline.py) — each finding is placed in time using the
-        prescription dates/durations, so a pair of courses that never
-        overlapped is marked historical instead of reading as a live risk;
+        prescription dates/durations;
       * concurrent_exposure — periods where two live prescriptions supplied
-        the same ingredient (double-dosing arithmetic over the record).
+        the same ingredient (double-dosing arithmetic over the active set).
     """
-    payload = {
-        "medications_timeline": timeline["medications_timeline"],
-        "known_allergies": timeline["known_allergies"],
-    }
-    raw = _completion_resilient(
-        model=model,
-        system_prompt=CROSS_CHECK_PROMPT,
-        user_content=f"Patient medication data:\n\n{json.dumps(payload, indent=2)}",
-        strict_format=CROSS_CHECK_RESPONSE_FORMAT,
-    )
-    result = _parse_json_object(raw)
+    from medication_activity import analyze_medication_activity, filter_active_timeline
 
-    deterministic_duplicates = detect_exact_duplicate_medications(timeline)
+    activity = analyze_medication_activity(timeline, reference_date)
+    active_timeline = filter_active_timeline(timeline, reference_date)
+
+    if active_timeline.get("medications_timeline"):
+        payload = {
+            "medications_timeline": active_timeline["medications_timeline"],
+            "known_allergies": timeline["known_allergies"],
+            "reference_date": activity["reference_date"],
+            "excluded_inactive_medications": activity["inactive_medications"],
+        }
+        raw = _completion_resilient(
+            model=model,
+            system_prompt=CROSS_CHECK_PROMPT,
+            user_content=f"Patient medication data:\n\n{json.dumps(payload, indent=2)}",
+            strict_format=CROSS_CHECK_RESPONSE_FORMAT,
+        )
+        result = _parse_json_object(raw)
+    else:
+        # Every documented course provably ended before the reference date
+        # (or the timeline has no medications at all). There is no live
+        # exposure to analyze — skip the LLM call entirely and say why.
+        result = {
+            "potential_drug_interactions": [],
+            "duplicate_prescriptions": [],
+            "conflicting_dosage_instructions": [],
+            "allergy_conflicts": [],
+            "overall_recommendation": (
+                "No currently active prescriptions were found for safety analysis: "
+                "every documented medication course ended before the reference date "
+                f"({activity['reference_date']}). Historical courses remain listed in "
+                "your record, and any current medications should be uploaded. Consult a "
+                "doctor or pharmacist before making changes."
+            ),
+        }
+
+    deterministic_duplicates = detect_exact_duplicate_medications(active_timeline)
     existing = result.setdefault("duplicate_prescriptions", [])
     existing_source_sets = [
         frozenset((occ.get("date"), occ.get("source_file")) for occ in d.get("occurrences", []))
@@ -3220,10 +3259,10 @@ def cross_check_prescriptions(
     # well-established, textbook-level interaction pairs are matched on
     # normalized ingredients in code, so catching them never depends on the
     # LLM noticing on any given run. The LLM remains the broad-coverage
-    # pass; the KB is the guaranteed floor.
+    # pass; the KB is the guaranteed floor. Scoped to active prescriptions.
     try:
         from drug_interactions import check_known_interactions, merge_into_report
-        merge_into_report(result, check_known_interactions(timeline))
+        merge_into_report(result, check_known_interactions(active_timeline))
     except Exception as e:
         # A KB failure must never take down the whole safety report — the
         # LLM findings above are still valid on their own.
@@ -3234,9 +3273,10 @@ def cross_check_prescriptions(
     # the patient's recorded allergies (allergen classes + direct ingredient
     # names), so catching e.g. "amoxicillin prescribed; penicillin allergy
     # on record" never depends on the model noticing on any given run.
+    # Scoped to active prescriptions.
     try:
         from drug_allergy_rules import check_allergy_conflicts, merge_allergy_findings
-        merge_allergy_findings(result, check_allergy_conflicts(timeline))
+        merge_allergy_findings(result, check_allergy_conflicts(active_timeline))
     except Exception as e:
         logger.warning("Deterministic allergy check failed (LLM findings kept): %s", e)
 
@@ -3255,15 +3295,15 @@ def cross_check_prescriptions(
     from evidence_grading import grade_cross_check
     grade_cross_check(result, graph_backed_findings)
 
-    # Place every finding in time. Two drugs only interact if the patient was
-    # taking them at the same time, and the model compares a flat list with no
-    # notion of when each course started or ended. Nothing is removed;
-    # findings whose courses never overlapped are marked `not_concurrent` so
-    # they can be shown as history rather than as a live risk.
+    # Place every finding in time. Within the active set all courses overlap
+    # at the reference date; timing still documents each finding's window
+    # from the record's dates/durations.
     from risk_timeline import annotate_findings_with_timing, concurrent_exposure
     annotate_findings_with_timing(result, timeline)
-    result["concurrent_exposure"] = concurrent_exposure(timeline)
+    result["concurrent_exposure"] = concurrent_exposure(active_timeline)
 
+    result["reference_date"] = activity["reference_date"]
+    result["medication_activity"] = activity
     return result
 
 

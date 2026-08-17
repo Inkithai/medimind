@@ -126,14 +126,16 @@ def test_cross_check_prescriptions_returns_graded_and_timed():
     timeline = {
         "visits": [],
         "medications_timeline": [
+            # Open-ended courses (no duration) stay active at any reference
+            # date, keeping this test independent of the day it runs on.
             {"name": "Paracetamol", "ingredients": ["Paracetamol"],
              "dosage_value": 500, "dosage_unit": "mg", "frequency_per_day": 3,
              "is_as_needed": False, "date": "2026-01-01", "source_file": "a.pdf",
-             "prescription_group": "rx-0", "duration": "5 days"},
+             "prescription_group": "rx-0"},
             {"name": "Paracetamol", "ingredients": ["Paracetamol"],
              "dosage_value": 500, "dosage_unit": "mg", "frequency_per_day": 3,
              "is_as_needed": False, "date": "2026-04-01", "source_file": "b.pdf",
-             "prescription_group": "rx-1", "duration": "5 days"},
+             "prescription_group": "rx-1"},
         ],
         "lab_results_timeline": [],
         "known_allergies": [],

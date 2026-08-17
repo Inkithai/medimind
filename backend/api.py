@@ -353,6 +353,14 @@ def _empty_cross_check(reason: str) -> Dict[str, Any]:
         "conflicting_dosage_instructions": [],
         "allergy_conflicts": [],
         "overall_recommendation": reason,
+        "reference_date": None,
+        "medication_activity": {
+            "reference_date": None,
+            "active_medications": [],
+            "inactive_medications": [],
+            "active_count": 0,
+            "inactive_count": 0,
+        },
     }
 
 
@@ -1703,6 +1711,14 @@ _EMPTY_CROSS_CHECK: Dict[str, Any] = {
         "check has not been re-run yet. Upload a document or ask a question "
         "to refresh it."
     ),
+    "reference_date": None,
+    "medication_activity": {
+        "reference_date": None,
+        "active_medications": [],
+        "inactive_medications": [],
+        "active_count": 0,
+        "inactive_count": 0,
+    },
 }
 
 
@@ -1778,6 +1794,7 @@ def _load_snapshot_or_rebuild(user_id: str) -> Optional[Dict[str, Any]]:
 def _enhanced_cross_check(snapshot: Dict[str, Any]) -> Dict[str, Any]:
     """Backfill deterministic findings/source links for older snapshots."""
     from medication_history import detect_medication_transitions, enrich_cross_check_sources
+    from medication_activity import analyze_medication_activity
 
     timeline = snapshot["patient_timeline"]
     report = dict(snapshot.get("cross_check_report") or {})
@@ -1788,6 +1805,13 @@ def _enhanced_cross_check(snapshot: Dict[str, Any]) -> Dict[str, Any]:
     transitions = detect_medication_transitions(timeline)
     report.setdefault("medication_changes", transitions["medication_changes"])
     report.setdefault("medication_continuations", transitions["medication_continuations"])
+    # Snapshots saved before activity scoping exist: backfill the
+    # deterministic active/inactive classification on read (no LLM call)
+    # so every stored record gets reference-date awareness.
+    if "medication_activity" not in report:
+        activity = analyze_medication_activity(timeline)
+        report["medication_activity"] = activity
+        report["reference_date"] = activity["reference_date"]
     return enrich_cross_check_sources(report, timeline)
 
 
