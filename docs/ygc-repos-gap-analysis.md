@@ -119,12 +119,12 @@ Confirmed during the review — these only *look* like advantages:
 
 6. Finding → specialty → provider search → transparent ranking → persisted referral reason (§1.8) — ✅ **implemented** (`backend/referral_trail.py` + `provider_ranking.py` numeric components + `db.save_referral_search`/`load_referral_searches` + `referral_searches` table in `supabase_schema.sql`; search endpoint persists and returns the trail, `GET /api/v1/care-referrals` serves history; frontend renders the referral reason and per-provider breakdown)
 
-**Phases 1–3 complete.** Remaining: Phase 4 (Robustness — OCR fallback, document-type detection, upload hardening, retry endpoints).
-
 ### Phase 4 — Robustness
 
-7. Tesseract OCR fallback (§1.5)
-8. Document-type detection (§1.7)
-9. Magic-byte upload validation + per-document retry endpoints (§2)
+7. Tesseract OCR fallback (§1.5) — ✅ **implemented** (`backend/ocr_service.py` + `medical_extractor.py` OCR pre-pass; confident transcripts take the text path, everything else keeps the vision path, never blocks)
+8. Document-type detection (§1.7) — ✅ **implemented** (`backend/document_types.py`; extracted types pinned to the closed vocabulary before persistence, per-record type summaries in upload + document-list responses)
+9. Magic-byte upload validation + per-document retry endpoints (§2) — ✅ **implemented** (`backend/upload_validation.py` per-file rejection; `POST /api/v1/documents/{id}/reprocess` re-fetches the original, re-extracts, replaces the file's rows, and rebuilds all derived data; frontend Reprocess button in the document viewer)
 
-**Net result:** new clinical functionality in the areas where MediMind is genuinely behind, with zero regressions in the areas (RAG, provider search, evidence/trust, dosage breadth) where MediMind is already substantially stronger.
+**All four phases complete.**
+
+**Net result:** new clinical functionality in the areas where MediMind was genuinely behind, with zero regressions in the areas (RAG, provider search, evidence/trust, dosage breadth) where MediMind was already substantially stronger.

@@ -269,6 +269,37 @@ def save_patient_snapshot(
 
 
 @_translate_missing_schema
+def replace_document_group(
+    user_id: str,
+    *,
+    content_sha256: Optional[str],
+    source_file: Optional[str],
+    pages: Sequence[Dict[str, Any]],
+) -> int:
+    """Replaces every stored row belonging to one physical file (all pages
+    of a multi-page document share its content_sha256) with freshly
+    extracted pages, then inserts the new rows. Returns how many rows were
+    replaced. Used by the per-document reprocess endpoint.
+
+    Falls back to matching on the stored source filename for rows that
+    predate the content-hash field. Never touches rows of other files.
+    """
+    response = _documents().select("id, data").eq("user_id", user_id).execute()
+    matched_ids: List[Any] = []
+    for row in response.data or []:
+        data = row.get("data") if isinstance(row.get("data"), dict) else {}
+        if content_sha256 and data.get("content_sha256") == content_sha256:
+            matched_ids.append(row["id"])
+        elif not content_sha256 and source_file and (data.get("_source") or {}).get("file") == source_file:
+            matched_ids.append(row["id"])
+    if matched_ids:
+        _documents().delete().in_("id", matched_ids).execute()
+    if pages:
+        insert_documents(user_id, list(pages))
+    return len(matched_ids)
+
+
+@_translate_missing_schema
 def save_referral_search(user_id: str, search: Dict[str, Any]) -> None:
     """Appends one referral-trail record (finding -> specialty -> search ->
     ranked providers) for this user. Append-only; see referral_trail.py

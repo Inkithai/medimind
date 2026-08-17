@@ -207,7 +207,7 @@ def _pipeline_patchers(extract_result):
 def _upload(client, filename="rx.pdf"):
     return client.post(
         "/api/v1/documents",
-        files=[("files", (filename, b"fake", "application/pdf"))],
+        files=[("files", (filename, b"%PDF-1.4 fake", "application/pdf"))],
     )
 
 

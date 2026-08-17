@@ -176,6 +176,9 @@ export const en = {
   viewer: {
     region: "Document details",
     openOriginal: "Open original",
+    reprocess: "Reprocess",
+    reprocessing: "Reprocessing…",
+    reprocessFailed: "Reprocessing failed",
     original: "Original",
     structured: "What We Found",
     originalDocument: "Original document",

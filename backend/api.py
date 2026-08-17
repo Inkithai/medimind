@@ -67,6 +67,8 @@ from care.recommendation import recommend_care
 from care.recommendations import generate_care_recommendations
 from care_recommendations import ProviderSearchError, recommendation_context, search_live_providers
 from referral_trail import build_referral_search
+from document_types import normalize_document_type, summarize_document_types
+from upload_validation import validate_upload_content
 from auth import get_current_user, issue_anonymous_token
 from appointment_prep import build_appointment_prep
 from change_detection import detect_record_changes
@@ -741,6 +743,25 @@ async def _execute_upload_pipeline(
                 _file_progress(file_index, status="failed", step="failed", message=info["error"], error_info=info)
                 continue
 
+            # Magic-byte check: a supported extension whose CONTENT is not
+            # actually that file type is rejected per-file (never aborts the
+            # batch) before it can cost an extraction call.
+            content_error = validate_upload_content(content, original_name)
+            if content_error:
+                info = {
+                    "file": original_name,
+                    "file_id": f"file-{file_index}",
+                    "file_index": file_index,
+                    "error": content_error,
+                    "kind": "invalid",
+                    "code": "invalid_file_content",
+                    "retryable": False,
+                    "retry_after_seconds": None,
+                }
+                file_errors.append(info)
+                _file_progress(file_index, status="failed", step="failed", message=info["error"], error_info=info)
+                continue
+
             content_sha256 = hashlib.sha256(content).hexdigest()
             already = seen_hashes.get(content_sha256) or (
                 {"_source": {"file": batch_hashes[content_sha256]}}
@@ -1069,6 +1090,9 @@ async def _execute_upload_pipeline(
                 page.setdefault("_document_id", f"doc_{uuid.uuid4().hex}")
                 page["document_url"] = upload_info["document_url"]
                 page["cloudinary_public_id"] = upload_info["cloudinary_public_id"]
+                # Pin the model's free-form type to the closed vocabulary so
+                # chunk metadata / evidence weighting downstream are stable.
+                page["document_type"] = normalize_document_type(page.get("document_type"))
                 # Persisted with the document so a future re-upload of this
                 # exact file is recognised before extraction (hash check at
                 # the top of this pipeline).
@@ -1315,6 +1339,7 @@ async def _execute_upload_pipeline(
         "consult_triage": consult_triage_report,
         "translation_risk": translation_risk,
         "antidote_reference_notes": antidote_reference_notes,
+        "document_types": summarize_document_types(all_docs),
         "indexed": indexed,
         "trust_summary": trust_summary,
         "conflicts": active_conflicts,
@@ -1605,6 +1630,136 @@ async def correct_document_extraction(
     }
 
 
+@app.post("/api/v1/documents/{document_id}/reprocess", status_code=200)
+async def reprocess_document(
+    document_id: str,
+    user_id: str = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """Re-runs the full per-document pipeline for one stored document and
+    rebuilds every derived representation (timeline, safety, labs, dosage,
+    triage, index) from the result.
+
+    This is the recovery path for a document that failed or extracted
+    poorly the first time — the original file is fetched from storage and
+    re-extracted, so nothing has to be re-uploaded. All rows belonging to
+    the same physical file (multi-page documents share its content hash)
+    are replaced together, and corrections/conflicts are replayed on the
+    rebuild exactly as they are for an upload.
+    """
+    docs = db.load_documents(user_id)
+    doc = next((d for d in docs if trust_document_id(d) == document_id), None)
+    if doc is None:
+        raise HTTPException(404, "Document not found in this workspace.")
+
+    source_file = ((doc.get("_source") or {}).get("file")) or "document"
+    try:
+        content = storage.download_document_bytes(doc)
+    except storage.StorageDownloadError as exc:
+        raise HTTPException(502, str(exc)) from exc
+
+    content_error = validate_upload_content(content, source_file)
+    if content_error:
+        raise HTTPException(422, content_error)
+
+    try:
+        with TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir) / Path(source_file).name
+            tmp_path.write_bytes(content)
+            logger.info(
+                "reprocess: user=%s document=%s re-extracting '%s'",
+                user_id, document_id, source_file,
+            )
+            try:
+                result = await asyncio.to_thread(process_document, str(tmp_path))
+            except NonMedicalDocumentError as exc:
+                raise HTTPException(422, str(exc)) from exc
+            except ProviderRateLimitError as exc:
+                raise HTTPException(503, (
+                    "The document-reading service is temporarily unavailable. "
+                    "The document was not changed; please retry later."
+                )) from exc
+            except Exception as exc:
+                logger.error(
+                    "reprocess: user=%s document=%s extraction failed: %s",
+                    user_id, document_id, exc, exc_info=True,
+                )
+                raise HTTPException(
+                    502,
+                    "The document could not be re-read right now. The stored "
+                    "record was not changed; please retry.",
+                ) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("reprocess: user=%s document=%s failed: %s", user_id, document_id, exc, exc_info=True)
+        raise HTTPException(500, "Reprocessing failed unexpectedly.") from exc
+
+    pages: List[Dict[str, Any]] = (
+        result["pages"] if isinstance(result, dict) and result.get("multi_page") else [result]
+    )
+    for page in pages:
+        page.setdefault("_document_id", doc.get("_document_id"))
+        page["document_url"] = doc.get("document_url")
+        page["cloudinary_public_id"] = doc.get("cloudinary_public_id")
+        if doc.get("content_sha256"):
+            page["content_sha256"] = doc["content_sha256"]
+        page["document_type"] = normalize_document_type(page.get("document_type"))
+
+    replaced = db.replace_document_group(
+        user_id,
+        content_sha256=doc.get("content_sha256"),
+        source_file=source_file,
+        pages=pages,
+    )
+    logger.info(
+        "reprocess: user=%s document=%s replaced %d row(s) with %d page(s)",
+        user_id, document_id, replaced, len(pages),
+    )
+
+    # Rebuild the record exactly as an upload would: conflicts -> quarantine
+    # -> timeline -> safety -> labs -> dosage -> triage -> snapshot -> index.
+    updated_docs = db.load_documents(user_id)
+    trusted, conflicts, trust_summary, detected = _prepare_current_trust_state(
+        user_id, updated_docs
+    )
+    if detected:
+        db.sync_conflicts(user_id, detected)
+    timeline, cross_check, lab_trends = await _derive_record(
+        trusted, conflicts, trust_summary, user_id
+    )
+    dosage_report = check_dosages(timeline)
+    consult_triage_report = generate_consult_triage(cross_check, lab_trends, dosage_report)
+    timeline["_record_fingerprint"] = timeline_fingerprint(timeline)
+    db.save_patient_snapshot(
+        user_id, timeline, cross_check, lab_trends=lab_trends,
+        dosage_report=dosage_report, consult_triage=consult_triage_report,
+    )
+    indexed, index_error, _ = await _replace_index(user_id, timeline)
+    audit.record(user_id, "documents.reprocessed", {
+        "document_id": document_id,
+        "rows_replaced": replaced,
+        "pages": len(pages),
+        "indexed": indexed,
+    })
+
+    response: Dict[str, Any] = {
+        "document_id": document_id,
+        "documents_reprocessed": 1,
+        "timeline": timeline,
+        "cross_check_report": cross_check,
+        "lab_trends": lab_trends,
+        "dosage_report": dosage_report,
+        "consult_triage": consult_triage_report,
+        "document_types": summarize_document_types(updated_docs),
+        "trust_summary": trust_summary,
+        "conflicts": conflicts,
+        "indexed": indexed,
+    }
+    if index_error:
+        response["index_error"] = index_error
+    return response
+
+
 @app.get("/api/v1/conflicts")
 async def list_record_conflicts(
     include_inactive: bool = Query(default=False),
@@ -1796,6 +1951,7 @@ async def list_documents(user_id: str = Depends(get_current_user)) -> Dict[str, 
         "user_id": user_id,
         "count": len(documents),
         "documents": documents,
+        "document_types": summarize_document_types(documents),
     }
 
 

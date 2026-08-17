@@ -12,6 +12,10 @@
 - Strict trend-value classification — censored/approximate/tolerance/scientific-notation lab readings are excluded from trend math rather than estimated, so a fabricated magnitude can never invert a trend direction
 - WHO antidote/poisoning reference knowledge graph — deterministic (non-LLM) ingestion of the WHO EML "Antidotes and other substances used in poisonings" section into Neo4j (adult EML + children's EMLc kept as independent listings), per-upload medication lookup, patient-facing reference notes, and reference-graph evidence grading that uncaps confidence on findings about WHO-listed antidotes
 - Referral trail — every local-care search is persisted as a reviewable finding → specialty → search → providers record, with the referral reason (why the finding produced this referral) and a numeric per-provider ranking breakdown (signal weights, scores, contributions) so both stay answerable after the live results age out
+- Offline Tesseract OCR pre-pass — scanned PDFs/images are OCR'd when the engine is installed; a confident transcript is extracted with the cheaper text model (zero image tokens), otherwise the vision model runs unchanged; per-page OCR confidence is recorded and OCR can never block an extraction
+- Document-type normalization — the extractor's free-form type is pinned to the closed vocabulary (prescription / lab_report / discharge_summary / consultation_note / imaging_report / procedure_report / other) before persistence, with per-record type distributions in the API
+- Magic-byte upload validation — a supported extension whose content is not actually that file type is rejected per-file (never aborts the batch) before it costs an extraction call
+- Per-document reprocess — POST /documents/{id}/reprocess re-fetches the stored original, re-extracts it, replaces the file's rows, and rebuilds timeline/safety/labs/dosage/triage/index like an upload; failed documents no longer need re-uploading
 - Patient-grounded RAG / Ask AI with conversational focus carry-over
 - Risk Timeline page — when each safety finding was actually live, graded by evidence strength
 - Duplicate re-upload detection — the same file or prescription is never counted twice
@@ -67,6 +71,8 @@
 - Neo4j observability: step/completion/retry logging, redacted URIs, MERGE write counters distinguish "re-ingest changed nothing" from "load matched nothing"; driver connection-lifetime/liveness tuning for idle-pooled cloud instances
 - Referral-trail persistence is best-effort: a missing/unavailable referrals table never fails the live provider search; persisted trails are historical records OF searches (provenance + retrieved_at), never a provider directory
 - Ranking disclosure is numeric and additive: each provider's `ranking.components` lists signal weight, 0-1 score, and contribution to the 0-100 match score alongside the existing plain-language explanations
+- OCR layer fails open: engine absence, low confidence, or non-medical reads all fall back to the vision path; a transcript is only trusted above MEDIMIND_OCR_MIN_CONFIDENCE with real text volume
+- Reprocess replaces every row sharing the file's content hash (multi-page docs are one physical file), preserves the stored document URL/identity, and replays corrections/conflicts through the standard trust-state rebuild
 - Chroma collection sanitization; confidence-aware extraction
 - Early cost-protection gate (reject before downstream AI)
 

@@ -176,6 +176,9 @@ export const si = {
   viewer: {
     region: "ලේඛන විස්තර",
     openOriginal: "මුල් ලේඛනය විවෘත කරන්න",
+    reprocess: "නැවත සැකසීම",
+    reprocessing: "නැවත සකසමින්…",
+    reprocessFailed: "නැවත සැකසීම අසාර්ථකයි",
     original: "මුල් ලේඛනය",
     structured: "අප සොයාගත් දේ",
     originalDocument: "මුල් ලේඛනය",

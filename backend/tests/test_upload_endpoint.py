@@ -84,7 +84,7 @@ def test_upload_indexed_true_when_chunks_exist():
         with TestClient(app) as client:
             resp = client.post(
                 "/api/v1/documents",
-                files=[("files", ("rx.pdf", b"fake-pdf-bytes", "application/pdf"))],
+                files=[("files", ("rx.pdf", b"%PDF-1.4 fake-pdf-bytes", "application/pdf"))],
             )
         assert resp.status_code == 201, resp.text
         body = resp.json()
@@ -103,7 +103,7 @@ def test_upload_indexed_false_when_no_indexable_content():
         with TestClient(app) as client:
             resp = client.post(
                 "/api/v1/documents",
-                files=[("files", ("rx.pdf", b"fake-pdf-bytes", "application/pdf"))],
+                files=[("files", ("rx.pdf", b"%PDF-1.4 fake-pdf-bytes", "application/pdf"))],
             )
         assert resp.status_code == 201, resp.text
         body = resp.json()
@@ -122,7 +122,7 @@ def test_index_exception_reports_indexed_false():
         with TestClient(app) as client:
             resp = client.post(
                 "/api/v1/documents",
-                files=[("files", ("rx.pdf", b"fake-pdf-bytes", "application/pdf"))],
+                files=[("files", ("rx.pdf", b"%PDF-1.4 fake-pdf-bytes", "application/pdf"))],
             )
         assert resp.status_code == 201, resp.text
         body = resp.json()
@@ -162,10 +162,10 @@ def test_partial_batch_keeps_good_files_and_reports_failures():
             resp = client.post(
                 "/api/v1/documents",
                 files=[
-                    ("files", ("rx.pdf", b"fake-pdf", "application/pdf")),
-                    ("files", ("receipt.jpg", b"fake-jpg", "image/jpeg")),
-                    ("files", ("cv.pdf", b"fake-cv", "application/pdf")),
-                    ("files", ("lab.jpg", b"fake-lab", "image/jpeg")),
+                    ("files", ("rx.pdf", b"%PDF-1.4 fake-pdf", "application/pdf")),
+                    ("files", ("receipt.jpg", b"\xff\xd8\xff" + b"fake-jpg", "image/jpeg")),
+                    ("files", ("cv.pdf", b"%PDF-1.4 fake-cv", "application/pdf")),
+                    ("files", ("lab.jpg", b"\xff\xd8\xff" + b"fake-lab", "image/jpeg")),
                 ],
             )
         assert resp.status_code == 201, resp.text
@@ -195,7 +195,7 @@ def test_all_files_transient_failure_is_502():
         with TestClient(app) as client:
             resp = client.post(
                 "/api/v1/documents",
-                files=[("files", ("a.jpg", b"a", "image/jpeg")), ("files", ("b.jpg", b"b", "image/jpeg"))],
+                files=[("files", ("a.jpg", b"\xff\xd8\xff" + b"a", "image/jpeg")), ("files", ("b.jpg", b"\xff\xd8\xff" + b"b", "image/jpeg"))],
             )
         assert resp.status_code == 502, resp.text
         assert "rate-limit" in resp.json()["detail"]
@@ -221,8 +221,8 @@ def test_async_job_exposes_independent_file_progress():
                 "/api/v1/documents?async=true",
                 headers={"Prefer": "respond-async"},
                 files=[
-                    ("files", ("rx.pdf", b"fake-pdf", "application/pdf")),
-                    ("files", ("notes.jpg", b"fake-jpg", "image/jpeg")),
+                    ("files", ("rx.pdf", b"%PDF-1.4 fake-pdf", "application/pdf")),
+                    ("files", ("notes.jpg", b"\xff\xd8\xff" + b"fake-jpg", "image/jpeg")),
                 ],
             )
             assert queued.status_code == 202, queued.text
@@ -265,8 +265,8 @@ def test_hard_provider_quota_stops_queued_files_after_first_call():
             response = client.post(
                 "/api/v1/documents",
                 files=[
-                    ("files", ("a.jpg", b"a", "image/jpeg")),
-                    ("files", ("b.jpg", b"b", "image/jpeg")),
+                    ("files", ("a.jpg", b"\xff\xd8\xff" + b"a", "image/jpeg")),
+                    ("files", ("b.jpg", b"\xff\xd8\xff" + b"b", "image/jpeg")),
                     ("files", ("c.jpg", b"c", "image/jpeg")),
                 ],
             )
@@ -294,7 +294,7 @@ def test_unsupported_file_does_not_fail_whole_batch():
             resp = client.post(
                 "/api/v1/documents",
                 files=[
-                    ("files", ("rx.pdf", b"fake-pdf", "application/pdf")),
+                    ("files", ("rx.pdf", b"%PDF-1.4 fake-pdf", "application/pdf")),
                     ("files", ("notes.txt", b"hello", "text/plain")),
                 ],
             )
@@ -325,7 +325,7 @@ def test_all_files_non_medical_still_422():
         with TestClient(app) as client:
             resp = client.post(
                 "/api/v1/documents",
-                files=[("files", ("boarding.jpg", b"a", "image/jpeg")), ("files", ("zoom.png", b"b", "image/png"))],
+                files=[("files", ("boarding.jpg", b"\xff\xd8\xff" + b"a", "image/jpeg")), ("files", ("zoom.png", b"\x89PNG\r\n\x1a\n" + b"b", "image/png"))],
             )
         assert resp.status_code == 422, resp.text
         detail = resp.json()["detail"]

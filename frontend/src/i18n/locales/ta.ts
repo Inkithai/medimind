@@ -176,6 +176,9 @@ export const ta = {
   viewer: {
     region: "ஆவண விவரங்கள்",
     openOriginal: "மூலத்தைத் திறக்கவும்",
+    reprocess: "மீண்டும் செயலாக்கு",
+    reprocessing: "மீண்டும் செயலாக்குகிறது…",
+    reprocessFailed: "மீண்டும் செயலாக்கம் தோல்வியடைந்தது",
     original: "மூலம்",
     structured: "நாங்கள் கண்டறிந்தவை",
     originalDocument: "மூல ஆவணம்",

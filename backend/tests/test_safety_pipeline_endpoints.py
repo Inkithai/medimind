@@ -92,7 +92,7 @@ def _upload(client, filename="rx.pdf", confirm=False):
     data = {"confirm_identity_mismatch": "true"} if confirm else {}
     return client.post(
         "/api/v1/documents",
-        files=[("files", (filename, b"fake", "application/pdf"))],
+        files=[("files", (filename, b"%PDF-1.4 fake", "application/pdf"))],
         data=data,
     )
 

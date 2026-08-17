@@ -11,16 +11,20 @@ export function DocumentViewer({
   visit,
   onClose,
   onUpdated,
+  onReprocess,
   initialEvidenceId,
 }: {
   visit: Visit;
   onClose?: () => void;
   onUpdated?: () => void;
+  onReprocess?: () => Promise<void>;
   initialEvidenceId?: string | null;
 }) {
   const { t } = useI18n();
   const [tab, setTab] = useState<"original" | "structured" | "correct">("structured");
   const [selectedEvidence, setSelectedEvidence] = useState<EvidenceRegion | null>(null);
+  const [reprocessing, setReprocessing] = useState(false);
+  const [reprocessError, setReprocessError] = useState<string | null>(null);
   const titleId = useId();
   const originalTabId = useId();
   const structuredTabId = useId();
@@ -87,6 +91,29 @@ export function DocumentViewer({
               <LinkIcon className="h-3.5 w-3.5" /> {t("viewer.openOriginal")}
               <span className="sr-only"> ({t("common.opensNewWindow")})</span>
             </a>
+          )}
+          {onReprocess && (
+            <button
+              type="button"
+              disabled={reprocessing}
+              onClick={async () => {
+                setReprocessing(true);
+                setReprocessError(null);
+                try {
+                  await onReprocess();
+                } catch (err) {
+                  setReprocessError(err instanceof Error ? err.message : String(err));
+                } finally {
+                  setReprocessing(false);
+                }
+              }}
+              className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {reprocessing ? t("viewer.reprocessing") : t("viewer.reprocess")}
+            </button>
+          )}
+          {reprocessError && (
+            <p role="alert" className="text-xs text-red-600">{t("viewer.reprocessFailed")}: {reprocessError}</p>
           )}
           {onClose && (
             <button
