@@ -63,6 +63,44 @@ def normalize_name(value: Any) -> str:
     return re.sub(r"[^a-z0-9]+", " ", normalize_text(value)).strip()
 
 
+# Honorifics, titles, and form-field noise that extraction legitimately
+# captures inside patient names ("PERERA, Anjali (Mrs.)", "Patient Name:
+# Silva, Kamala (Female)") but that carry no identity signal.
+_IDENTITY_NOISE_TOKENS = frozenset({
+    "mr", "mrs", "ms", "miss", "mx", "master", "baby", "dr", "prof",
+    "rev", "fr", "sir", "madam", "shri", "smt", "kumari", "mahatma",
+    "name", "patient", "male", "female", "sex", "m", "f", "b", "o",
+})
+
+
+def identity_key(value: Any) -> Tuple[str, ...]:
+    """Canonical comparison key for extracted patient names.
+
+    The SAME patient legitimately extracts as format variants across
+    documents: "PERERA, Anjali (Mrs.)", "Anjali Perera", "anjali perera".
+    Raw normalized strings made all of these 'different identities',
+    which fired a critical identity conflict and quarantined EVERY
+    document in the workspace — the fail-closed policy is correct for a
+    genuine two-patient mixup, but a punctuation/honorific difference is
+    not that. Production impact (2026-08-17): a routine 7-file upload of
+    one patient's records produced a dashboard with 0 medications,
+    0 lab results, and 0 clinical events.
+
+    Comparison therefore ignores token ORDER (surname-first vs
+    given-name-first printing) and drops honorifics — matching the
+    tolerance the upload-time identity guard already applies via its
+    order-insensitive name similarity. Genuinely different identities
+    (different name token sets, e.g. "Jane Doe" vs "John Doe") still
+    produce different keys, preserving the fail-closed guarantee.
+    """
+    tokens = [
+        token
+        for token in normalize_name(value).split()
+        if token and token not in _IDENTITY_NOISE_TOKENS
+    ]
+    return tuple(sorted(tokens))
+
+
 def validate_correction_path(path: str) -> Tuple[str, Optional[int], str]:
     """Validate the intentionally narrow editable surface.
 
@@ -307,9 +345,9 @@ def detect_conflicts(documents: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]
     conflicts: List[Dict[str, Any]] = []
 
     # Identity: one workspace must not silently merge two patient names.
-    identity_groups: Dict[str, List[Dict[str, Any]]] = {}
+    identity_groups: Dict[Tuple[str, ...], List[Dict[str, Any]]] = {}
     for doc in docs:
-        normalized = normalize_name(doc.get("patient_name"))
+        normalized = identity_key(doc.get("patient_name"))
         if normalized:
             identity_groups.setdefault(normalized, []).append(doc)
     if len(identity_groups) > 1:
@@ -563,9 +601,13 @@ def apply_conflict_quarantine(
                 (item for item in conflict.get("items", []) if str(item.get("document_id")) == authoritative),
                 None,
             )
-            authoritative_name = normalize_name((authoritative_item or {}).get("value"))
+            # Same canonical comparison as detection: a resolved
+            # authoritative name must un-quarantine its format variants
+            # too, or "PERERA, Anjali (Mrs.)" stays quarantined forever
+            # after being confirmed authoritative against "Anjali Perera".
+            authoritative_name = identity_key((authoritative_item or {}).get("value"))
             for doc in result:
-                matches = authoritative_name and normalize_name(doc.get("patient_name")) == authoritative_name
+                matches = bool(authoritative_name) and identity_key(doc.get("patient_name")) == authoritative_name
                 _mark_fact(doc, "/patient_name", conflict, quarantined=not bool(matches))
             continue
 
