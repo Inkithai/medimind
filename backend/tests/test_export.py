@@ -7,7 +7,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from export import build_export, build_fhir_bundle, build_native_export  # noqa: E402
+from export import build_export, build_fhir_bundle, build_native_export, validate_fhir_bundle  # noqa: E402
 
 
 SNAPSHOT = {
@@ -80,9 +80,17 @@ def test_fhir_numeric_lab_uses_value_quantity_and_freetext_uses_value_string():
 def test_fhir_medication_maps_dosage_and_date():
     bundle = build_fhir_bundle("anon_x", SNAPSHOT)
     med = _resources_of(bundle, "MedicationStatement")[0]
-    assert med["medication"]["concept"]["text"] == "Metformin"
+    assert med["medicationCodeableConcept"]["text"] == "Metformin"
+    assert med["medicationCodeableConcept"]["coding"][0]["system"] == "http://www.nlm.nih.gov/research/umls/rxnorm"
     assert med["effectiveDateTime"] == "2024-03-15"
     assert "500 mg" in med["dosage"][0]["text"]
+
+
+def test_fhir_bundle_passes_local_r4_structural_validation():
+    bundle = build_fhir_bundle("anon_x", SNAPSHOT)
+    report = validate_fhir_bundle(bundle)
+    assert report["valid"] is True
+    assert report["errors"] == []
 
 
 def test_fhir_provenance_targets_every_other_resource():

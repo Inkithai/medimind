@@ -2314,6 +2314,30 @@ async def export_record(
     return result
 
 
+@app.get("/api/v1/export/validation")
+async def validate_record_export(
+    format: str = Query("fhir", description="Validation format; currently only 'fhir' is supported"),
+    user_id: str = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """Generate and validate the authenticated user's FHIR export.
+
+    This is a deterministic local structural R4 check, not a substitute for
+    the HL7 Java validator. It is exposed separately so the exported Bundle
+    remains valid FHIR JSON without application metadata added to it.
+    """
+    if format.strip().lower() != "fhir":
+        raise HTTPException(400, "Validation currently supports only format=fhir.")
+    snapshot = _load_snapshot_or_rebuild(user_id)
+    if snapshot is None:
+        raise HTTPException(404, "No patient record found for this user — upload documents first.")
+    bundle = export_module.build_fhir_bundle(user_id, snapshot)
+    report = export_module.validate_fhir_bundle(bundle)
+    report["format"] = "fhir"
+    report["bundle_type"] = bundle.get("type")
+    audit.record(user_id, "records.export_validation", {"format": "fhir", "valid": report["valid"]})
+    return report
+
+
 @app.get("/api/v1/changes")
 async def get_record_changes(user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
     """Explain what changed between consecutive dated records.
