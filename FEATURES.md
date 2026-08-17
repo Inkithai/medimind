@@ -6,6 +6,16 @@
 - Multilingual document extraction (Tamil/Arabic/etc., INN normalization)
 - Non-medical document filter (early rejection before LLM/Chroma)
 - Patient timeline + longitudinal lab trends (threshold approach detection)
+- Deterministic medication-allergy contraindication KB — normalized ingredients matched in code against recorded allergies (allergen classes + direct ingredient names), so "amoxicillin prescribed; penicillin allergy on record" is caught even when the model misses it
+- Active-prescription scoping — interaction/allergy/duplicate/dosage checks run only against courses still active at the reference date; provably ended courses are listed with reasons, never silently dropped, and the LLM pass is skipped entirely when nothing is active
+- Dosage checks beyond mg — g/mcg converted exactly; tablet, mL and IU doses converted via documented standard strengths/exact factors with the assumption stated and a lower confidence; unconvertible doses reported "not evaluated"
+- Strict trend-value classification — censored/approximate/tolerance/scientific-notation lab readings are excluded from trend math rather than estimated, so a fabricated magnitude can never invert a trend direction
+- WHO antidote/poisoning reference knowledge graph — deterministic (non-LLM) ingestion of the WHO EML "Antidotes and other substances used in poisonings" section into Neo4j (adult EML + children's EMLc kept as independent listings), per-upload medication lookup, patient-facing reference notes, and reference-graph evidence grading that uncaps confidence on findings about WHO-listed antidotes
+- Referral trail — every local-care search is persisted as a reviewable finding → specialty → search → providers record, with the referral reason (why the finding produced this referral) and a numeric per-provider ranking breakdown (signal weights, scores, contributions) so both stay answerable after the live results age out
+- Offline Tesseract OCR pre-pass — scanned PDFs/images are OCR'd when the engine is installed; a confident transcript is extracted with the cheaper text model (zero image tokens), otherwise the vision model runs unchanged; per-page OCR confidence is recorded and OCR can never block an extraction
+- Document-type normalization — the extractor's free-form type is pinned to the closed vocabulary (prescription / lab_report / discharge_summary / consultation_note / imaging_report / procedure_report / other) before persistence, with per-record type distributions in the API
+- Magic-byte upload validation — a supported extension whose content is not actually that file type is rejected per-file (never aborts the batch) before it costs an extraction call
+- Per-document reprocess — POST /documents/{id}/reprocess re-fetches the stored original, re-extracts it, replaces the file's rows, and rebuilds timeline/safety/labs/dosage/triage/index like an upload; failed documents no longer need re-uploading
 - Patient-grounded RAG / Ask AI with conversational focus carry-over
 - Risk Timeline page — when each safety finding was actually live, graded by evidence strength
 - Duplicate re-upload detection — the same file or prescription is never counted twice
@@ -52,6 +62,18 @@
 - Reverse geocoding used for naming only—device coordinates are never overwritten by a feature centroid
 - Regression tests for GPS refinement, cache avoidance, permission/timeout handling, and accuracy labelling
 - Regression tests for reference-range formatting + trend direction
+- Curated medication-allergy KB runs alongside the LLM cross-check with fail-open semantics — a KB failure never takes down the report, and findings self-tag `source: curated_knowledge_base` so evidence grading treats them as deterministic (uncapped confidence)
+- Allergy-text resolution recognizes negative statements ("no known drug allergies") while still matching named exceptions ("…except penicillin")
+- Activity windows reuse `risk_timeline.build_treatment_windows` — activity and concurrency can never disagree; open-ended/PRN/undated courses stay active (fail active, never fail silent)
+- Older snapshots without `medication_activity` are backfilled deterministically on read (no LLM call), mirroring the lab-trends recompute pattern
+- WHO antidote graph is optional and fail-open: unconfigured/missing NEO4J_* env never blocks uploads, endpoint ingestion requires auth, `POST /api/v1/knowledge-graph/antidotes` ingests a WHO EML PDF deterministically (pdfplumber table parsing — no LLM, nothing to hallucinate)
+- Antidote lookup is one bulk round trip per record, reused for both evidence grading and patient-facing notes; per-listing properties live on `:LISTED_IN` edges so adult EML and children's EMLc coexist without overwriting each other
+- Neo4j observability: step/completion/retry logging, redacted URIs, MERGE write counters distinguish "re-ingest changed nothing" from "load matched nothing"; driver connection-lifetime/liveness tuning for idle-pooled cloud instances
+- Referral-trail persistence is best-effort: a missing/unavailable referrals table never fails the live provider search; persisted trails are historical records OF searches (provenance + retrieved_at), never a provider directory
+- Ranking disclosure is numeric and additive: each provider's `ranking.components` lists signal weight, 0-1 score, and contribution to the 0-100 match score alongside the existing plain-language explanations
+- OCR layer fails open: engine absence, low confidence, or non-medical reads all fall back to the vision path; a transcript is only trusted above MEDIMIND_OCR_MIN_CONFIDENCE with real text volume
+- OCR evidence quotes are attributed to their source page from the transcript (whitespace-tolerant, `ocr_text_search` locator, no fabricated geometry); malformed Tesseract rows degrade to unreadable instead of crashing
+- Reprocess replaces every row sharing the file's content hash (multi-page docs are one physical file), preserves the stored document URL/identity, and replays corrections/conflicts through the standard trust-state rebuild
 - Chroma collection sanitization; confidence-aware extraction
 - Early cost-protection gate (reject before downstream AI)
 

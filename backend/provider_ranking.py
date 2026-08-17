@@ -160,6 +160,45 @@ def rank_providers(
             "rating": rating_explanation,
             "availability": availability_explanation,
             "availability_preference": availability_label(availability),
+            # Numeric disclosure of the same signals: weight, 0-1 score,
+            # and contribution to the final 0-100 match score. Everything
+            # here is computed above — never invented provider attributes.
+            "components": [
+                {
+                    "signal": "specialty_relevance",
+                    "weight": 55.0,
+                    "score": round(specialty_score, 2),
+                    "contribution": round(specialty_score * 55.0 / total_weight * 100, 1),
+                    "explanation": specialty_explanation,
+                },
+                *([
+                    {
+                        "signal": "distance",
+                        "weight": 35.0,
+                        "score": round(distance_score, 2),
+                        "contribution": round(distance_score * 35.0 / total_weight * 100, 1),
+                        "explanation": distance_explanation,
+                    },
+                ] if distance_score is not None else []),
+                *([
+                    {
+                        "signal": "rating",
+                        "weight": 10.0,
+                        "score": round(rating_score, 2),
+                        "contribution": round(rating_score * 10.0 / total_weight * 100, 1),
+                        "explanation": rating_explanation,
+                    },
+                ] if rating_score is not None else []),
+                *([
+                    {
+                        "signal": "availability",
+                        "weight": 5.0,
+                        "score": round(availability_score, 2),
+                        "contribution": round(availability_score * 5.0 / total_weight * 100, 1),
+                        "explanation": availability_explanation,
+                    },
+                ] if availability_score is not None else []),
+            ],
         }
         ranked.append(result)
 

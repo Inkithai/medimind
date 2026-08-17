@@ -169,9 +169,9 @@ def grade_cross_check(
 
     `graph_backed_findings` optionally maps a lowercased drug name to whatever
     reference record supports it. Any finding naming one of those drugs is
-    graded `reference_graph` and keeps its confidence uncapped. MediMind does
-    not ship reference data today, so this defaults to None and every
-    non-deterministic finding grades as model_knowledge — the honest answer.
+    graded `reference_graph` and keeps its confidence uncapped. When no
+    reference graph is configured (the default), every non-deterministic
+    finding grades as model_knowledge — the honest answer.
     """
     counts = {DETERMINISTIC: 0, REFERENCE_GRAPH: 0, MODEL_KNOWLEDGE: 0}
 
@@ -201,6 +201,30 @@ def grade_cross_check(
         ),
     }
     return cross_check
+
+
+def graph_backed_findings_from_antidotes(
+    antidote_references: Dict[str, Dict[str, Any]],
+) -> Dict[str, Dict[str, Any]]:
+    """
+    Adapts poisoning_kg.lookup_antidote_references() output into the
+    `graph_backed_findings` shape consumed by grade_finding()/grade_cross_check().
+
+    Deliberately narrow: being WHO-listed as an antidote evidences that the
+    DRUG is in a reference document, not that any particular interaction claim
+    about it is true. It is used here to cite a real source alongside a finding
+    — never to imply the graph confirmed an interaction it has no data about.
+    """
+    backed: Dict[str, Dict[str, Any]] = {}
+    for name, ref in (antidote_references or {}).items():
+        if not name:
+            continue
+        backed[name.strip().lower()] = {
+            "source": "WHO Model List of Essential Medicines (antidotes section)",
+            "display_name": ref.get("display_name"),
+            "listings": ref.get("listings", []),
+        }
+    return backed
 
 
 if __name__ == "__main__":

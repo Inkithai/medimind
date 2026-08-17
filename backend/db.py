@@ -81,6 +81,10 @@ def _conflict_events():
     return _get_client().table("conflict_resolution_events")
 
 
+def _referral_searches():
+    return _get_client().table("referral_searches")
+
+
 class SchemaNotInitializedError(RuntimeError):
     """Raised when the Supabase project is reachable but the app's tables
     (documents / patient_snapshots) do not exist — i.e. supabase_schema.sql
@@ -262,6 +266,64 @@ def save_patient_snapshot(
                 raise
             fields.pop("derived_reports", None)
     _snapshots().upsert(fields, on_conflict="user_id").execute()
+
+
+@_translate_missing_schema
+def replace_document_group(
+    user_id: str,
+    *,
+    content_sha256: Optional[str],
+    source_file: Optional[str],
+    pages: Sequence[Dict[str, Any]],
+) -> int:
+    """Replaces every stored row belonging to one physical file (all pages
+    of a multi-page document share its content_sha256) with freshly
+    extracted pages, then inserts the new rows. Returns how many rows were
+    replaced. Used by the per-document reprocess endpoint.
+
+    Falls back to matching on the stored source filename for rows that
+    predate the content-hash field. Never touches rows of other files.
+    """
+    response = _documents().select("id, data").eq("user_id", user_id).execute()
+    matched_ids: List[Any] = []
+    for row in response.data or []:
+        data = row.get("data") if isinstance(row.get("data"), dict) else {}
+        if content_sha256 and data.get("content_sha256") == content_sha256:
+            matched_ids.append(row["id"])
+        elif not content_sha256 and source_file and (data.get("_source") or {}).get("file") == source_file:
+            matched_ids.append(row["id"])
+    if matched_ids:
+        _documents().delete().in_("id", matched_ids).execute()
+    if pages:
+        insert_documents(user_id, list(pages))
+    return len(matched_ids)
+
+
+@_translate_missing_schema
+def save_referral_search(user_id: str, search: Dict[str, Any]) -> None:
+    """Appends one referral-trail record (finding -> specialty -> search ->
+    ranked providers) for this user. Append-only; see referral_trail.py
+    for the record shape. The table is created by supabase_schema.sql."""
+    _referral_searches().insert({
+        "user_id": user_id,
+        "created_at": _now_iso(),
+        "search": search,
+    }).execute()
+
+
+@_translate_missing_schema
+def load_referral_searches(user_id: str, limit: int = 20) -> List[Dict[str, Any]]:
+    """Returns this user's referral-trail history, newest first."""
+    response = (
+        _referral_searches()
+        .select("id, created_at, search")
+        .eq("user_id", user_id)
+        .order("created_at", desc=True)
+        .order("id", desc=True)
+        .limit(max(1, min(100, limit)))
+        .execute()
+    )
+    return list(response.data or [])
 
 
 @_translate_missing_schema

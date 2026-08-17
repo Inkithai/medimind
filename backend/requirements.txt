@@ -22,3 +22,6 @@ python-multipart
 supabase
 cloudinary
 pyjwt
+# Optional WHO antidote reference knowledge graph (fail-open when not
+# configured — see graph_db.py / poisoning_kg.py). Pure-Python driver.
+neo4j

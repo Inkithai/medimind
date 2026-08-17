@@ -172,7 +172,7 @@ def _make_client(existing_docs, process_document_mock, insert_side_effect=None):
 def test_identical_reupload_skipped_before_extraction():
     """Uploading a file whose bytes match one already on file must add
     nothing, call the extractor zero times, and explain itself."""
-    content = b"the exact same CBC report bytes"
+    content = b"%PDF-1.4 the exact same CBC report bytes"
     existing = [{
         **EXTRACTED_DOC,
         "content_sha256": hashlib.sha256(content).hexdigest(),
@@ -205,7 +205,7 @@ def test_identical_reupload_skipped_before_extraction():
 
 
 def test_same_file_twice_in_one_batch_processed_once():
-    content = b"one file sent twice in the same request"
+    content = b"%PDF-1.4 one file sent twice in the same request"
     process_document = mock.MagicMock(return_value=dict(EXTRACTED_DOC, _source={"file": "ignored"}))
     app, patchers = _make_client([], process_document)
     try:
@@ -231,7 +231,7 @@ def test_same_file_twice_in_one_batch_processed_once():
 def test_new_upload_persists_content_sha256():
     """Every saved page must carry its content hash so the NEXT upload can
     recognise it."""
-    content = b"brand new report bytes"
+    content = b"%PDF-1.4 brand new report bytes"
     inserted = {}
 
     def capture_insert(user_id, docs):
@@ -269,7 +269,7 @@ def test_different_bytes_same_name_not_treated_as_duplicate():
         with TestClient(app) as client:
             resp = client.post(
                 "/api/v1/documents",
-                files=[("files", ("CBC_Report.pdf", b"new bytes", "application/pdf"))],
+                files=[("files", ("CBC_Report.pdf", b"%PDF-1.4 new bytes", "application/pdf"))],
             )
         assert resp.status_code == 201, resp.text
         body = resp.json()

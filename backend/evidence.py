@@ -274,6 +274,66 @@ def _search_variants(value: str) -> Iterable[str]:
     return unique
 
 
+def locate_ocr_text_evidence(ocr_text: str, document: Dict[str, Any]) -> Dict[str, Any]:
+    """Attribute evidence quotes to the OCR page they came from.
+
+    `ocr_text` is the OCR transcript with "--- Page N ---" separators (the
+    shape ocr_service/medical_extractor produce). Unlike
+    locate_pdf_text_evidence there is no page geometry to anchor to, so this
+    sets the page number and a `locator` marker only — never a bbox — and
+    searches whitespace-tolerantly because OCR inserts line breaks inside
+    what was one printed phrase. Quotes that cannot be placed keep their
+    default page rather than being guessed onto the wrong one.
+    """
+    # Split the transcript into per-page sections.
+    page_texts: List[Tuple[int, str]] = []
+    current_page = 1
+    current: List[str] = []
+    marker_re = re.compile(r"^---\s*Page\s+(\d+)\s*---\s*$")
+    for raw_line in (ocr_text or "").splitlines():
+        match = marker_re.match(raw_line.strip())
+        if match:
+            page_texts.append((current_page, "\n".join(current)))
+            current = []
+            current_page = int(match.group(1))
+            continue
+        current.append(raw_line)
+    page_texts.append((current_page, "\n".join(current)))
+
+    if not page_texts:
+        return document
+
+    def _page_of(quote: str) -> Optional[int]:
+        normalized = re.sub(r"\s+", " ", quote or "").strip()
+        if not normalized:
+            return None
+        variants = list(_search_variants(normalized))
+        for variant in variants:
+            pattern = re.compile(r"\s+".join(re.escape(part) for part in variant.split()))
+            for page, text in page_texts:
+                if pattern.search(text):
+                    return page
+        return None
+
+    for region, candidates in iter_document_evidence(document):
+        quote = (region.get("quote") or "").strip()
+        page = _page_of(quote)
+        if page is None:
+            # Try the fallback candidate strings (fact text fields) too.
+            for candidate in candidates:
+                page = _page_of(candidate)
+                if page is not None:
+                    break
+        if page is not None:
+            region["page"] = page
+            region["locator"] = "ocr_text_search"
+            # Page-level attribution from recognized text (no geometry, and
+            # OCR may contain recognition errors) — deliberately lower than
+            # a digital-PDF rectangle match.
+            region["confidence"] = 0.7
+    return document
+
+
 def locate_pdf_text_evidence(pdf_path: str, document: Dict[str, Any]) -> Dict[str, Any]:
     """Resolve evidence quotes/values to exact normalized PyMuPDF rectangles."""
     pdf = pymupdf.open(pdf_path)

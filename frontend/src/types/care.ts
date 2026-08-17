@@ -120,6 +120,17 @@ export interface ConsultationPack {
   disclaimer: string;
 }
 
+export interface ProviderRankingComponent {
+  signal: "specialty_relevance" | "distance" | "rating" | "availability";
+  /** Percentage weight this signal carries in the match score. */
+  weight: number;
+  /** 0–1 signal score. */
+  score: number;
+  /** Contribution to the 0–100 match score. */
+  contribution: number;
+  explanation: string;
+}
+
 export interface ProviderRanking {
   score: number;
   specialty_relevance: string;
@@ -127,6 +138,8 @@ export interface ProviderRanking {
   rating: string;
   availability: string;
   availability_preference: string;
+  /** Optional numeric breakdown of the same signals (referral trail). */
+  components?: ProviderRankingComponent[];
 }
 
 export interface LiveProvider {
@@ -172,5 +185,54 @@ export interface CareProviderSearchResponse {
   ranking_method: string;
   providers: LiveProvider[];
   no_results_message: string | null;
+  disclaimer: string;
+  /** Referral trail (Phase 3): why this finding produced this search,
+   *  plus the persisted record of the search itself. */
+  referral_id?: string;
+  referral_reason?: string;
+  referral?: ReferralTrail;
+}
+
+/** Persisted referral-trail record (GET /api/v1/care-referrals + search
+ *  responses). A historical record OF a search, not a live directory. */
+export interface ReferralTrail {
+  search_id: string;
+  created_at: string;
+  intent: {
+    clinical_flag: {
+      id: string;
+      issue_type: string | null;
+      trigger: string | null;
+      risk_level: string | null;
+      title: string | null;
+      evidence: string | null;
+      source: string | null;
+      confidence: number | null;
+    };
+    specialty: {
+      id: string | null;
+      label: string | null;
+      provider_query: string | null;
+      reason: string | null;
+    };
+    referral_reason: string;
+    care_route_explanation?: string | null;
+    evidence: CarePathwayEvidence[];
+    location: {
+      query: string | null;
+      resolved_area: string | null;
+      latitude: number | null;
+      longitude: number | null;
+    };
+    availability: string;
+    availability_label: string;
+  };
+  results: LiveProvider[];
+  ranking_method: string;
+  provenance: {
+    source_id: string | null;
+    label: string | null;
+    retrieved_at: string | null;
+  };
   disclaimer: string;
 }

@@ -54,7 +54,22 @@ from dotenv import load_dotenv
 import logging
 
 from clinical_events import CLINICAL_EVENT_COLLECTIONS, CLINICAL_EVENT_DATE_FIELDS, CLINICAL_TIMELINE_KEYS
-from evidence import first_evidence, locate_pdf_text_evidence, normalize_document_evidence
+from evidence import (
+    first_evidence,
+    locate_ocr_text_evidence,
+    locate_pdf_text_evidence,
+    normalize_document_evidence,
+)
+from ocr_service import (
+    InvalidImageError,
+    InvalidPDFError,
+    OCRError,
+    TesseractNotFoundError,
+    is_tesseract_available,
+    ocr_image_bytes,
+    ocr_pdf_pages,
+    transcript_is_usable,
+)
 
 load_dotenv(override=True)
 
@@ -2168,8 +2183,66 @@ def classify_pdf_pages(
     return text_idx, image_idx
 
 
-def image_to_base64(img: Image.Image) -> str:
-    # Downscale image if too large to prevent huge base64 payload size and potential network/timeout/size issues.
+def _ocr_scan_pdf_pages(
+    file_path: str, page_indices: List[int], progress_callback: Optional[Any] = None
+) -> Tuple[Optional[str], Optional[float], List[int]]:
+    """Best-effort offline OCR of scanned PDF pages.
+
+    Returns (transcript, avg_confidence, ocr_pages) when Tesseract is
+    available AND the transcript is trustworthy; (None, None, []) in every
+    other case — including engine absence and OCR failures. This layer
+    never blocks an extraction: the caller keeps its vision path when it
+    declines.
+    """
+    if not page_indices or not is_tesseract_available():
+        return None, None, []
+    try:
+        _emit_document_progress(
+            progress_callback, "reading",
+            f"Reading scanned page(s) with offline OCR ({len(page_indices)} page(s))",
+        )
+        results = ocr_pdf_pages(file_path, page_indices)
+        usable, joined, avg = transcript_is_usable(results, min_chars=PAGE_TEXT_MIN_CHARS)
+        if not usable:
+            logger.info(
+                "ocr: '%s' transcript not trusted (avg confidence=%s); using vision for %d page(s)",
+                Path(file_path).name, avg, len(page_indices),
+            )
+            return None, None, []
+        logger.info(
+            "ocr: '%s' transcript usable (avg confidence=%s) for %d scanned page(s) — text path",
+            Path(file_path).name, avg, len(page_indices),
+        )
+        return joined, avg, [r.page for r in results if r.text and r.text.strip()]
+    except (TesseractNotFoundError, InvalidPDFError, OCRError) as exc:
+        logger.warning("ocr: '%s' skipped (%s); using vision", Path(file_path).name, exc)
+        return None, None, []
+    except Exception as exc:  # defensive — OCR must never take down extraction
+        logger.warning("ocr: '%s' failed unexpectedly (%s); using vision", Path(file_path).name, exc)
+        return None, None, []
+
+
+def _ocr_image_file(file_path: str) -> Tuple[Optional[str], Optional[float]]:
+    """Best-effort offline OCR of a single image file. Same fail-open
+    contract as _ocr_scan_pdf_pages."""
+    if not is_tesseract_available():
+        return None, None
+    try:
+        with open(file_path, "rb") as f:
+            result = ocr_image_bytes(f.read(), page=1)
+        usable, joined, avg = transcript_is_usable([result], min_chars=PAGE_TEXT_MIN_CHARS)
+        if not usable:
+            return None, None
+        return joined, avg
+    except (TesseractNotFoundError, InvalidImageError, OCRError) as exc:
+        logger.warning("ocr: '%s' skipped (%s); using vision", Path(file_path).name, exc)
+        return None, None
+    except Exception as exc:
+        logger.warning("ocr: '%s' failed unexpectedly (%s); using vision", Path(file_path).name, exc)
+        return None, None
+
+
+def image_to_base64(img: Image.Image) -> str:    # Downscale image if too large to prevent huge base64 payload size and potential network/timeout/size issues.
     # 1600px is more than enough for medical document OCR.
     max_side = 1600
     if max(img.size) > max_side:
@@ -2431,6 +2504,33 @@ def process_document(
             return result
 
         if image_idx and not text_idx:
+            # Offline OCR pre-pass first: a confident transcript lets the
+            # cheaper text model extract the record with zero image tokens.
+            # The vision path below remains the higher-level interpreter
+            # whenever OCR is unavailable or not trustworthy.
+            ocr_text, ocr_conf, ocr_pages = _ocr_scan_pdf_pages(
+                file_path, list(range(len(page_texts))), progress_callback
+            )
+            if ocr_text is not None:
+                try:
+                    assert_text_looks_medical(ocr_text, path.name)
+                except Exception:
+                    # A scanned document whose OCR read doesn't look medical
+                    # may still be one — the vision model gets to judge.
+                    ocr_text = None
+            if ocr_text is not None:
+                _emit_document_progress(progress_callback, "extracting", "Finding medical details in the OCR text")
+                result = extract_from_text(ocr_text, model=model)
+                result = normalize_document_evidence(result, default_page=1, vision=False)
+                result = locate_ocr_text_evidence(ocr_text, result)
+                result["_source"] = {
+                    "file": path.name,
+                    "method": "ocr_text_layer",
+                    "ocr_confidence": ocr_conf,
+                    "ocr_pages": ocr_pages,
+                }
+                return result
+
             pages = pdf_pages_to_images(file_path)
             page_results = []
             for i, img in enumerate(pages):
@@ -2450,7 +2550,8 @@ def process_document(
                 page_results.append(res)
             return {"multi_page": True, "pages": page_results}
 
-        # Hybrid: digital pages via text extraction, scanned pages via vision.
+        # Hybrid: digital pages via text extraction, scanned pages via
+        # vision — with the same offline OCR pre-pass for the scanned part.
         page_results = []
         if text_idx:
             combined = "\n\n".join(
@@ -2466,26 +2567,72 @@ def process_document(
             text_result["_source"] = {"file": path.name, "method": "text_layer"}
             page_results.append(text_result)
         if image_idx:
-            images = pdf_pages_to_images(file_path, page_indices=image_idx)
-            for page_i, img in zip(image_idx, images):
+            ocr_text, ocr_conf, ocr_pages = _ocr_scan_pdf_pages(
+                file_path, image_idx, progress_callback
+            )
+            if ocr_text is not None:
+                try:
+                    assert_text_looks_medical(ocr_text, path.name)
+                except Exception:
+                    ocr_text = None
+            if ocr_text is not None:
                 _emit_document_progress(
                     progress_callback,
                     "extracting",
-                    f"Finding medical details on scanned page {page_i + 1} of {len(page_texts)}",
+                    f"Finding medical details in the OCR text of {len(image_idx)} scanned page(s)",
                 )
-                res = extract_from_image(img, model=vision_model)
-                res = _apply_confidence_ceiling(res, VISION_OCR_CONFIDENCE_CEILING)
-                res["_source"] = {
+                ocr_result = extract_from_text(ocr_text, model=model)
+                ocr_result = normalize_document_evidence(ocr_result, default_page=1, vision=False)
+                ocr_result = locate_ocr_text_evidence(ocr_text, ocr_result)
+                ocr_result["_source"] = {
                     "file": path.name,
-                    "method": "vision_ocr",
-                    "page": page_i + 1,
+                    "method": "ocr_text_layer",
+                    "ocr_confidence": ocr_conf,
+                    "ocr_pages": ocr_pages,
                 }
-                page_results.append(res)
+                page_results.append(ocr_result)
+            else:
+                images = pdf_pages_to_images(file_path, page_indices=image_idx)
+                for page_i, img in zip(image_idx, images):
+                    _emit_document_progress(
+                        progress_callback,
+                        "extracting",
+                        f"Finding medical details on scanned page {page_i + 1} of {len(page_texts)}",
+                    )
+                    res = extract_from_image(img, model=vision_model)
+                    res = _apply_confidence_ceiling(res, VISION_OCR_CONFIDENCE_CEILING)
+                    res["_source"] = {
+                        "file": path.name,
+                        "method": "vision_ocr",
+                        "page": page_i + 1,
+                    }
+                    page_results.append(res)
         if len(page_results) == 1:
             return page_results[0]
         return {"multi_page": True, "pages": page_results}
 
     else:  # image types
+        # Offline OCR pre-pass first (same fail-open contract as the scanned
+        # PDF path): confident transcript -> text model; otherwise vision.
+        ocr_text, ocr_conf = _ocr_image_file(file_path)
+        if ocr_text is not None:
+            try:
+                assert_text_looks_medical(ocr_text, path.name)
+            except Exception:
+                ocr_text = None
+        if ocr_text is not None:
+            _emit_document_progress(progress_callback, "extracting", "Finding medical details in the OCR text")
+            result = extract_from_text(ocr_text, model=model)
+            result = normalize_document_evidence(result, default_page=1, vision=False)
+            result = locate_ocr_text_evidence(ocr_text, result)
+            result["_source"] = {
+                "file": path.name,
+                "method": "ocr_text_layer",
+                "ocr_confidence": ocr_conf,
+                "page": 1,
+            }
+            return result
+
         img = Image.open(file_path)
         # Phone photos carry an EXIF orientation tag instead of rotated
         # pixels — apply it, or the vision model reads the document
@@ -2972,6 +3119,12 @@ default to a high score:
   would be the more dangerous error, and mark it clearly as low-confidence.
 
 Rules:
+- The payload you receive is already scoped to the patient's CURRENTLY
+  ACTIVE medications. `reference_date` is the analysis date, and
+  `excluded_inactive_medications` lists courses whose explicit duration had
+  ended before that date — they are history, not live exposure, and must
+  not be flagged as live interactions or conflicts. An open-ended or
+  undated prescription is treated as active: flag it normally.
 - Every medication entry carries a `prescription_group`. Entries sharing a
   prescription_group came from THE SAME physical prescription, uploaded more
   than once (e.g. a scan and a phone photo of one page). Count them as ONE
@@ -3174,6 +3327,7 @@ def cross_check_prescriptions(
     timeline: Dict[str, Any],
     model: str = MODEL,
     graph_backed_findings: Optional[Dict[str, Dict[str, Any]]] = None,
+    reference_date: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Runs interaction / duplicate / dosage-conflict / allergy cross-checking
@@ -3183,29 +3337,69 @@ def cross_check_prescriptions(
     alongside the LLM's own duplicate detection, rather than relying on
     the LLM pass alone to catch exact cross-language matches.
 
+    Activity scoping (medication_activity.py): the live safety checks —
+    the LLM cross-check and every deterministic pass — run only against
+    medications whose courses are still active at `reference_date`
+    (default today). Entries whose course provably ended earlier are
+    excluded and listed with reasons in the report's `medication_activity`
+    block, so nothing is silently dropped; medication history and change
+    detection still cover the full record.
+
     After the findings are merged they are post-processed deterministically:
       * evidence grading (evidence_grading.py) — each finding is tagged by
         what actually backs it (computed-from-records vs model knowledge),
         and ungrounded model claims get their confidence capped;
       * timing (risk_timeline.py) — each finding is placed in time using the
-        prescription dates/durations, so a pair of courses that never
-        overlapped is marked historical instead of reading as a live risk;
+        prescription dates/durations;
       * concurrent_exposure — periods where two live prescriptions supplied
-        the same ingredient (double-dosing arithmetic over the record).
+        the same ingredient (double-dosing arithmetic over the active set).
     """
-    payload = {
-        "medications_timeline": timeline["medications_timeline"],
-        "known_allergies": timeline["known_allergies"],
-    }
-    raw = _completion_resilient(
-        model=model,
-        system_prompt=CROSS_CHECK_PROMPT,
-        user_content=f"Patient medication data:\n\n{json.dumps(payload, indent=2)}",
-        strict_format=CROSS_CHECK_RESPONSE_FORMAT,
-    )
-    result = _parse_json_object(raw)
+    from medication_activity import analyze_medication_activity, filter_active_timeline
 
-    deterministic_duplicates = detect_exact_duplicate_medications(timeline)
+    activity = analyze_medication_activity(timeline, reference_date)
+    active_timeline = filter_active_timeline(timeline, reference_date)
+
+    if active_timeline.get("medications_timeline"):
+        payload = {
+            "medications_timeline": active_timeline["medications_timeline"],
+            "known_allergies": timeline["known_allergies"],
+            "reference_date": activity["reference_date"],
+            "excluded_inactive_medications": activity["inactive_medications"],
+        }
+        raw = _completion_resilient(
+            model=model,
+            system_prompt=CROSS_CHECK_PROMPT,
+            user_content=f"Patient medication data:\n\n{json.dumps(payload, indent=2)}",
+            strict_format=CROSS_CHECK_RESPONSE_FORMAT,
+        )
+        result = _parse_json_object(raw)
+    else:
+        # Every documented course provably ended before the reference date
+        # (or the timeline has no medications at all). There is no live
+        # exposure to analyze — skip the LLM call entirely and say why.
+        if timeline.get("medications_timeline"):
+            recommendation = (
+                "No currently active prescriptions were found for safety analysis: "
+                "every documented medication course ended before the reference date "
+                f"({activity['reference_date']}). Historical courses remain listed in "
+                "your record, and any current medications should be uploaded. Consult a "
+                "doctor or pharmacist before making changes."
+            )
+        else:
+            recommendation = (
+                "No medications are documented in this record yet, so there is no "
+                "prescription safety analysis to run. Upload your prescriptions to "
+                "enable interaction, allergy, duplicate, and dosage checks."
+            )
+        result = {
+            "potential_drug_interactions": [],
+            "duplicate_prescriptions": [],
+            "conflicting_dosage_instructions": [],
+            "allergy_conflicts": [],
+            "overall_recommendation": recommendation,
+        }
+
+    deterministic_duplicates = detect_exact_duplicate_medications(active_timeline)
     existing = result.setdefault("duplicate_prescriptions", [])
     existing_source_sets = [
         frozenset((occ.get("date"), occ.get("source_file")) for occ in d.get("occurrences", []))
@@ -3220,14 +3414,26 @@ def cross_check_prescriptions(
     # well-established, textbook-level interaction pairs are matched on
     # normalized ingredients in code, so catching them never depends on the
     # LLM noticing on any given run. The LLM remains the broad-coverage
-    # pass; the KB is the guaranteed floor.
+    # pass; the KB is the guaranteed floor. Scoped to active prescriptions.
     try:
         from drug_interactions import check_known_interactions, merge_into_report
-        merge_into_report(result, check_known_interactions(timeline))
+        merge_into_report(result, check_known_interactions(active_timeline))
     except Exception as e:
         # A KB failure must never take down the whole safety report — the
         # LLM findings above are still valid on their own.
         logger.warning("Deterministic interaction check failed (LLM findings kept): %s", e)
+
+    # Deterministic curated medication-allergy pass (never LLM-dependent):
+    # each medication's normalized ingredients are matched in code against
+    # the patient's recorded allergies (allergen classes + direct ingredient
+    # names), so catching e.g. "amoxicillin prescribed; penicillin allergy
+    # on record" never depends on the model noticing on any given run.
+    # Scoped to active prescriptions.
+    try:
+        from drug_allergy_rules import check_allergy_conflicts, merge_allergy_findings
+        merge_allergy_findings(result, check_allergy_conflicts(active_timeline))
+    except Exception as e:
+        logger.warning("Deterministic allergy check failed (LLM findings kept): %s", e)
 
     from medication_history import detect_medication_transitions, enrich_cross_check_sources
 
@@ -3244,15 +3450,15 @@ def cross_check_prescriptions(
     from evidence_grading import grade_cross_check
     grade_cross_check(result, graph_backed_findings)
 
-    # Place every finding in time. Two drugs only interact if the patient was
-    # taking them at the same time, and the model compares a flat list with no
-    # notion of when each course started or ended. Nothing is removed;
-    # findings whose courses never overlapped are marked `not_concurrent` so
-    # they can be shown as history rather than as a live risk.
+    # Place every finding in time. Within the active set all courses overlap
+    # at the reference date; timing still documents each finding's window
+    # from the record's dates/durations.
     from risk_timeline import annotate_findings_with_timing, concurrent_exposure
     annotate_findings_with_timing(result, timeline)
-    result["concurrent_exposure"] = concurrent_exposure(timeline)
+    result["concurrent_exposure"] = concurrent_exposure(active_timeline)
 
+    result["reference_date"] = activity["reference_date"]
+    result["medication_activity"] = activity
     return result
 
 

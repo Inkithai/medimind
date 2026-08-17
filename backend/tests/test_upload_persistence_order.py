@@ -100,7 +100,7 @@ def _upload(app):
     with TestClient(app) as client:
         return client.post(
             "/api/v1/documents",
-            files=[("files", ("rx.pdf", b"fake-pdf-bytes", "application/pdf"))],
+            files=[("files", ("rx.pdf", b"%PDF-1.4 fake-pdf-bytes", "application/pdf"))],
         )
 
 

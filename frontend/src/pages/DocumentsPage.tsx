@@ -182,6 +182,10 @@ export function DocumentsPage() {
                     visit={selected}
                     onClose={() => setSelected(null)}
                     onUpdated={() => void load()}
+                    onReprocess={async () => {
+                      await api.reprocessDocument(credentials, selected._document_id);
+                      await load();
+                    }}
                     initialEvidenceId={requestedEvidenceId}
                   />
                 ) : (

@@ -101,6 +101,28 @@ def test_reference_graph_hook_uncapped():
     assert "naloxone" in finding["reference"]
 
 
+def test_graph_backed_findings_from_antidotes_adapter():
+    """The poisoning_kg lookup shape adapts to the grading shape, keyed by
+    lowercased drug name with the WHO source cited."""
+    adapter = evidence_grading.graph_backed_findings_from_antidotes
+    refs = {
+        "Naloxone": {
+            "display_name": "naloxone",
+            "category": "specific",
+            "listings": [{
+                "population": "adult", "source_document": "who_eml.pdf",
+                "list_type": "core", "dosage_form": "Injection",
+            }],
+        },
+    }
+    backed = adapter(refs)
+    assert set(backed) == {"naloxone"}
+    assert backed["naloxone"]["source"] == "WHO Model List of Essential Medicines (antidotes section)"
+    assert backed["naloxone"]["display_name"] == "naloxone"
+    assert backed["naloxone"]["listings"][0]["source_document"] == "who_eml.pdf"
+    assert adapter({}) == {}
+
+
 def test_evidence_summary_counts():
     report = _sample_report()
     evidence_grading.grade_cross_check(report)
@@ -126,14 +148,16 @@ def test_cross_check_prescriptions_returns_graded_and_timed():
     timeline = {
         "visits": [],
         "medications_timeline": [
+            # Open-ended courses (no duration) stay active at any reference
+            # date, keeping this test independent of the day it runs on.
             {"name": "Paracetamol", "ingredients": ["Paracetamol"],
              "dosage_value": 500, "dosage_unit": "mg", "frequency_per_day": 3,
              "is_as_needed": False, "date": "2026-01-01", "source_file": "a.pdf",
-             "prescription_group": "rx-0", "duration": "5 days"},
+             "prescription_group": "rx-0"},
             {"name": "Paracetamol", "ingredients": ["Paracetamol"],
              "dosage_value": 500, "dosage_unit": "mg", "frequency_per_day": 3,
              "is_as_needed": False, "date": "2026-04-01", "source_file": "b.pdf",
-             "prescription_group": "rx-1", "duration": "5 days"},
+             "prescription_group": "rx-1"},
         ],
         "lab_results_timeline": [],
         "known_allergies": [],

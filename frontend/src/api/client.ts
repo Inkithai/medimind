@@ -38,6 +38,27 @@ export interface DocumentsResponse {
   user_id: string;
   count: number;
   documents: Record<string, unknown>[];
+  document_types?: {
+    counts: Record<string, number>;
+    types: string[];
+    dominant: string;
+    total: number;
+  };
+}
+
+/** Response of POST /api/v1/documents/{id}/reprocess (mirrors the upload
+ *  response's derived-record subset). */
+export interface ReprocessDocumentResponse {
+  document_id: string;
+  documents_reprocessed: number;
+  timeline: Record<string, unknown>;
+  cross_check_report: Record<string, unknown>;
+  lab_trends: Record<string, unknown>;
+  dosage_report: Record<string, unknown>;
+  consult_triage: Record<string, unknown>;
+  document_types?: DocumentsResponse["document_types"];
+  indexed: boolean;
+  index_error?: string;
 }
 
 export type JobFileStatus = "queued" | "processing" | "completed" | "failed";
@@ -437,6 +458,16 @@ export const api = {
   // of any in-process state.
   listDocuments(credentials: Credentials): Promise<DocumentsResponse> {
     return request<DocumentsResponse>(credentials, "/api/v1/documents");
+  },
+
+  // Re-runs the full per-document pipeline for one stored document (fetches
+  // the original from storage, re-extracts, rebuilds timeline/safety/index).
+  reprocessDocument(credentials: Credentials, documentId: string): Promise<ReprocessDocumentResponse> {
+    return request<ReprocessDocumentResponse>(
+      credentials,
+      `/api/v1/documents/${encodeURIComponent(documentId)}/reprocess`,
+      { method: "POST" }
+    );
   },
 
   // One request returns timeline + cross-check + lab trends together (the

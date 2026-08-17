@@ -14,13 +14,16 @@ Env:
     CLOUDINARY_API_SECRET
 """
 
+import logging
 import os
 import re
 import uuid
-from typing import Dict
+from typing import Any, Dict
 
 import cloudinary
 import cloudinary.uploader
+
+logger = logging.getLogger("storage")
 
 _configured = False
 
@@ -72,3 +75,30 @@ def upload_patient_document(user_id: str, file_path: str, original_filename: str
         "document_url": result["secure_url"],
         "cloudinary_public_id": result["public_id"],
     }
+
+
+class StorageDownloadError(RuntimeError):
+    """The stored original could not be fetched for reprocessing."""
+
+
+def download_document_bytes(doc: Dict[str, Any], timeout: int = 60) -> bytes:
+    """Fetches a stored document's original bytes from its saved
+    `document_url` (Cloudinary secure URLs are public, so no signing is
+    needed). Raises StorageDownloadError with a patient-safe message when
+    the URL is missing or the fetch fails — never leaks provider details.
+    """
+    url = doc.get("document_url")
+    if not url or not str(url).startswith("https://"):
+        raise StorageDownloadError(
+            "The original file for this document is not available for reprocessing."
+        )
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen(str(url), timeout=timeout) as response:
+            return response.read()
+    except Exception as exc:
+        logger.warning("storage: download failed for '%s': %s", url, exc)
+        raise StorageDownloadError(
+            "The original file could not be fetched right now. Please try again later."
+        ) from exc

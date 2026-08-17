@@ -60,42 +60,13 @@ def _parse_date(date_str: Optional[str], dayfirst: bool = True) -> Optional[date
     return parse_mixed_datetime(date_str, dayfirst=dayfirst)
 
 
-def _parse_value(value: Any) -> Optional[float]:
-    """Extracts the numeric magnitude from an extracted lab value.
-
-    Thousands separators must be consumed as part of the number. A bare
-    `\\d+(\\.\\d+)?` search stops at the first comma, so a platelet count of
-    "150,000" parsed as 150 — a ~1000x understatement that silently
-    inverts trend direction and reads as a critical thrombocytopenia
-    rather than a normal count. Same class of error for WBC/RBC counts
-    and any lab reported in the hundreds of thousands.
-
-    Both conventions appear in real reports, so the separator is
-    disambiguated by grouping rather than assumed:
+def _parse_numeric_token(token: str) -> Optional[float]:
+    """Parses one clean numeric token, handling thousands/decimal-separator
+    disambiguation:
       * "150,000"    -> 150000.0  (comma = thousands, groups of 3)
       * "1.234,56"   -> 1234.56   (European: dot thousands, comma decimal)
       * "5,3"        -> 5.3       (comma decimal, no 3-digit group)
-    Qualifiers are dropped ("<5" -> 5.0), matching prior behavior: the
-    magnitude is what trends, and the flag field carries the censoring.
     """
-    if value is None:
-        return None
-    if isinstance(value, bool):  # bool is an int subclass; not a lab value
-        return None
-    if isinstance(value, (int, float)):
-        return float(value)
-    text = str(value).strip()
-    if not text:
-        return None
-
-    # Grab a numeric run that may contain , and . as group/decimal marks.
-    match = re.search(r"-?\d[\d,.]*", text)
-    if not match:
-        return None
-    token = match.group().rstrip(".,")
-    if not token or token in ("-",):
-        return None
-
     has_comma, has_dot = "," in token, "." in token
     if has_comma and has_dot:
         # Whichever separator appears last is the decimal mark.
@@ -116,6 +87,109 @@ def _parse_value(value: Any) -> Optional[float]:
         return float(token)
     except ValueError:
         return None
+
+
+def _parse_value(value: Any) -> Optional[float]:
+    """Extracts the numeric magnitude from a *reference-range bound* string
+    (e.g. "70", "99", "150,000"). Range bounds are clean numbers by
+    construction — see _parse_range()'s number pattern — so qualifier
+    handling lives elsewhere. For trend values use the strict
+    _parse_trend_value(), which never estimates a censored reading.
+
+    Thousands separators must be consumed as part of the number. A bare
+    `\\d+(\\.\\d+)?` search stops at the first comma, so a platelet count of
+    "150,000" parsed as 150 — a ~1000x understatement that silently
+    inverts trend direction and reads as a critical thrombocytopenia
+    rather than a normal count. Same class of error for WBC/RBC counts
+    and any lab reported in the hundreds of thousands.
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool):  # bool is an int subclass; not a lab value
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value).strip()
+    if not text:
+        return None
+
+    # Grab a numeric run that may contain , and . as group/decimal marks.
+    match = re.search(r"-?\d[\d,.]*", text)
+    if not match:
+        return None
+    token = match.group().rstrip(".,")
+    if not token or token in ("-",):
+        return None
+    return _parse_numeric_token(token)
+
+
+# Markers that make a reported value something other than one exact
+# measurement. Trending a censored reading ("<0.01") as its boundary, or
+# an approximate one ("~5") as 5, invents a precision the laboratory
+# explicitly declined to report — and the invented point can silently
+# invert a trend direction.
+_UNKNOWN_VALUE_MARKERS = ("<", ">", "≤", "≥", "~", "≈", "±", "+/-")
+
+_APPROXIMATE_VALUE_WORDS = (
+    "approx", "approximately", "about", "around", "circa",
+    "less than", "greater than", "more than", "up to",
+)
+
+# Scientific notation is outside the plain-decimal grammar this parser
+# supports; it is rejected rather than truncated ("1e3" would otherwise
+# parse as 1).
+_SCIENTIFIC_NOTATION_RE = re.compile(
+    r"^[-+]?(?:\d+(?:\.\d+)?|\.\d+)[eE][-+]?\d+$"
+)
+
+
+def _parse_trend_value(value: Any) -> Optional[float]:
+    """Strict classifier for one extracted lab value, for TREND purposes.
+
+    Returns the numeric magnitude only when the whole string is one exact
+    measurement. Returns None (excluded from trend math) when the value is:
+
+      * censored ("<5", ">1000", "≤0.5") — the magnitude is unknown;
+      * approximate ("~5", "approx 5", "around 100");
+      * a tolerance ("5 ± 1", "5 +/- 1");
+      * scientific notation ("1e3", "5.2E-3");
+      * a range or multi-number expression ("3.5 - 5.5", "Grade 2 at 5.2");
+      * anything else non-numeric.
+
+    The extracted `flag` field still carries the report's own
+    normal/high/low marking; a censored reading simply contributes no
+    magnitude to direction/boundary math rather than an estimated one.
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool):  # bool is an int subclass; not a lab value
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value).strip()
+    if not text:
+        return None
+
+    lowered = text.lower()
+    if any(word in lowered for word in _APPROXIMATE_VALUE_WORDS):
+        return None
+    if any(marker in text for marker in _UNKNOWN_VALUE_MARKERS):
+        return None
+    if _SCIENTIFIC_NOTATION_RE.match(text.replace(" ", "")):
+        return None
+
+    # Exactly one numeric run (allowing , and . as group/decimal marks) —
+    # a second run means a range ("3.5 - 5.5"), a composite expression
+    # ("Grade 2 at 5.2"), or scientific notation ("10^3"), none of which
+    # has a single defensible magnitude.
+    runs = re.findall(r"-?\d[\d,.]*", text)
+    if len(runs) != 1:
+        return None
+
+    token = runs[0].rstrip(".,")
+    if not token or token in ("-",):
+        return None
+    return _parse_numeric_token(token)
 
 
 def _parse_range(reference_range: Optional[str]) -> Optional[Tuple[float, float]]:
@@ -341,8 +415,11 @@ def _explain(
 def track_lab_trends(timeline: Dict[str, Any]) -> Dict[str, Any]:
     """
     Groups `timeline["lab_results_timeline"]` by test_name and analyzes
-    each test with 2+ usable (dated, numeric) data points for directional
-    drift and reference-range crossings.
+    each test with 2+ usable (dated, exact-numeric) data points for
+    directional drift and reference-range crossings. Censored,
+    approximate, tolerance, scientific-notation and multi-number readings
+    are excluded from trend math rather than estimated (see
+    _parse_trend_value).
 
     Returns:
       {
@@ -380,7 +457,7 @@ def track_lab_trends(timeline: Dict[str, Any]) -> Dict[str, Any]:
         ranges_seen = set()
         for e in entries:
             dt = _parse_date(e.get("date"), dayfirst=dayfirst)
-            val = _parse_value(e.get("value"))
+            val = _parse_trend_value(e.get("value"))
             if dt is None or val is None:
                 dropped += 1
                 continue
@@ -403,10 +480,14 @@ def track_lab_trends(timeline: Dict[str, Any]) -> Dict[str, Any]:
             insufficient.append({
                 "test_name": test_name,
                 "reason": (
-                    f"only {len(usable)} usable data point(s) with a parseable date and numeric value "
-                    f"(need at least 2 to establish a trend); {dropped} entrie(s) were dropped."
+                    f"only {len(usable)} usable data point(s) with a parseable date and an exact "
+                    f"numeric value (need at least 2 to establish a trend); {dropped} entrie(s) "
+                    f"were excluded (missing date, non-numeric, or censored/approximate value such "
+                    f"as '<5')."
                     if usable else
-                    f"no entries had both a parseable date and a numeric value ({dropped} dropped)."
+                    f"no entries had both a parseable date and an exact numeric value "
+                    f"({dropped} excluded — missing date, non-numeric, or censored/approximate "
+                    f"value such as '<5')."
                 ),
             })
             continue
@@ -538,8 +619,18 @@ if __name__ == "__main__":
     assert _parse_value("12,500") == 12500.0
     assert _parse_value("1,234.5") == 1234.5
     assert _parse_value("6.1") == 6.1
-    assert _parse_value("<5.7") == 5.7
     assert _parse_value("1,5") == 1.5
+
+    # Censored/approximate readings must NOT become trend magnitudes:
+    # "<5" has no known magnitude, and estimating one can invert a trend.
+    assert _parse_trend_value("<5.7") is None
+    assert _parse_trend_value(">1000") is None
+    assert _parse_trend_value("~5") is None
+    assert _parse_trend_value("5 ± 1") is None
+    assert _parse_trend_value("3.5 - 5.5") is None
+    assert _parse_trend_value("1e3") is None
+    assert _parse_trend_value("150,000") == 150000.0
+    assert _parse_trend_value("6.1") == 6.1
 
     for t in result["trends"]:
         print(f"--- {t['test_name']} ---")

@@ -166,3 +166,20 @@ create index if not exists conflict_resolution_events_user_idx
     on public.conflict_resolution_events (user_id, conflict_id, created_at);
 grant select, insert on table public.conflict_resolution_events to service_role;
 alter table public.conflict_resolution_events enable row level security;
+
+-- Append-only referral trail: one row per local-care provider search a user
+-- ran from a clinical flag (finding -> specialty -> search -> ranked
+-- providers with the referral reason and per-provider ranking breakdowns).
+-- The JSON is historical record OF A SEARCH (see referral_trail.py), not a
+-- live provider directory.
+create table if not exists public.referral_searches (
+    id          bigint generated always as identity primary key,
+    user_id     text        not null,
+    created_at  timestamptz not null default now(),
+    search      jsonb       not null
+);
+create index if not exists referral_searches_user_idx
+    on public.referral_searches (user_id, created_at desc);
+grant select, insert on table public.referral_searches to service_role;
+grant usage, select on sequence public.referral_searches_id_seq to service_role;
+alter table public.referral_searches enable row level security;

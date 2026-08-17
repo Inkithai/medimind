@@ -358,3 +358,68 @@ class TestUnitMismatch:
              "date": "2026-04-01", "source_file": "b.pdf"},
         ]})
         assert len(result["trends"]) == 1
+
+
+class TestStrictTrendValueClassification:
+    """Censored/approximate/ambiguous values must never become trend
+    magnitudes — trending "<5" as 5 invents a precision the laboratory
+    declined to report and can silently invert a direction."""
+
+    @pytest.mark.parametrize("raw", [
+        "<5", ">1000", "≤0.5", "≥120", "~5", "≈5", "approx 5",
+        "around 100", "5 ± 1", "5 +/- 1", "1e3", "5.2E-3",
+        "3.5 - 5.5", "72-106", "Grade 2 at 5.2", "10^3/uL",
+        "less than 0.01", "up to 40",
+    ])
+    def test_censored_or_ambiguous_values_are_excluded(self, raw):
+        from lab_trends import _parse_trend_value
+        assert _parse_trend_value(raw) is None
+
+    @pytest.mark.parametrize("raw,expected", [
+        ("150,000", 150000.0),
+        ("1,234", 1234.0),
+        ("1,234,567", 1234567.0),
+        ("5.3", 5.3),
+        ("95", 95.0),
+        ("1.5 mg", 1.5),
+        ("1.234,56", 1234.56),
+        ("5,3", 5.3),
+        ("-5", -5.0),
+    ])
+    def test_exact_values_parse_at_full_magnitude(self, raw, expected):
+        from lab_trends import _parse_trend_value
+        assert _parse_trend_value(raw) == pytest.approx(expected)
+
+    def test_numeric_input_passes_through(self):
+        from lab_trends import _parse_trend_value
+        assert _parse_trend_value(5) == 5.0
+        assert _parse_trend_value(5.7) == 5.7
+
+    def test_censored_readings_dropped_from_trend_math(self):
+        """Two exact readings still trend; the censored one contributes no
+        magnitude and is counted as dropped (lowering confidence)."""
+        timeline = _series(
+            "TSH", ["1.2", "<0.01", "1.8"],
+            reference_range="0.4-4.5", unit="mIU/L",
+            flags=["normal", "low", "normal"],
+        )
+        trend = _only_trend(timeline)
+        assert [p["value"] for p in trend["data_points"]] == ["1.2", "1.8"]
+        assert trend["direction"] == "increasing"
+        assert trend["confidence"] < 0.9  # discount applied for the dropped reading
+
+    def test_all_censored_readings_yield_insufficient_data_not_a_trend(self):
+        timeline = _series(
+            "TSH", ["<0.01", "<0.01", "<0.01"],
+            reference_range="0.4-4.5", unit="mIU/L",
+            flags=["low", "low", "low"],
+        )
+        result = track_lab_trends(timeline)
+        assert result["trends"] == []
+        assert len(result["insufficient_data"]) == 1
+        assert "TSH" in result["insufficient_data"][0]["test_name"]
+
+    def test_insufficient_data_reason_names_censored_values(self):
+        timeline = _series("TSH", ["<0.01"], reference_range="0.4-4.5", unit="mIU/L")
+        result = track_lab_trends(timeline)
+        assert "censored/approximate" in result["insufficient_data"][0]["reason"]

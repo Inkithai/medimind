@@ -66,6 +66,9 @@ from care.postprocess import finalize as finalize_facilities
 from care.recommendation import recommend_care
 from care.recommendations import generate_care_recommendations
 from care_recommendations import ProviderSearchError, recommendation_context, search_live_providers
+from referral_trail import build_referral_search
+from document_types import normalize_document_type, summarize_document_types
+from upload_validation import validate_upload_content
 from auth import get_current_user, issue_anonymous_token
 from appointment_prep import build_appointment_prep
 from change_detection import detect_record_changes
@@ -81,6 +84,7 @@ from language_guard import (
     assess_documents_translation_risk,
 )
 from follow_up import build_follow_up_plan
+import graph_db
 from lab_trends import track_lab_trends
 from record_integrity import check_record_integrity
 
@@ -199,6 +203,23 @@ async def lifespan(app: FastAPI):
         db.ensure_indexes()
     except Exception as e:
         logger.warning("ensure_indexes failed on startup: %s", e)
+
+    # The WHO antidote reference graph is an enrichment, not core: a missing
+    # NEO4J_* var or an unreachable instance must not stop the API from
+    # serving documents, timelines, cross-checks or Q&A. The upload read
+    # path is already fail-open, so this is the only place Neo4j could take
+    # the whole service down — and it cannot.
+    if graph_db.is_configured():
+        try:
+            graph_db.ensure_constraints()
+            logger.info("startup: antidote reference graph ready")
+        except Exception as e:
+            logger.warning(
+                "startup: antidote reference graph unavailable, continuing without it "
+                "(antidote reference notes will be empty on every upload): %s", e,
+            )
+    else:
+        logger.info("startup: antidote reference graph not configured — skipping")
 
     # Load the embedding model ONCE, at startup, outside any request. The
     # local ONNX MiniLM weights (~79 MB) were previously downloaded and the
@@ -353,20 +374,87 @@ def _empty_cross_check(reason: str) -> Dict[str, Any]:
         "conflicting_dosage_instructions": [],
         "allergy_conflicts": [],
         "overall_recommendation": reason,
+        "reference_date": None,
+        "medication_activity": {
+            "reference_date": None,
+            "active_medications": [],
+            "inactive_medications": [],
+            "active_count": 0,
+            "inactive_count": 0,
+        },
     }
 
 
-async def _cross_check_trusted_timeline(timeline: Dict[str, Any]) -> Dict[str, Any]:
+def _antidote_context(
+    timeline: Dict[str, Any], user_id: str, operation: str
+) -> Tuple[Dict[str, Dict[str, Any]], List[Dict[str, Any]]]:
+    """Best-effort WHO antidote reference-graph lookup for a medication
+    timeline. Returns (graph_backed_findings, reference_notes).
+
+    Fail-open by design: an unconfigured, unreachable, or failing graph
+    never fails the upload — it just means no reference notes are attached
+    and findings grade as model knowledge (the honest default). One round
+    trip to the graph per record, reused for both evidence grading and the
+    patient-facing reference notes.
+    """
+    if not graph_db.is_configured():
+        logger.debug(
+            "%s: user=%s antidote graph not configured (NEO4J_* unset or driver "
+            "missing) — skipping reference lookup",
+            operation, user_id,
+        )
+        return {}, []
+
+    from evidence_grading import graph_backed_findings_from_antidotes
+    from poisoning_kg import lookup_antidote_references
+
+    med_names = sorted({
+        m.get("name") for m in timeline.get("medications_timeline", []) if m.get("name")
+    })
+    try:
+        logger.info(
+            "%s: user=%s querying antidote graph for %d medication name(s)",
+            operation, user_id, len(med_names),
+        )
+        references = lookup_antidote_references(med_names)
+    except Exception as e:
+        # graph_db/poisoning_kg have already logged the failing step and the
+        # (redacted) URI; this records that the operation CONTINUED without
+        # the enrichment — an empty reference_notes list means "not checked",
+        # not "checked and found nothing".
+        logger.warning(
+            "%s: user=%s antidote reference lookup skipped, continuing without it "
+            "(findings will grade as unverified model knowledge): %s",
+            operation, user_id, e,
+        )
+        return {}, []
+
+    notes = [
+        {"medication": name, **ref}
+        for name, ref in sorted(references.items())
+    ]
+    if notes:
+        logger.info(
+            "%s: user=%s antidote graph matched %d of %d medication(s): %s",
+            operation, user_id, len(notes), len(med_names),
+            ", ".join(n["medication"] for n in notes),
+        )
+    return graph_backed_findings_from_antidotes(references), notes
+
+
+async def _cross_check_trusted_timeline(
+    timeline: Dict[str, Any],
+    graph_backed_findings: Optional[Dict[str, Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
     if not timeline.get("medications_timeline"):
         return _empty_cross_check(
             "No trusted medication facts are currently available for safety analysis. "
             "Resolve quarantined conflicts and consult a doctor or pharmacist before making changes."
         )
-    return await asyncio.get_running_loop().run_in_executor(
-        _DOCUMENT_EXECUTOR,
-        cross_check_prescriptions,
-        timeline,
-    )
+    def _run() -> Dict[str, Any]:
+        return cross_check_prescriptions(timeline, graph_backed_findings=graph_backed_findings)
+
+    return await asyncio.get_running_loop().run_in_executor(_DOCUMENT_EXECUTOR, _run)
 
 
 class CareSearchRequest(BaseModel):
@@ -648,6 +736,25 @@ async def _execute_upload_pipeline(
                     "error": f"This file type ({suffix or 'no extension'}) is not supported.",
                     "kind": "unsupported",
                     "code": "unsupported_file_type",
+                    "retryable": False,
+                    "retry_after_seconds": None,
+                }
+                file_errors.append(info)
+                _file_progress(file_index, status="failed", step="failed", message=info["error"], error_info=info)
+                continue
+
+            # Magic-byte check: a supported extension whose CONTENT is not
+            # actually that file type is rejected per-file (never aborts the
+            # batch) before it can cost an extraction call.
+            content_error = validate_upload_content(content, original_name)
+            if content_error:
+                info = {
+                    "file": original_name,
+                    "file_id": f"file-{file_index}",
+                    "file_index": file_index,
+                    "error": content_error,
+                    "kind": "invalid",
+                    "code": "invalid_file_content",
                     "retryable": False,
                     "retry_after_seconds": None,
                 }
@@ -983,6 +1090,9 @@ async def _execute_upload_pipeline(
                 page.setdefault("_document_id", f"doc_{uuid.uuid4().hex}")
                 page["document_url"] = upload_info["document_url"]
                 page["cloudinary_public_id"] = upload_info["cloudinary_public_id"]
+                # Pin the model's free-form type to the closed vocabulary so
+                # chunk metadata / evidence weighting downstream are stable.
+                page["document_type"] = normalize_document_type(page.get("document_type"))
                 # Persisted with the document so a future re-upload of this
                 # exact file is recognised before extraction (hash check at
                 # the top of this pipeline).
@@ -1068,9 +1178,18 @@ async def _execute_upload_pipeline(
         timeline["trust_summary"] = trust_summary
         timeline["conflicts"] = active_conflicts
         _progress("safety", "Checking medicines and allergies")
+        # Look the medication list up in the WHO antidote reference graph
+        # BEFORE cross-checking, so any finding about a drug the graph
+        # actually documents can be graded as evidence-backed and cite its
+        # source, instead of being capped as unverifiable model recall.
+        # Fail-open as always: no graph just means every finding grades as
+        # model_knowledge.
+        graph_backed_findings, antidote_reference_notes = _antidote_context(
+            timeline, user_id, "upload_documents"
+        )
         # Safety is another provider call, so it shares the same bounded pool
         # as extraction instead of bypassing load control or blocking polling.
-        cross_check = await _cross_check_trusted_timeline(timeline)
+        cross_check = await _cross_check_trusted_timeline(timeline, graph_backed_findings)
     except NonMedicalDocumentError as exc:
         raise UploadPipelineError(422, str(exc), code="not_medical", retryable=False) from exc
     except ProviderRateLimitError as exc:
@@ -1106,6 +1225,11 @@ async def _execute_upload_pipeline(
 
     issue_count = sum(len(value) for value in cross_check.values() if isinstance(value, list))
     logger.info("upload: user=%s timeline rebuilt, cross-check found %d issue(s)", user_id, issue_count)
+
+    # Attach the reference notes AFTER issue_count is computed so this
+    # enrichment list is never counted as safety findings. Persisted with
+    # the snapshot so later GET /cross-check reads include it too.
+    cross_check["antidote_reference_notes"] = antidote_reference_notes
     lab_trends = track_lab_trends(timeline)
     logger.info(
         "upload: user=%s lab trends: %d trends, %d insufficient",
@@ -1214,6 +1338,8 @@ async def _execute_upload_pipeline(
         "dosage_report": dosage_report,
         "consult_triage": consult_triage_report,
         "translation_risk": translation_risk,
+        "antidote_reference_notes": antidote_reference_notes,
+        "document_types": summarize_document_types(all_docs),
         "indexed": indexed,
         "trust_summary": trust_summary,
         "conflicts": active_conflicts,
@@ -1473,7 +1599,7 @@ async def correct_document_extraction(
         trusted, conflicts, trust_summary, detected = _prepare_current_trust_state(
             user_id, prospective_docs
         )
-        timeline, cross_check, lab_trends = await _derive_record(trusted, conflicts, trust_summary)
+        timeline, cross_check, lab_trends = await _derive_record(trusted, conflicts, trust_summary, user_id)
     except CorrectionValidationError as exc:
         raise HTTPException(409, str(exc)) from exc
     except ProviderRateLimitError as exc:
@@ -1502,6 +1628,136 @@ async def correct_document_extraction(
         "chunks_indexed": chunks_indexed,
         "index_error": index_error,
     }
+
+
+@app.post("/api/v1/documents/{document_id}/reprocess", status_code=200)
+async def reprocess_document(
+    document_id: str,
+    user_id: str = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """Re-runs the full per-document pipeline for one stored document and
+    rebuilds every derived representation (timeline, safety, labs, dosage,
+    triage, index) from the result.
+
+    This is the recovery path for a document that failed or extracted
+    poorly the first time — the original file is fetched from storage and
+    re-extracted, so nothing has to be re-uploaded. All rows belonging to
+    the same physical file (multi-page documents share its content hash)
+    are replaced together, and corrections/conflicts are replayed on the
+    rebuild exactly as they are for an upload.
+    """
+    docs = db.load_documents(user_id)
+    doc = next((d for d in docs if trust_document_id(d) == document_id), None)
+    if doc is None:
+        raise HTTPException(404, "Document not found in this workspace.")
+
+    source_file = ((doc.get("_source") or {}).get("file")) or "document"
+    try:
+        content = storage.download_document_bytes(doc)
+    except storage.StorageDownloadError as exc:
+        raise HTTPException(502, str(exc)) from exc
+
+    content_error = validate_upload_content(content, source_file)
+    if content_error:
+        raise HTTPException(422, content_error)
+
+    try:
+        with TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir) / Path(source_file).name
+            tmp_path.write_bytes(content)
+            logger.info(
+                "reprocess: user=%s document=%s re-extracting '%s'",
+                user_id, document_id, source_file,
+            )
+            try:
+                result = await asyncio.to_thread(process_document, str(tmp_path))
+            except NonMedicalDocumentError as exc:
+                raise HTTPException(422, str(exc)) from exc
+            except ProviderRateLimitError as exc:
+                raise HTTPException(503, (
+                    "The document-reading service is temporarily unavailable. "
+                    "The document was not changed; please retry later."
+                )) from exc
+            except Exception as exc:
+                logger.error(
+                    "reprocess: user=%s document=%s extraction failed: %s",
+                    user_id, document_id, exc, exc_info=True,
+                )
+                raise HTTPException(
+                    502,
+                    "The document could not be re-read right now. The stored "
+                    "record was not changed; please retry.",
+                ) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("reprocess: user=%s document=%s failed: %s", user_id, document_id, exc, exc_info=True)
+        raise HTTPException(500, "Reprocessing failed unexpectedly.") from exc
+
+    pages: List[Dict[str, Any]] = (
+        result["pages"] if isinstance(result, dict) and result.get("multi_page") else [result]
+    )
+    for page in pages:
+        page.setdefault("_document_id", doc.get("_document_id"))
+        page["document_url"] = doc.get("document_url")
+        page["cloudinary_public_id"] = doc.get("cloudinary_public_id")
+        if doc.get("content_sha256"):
+            page["content_sha256"] = doc["content_sha256"]
+        page["document_type"] = normalize_document_type(page.get("document_type"))
+
+    replaced = db.replace_document_group(
+        user_id,
+        content_sha256=doc.get("content_sha256"),
+        source_file=source_file,
+        pages=pages,
+    )
+    logger.info(
+        "reprocess: user=%s document=%s replaced %d row(s) with %d page(s)",
+        user_id, document_id, replaced, len(pages),
+    )
+
+    # Rebuild the record exactly as an upload would: conflicts -> quarantine
+    # -> timeline -> safety -> labs -> dosage -> triage -> snapshot -> index.
+    updated_docs = db.load_documents(user_id)
+    trusted, conflicts, trust_summary, detected = _prepare_current_trust_state(
+        user_id, updated_docs
+    )
+    if detected:
+        db.sync_conflicts(user_id, detected)
+    timeline, cross_check, lab_trends = await _derive_record(
+        trusted, conflicts, trust_summary, user_id
+    )
+    dosage_report = check_dosages(timeline)
+    consult_triage_report = generate_consult_triage(cross_check, lab_trends, dosage_report)
+    timeline["_record_fingerprint"] = timeline_fingerprint(timeline)
+    db.save_patient_snapshot(
+        user_id, timeline, cross_check, lab_trends=lab_trends,
+        dosage_report=dosage_report, consult_triage=consult_triage_report,
+    )
+    indexed, index_error, _ = await _replace_index(user_id, timeline)
+    audit.record(user_id, "documents.reprocessed", {
+        "document_id": document_id,
+        "rows_replaced": replaced,
+        "pages": len(pages),
+        "indexed": indexed,
+    })
+
+    response: Dict[str, Any] = {
+        "document_id": document_id,
+        "documents_reprocessed": 1,
+        "timeline": timeline,
+        "cross_check_report": cross_check,
+        "lab_trends": lab_trends,
+        "dosage_report": dosage_report,
+        "consult_triage": consult_triage_report,
+        "document_types": summarize_document_types(updated_docs),
+        "trust_summary": trust_summary,
+        "conflicts": conflicts,
+        "indexed": indexed,
+    }
+    if index_error:
+        response["index_error"] = index_error
+    return response
 
 
 @app.get("/api/v1/conflicts")
@@ -1556,7 +1812,7 @@ async def _change_conflict_status(
         conflict_overrides={conflict_id: override},
     )
     try:
-        timeline, cross_check, lab_trends = await _derive_record(trusted, conflicts, trust_summary)
+        timeline, cross_check, lab_trends = await _derive_record(trusted, conflicts, trust_summary, user_id)
     except ProviderRateLimitError as exc:
         raise HTTPException(503, "The source decision was not saved because the safety rebuild is temporarily unavailable. Please retry.") from exc
     except RuntimeError as exc:
@@ -1655,9 +1911,14 @@ async def _derive_record(
     trusted_docs: List[Dict[str, Any]],
     conflicts: List[Dict[str, Any]],
     trust_summary: Dict[str, Any],
+    user_id: str,
 ) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
     timeline = _timeline_from_trust_state(trusted_docs, conflicts, trust_summary)
-    cross_check = await _cross_check_trusted_timeline(timeline)
+    graph_backed_findings, antidote_reference_notes = _antidote_context(
+        timeline, user_id, "record_rebuild"
+    )
+    cross_check = await _cross_check_trusted_timeline(timeline, graph_backed_findings)
+    cross_check["antidote_reference_notes"] = antidote_reference_notes
     lab_trends = track_lab_trends(timeline)
     return timeline, cross_check, lab_trends
 
@@ -1690,6 +1951,7 @@ async def list_documents(user_id: str = Depends(get_current_user)) -> Dict[str, 
         "user_id": user_id,
         "count": len(documents),
         "documents": documents,
+        "document_types": summarize_document_types(documents),
     }
 
 
@@ -1703,6 +1965,14 @@ _EMPTY_CROSS_CHECK: Dict[str, Any] = {
         "check has not been re-run yet. Upload a document or ask a question "
         "to refresh it."
     ),
+    "reference_date": None,
+    "medication_activity": {
+        "reference_date": None,
+        "active_medications": [],
+        "inactive_medications": [],
+        "active_count": 0,
+        "inactive_count": 0,
+    },
 }
 
 
@@ -1778,6 +2048,7 @@ def _load_snapshot_or_rebuild(user_id: str) -> Optional[Dict[str, Any]]:
 def _enhanced_cross_check(snapshot: Dict[str, Any]) -> Dict[str, Any]:
     """Backfill deterministic findings/source links for older snapshots."""
     from medication_history import detect_medication_transitions, enrich_cross_check_sources
+    from medication_activity import analyze_medication_activity
 
     timeline = snapshot["patient_timeline"]
     report = dict(snapshot.get("cross_check_report") or {})
@@ -1788,6 +2059,13 @@ def _enhanced_cross_check(snapshot: Dict[str, Any]) -> Dict[str, Any]:
     transitions = detect_medication_transitions(timeline)
     report.setdefault("medication_changes", transitions["medication_changes"])
     report.setdefault("medication_continuations", transitions["medication_continuations"])
+    # Snapshots saved before activity scoping exist: backfill the
+    # deterministic active/inactive classification on read (no LLM call)
+    # so every stored record gets reference-date awareness.
+    if "medication_activity" not in report:
+        activity = analyze_medication_activity(timeline)
+        report["medication_activity"] = activity
+        report["reference_date"] = activity["reference_date"]
     return enrich_cross_check_sources(report, timeline)
 
 
@@ -1914,6 +2192,97 @@ async def get_dosage_report(user_id: str = Depends(get_current_user)) -> Dict[st
     result = check_dosages(snapshot["patient_timeline"])
     audit.record(user_id, "records.read", {"view": "dosage_report", "recomputed": True})
     return result
+
+
+# ---------------------------------------------------------------------------
+# Reference knowledge graph (Neo4j) — WHO antidote reference data
+# ---------------------------------------------------------------------------
+
+@app.post("/api/v1/knowledge-graph/antidotes", status_code=201)
+async def upload_antidote_reference(
+    file: UploadFile = File(...),
+    user_id: str = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """
+    Ingests the "Antidotes and other substances used in poisonings"
+    section of a WHO Model List of Essential Medicines PDF into the Neo4j
+    reference graph. Extraction is deterministic table parsing, so the
+    graph holds only what the document literally prints — notably NOT
+    which poison each antidote treats, which the source never states.
+
+    Accepts both WHO lists: the main EML (adults) and the EMLc (children).
+    Each is stored as its own :SourceDocument, so the two coexist and a
+    drug on both keeps a separate listing (and dosage form) per document.
+    Which population a PDF covers is read off its own title text.
+
+    Unlike every other route here, what this writes is shared reference
+    data, not per-patient data, so it is not scoped by user_id — a valid
+    token is still required to keep the write authenticated.
+    """
+    if not graph_db.is_configured():
+        raise HTTPException(
+            503,
+            "The antidote reference graph is not configured on this server "
+            "(NEO4J_URI / NEO4J_USERNAME / NEO4J_PASSWORD missing or the neo4j "
+            "driver is not installed).",
+        )
+    from poisoning_kg import extract_antidote_section, ingest_antidote_entries
+
+    suffix = Path(file.filename or "").suffix.lower()
+    if suffix != ".pdf":
+        raise HTTPException(
+            400,
+            f"Unsupported file type '{suffix or '(no extension)'}'. "
+            "Antidote reference ingestion requires a PDF (table extraction).",
+        )
+
+    with TemporaryDirectory() as tmp_dir:
+        tmp_path = Path(tmp_dir) / file.filename
+        tmp_path.write_bytes(await file.read())
+        logger.info(
+            "upload_antidote_reference: user=%s parsing '%s'", user_id, file.filename,
+        )
+        try:
+            section = extract_antidote_section(str(tmp_path))
+        except Exception as e:
+            logger.error(
+                "upload_antidote_reference: user=%s parse failed for '%s': %s",
+                user_id, file.filename, e, exc_info=True,
+            )
+            raise HTTPException(422, f"Could not parse '{file.filename}': {e}")
+
+    entries = section["entries"]
+    if not entries:
+        raise HTTPException(
+            422,
+            f"No 'Antidotes and other substances used in poisonings' section "
+            f"found in '{file.filename}'.",
+        )
+
+    try:
+        count = ingest_antidote_entries(section, source_document=file.filename)
+    except Exception as e:
+        logger.error(
+            "upload_antidote_reference: user=%s ingest failed for '%s': %s",
+            user_id, file.filename, e, exc_info=True,
+        )
+        raise HTTPException(503, f"The reference graph is unreachable: {e}")
+    categories = sorted({e["subsection"] for e in entries if e["subsection"]})
+    logger.info(
+        "upload_antidote_reference: user=%s ingested %d entrie(s) from '%s' (population=%s)",
+        user_id, count, file.filename, section["population"],
+    )
+    audit.record(user_id, "knowledge_graph.antidotes_ingested", {
+        "source_document": file.filename,
+        "entries_ingested": count,
+        "population": section["population"],
+    })
+    return {
+        "source_document": file.filename,
+        "population": section["population"],
+        "entries_ingested": count,
+        "categories": categories,
+    }
 
 
 @app.get("/api/v1/export")
@@ -2099,12 +2468,18 @@ async def search_care_recommendations(
     Provider details are returned only when the selected source provides them
     during this request. There are no seeded, cached fallback, or fabricated
     provider records in this application.
+
+    Every search also produces a referral trail (finding -> specialty ->
+    search -> ranked providers with the referral reason and per-provider
+    ranking breakdown) that is appended to this user's persisted history.
+    Persistence is best-effort: a missing/unavailable referrals table never
+    fails the live search itself.
     """
     snapshot = _load_snapshot_or_rebuild(user_id)
     if snapshot is None:
         raise HTTPException(404, "No patient record found for this user. Upload and process medical documents first.")
     try:
-        return await asyncio.to_thread(
+        result = await asyncio.to_thread(
             search_live_providers,
             snapshot,
             flag_id=body.flag_id,
@@ -2118,6 +2493,64 @@ async def search_care_recommendations(
             status_code=exc.http_status,
             content={"detail": exc.detail, "code": exc.code, "retryable": exc.retryable},
         )
+
+    # Phase 3 — referral trail: persist WHY this finding produced this
+    # referral and WHY each provider was ranked where it was, so the
+    # relationship remains reviewable after the live results age out.
+    referral = build_referral_search(
+        clinical_flag=result["clinical_flag"],
+        specialty=result["specialty"],
+        location=result["location"],
+        availability=result["availability"],
+        providers=result["providers"],
+        provenance=result["provenance"],
+        care_route_explanation=result.get("care_route_explanation"),
+        evidence=result.get("evidence"),
+    )
+    result["referral"] = referral
+    result["referral_id"] = referral["search_id"]
+    result["referral_reason"] = referral["intent"]["referral_reason"]
+    try:
+        db.save_referral_search(user_id, referral)
+        audit.record(user_id, "care.referral_search", {
+            "referral_id": referral["search_id"],
+            "flag_id": body.flag_id,
+            "provider_count": len(result["providers"]),
+        })
+    except db.SchemaNotInitializedError as exc:
+        logger.warning(
+            "care search: user=%s referral trail not persisted (referrals table "
+            "missing — run the updated supabase_schema.sql); live results returned: %s",
+            user_id, exc,
+        )
+    except Exception as exc:
+        logger.warning(
+            "care search: user=%s referral trail persistence failed (live results "
+            "still returned): %s", user_id, exc,
+        )
+    return result
+
+
+@app.get("/api/v1/care-referrals")
+async def get_care_referrals(user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
+    """Returns this user's persisted referral-trail history, newest first.
+
+    Each entry is a historical record of one provider search: the clinical
+    finding that motivated it, the mapped specialty, the referral reason,
+    the location/availability used, and the providers returned at that
+    moment with their ranking breakdowns. These are records OF searches,
+    not a live provider directory — re-run the search for live data.
+    """
+    referrals = db.load_referral_searches(user_id)
+    audit.record(user_id, "records.read", {"view": "care_referrals"})
+    return {
+        "referrals": referrals,
+        "note": (
+            "These are historical records of provider searches derived from your "
+            "uploaded records. They are routing information — not a diagnosis and "
+            "not an endorsement of any provider. Run a new search for live results."
+        ),
+    }
 
 
 # ---------------------------------------------------------------------------

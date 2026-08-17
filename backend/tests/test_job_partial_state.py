@@ -88,7 +88,7 @@ def _run_async_upload(app):
         queued = client.post(
             "/api/v1/documents?async=true",
             headers={"Prefer": "respond-async"},
-            files=[("files", ("rx.pdf", b"fake-pdf", "application/pdf"))],
+            files=[("files", ("rx.pdf", b"%PDF-1.4 fake-pdf", "application/pdf"))],
         )
         assert queued.status_code == 202, queued.text
         job_id = queued.json()["job_id"]

@@ -176,6 +176,9 @@ export const en = {
   viewer: {
     region: "Document details",
     openOriginal: "Open original",
+    reprocess: "Reprocess",
+    reprocessing: "Reprocessing…",
+    reprocessFailed: "Reprocessing failed",
     original: "Original",
     structured: "What We Found",
     originalDocument: "Original document",
@@ -472,6 +475,13 @@ export const en = {
     mapDirections: "Open map or directions",
     providerWebsite: "Provider website",
     whyDirectoryMatch: "Why this directory match is shown",
+    referralReasonTitle: "Why this referral was suggested",
+    referralPersisted: "This referral trail is saved to your record history.",
+    rankingComponentSpecialty: "Specialty match",
+    rankingComponentDistance: "Distance",
+    rankingComponentRating: "Rating",
+    rankingComponentAvailability: "Availability",
+    rankingWeightContribution: "{{weight}}% weight · +{{contribution}} of the match score",
     mapLabel: "Map of nearby clinics from OpenStreetMap",
   },
   settings: {
