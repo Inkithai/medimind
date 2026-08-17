@@ -115,15 +115,11 @@ Confirmed during the review — these only *look* like advantages:
 
 5. WHO antidote/poisoning knowledge graph → reference-graph evidence integration (§1.3) — ✅ **implemented** (`backend/graph_db.py` + `backend/poisoning_kg.py` + `graph_backed_findings_from_antidotes` in `evidence_grading.py`; optional Neo4j, fail-open, `POST /api/v1/knowledge-graph/antidotes` ingestion endpoint, per-upload lookup wired into upload + record-rebuild paths)
 
-**Phases 1–2 complete.** Remaining: Phase 3 (Doctor recommendation — finding → specialty → provider search → transparent ranking → persisted referral reason) and Phase 4 (Robustness — OCR fallback, document-type detection, upload hardening, retry endpoints).
-
-### Phase 2 — Clinical knowledge
-
-5. WHO antidote/poisoning knowledge graph → reference-graph evidence integration (§1.3)
-
 ### Phase 3 — Doctor recommendation
 
-6. Finding → specialty → provider search → transparent ranking → persisted referral reason (§1.8)
+6. Finding → specialty → provider search → transparent ranking → persisted referral reason (§1.8) — ✅ **implemented** (`backend/referral_trail.py` + `provider_ranking.py` numeric components + `db.save_referral_search`/`load_referral_searches` + `referral_searches` table in `supabase_schema.sql`; search endpoint persists and returns the trail, `GET /api/v1/care-referrals` serves history; frontend renders the referral reason and per-provider breakdown)
+
+**Phases 1–3 complete.** Remaining: Phase 4 (Robustness — OCR fallback, document-type detection, upload hardening, retry endpoints).
 
 ### Phase 4 — Robustness
 

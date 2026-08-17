@@ -66,6 +66,7 @@ from care.postprocess import finalize as finalize_facilities
 from care.recommendation import recommend_care
 from care.recommendations import generate_care_recommendations
 from care_recommendations import ProviderSearchError, recommendation_context, search_live_providers
+from referral_trail import build_referral_search
 from auth import get_current_user, issue_anonymous_token
 from appointment_prep import build_appointment_prep
 from change_detection import detect_record_changes
@@ -2311,12 +2312,18 @@ async def search_care_recommendations(
     Provider details are returned only when the selected source provides them
     during this request. There are no seeded, cached fallback, or fabricated
     provider records in this application.
+
+    Every search also produces a referral trail (finding -> specialty ->
+    search -> ranked providers with the referral reason and per-provider
+    ranking breakdown) that is appended to this user's persisted history.
+    Persistence is best-effort: a missing/unavailable referrals table never
+    fails the live search itself.
     """
     snapshot = _load_snapshot_or_rebuild(user_id)
     if snapshot is None:
         raise HTTPException(404, "No patient record found for this user. Upload and process medical documents first.")
     try:
-        return await asyncio.to_thread(
+        result = await asyncio.to_thread(
             search_live_providers,
             snapshot,
             flag_id=body.flag_id,
@@ -2330,6 +2337,64 @@ async def search_care_recommendations(
             status_code=exc.http_status,
             content={"detail": exc.detail, "code": exc.code, "retryable": exc.retryable},
         )
+
+    # Phase 3 — referral trail: persist WHY this finding produced this
+    # referral and WHY each provider was ranked where it was, so the
+    # relationship remains reviewable after the live results age out.
+    referral = build_referral_search(
+        clinical_flag=result["clinical_flag"],
+        specialty=result["specialty"],
+        location=result["location"],
+        availability=result["availability"],
+        providers=result["providers"],
+        provenance=result["provenance"],
+        care_route_explanation=result.get("care_route_explanation"),
+        evidence=result.get("evidence"),
+    )
+    result["referral"] = referral
+    result["referral_id"] = referral["search_id"]
+    result["referral_reason"] = referral["intent"]["referral_reason"]
+    try:
+        db.save_referral_search(user_id, referral)
+        audit.record(user_id, "care.referral_search", {
+            "referral_id": referral["search_id"],
+            "flag_id": body.flag_id,
+            "provider_count": len(result["providers"]),
+        })
+    except db.SchemaNotInitializedError as exc:
+        logger.warning(
+            "care search: user=%s referral trail not persisted (referrals table "
+            "missing — run the updated supabase_schema.sql); live results returned: %s",
+            user_id, exc,
+        )
+    except Exception as exc:
+        logger.warning(
+            "care search: user=%s referral trail persistence failed (live results "
+            "still returned): %s", user_id, exc,
+        )
+    return result
+
+
+@app.get("/api/v1/care-referrals")
+async def get_care_referrals(user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
+    """Returns this user's persisted referral-trail history, newest first.
+
+    Each entry is a historical record of one provider search: the clinical
+    finding that motivated it, the mapped specialty, the referral reason,
+    the location/availability used, and the providers returned at that
+    moment with their ranking breakdowns. These are records OF searches,
+    not a live provider directory — re-run the search for live data.
+    """
+    referrals = db.load_referral_searches(user_id)
+    audit.record(user_id, "records.read", {"view": "care_referrals"})
+    return {
+        "referrals": referrals,
+        "note": (
+            "These are historical records of provider searches derived from your "
+            "uploaded records. They are routing information — not a diagnosis and "
+            "not an endorsement of any provider. Run a new search for live results."
+        ),
+    }
 
 
 # ---------------------------------------------------------------------------

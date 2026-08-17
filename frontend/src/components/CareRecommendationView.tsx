@@ -30,6 +30,13 @@ export function CareRecommendationView({ result }: { result: CareProviderSearchR
             {result.location.resolved_area && <StatusBadge tone="neutral">{t("care.nearArea", { area: result.location.resolved_area })}</StatusBadge>}
             <StatusBadge tone="brand">{t("care.preferenceValue", { preference: availabilityLabel })}</StatusBadge>
           </div>
+          {result.referral_reason && (
+            <div className="rounded-lg bg-brand-50 px-3 py-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-brand-700">{t("care.referralReasonTitle")}</p>
+              <p className="mt-1 text-sm leading-relaxed text-slate-700">{result.referral_reason}</p>
+              <p className="mt-1 text-xs text-slate-500">{t("care.referralPersisted")}</p>
+            </div>
+          )}
           <div>
             <p className="text-sm font-semibold text-slate-800">{t("care.whyProviders")}</p>
             <p className="mt-1 text-sm leading-relaxed text-slate-600">{result.ranking_method}</p>

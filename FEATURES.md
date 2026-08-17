@@ -11,6 +11,7 @@
 - Dosage checks beyond mg — g/mcg converted exactly; tablet, mL and IU doses converted via documented standard strengths/exact factors with the assumption stated and a lower confidence; unconvertible doses reported "not evaluated"
 - Strict trend-value classification — censored/approximate/tolerance/scientific-notation lab readings are excluded from trend math rather than estimated, so a fabricated magnitude can never invert a trend direction
 - WHO antidote/poisoning reference knowledge graph — deterministic (non-LLM) ingestion of the WHO EML "Antidotes and other substances used in poisonings" section into Neo4j (adult EML + children's EMLc kept as independent listings), per-upload medication lookup, patient-facing reference notes, and reference-graph evidence grading that uncaps confidence on findings about WHO-listed antidotes
+- Referral trail — every local-care search is persisted as a reviewable finding → specialty → search → providers record, with the referral reason (why the finding produced this referral) and a numeric per-provider ranking breakdown (signal weights, scores, contributions) so both stay answerable after the live results age out
 - Patient-grounded RAG / Ask AI with conversational focus carry-over
 - Risk Timeline page — when each safety finding was actually live, graded by evidence strength
 - Duplicate re-upload detection — the same file or prescription is never counted twice
@@ -64,6 +65,8 @@
 - WHO antidote graph is optional and fail-open: unconfigured/missing NEO4J_* env never blocks uploads, endpoint ingestion requires auth, `POST /api/v1/knowledge-graph/antidotes` ingests a WHO EML PDF deterministically (pdfplumber table parsing — no LLM, nothing to hallucinate)
 - Antidote lookup is one bulk round trip per record, reused for both evidence grading and patient-facing notes; per-listing properties live on `:LISTED_IN` edges so adult EML and children's EMLc coexist without overwriting each other
 - Neo4j observability: step/completion/retry logging, redacted URIs, MERGE write counters distinguish "re-ingest changed nothing" from "load matched nothing"; driver connection-lifetime/liveness tuning for idle-pooled cloud instances
+- Referral-trail persistence is best-effort: a missing/unavailable referrals table never fails the live provider search; persisted trails are historical records OF searches (provenance + retrieved_at), never a provider directory
+- Ranking disclosure is numeric and additive: each provider's `ranking.components` lists signal weight, 0-1 score, and contribution to the 0-100 match score alongside the existing plain-language explanations
 - Chroma collection sanitization; confidence-aware extraction
 - Early cost-protection gate (reject before downstream AI)
 

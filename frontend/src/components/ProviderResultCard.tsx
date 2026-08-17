@@ -124,6 +124,32 @@ export function ProviderResultCard({ provider, index }: { provider: LiveProvider
             <li>• {provider.ranking.rating}</li>
             <li>• {provider.ranking.availability}</li>
           </ul>
+          {provider.ranking.components && provider.ranking.components.length > 0 && (
+            <dl className="mt-3 space-y-1 border-t border-slate-100 pt-2 text-xs text-slate-600">
+              {provider.ranking.components.map((component) => {
+                const label = {
+                  specialty_relevance: t("care.rankingComponentSpecialty"),
+                  distance: t("care.rankingComponentDistance"),
+                  rating: t("care.rankingComponentRating"),
+                  availability: t("care.rankingComponentAvailability"),
+                }[component.signal];
+                return (
+                  <div key={component.signal} className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+                    <dt className="font-medium text-slate-700">
+                      {label}
+                      <span className="ml-2 font-normal text-slate-500">
+                        {t("care.rankingWeightContribution", {
+                          weight: formatNumber(component.weight, { maximumFractionDigits: 0 }),
+                          contribution: formatNumber(component.contribution, { maximumFractionDigits: 1 }),
+                        })}
+                      </span>
+                    </dt>
+                    <dd className="text-slate-500">{component.explanation}</dd>
+                  </div>
+                );
+              })}
+            </dl>
+          )}
         </details>
       </CardBody>
     </Card>

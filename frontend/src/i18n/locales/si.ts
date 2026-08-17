@@ -472,6 +472,13 @@ export const si = {
     mapDirections: "සිතියම හෝ මාර්ග උපදෙස් විවෘත කරන්න",
     providerWebsite: "සේවා සපයන්නාගේ වෙබ් අඩවිය",
     whyDirectoryMatch: "මෙම නාමාවලි ගැළපීම පෙන්වන්නේ ඇයි",
+    referralReasonTitle: "මෙම යොමු කිරීම යෝජනා කළේ ඇයි",
+    referralPersisted: "මෙම යොමු කිරීමේ වාර්තාව ඔබේ ඉතිහාසයේ සුරකින ලදී.",
+    rankingComponentSpecialty: "විශේෂඥතා ගැළපීම",
+    rankingComponentDistance: "දුර",
+    rankingComponentRating: "ශ්‍රේණිගත කිරීම",
+    rankingComponentAvailability: "ලබා ගත හැකි බව",
+    rankingWeightContribution: "බර {{weight}}% · ලකුණු වලින් +{{contribution}}",
     mapLabel: "OpenStreetMap වෙතින් ආසන්න සායන සිතියම",
   },
   settings: {

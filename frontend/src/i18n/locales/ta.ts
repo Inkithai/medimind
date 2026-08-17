@@ -472,6 +472,13 @@ export const ta = {
     mapDirections: "வரைபடம் அல்லது வழிகாட்டலைத் திறக்கவும்",
     providerWebsite: "சேவை வழங்குநரின் இணையதளம்",
     whyDirectoryMatch: "இந்த அடைவு பொருத்தம் ஏன் காட்டப்படுகிறது",
+    referralReasonTitle: "இந்தப் பரிந்துரை ஏன் பரிந்துரைக்கப்பட்டது",
+    referralPersisted: "இந்தப் பரிந்துரை பதிவு உங்கள் வரலாற்றில் சேமிக்கப்பட்டது.",
+    rankingComponentSpecialty: "சிறப்புத் துறைப் பொருத்தம்",
+    rankingComponentDistance: "தூரம்",
+    rankingComponentRating: "மதிப்பீடு",
+    rankingComponentAvailability: "கிடைக்கும் தன்மை",
+    rankingWeightContribution: "எடை {{weight}}% · பொருத்த மதிப்பில் +{{contribution}}",
     mapLabel: "OpenStreetMap இலிருந்து அருகிலுள்ள மருத்துவ நிலையங்களின் வரைபடம்",
   },
   settings: {
