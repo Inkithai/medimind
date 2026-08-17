@@ -117,6 +117,7 @@ CORS_ORIGINS=*          # or https://your-frontend
 # GROQ_MODEL=openai/gpt-oss-120b
 # LLM_MODEL=gpt-4o-mini            # generic OpenAI-compatible
 # GEMINI_MAX_TOKENS=4096
+# GEMINI_MAX_COMPLETION_TOKENS=16384  # ceiling when escalating a truncated (finish_reason=length) generation
 # LLM_MAX_RATE_LIMIT_RETRIES=5
 ```
 

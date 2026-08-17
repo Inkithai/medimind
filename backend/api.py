@@ -834,19 +834,17 @@ async def _execute_upload_pipeline(
                         # This wrapper starts only when the shared executor has
                         # a real slot. Until then the file truthfully remains
                         # "queued" instead of claiming to be read while it is
-                        # sitting behind another upload job.
+                        # sitting behind another upload job. The first progress
+                        # event (reading/"Opening and checking the document") is
+                        # emitted by process_document() itself — emitting it here
+                        # too used to duplicate the jobs-table write and the log
+                        # line for every file.
                         logger.info(
                             "upload: user=%s processing '%s' (%d/%d)",
                             user_id,
                             original_name,
                             file_index,
                             total_files,
-                        )
-                        _file_progress(
-                            file_index,
-                            status="processing",
-                            step="reading",
-                            message="Opening and checking the document",
                         )
                         return process_document(
                             str(tmp_path),
