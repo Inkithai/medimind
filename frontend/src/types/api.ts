@@ -1024,3 +1024,237 @@ export interface CareSearchResponse {
   };
   disclaimer: string;
 }
+
+// ========================================================================== //
+// Clinical-safety & longitudinal CDS types (P0/P1/P2 features)
+// ========================================================================== //
+
+export type Severity = "high" | "moderate" | "low";
+
+/** A generic finding shared by the drug-lab / renal-hepatic / condition engines. */
+export interface ClinicalFinding {
+  medications_involved?: string[];
+  condition?: string;
+  organ?: string;
+  lab?: { test: string; value: number | string | null; unit: string | null; flag?: string | null };
+  lab_markers?: Array<{ test: string; value: number | null; unit: string | null; flag?: string | null }>;
+  explanation: string;
+  severity: Severity;
+  confidence?: number;
+  source?: string;
+  rule?: string;
+  finding_kind?: string;
+  // alert-fatigue annotation
+  feedback_verdict?: string | null;
+  is_overridden?: boolean;
+}
+
+export interface VitalTrend {
+  vital: string;
+  display_name: string;
+  data_points: Array<{ date: string | null; value: string | number }>;
+  direction: string;
+  latest: string | number;
+  unit?: string | null;
+  latest_flag: string | null;
+  risk_level: string;
+  explanation: string;
+}
+export interface VitalTrendsReport {
+  trends: VitalTrend[];
+  insufficient_data: Array<{ vital: string; reason: string }>;
+  summary: { vital_types: number; abnormal_latest: number };
+}
+
+export interface EarlyWarningComponent {
+  signal: string;
+  value: number | null;
+  points: number;
+  max_points: number;
+  detail: string;
+}
+export interface EarlyWarningReport {
+  score: number;
+  max_possible: number;
+  risk_band: string;
+  advice: string;
+  components: EarlyWarningComponent[];
+  inputs_available: number;
+  inputs_total: number;
+  note: string;
+}
+
+export interface AdherenceSignal {
+  ingredient: string;
+  signal: string;
+  gap_days?: number;
+  between?: string[];
+  last_supply?: string;
+  estimated_end?: string;
+  detail: string;
+}
+export interface AdherenceReport {
+  reference_date?: string;
+  signals: AdherenceSignal[];
+  summary: { medications_reviewed: number; signal_count: number };
+  note: string;
+}
+
+export interface SymptomFinding {
+  symptom: string;
+  relevant_medications_on_record: string[];
+  relevant_abnormal_labs: string[];
+}
+export interface SymptomAnalysis {
+  analysed: boolean;
+  matched_symptoms?: string[];
+  findings?: SymptomFinding[];
+  summary?: string;
+  note?: string;
+}
+
+export interface CareGap {
+  kind: string;
+  title: string;
+  detail: string;
+  priority: string;
+}
+export interface PreventiveCareReport {
+  age: number | null;
+  sex: string | null;
+  care_gaps: CareGap[];
+  count: number;
+  note: string;
+}
+
+export interface ManagedFinding extends ClinicalFinding {
+  finding_key: string;
+  _source_list?: string;
+  _merged_count?: number;
+  suppressed_reason?: string;
+}
+export interface ManagedAlertsReport {
+  active_findings: ManagedFinding[];
+  active_count: number;
+  suppressed_findings: ManagedFinding[];
+  suppressed_count: number;
+  collapsed_duplicates: number;
+  merge_log: Array<{ collapsed_into: string; rule?: string }>;
+}
+
+export type FeedbackVerdict = "confirmed" | "false_positive" | "needs_change" | "overridden";
+export interface FindingFeedbackInput {
+  finding_key?: string;
+  finding_kind?: string;
+  rule?: string;
+  medications_involved?: string[];
+  condition?: string;
+  organ?: string;
+  verdict: FeedbackVerdict;
+  reason?: string;
+  note?: string;
+  reviewer?: string;
+}
+export interface FindingFeedbackEntry extends FindingFeedbackInput {
+  user_id?: string;
+  finding_key: string;
+  created_at: string;
+}
+export interface FeedbackMetrics {
+  total: number;
+  decided: number;
+  by_verdict: Record<string, number>;
+  confirmation_rate: number | null;
+  false_positive_rate: number | null;
+  override_rate: number | null;
+  by_finding_kind: Record<string, Record<string, number>>;
+  noisiest_rules: Array<{ rule: string; total: number; overrides: number; false_positives: number }>;
+}
+
+export type FindingLifecycleState =
+  | "new" | "active" | "reviewed" | "confirmed" | "dismissed" | "resolved" | "reopened";
+export interface FindingLifecycleInput {
+  finding_kind?: string;
+  rule?: string;
+  medications_involved?: string[];
+  condition?: string;
+  organ?: string;
+  to_state: FindingLifecycleState;
+  reason?: string;
+  actor?: string;
+}
+export interface FindingLifecycleResult {
+  finding_key: string;
+  state: FindingLifecycleState;
+  from_state?: FindingLifecycleState;
+  transitioned?: boolean;
+  unchanged?: boolean;
+}
+export interface FindingLifecycleOverview {
+  findings: Array<Record<string, unknown> & {
+    finding_key: string;
+    lifecycle_state: FindingLifecycleState;
+    is_open: boolean;
+  }>;
+  open_count: number;
+  closed_count: number;
+  by_state: Record<string, number>;
+}
+
+export interface FhirImportResult {
+  patient_name: string;
+  documents: unknown[];
+  imported: Record<string, number>;
+  ignored_resource_types: string[];
+  note: string;
+}
+
+export interface PatientMeasurementInput {
+  name: string;
+  value: string | number;
+  unit?: string;
+  measured_at?: string;
+  kind?: string;
+  note?: string;
+}
+export interface PatientMeasurement extends PatientMeasurementInput {
+  source: string;
+  recorded_at: string;
+}
+
+export interface ProviderMessageInput {
+  body: string;
+  provider?: string;
+  thread_id?: string;
+  finding_key?: string;
+  direction?: string;
+}
+export interface ProviderMessage extends ProviderMessageInput {
+  user_id?: string;
+  thread_id: string;
+  direction: string;
+  created_at: string;
+}
+export interface ProviderThread {
+  thread_id: string;
+  provider: string;
+  message_count: number;
+  last_at: string;
+}
+
+export interface GuidelinesSource {
+  key: string;
+  version: string;
+  reviewed: string;
+  description: string;
+  source_url?: string;
+  age_days: number | null;
+  stale: boolean;
+}
+export interface GuidelinesStatus {
+  sources: GuidelinesSource[];
+  total: number;
+  stale_count: number;
+  staleness_threshold_days: number;
+  note: string;
+}

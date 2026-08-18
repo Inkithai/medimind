@@ -16,6 +16,12 @@ import { DocumentsPage } from "./pages/DocumentsPage";
 import { MedicinesPage } from "./pages/MedicinesPage";
 import { HistoryPage } from "./pages/HistoryPage";
 import { RiskTimelinePage } from "./pages/RiskTimelinePage";
+import { ClinicalSafetyPage } from "./pages/ClinicalSafetyPage";
+import { VitalsPage } from "./pages/VitalsPage";
+import { PreventiveCarePage } from "./pages/PreventiveCarePage";
+import { SymptomCheckerPage } from "./pages/SymptomCheckerPage";
+import { GuidelinesPage } from "./pages/GuidelinesPage";
+import { MessagesPage } from "./pages/MessagesPage";
 import { ChangesPage } from "./pages/ChangesPage";
 import { AppointmentPrepPage } from "./pages/AppointmentPrepPage";
 import { RecordIntegrityPage } from "./pages/RecordIntegrityPage";
@@ -210,6 +216,54 @@ export default function App() {
           element={
             <RequireAuth>
               <RiskTimelinePage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/clinical-safety"
+          element={
+            <RequireAuth>
+              <ClinicalSafetyPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/vitals"
+          element={
+            <RequireAuth>
+              <VitalsPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/preventive-care"
+          element={
+            <RequireAuth>
+              <PreventiveCarePage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/symptoms"
+          element={
+            <RequireAuth>
+              <SymptomCheckerPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/guidelines"
+          element={
+            <RequireAuth>
+              <GuidelinesPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/messages"
+          element={
+            <RequireAuth>
+              <MessagesPage />
             </RequireAuth>
           }
         />
