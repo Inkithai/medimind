@@ -484,6 +484,7 @@ export function FindCarePage() {
             {t("care.facilityType")}
             <select
               id="care-kind"
+              name="facility-kind"
               value={searchKind}
               onChange={(event) => {
                 const nextKind = event.target.value as SearchKind;
@@ -510,9 +511,11 @@ export function FindCarePage() {
             placeholder="Search specialty or type of care…"
           />
 
-          <label className="text-sm font-semibold text-slate-800">
+          <label htmlFor="care-availability" className="text-sm font-semibold text-slate-800">
             {t("care.availability")}
             <select
+              id="care-availability"
+              name="care-availability"
               value={availability}
               onChange={(event) => {
                 const next = event.target.value as CareAvailability;
@@ -529,9 +532,11 @@ export function FindCarePage() {
             </select>
           </label>
 
-          <label className="text-sm font-semibold text-slate-800">
+          <label htmlFor="care-radius" className="text-sm font-semibold text-slate-800">
             {t("care.radius")}
             <select
+              id="care-radius"
+              name="care-radius-km"
               value={radiusKm}
               onChange={(event) => {
                 const next = Number(event.target.value);

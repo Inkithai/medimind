@@ -381,6 +381,7 @@ export function LocationPicker({
               <input
                 ref={inputRef}
                 id={`${listboxId}-input`}
+                name="care-location-search"
                 value={query}
                 onChange={(event) => {
                   setQuery(event.target.value);
@@ -580,6 +581,7 @@ export function LocationPicker({
                 <p id={`${listboxId}-details-help`} className="mt-0.5 text-xs text-slate-600">{t("location.detailsHelp")}</p>
                 <input
                   id={`${listboxId}-details`}
+                  name="care-location-details"
                   value={addressDetails}
                   onChange={(event) => setAddressDetails(event.target.value)}
                   aria-describedby={`${listboxId}-details-help`}

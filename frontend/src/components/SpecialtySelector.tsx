@@ -169,6 +169,7 @@ export function SpecialtySelector({
             <input
               ref={inputRef}
               id={`${baseId}-specialty`}
+              name="care-specialty-search"
               value={query}
               onChange={(event) => {
                 setQuery(event.target.value);
