@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { useI18n } from "../i18n/I18nContext";
 import { classNames } from "../utils/format";
@@ -29,20 +29,24 @@ interface NavItem {
 }
 
 const NAV: NavItem[] = [
+  // Semantic, muted icon tiles (spec: pale background ~7-10% + medium-dark
+  // stroke; teal/cyan = records & communication, blue/violet = timelines &
+  // analysis, amber/orange = trust & safety review, rose = alerts/risk,
+  // slate = utilities).
   { to: "/dashboard", labelKey: "nav.dashboard", icon: TimelineIcon, chip: "bg-brand-50 text-brand-700" },
-  { to: "/documents", labelKey: "nav.records", icon: FileIcon, chip: "bg-sky-50 text-sky-700" },
-  { to: "/review", labelKey: "nav.trustReview", icon: ShieldIcon, chip: "bg-amber-50 text-amber-700" },
-  { to: "/medicines", labelKey: "nav.medications", icon: PillIcon, chip: "bg-emerald-50 text-emerald-700" },
-  { to: "/labs", labelKey: "nav.labs", icon: BeakerIcon, chip: "bg-violet-50 text-violet-700" },
-  { to: "/history", labelKey: "nav.timeline", icon: TimelineIcon, chip: "bg-sky-50 text-sky-700" },
-  { to: "/changes", labelKey: "nav.changes", icon: ChangesIcon, chip: "bg-indigo-50 text-indigo-700" },
-  { to: "/appointment-prep", labelKey: "nav.appointmentPrep", icon: AppointmentIcon, chip: "bg-cyan-50 text-cyan-800" },
-  { to: "/follow-up", labelKey: "nav.actionCenter", icon: ReminderIcon, chip: "bg-fuchsia-50 text-fuchsia-700" },
-  { to: "/record-integrity", labelKey: "nav.recordCheck", icon: IntegrityIcon, chip: "bg-orange-50 text-orange-700" },
+  { to: "/documents", labelKey: "nav.records", icon: FileIcon, chip: "bg-cyan-50 text-cyan-800" },
+  { to: "/review", labelKey: "nav.trustReview", icon: ShieldIcon, chip: "bg-amber-50 text-amber-800" },
+  { to: "/medicines", labelKey: "nav.medications", icon: PillIcon, chip: "bg-emerald-50 text-emerald-800" },
+  { to: "/labs", labelKey: "nav.labs", icon: BeakerIcon, chip: "bg-violet-50 text-violet-800" },
+  { to: "/history", labelKey: "nav.timeline", icon: TimelineIcon, chip: "bg-sky-50 text-sky-800" },
+  { to: "/changes", labelKey: "nav.changes", icon: ChangesIcon, chip: "bg-indigo-50 text-indigo-800" },
+  { to: "/appointment-prep", labelKey: "nav.appointmentPrep", icon: AppointmentIcon, chip: "bg-teal-50 text-teal-800" },
+  { to: "/follow-up", labelKey: "nav.actionCenter", icon: ReminderIcon, chip: "bg-teal-50 text-teal-800" },
+  { to: "/record-integrity", labelKey: "nav.recordCheck", icon: IntegrityIcon, chip: "bg-orange-50 text-orange-800" },
   { to: "/safety", labelKey: "nav.safety", icon: ShieldIcon, chip: "bg-amber-50 text-amber-800" },
-  { to: "/risk-timeline", labelKey: "nav.riskTimeline", icon: ClockIcon, chip: "bg-orange-50 text-orange-700" },
+  { to: "/risk-timeline", labelKey: "nav.riskTimeline", icon: ClockIcon, chip: "bg-rose-50 text-rose-800" },
   { to: "/ask", labelKey: "nav.ask", icon: ChatIcon, chip: "bg-brand-50 text-brand-700" },
-  { to: "/find-care", labelKey: "nav.care", icon: LocationIcon, chip: "bg-rose-50 text-rose-700" },
+  { to: "/find-care", labelKey: "nav.care", icon: LocationIcon, chip: "bg-cyan-50 text-cyan-800" },
   { to: "/settings", labelKey: "nav.settings", icon: SettingsIcon, chip: "bg-slate-100 text-slate-700" },
 ];
 
@@ -74,6 +78,7 @@ export function Layout() {
   const { isConfigured, credentials, createNewWorkspace, clearCredentials } = useAuth();
   const { t } = useI18n();
   const navigate = useNavigate();
+  const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   // Desktop-only: collapse the sidebar to an icon rail (persisted).
   const [collapsed, setCollapsed] = useState(readCollapsed);
@@ -160,40 +165,43 @@ export function Layout() {
         </div>
       </header>
 
-      {/* Mobile drawer; desktop sticky sidebar remains visible on long pages. */}
+      {/* Mobile drawer; desktop sticky sidebar remains visible on long pages.
+          Three-part fixed-height structure: header + upload stay visible, the
+          workflow navigation scrolls independently, and the utility region
+          (About, language, workspace controls) stays pinned at the bottom. */}
       <aside
         ref={sidebarRef}
         id="primary-sidebar"
         className={classNames(
-          "fixed bottom-0 left-0 top-0 z-30 h-dvh w-[min(18rem,calc(100vw-2rem))] transform border-r border-slate-200 bg-white transition-all duration-200",
+          "fixed bottom-0 left-0 top-0 z-30 h-dvh w-[min(18rem,calc(100vw-2rem))] transform border-r border-[#e3e9e8] bg-[#fcfdfd] transition-all duration-200",
           // Keep the desktop sidebar pinned to the viewport rather than stretching with page content.
           "lg:sticky lg:bottom-auto lg:top-0 lg:h-dvh lg:shrink-0 lg:self-start lg:translate-x-0",
           sidebarOpen ? "translate-x-0" : "-translate-x-full",
-          collapsed ? "lg:w-[76px]" : "lg:w-64"
+          collapsed ? "lg:w-[72px]" : "lg:w-[280px]"
         )}
         aria-label={t("nav.main")}
         aria-modal={!desktop && sidebarOpen ? true : undefined}
         role={!desktop && sidebarOpen ? "dialog" : undefined}
       >
-        <div className="flex h-full min-h-0 flex-col">
+        <div className="flex h-full min-h-0 flex-col overflow-hidden">
           <div
             className={classNames(
-              "flex h-14 shrink-0 items-center gap-3 px-4",
+              "flex min-h-16 shrink-0 items-center gap-3 px-4 py-3",
               collapsed && "lg:justify-center lg:px-2"
             )}
           >
-            <div className={classNames("contents", collapsed && "lg:hidden")}>
-              <Logo />
-              <div className="min-w-0 flex-1">
-                <p className="text-lg font-bold leading-tight text-slate-900">MediMind</p>
-                <p className="text-sm leading-tight text-slate-600">{t("common.tagline")}</p>
-              </div>
+            <Logo />
+            <div className={classNames("min-w-0 flex-1", collapsed && "lg:hidden")}>
+              <p className="text-xl font-bold leading-tight text-slate-900">MediMind</p>
             </div>
             {desktop && (
               <button
                 type="button"
                 onClick={() => setCollapsed((value) => !value)}
-                className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 lg:flex"
+                className={classNames(
+                  "hidden h-10 w-10 shrink-0 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 lg:flex",
+                  collapsed && "lg:hidden"
+                )}
                 aria-label={collapsed ? t("nav.expandSidebar") : t("nav.collapseSidebar")}
                 aria-expanded={!collapsed}
                 title={collapsed ? t("nav.expandSidebar") : t("nav.collapseSidebar")}
@@ -221,12 +229,15 @@ export function Layout() {
           </div>
 
           {isConfigured && (
-            <div className="shrink-0 px-3 pb-2">
+            <div className="shrink-0 px-3 pb-3">
               <NavLink
                 to="/upload"
                 onClick={closeSidebar}
                 tabIndex={navInteractive ? undefined : -1}
-                className={classNames("btn-primary h-10 min-h-0 w-full px-3 py-0 text-sm", collapsed && "lg:min-w-0 lg:px-0")}
+                className={classNames(
+                  "flex h-11 w-full items-center justify-center gap-2 rounded-[10px] bg-brand-600 px-3 text-[15px] font-semibold text-white shadow-sm transition hover:bg-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-300 focus-visible:ring-offset-2",
+                  collapsed && "lg:px-0"
+                )}
                 title={collapsed ? t("nav.upload") : undefined}
               >
                 <UploadIcon className="h-5 w-5 shrink-0" />
@@ -236,7 +247,7 @@ export function Layout() {
           )}
 
           <nav
-            className="scroll-thin min-h-0 flex-1 space-y-0.5 overflow-y-auto overscroll-contain px-3 py-1"
+            className="scroll-thin min-h-0 flex-1 space-y-0.5 overflow-y-auto overscroll-contain px-2 py-1"
             aria-label={t("nav.main")}
           >
             {NAV.map((item, index) => {
@@ -260,19 +271,24 @@ export function Layout() {
                   title={collapsed ? t(item.labelKey) : undefined}
                   className={({ isActive }) =>
                     classNames(
-                      "group flex min-h-[44px] items-center gap-2.5 rounded-lg px-2 text-sm transition lg:min-h-9",
+                      "group flex min-h-[44px] items-center gap-2.5 rounded-[9px] px-2.5 text-[15px] font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-offset-1 lg:min-h-[42px]",
                       collapsed && "lg:justify-center lg:px-0",
+                      // Settings stays in place but gets a little separation
+                      // to read as a utility destination (no group label added).
+                      item.to === "/settings" && "mt-2",
                       disabled
                         ? "cursor-not-allowed text-slate-400"
                         : isActive
-                        ? "bg-brand-50 font-semibold text-brand-800"
-                        : "text-slate-700 hover:bg-slate-50 hover:text-slate-950"
+                        ? // Pale-teal active treatment: background + weight/color
+                          // + teal edge marker — selection never relies on color alone.
+                          "bg-[#eaf6f4] font-semibold text-[#123c3a] shadow-[inset_3px_0_0_#0F766E]"
+                        : "text-slate-600 hover:bg-[#f3f7f6] hover:text-slate-900"
                     )
                   }
                 >
                   {({ isActive }) => (
                     <>
-                      <span className={classNames("flex h-7 w-7 shrink-0 items-center justify-center rounded-md", item.chip, !isActive && "opacity-90")}>
+                      <span className={classNames("flex h-7 w-7 shrink-0 items-center justify-center rounded-[7px]", item.chip)}>
                         <Icon className="h-4 w-4" />
                       </span>
                       <span className={classNames("min-w-0 flex-1 break-words", collapsed && "lg:hidden")}>{t(item.labelKey)}</span>
@@ -285,26 +301,29 @@ export function Layout() {
           </nav>
 
           {/* Secondary and informational — deliberately outside the workflow
-              nav above, and available with or without a workspace. Collapses
-              to an icon on the desktop rail like the other nav items. */}
-          <div className="shrink-0 border-t border-slate-100 px-3 py-1">
+              nav above, and available with or without a workspace. Same row
+              treatment and active state as the main navigation, so About reads
+              as part of the application rather than an unrelated footer box. */}
+          <div className="shrink-0 border-t border-[#e5ebe9] px-2 pb-3 pt-2">
             <NavLink
               to="/about"
               onClick={closeSidebar}
               title={t("about.nav")}
               className={({ isActive }) =>
                 classNames(
-                  "flex min-h-[44px] items-center gap-2.5 rounded-lg px-2 text-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500",
+                  "flex min-h-[44px] items-center gap-2.5 rounded-[9px] px-2.5 text-[15px] font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-offset-1",
                   collapsed && "lg:justify-center lg:px-0",
                   isActive
-                    ? "bg-slate-100 font-semibold text-slate-900"
-                    : "text-slate-500 hover:bg-slate-50 hover:text-slate-800"
+                    ? "bg-[#eaf6f4] font-semibold text-[#123c3a] shadow-[inset_3px_0_0_#0F766E]"
+                    : "text-slate-600 hover:bg-[#f3f7f6] hover:text-slate-900"
                 )
               }
             >
               {({ isActive }) => (
                 <>
-                  <InfoIcon className="h-4 w-4 shrink-0" />
+                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[7px] bg-brand-50 text-brand-700">
+                    <InfoIcon className="h-4 w-4" />
+                  </span>
                   <span className={classNames("min-w-0 truncate", collapsed && "lg:hidden")}>
                     {t("about.nav")}
                   </span>
@@ -312,32 +331,32 @@ export function Layout() {
                 </>
               )}
             </NavLink>
-          </div>
 
-          <div className={classNames("shrink-0 border-t border-slate-100 px-3 py-2", collapsed && "lg:hidden")}>
-            <LanguageSelector className="mb-1.5 hidden lg:block" />
-            {isConfigured && (
-              <div className="grid grid-cols-2 gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => void createNewWorkspace()}
-                  className="min-h-[44px] rounded-lg border border-slate-300 bg-white px-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 lg:min-h-9"
-                  title={`${t("nav.newWorkspace")} (${credentials.userId})`}
-                >
-                  {t("nav.newWorkspace")}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    clearCredentials();
-                    navigate("/");
-                  }}
-                  className="min-h-[44px] rounded-lg border border-slate-300 bg-white px-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 lg:min-h-9"
-                >
-                  {t("nav.resetData")}
-                </button>
-              </div>
-            )}
+            <div className={classNames("px-1", collapsed && "lg:hidden")}>
+              <LanguageSelector className="mb-2 hidden lg:block" />
+              {isConfigured && (
+                <div className="grid grid-cols-2 gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => void createNewWorkspace()}
+                    className="min-h-[44px] rounded-lg border border-slate-300 bg-white px-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 lg:min-h-10"
+                    title={`${t("nav.newWorkspace")} (${credentials.userId})`}
+                  >
+                    {t("nav.newWorkspace")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      clearCredentials();
+                      navigate("/");
+                    }}
+                    className="min-h-[44px] rounded-lg border border-red-200 bg-white px-1.5 text-xs font-semibold text-red-700 transition hover:border-red-300 hover:bg-red-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400 lg:min-h-10"
+                  >
+                    {t("nav.resetData")}
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </aside>
@@ -355,8 +374,20 @@ export function Layout() {
         />
       )}
 
-      <main id="main-content" tabIndex={-1} className="min-w-0 flex-1 overflow-x-hidden bg-slate-50">
-        <div className="app-content mx-auto min-w-0 max-w-6xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+      {/* overflow-x-clip (not hidden): `hidden` would create a scroll
+          container and silently break the About page's sticky section bar
+          and any other sticky element inside the content column. `clip`
+          guards against horizontal overflow without a scrollport. */}
+      <main id="main-content" tabIndex={-1} className="min-w-0 flex-1 overflow-x-clip bg-slate-50">
+        {/* The About page opts into a wider editorial grid (spec: up to
+            1280px with 48px gutters); every other page keeps the standard
+            72rem content column. */}
+        <div
+          className={classNames(
+            "app-content mx-auto min-w-0 px-4 py-6 sm:px-6 lg:px-8 lg:py-8",
+            location.pathname.startsWith("/about") ? "max-w-[1280px] lg:px-12" : "max-w-6xl"
+          )}
+        >
           <Outlet />
         </div>
       </main>
