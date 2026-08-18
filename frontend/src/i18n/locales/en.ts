@@ -70,6 +70,13 @@ export const en = {
     recordCheck: "Record Check",
     safety: "Safety Alerts",
     riskTimeline: "Risk Timeline",
+    clinicalSafety: "Clinical Safety",
+    vitals: "Vitals & Monitoring",
+    preventive: "Preventive Care",
+    symptoms: "Symptom Check",
+    guidelines: "Guidelines",
+    messages: "Messages",
+    fhir: "Import Record",
     ask: "Ask AI",
     care: "Find Care",
     settings: "Settings",
@@ -96,6 +103,7 @@ export const en = {
       symptoms: "Cross-reference a symptom against your record. Not a diagnosis.",
       guidelines: "Review status of the clinical knowledge sources used.",
       messages: "Message a provider about a finding.",
+      fhir: "Import an electronic health record (FHIR R4) directly.",
       ask: "Ask questions answered from your own records.",
       care: "Find nearby healthcare facilities and professionals.",
       settings: "Manage your workspace and preferences.",
@@ -852,6 +860,10 @@ export const en = {
   messages: {
     title: "Provider Messages",
     subtitle: "Message a provider about a finding. Stored in your workspace.",
+  },
+  fhir: {
+    title: "Import FHIR Record",
+    subtitle: "Import an existing electronic health record (FHIR R4 Bundle) instead of uploading individual documents. The structured data is read straight into your workspace.",
   },
 
 } as const;

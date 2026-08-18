@@ -48,6 +48,7 @@ const NAV: NavItem[] = [
   { group: "records", to: "/medicines", labelKey: "nav.medications", descriptionKey: "nav.descriptions.medications", icon: PillIcon, chip: "bg-emerald-50 text-emerald-800" },
   { group: "records", to: "/labs", labelKey: "nav.labs", descriptionKey: "nav.descriptions.labs", icon: BeakerIcon, chip: "bg-violet-50 text-violet-800" },
   { group: "records", to: "/history", labelKey: "nav.timeline", descriptionKey: "nav.descriptions.timeline", icon: TimelineIcon, chip: "bg-sky-50 text-sky-800" },
+  { group: "records", to: "/import", labelKey: "nav.fhir", descriptionKey: "nav.descriptions.fhir", icon: UploadIcon, chip: "bg-indigo-50 text-indigo-800" },
   { group: "insights", to: "/changes", labelKey: "nav.changes", descriptionKey: "nav.descriptions.changes", icon: ChangesIcon, chip: "bg-indigo-50 text-indigo-800" },
   { group: "insights", to: "/safety", labelKey: "nav.safety", descriptionKey: "nav.descriptions.safety", icon: AlertIcon, chip: "bg-red-50 text-red-800" },
   { group: "insights", to: "/risk-timeline", labelKey: "nav.riskTimeline", descriptionKey: "nav.descriptions.riskTimeline", icon: ChartIcon, chip: "bg-rose-50 text-rose-800" },

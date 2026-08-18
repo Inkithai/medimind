@@ -22,6 +22,7 @@ import { PreventiveCarePage } from "./pages/PreventiveCarePage";
 import { SymptomCheckerPage } from "./pages/SymptomCheckerPage";
 import { GuidelinesPage } from "./pages/GuidelinesPage";
 import { MessagesPage } from "./pages/MessagesPage";
+import { FhirImportPage } from "./pages/FhirImportPage";
 import { ChangesPage } from "./pages/ChangesPage";
 import { AppointmentPrepPage } from "./pages/AppointmentPrepPage";
 import { RecordIntegrityPage } from "./pages/RecordIntegrityPage";
@@ -264,6 +265,14 @@ export default function App() {
           element={
             <RequireAuth>
               <MessagesPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/import"
+          element={
+            <RequireAuth>
+              <FhirImportPage />
             </RequireAuth>
           }
         />

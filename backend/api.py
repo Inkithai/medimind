@@ -2692,17 +2692,28 @@ async def get_finding_lifecycle(user_id: str = Depends(get_current_user)) -> Dic
 @app.post("/api/v1/import/fhir")
 async def import_fhir(payload: Dict[str, Any], user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
     """Ingest a FHIR R4 Bundle into the extraction document shape and persist
-    it to the workspace (then re-derive like any upload)."""
+    it to the workspace (then re-derive like any upload). The parse result is
+    always returned so the UI can preview what was understood even when
+    persistence is unavailable (best-effort), instead of a bare 502."""
     from fhir_ingestion import parse_fhir_bundle
     bundle = payload.get("bundle") or payload
-    result = parse_fhir_bundle(bundle, document_id=f"fhir_{user_id[:8]}")
+    try:
+        result = parse_fhir_bundle(bundle, document_id=f"fhir_{user_id[:8]}")
+    except Exception as e:
+        raise HTTPException(400, f"FHIR bundle could not be parsed: {e}")
+
     docs = result.get("documents") or []
+    result["persisted"] = False
+    result["persistence_error"] = None
     if docs:
         try:
             db.insert_documents(user_id, docs)
             audit.record(user_id, "fhir.import", {"resources": result["imported"]})
+            result["persisted"] = True
         except Exception as e:
-            raise HTTPException(502, f"FHIR parsed but persistence failed: {e}")
+            # Surface the parse result anyway — the data is valid; only the
+            # storage layer (e.g. Supabase not configured) is unavailable.
+            result["persistence_error"] = str(e)
     return result
 
 

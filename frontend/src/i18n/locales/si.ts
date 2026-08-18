@@ -75,6 +75,7 @@ export const si = {
     preventive: "Preventive Care",
     symptoms: "Symptom Check",
     guidelines: "Guidelines",
+    fhir: "Import Record",
     messages: "Messages",
     ask: "AI වෙතින් අසන්න",
     care: "ප්‍රතිකාර සොයන්න",
@@ -102,6 +103,7 @@ export const si = {
       symptoms: "Cross-reference a symptom against your record. Not a diagnosis.",
       guidelines: "Review status of the clinical knowledge sources used.",
       messages: "Message a provider about a finding.",
+      fhir: "Import an electronic health record (FHIR R4) directly.",
       ask: "ඔබේම වාර්තා පදනම් කරගෙන ප්‍රශ්න අසන්න.",
       care: "අසල සෞඛ්‍ය සේවා ස්ථාන සහ වෘත්තිකයන් සොයන්න.",
       settings: "ඔබේ වැඩබිම සහ මනාප කළමනාකරණය කරන්න.",
@@ -863,5 +865,9 @@ export const si = {
   messages: {
     title: "Provider Messages",
     subtitle: "Message a provider about a finding. Stored in your workspace.",
+  },
+  fhir: {
+    title: "Import FHIR Record",
+    subtitle: "Import an existing electronic health record (FHIR R4 Bundle) instead of uploading individual documents. The structured data is read straight into your workspace.",
   },
 };

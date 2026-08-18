@@ -75,6 +75,7 @@ export const ta = {
     preventive: "Preventive Care",
     symptoms: "Symptom Check",
     guidelines: "Guidelines",
+    fhir: "Import Record",
     messages: "Messages",
     ask: "AI-யிடம் கேளுங்கள்",
     care: "சிகிச்சையைத் தேடுங்கள்",
@@ -102,6 +103,7 @@ export const ta = {
       symptoms: "Cross-reference a symptom against your record. Not a diagnosis.",
       guidelines: "Review status of the clinical knowledge sources used.",
       messages: "Message a provider about a finding.",
+      fhir: "Import an electronic health record (FHIR R4) directly.",
       ask: "உங்கள் சொந்த பதிவுகளிலிருந்து பதிலளிக்கப்படும் கேள்விகளைக் கேளுங்கள்.",
       care: "அருகிலுள்ள சுகாதார நிலையங்களையும் நிபுணர்களையும் கண்டறியுங்கள்.",
       settings: "உங்கள் பணியிடத்தையும் விருப்பங்களையும் நிர்வகியுங்கள்.",
@@ -863,5 +865,9 @@ export const ta = {
   messages: {
     title: "Provider Messages",
     subtitle: "Message a provider about a finding. Stored in your workspace.",
+  },
+  fhir: {
+    title: "Import FHIR Record",
+    subtitle: "Import an existing electronic health record (FHIR R4 Bundle) instead of uploading individual documents. The structured data is read straight into your workspace.",
   },
 };

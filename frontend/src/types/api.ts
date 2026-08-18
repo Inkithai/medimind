@@ -1207,6 +1207,8 @@ export interface FhirImportResult {
   imported: Record<string, number>;
   ignored_resource_types: string[];
   note: string;
+  persisted?: boolean;
+  persistence_error?: string | null;
 }
 
 export interface PatientMeasurementInput {
