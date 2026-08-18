@@ -617,6 +617,13 @@ export const api = {
     return request<CrossCheckReport>(credentials, "/api/v1/cross-check");
   },
 
+  getMedicationSafety(credentials: Credentials): Promise<CrossCheckReport & { dosage_report?: DosageReport }> {
+    return request<CrossCheckReport & { dosage_report?: DosageReport }>(
+      credentials,
+      "/api/v1/medication-safety"
+    );
+  },
+
   getDosageReport(credentials: Credentials): Promise<DosageReport> {
     return request<DosageReport>(credentials, "/api/v1/dosage-report");
   },

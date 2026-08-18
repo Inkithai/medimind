@@ -2,6 +2,50 @@
 
 MediMind converts your private medical files into something you can actually navigate. Drop in prescriptions, lab reports, and discharge summaries and you get a structured timeline, automatic safety checks, lab trend analysis, and grounded question answering. All of it lives inside a **private anonymous workspace** — no signup, no password, just a `session_id` stored locally in your browser.
 
+**YGC Final Round: 19 / 19 requirements complete.** Official brief: [`docs/YGC_FINAL_ROUND_RULES.md`](docs/YGC_FINAL_ROUND_RULES.md). Evidence: [`docs/YGC_FINAL_ROUND_CHECKLIST.md`](docs/YGC_FINAL_ROUND_CHECKLIST.md). Feature inventory: [`docs/FEATURES.md`](docs/FEATURES.md).
+
+### YGC Final Round — Competition Checklist
+
+#### ROUND 1 BASELINE
+
+- [x] **R1** — Extract data from multiple medical documents (lab reports, prescriptions, notes, discharge summaries)
+- [x] **R2** — Merge extracted data into one unified patient timeline
+- [x] **R3** — Cross-check prescriptions for interactions, duplicates, or conflicting dosages
+- [x] **R4** — Track lab result trends over time
+- [x] **R5** — Explain lab trends in plain language
+- [x] **R6** — Answer follow-up questions across multiple documents
+- [x] **R7** — Give a confidence score for flagged issues
+- [x] **R8** — Recommend consulting a doctor for high-risk or low-confidence cases
+
+#### FINAL ROUND NEW FEATURE
+
+- [x] **R9** — Identify the right type of doctor based on the flagged issue (specialty matching)
+- [x] **R10** — Ask the user for their location (city/area)
+- [x] **R11** — Ask the user for their availability for consultation
+- [x] **R12** — Search real, publicly available data using Google Maps Places API or a free alternative (OpenStreetMap/Nominatim)
+- [x] **R13** — Display a result list showing: doctor/clinic name, specialty, address, distance, and rating/contact number
+- [x] **R14** — Handle no-results gracefully: clear message + suggest widening the search area (no fake results)
+
+#### DATA RULES
+
+- [x] **R15** — All doctor/clinic data must come from a real public source (no synthetic or fabricated data)
+- [x] **R16** — App must never present itself as making a diagnosis
+
+#### DELIVERABLES
+
+- [x] **R17** — Working application demonstrating the full end-to-end flow: upload → flag → location asked → doctor list shown
+- [x] **R18** — Working web app link with a README explaining which API was used and how
+- [x] **R19** — A short demo (5 minutes) covering the full flow — [`docs/DEMO_RUNBOOK.md`](docs/DEMO_RUNBOOK.md)
+
+**Directory APIs used (R12 / R18).** Find Local Care (`/care`) searches **live public listings only** — nothing is seeded or mocked.
+
+| Source | When it is used | How |
+|---|---|---|
+| **Google Places API (New)** | `PROVIDER_DIRECTORY_SOURCE=google_places` + `GOOGLE_PLACES_API_KEY`, or `CARE_PROVIDER=google` + `GOOGLE_MAPS_API_KEY` | Backend geocodes the city/area, then Nearby Search (coordinates) or Text Search (city text). Key stays server-side. |
+| **OpenStreetMap / Nominatim + Overpass** | Default, and automatic fallback | Nominatim geocodes the city/area; Overpass returns nearby doctors/clinics/hospitals. No API key. |
+
+Zero matches return an empty list plus a “widen the search area” message. Missing rating or phone is shown as “Not available”, never invented. Full contract: [`backend/docs/care_recommendations.md`](backend/docs/care_recommendations.md). Deploy: [`docs/DEPLOYMENT_GUIDE.md`](docs/DEPLOYMENT_GUIDE.md).
+
 ```
                Original file (PDF/JPG)
                         |
@@ -22,9 +66,13 @@ MediMind converts your private medical files into something you can actually nav
                 |
      ┌──────────┼──────────┐
      │          │          │
- Safety     Lab Trends   Vector Store (Chroma or Supabase `chunks`)
- check      deterministic   |  ← VECTOR_STORE=chroma (local) or supabase (no volume)
-     │          │           └──→ RAG Q&A / Conversations (query rewrite)
+ Medication  Lab Trends   Vector Store (Chroma or Supabase `chunks`)
+ Safety      deterministic   |  ← VECTOR_STORE=chroma (local) or supabase (no volume)
+ service                    └──→ RAG Q&A / Conversations (query rewrite)
+ (medication_safety.py —
+  interactions / duplicates /
+  dosage / allergy; not extraction)
+     │          │
      └──────────┴──────────→ JSON answer with citations
 ```
 
@@ -46,7 +94,8 @@ Vision+text use the same Gemini model; Groq needs two. All three are OpenAI-comp
 
 | File | What it handles |
 |---|---|
-| `medical_extractor.py` | `LLM_PROVIDER` layer, vision / text extraction, patient grouping, timeline creation, safety LLM call plus deterministic duplicate detection, local CLI persistence |
+| `medical_extractor.py` | `LLM_PROVIDER` layer, vision / text extraction, patient grouping, timeline creation, local CLI persistence. Does **not** own medication safety. |
+| `medication_safety.py` | Dedicated medication-safety service. Reads the timeline and writes analyses: deterministic interaction KB, allergy KB, duplicates, dosage, drug–lab / renal-hepatic / condition engines, numeric confidence grading. HTTP: `GET /api/v1/medication-safety`. |
 | `document_filter.py` | Fast post-extraction filter for non-medical files (no extra LLM call, reuses `document_type` + clinical fields) |
 | `lab_trends.py` | Pure Python trend engine — direction, crossings, recovery (`returned_to_normal`), unit-clash decline, and thousands-aware parsing |
 | `change_detection.py` / `record_integrity.py` | Deterministic longitudinal change detection and source-linked cross-document discrepancy checks |
@@ -185,6 +234,8 @@ Citations resolve to documents by **exact** filename match (`frontend/src/utils/
 - **Find Care** `/find-care` — search-as-you-type or current location → map confirmation → provider-neutral hospitals, clinics, pharmacies, laboratories, and doctors within the selected radius.
 - **About MediMind** `/about` — current capabilities, hybrid architecture, safety/data boundaries, and an honest prioritized roadmap.
 
+A hidden speaker-notes URL (`/ygc-prep`) is registered outside the workspace layout for the live demo. It is not linked from the sidebar, landing page, footer, or workflow NAV — type the path. Component tests: `npm run test:judge-prep`.
+
 States distinguished: loading, empty 404 (no record), 401 auth, 422 validation/non-medical, 502 ML pipeline, network/CORS.
 
 #### Source evidence contract
@@ -211,7 +262,7 @@ cd frontend
 npm install
 npm run dev       # http://localhost:5173, proxies /api → http://127.0.0.1:8000
 npm run lint      # TypeScript verification
-npm run test      # auth, i18n, axe accessibility, keyboard, geolocation, and care regressions
+npm run test      # auth, i18n, axe, geolocation, care, About, timeline empty-state, hidden /ygc-prep
 npm run build     # production bundle
 ```
 
@@ -316,6 +367,14 @@ X-User-Id: <user_id>
 
 `GET /api/v1/timeline`, `/cross-check`, `/lab-trends` — 404 if no snapshot yet. Reads replay current corrections and quarantine policy so an older snapshot cannot leak conflicting facts.
 
+#### Medication safety
+Dedicated service (`medication_safety.py`) — not extraction and not RAG. The Safety page (`/safety`) calls this surface.
+
+- `GET /api/v1/medication-safety` — structured report plus `service`, `module`, `dosage_report`, and a not-a-diagnosis disclaimer. 404 if no snapshot. Auth required.
+- `POST /api/v1/medication-safety/reanalyze` — rebuilds and persists the full safety pipeline from current documents. 409 during an active upload, 404 if no documents. Returns `reanalyzed`, before/after finding counts, and `indexed`.
+
+Offline tests: `backend/tests/test_medication_safety_service.py` (engine), `backend/tests/test_medication_safety_endpoints.py` (TestClient), and `backend/tests/test_p1_p2_endpoints.py` (TestClient for vitals / symptoms / alerts / FHIR / measurements / messaging / guidelines).
+
 #### Corrections and source conflicts
 
 - `GET /api/v1/documents/{document_id}/corrections` returns immutable original/effective extraction and audit events.
@@ -404,7 +463,7 @@ VECTOR_STORE=supabase python backend/inspect_chroma.py "anon_ab12cd34ef56"
 - **`GROQ_API_KEY` placeholder handling** — legacy var now treats `your-groq-api-key` / `your-*` as missing, not valid.
 - **AuthContext** — `clearCredentials`/`createNewWorkspace` reset `provisioningStarted` so erasing workspace no longer stalls auto-provision after StrictMode guard.
 - **DocumentViewer** — PDF detection now strips query params (`split("?")[0]`) so Cloudinary `...pdf?dl=0` renders as iframe, not broken image.
-- **Docs** — `backend/docs/` is the current architecture source of truth: three presentation layers (pipeline, intelligence, isolation). No `/care` on this branch.
+- **Docs** — project docs live in `docs/` (competition checklist, features, deploy, demo). `backend/docs/` is the architecture source of truth: Understand → Detect → Explain → Protect, plus the live-directory contract in `care_recommendations.md`.
 - Earlier: Supabase chained `.order("uploaded_at").order("id")`, lifespan, dateutil sorting, `_parse_range` robust to `70-99 mg/dL`, upload dedup fix, anonymous session flow.
 
 ### Limitations

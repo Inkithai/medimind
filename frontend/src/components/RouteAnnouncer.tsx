@@ -28,6 +28,11 @@ export function RouteAnnouncer() {
   const [message, setMessage] = useState("");
 
   useEffect(() => {
+    if (location.pathname === "/ygc-prep") {
+      document.title = "Judge Q&A prep · MediMind";
+      setMessage("Judge Q&A prep");
+      return;
+    }
     const title = t(routeKeys[location.pathname] || "common.appName");
     document.title = `${title} · MediMind`;
     setMessage(t("a11y.routeChanged", { title }));

@@ -29,12 +29,9 @@ export function CrossCheckPage() {
     setLoading(true);
     setError(null);
     try {
-      const [data, dosage] = await Promise.all([
-        api.getCrossCheck(credentials),
-        api.getDosageReport(credentials),
-      ]);
+      const data = await api.getMedicationSafety(credentials);
       setReport(data);
-      setDosageReport(dosage);
+      setDosageReport(data.dosage_report ?? (await api.getDosageReport(credentials)));
     } catch (err) {
       setReport(null);
       setError(err);

@@ -28,6 +28,7 @@ import { AppointmentPrepPage } from "./pages/AppointmentPrepPage";
 import { RecordIntegrityPage } from "./pages/RecordIntegrityPage";
 import { FollowUpPage } from "./pages/FollowUpPage";
 import { ReviewPage } from "./pages/ReviewPage";
+import { JudgePrepPage } from "./pages/JudgePrepPage";
 import { Spinner } from "./components/Spinner";
 import { useI18n } from "./i18n/I18nContext";
 
@@ -75,6 +76,8 @@ export default function App() {
   return (
     <Routes>
       <Route path="/" element={<LandingPage />} />
+      {/* Speaker notes only — no nav, sidebar, or landing link. Type /ygc-prep. */}
+      <Route path="/ygc-prep" element={<JudgePrepPage />} />
       <Route element={<Layout />}>
         <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="/settings" element={<SettingsPage />} />

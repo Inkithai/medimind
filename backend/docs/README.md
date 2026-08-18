@@ -17,6 +17,6 @@ There is **no** `/care`, `/find-care`, Geoapify, OSM, Leaflet, or consultation p
 | [05-api-storage-and-jobs.md](05-api-storage-and-jobs.md) | Protect — anonymous workspace isolation |
 | [06-care-navigation-extension.md](06-care-navigation-extension.md) | **Not on the main deck.** Optional future Connect layer: provider-agnostic facility search. Not in this tree. |
 
-Setup and deploy: repo-root [README.md](../../README.md), [DEPLOYMENT_GUIDE.md](../../DEPLOYMENT_GUIDE.md).
+Setup and deploy: repo-root [README.md](../../README.md), [DEPLOYMENT_GUIDE.md](../../docs/DEPLOYMENT_GUIDE.md).
 
 Model IDs, retry ladders, embeddings, and collection-name rules stay in **engineering notes** at the bottom of 02–05 — not on the main slides.

@@ -880,6 +880,8 @@ const API_GROUPS: Array<{
   {
     titleKey: "about.apiClinical",
     endpoints: [
+      { method: "GET", path: "/api/v1/medication-safety", bodyKey: "about.e6" },
+      { method: "POST", path: "/api/v1/medication-safety/reanalyze", bodyKey: "about.e6" },
       { method: "GET", path: "/api/v1/cross-check", bodyKey: "about.e6" },
       { method: "GET", path: "/api/v1/lab-trends", bodyKey: "about.e7" },
       { method: "GET", path: "/api/v1/changes", bodyKey: "about.e16" },

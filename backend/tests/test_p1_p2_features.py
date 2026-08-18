@@ -122,6 +122,16 @@ def test_adherence_no_signal_when_continuous():
     assert out["signals"] == []
 
 
+def test_adherence_without_reference_date_does_not_crash():
+    """HTTP GET /adherence calls this with no reference_date (defaults to today)."""
+    tl = _timeline(meds=[
+        {"name": "Lisinopril", "ingredients": ["lisinopril"], "date": "2026-01-01", "duration_days": 30},
+    ])
+    out = adh.analyse_adherence(tl)
+    assert "signals" in out
+    assert out["summary"]["medications_reviewed"] == 1
+
+
 # ---- early warning --------------------------------------------------------- #
 
 def test_ews_high_score_with_abnormal_vitals():
@@ -240,3 +250,11 @@ def test_living_guidelines_seeds_and_flags_stale():
     status2 = lg.registry_status(staleness_days=30)
     drug = [s for s in status2["sources"] if s["key"] == "drug_interactions"][0]
     assert drug["stale"] is False
+
+
+if __name__ == "__main__":
+    tests = [value for name, value in sorted(globals().items()) if name.startswith("test_")]
+    for test in tests:
+        test()
+        print(f"PASS {test.__name__}")
+    print(f"\n{len(tests)} tests passed")
