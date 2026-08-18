@@ -8,7 +8,8 @@ docs for individual backend modules live next to the code they describe, in
 
 | File | What it covers |
 | --- | --- |
-| [`YGC_FINAL_ROUND_CHECKLIST.md`](YGC_FINAL_ROUND_CHECKLIST.md) | Official 19-item final-round checklist — all complete, with module evidence. |
+| [`YGC_FINAL_ROUND_RULES.md`](YGC_FINAL_ROUND_RULES.md) | Official Final Round brief: theme, new-feature scope, data rules, deliverables, scoring. |
+| [`YGC_FINAL_ROUND_CHECKLIST.md`](YGC_FINAL_ROUND_CHECKLIST.md) | 19-item compliance checklist against that brief — all complete, with module evidence. |
 | [`FEATURES.md`](FEATURES.md) | Full product inventory plus Round 1–5 feature checklists. |
 | [`DEMO_RUNBOOK.md`](DEMO_RUNBOOK.md) | 4:30 demo script: upload → history → safety → labs → Ask → Find Care. |
 

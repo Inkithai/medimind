@@ -2,7 +2,7 @@
 
 MediMind converts your private medical files into something you can actually navigate. Drop in prescriptions, lab reports, and discharge summaries and you get a structured timeline, automatic safety checks, lab trend analysis, and grounded question answering. All of it lives inside a **private anonymous workspace** — no signup, no password, just a `session_id` stored locally in your browser.
 
-**YGC Final Round: 19 / 19 requirements complete.** Full evidence: [`docs/YGC_FINAL_ROUND_CHECKLIST.md`](docs/YGC_FINAL_ROUND_CHECKLIST.md). Feature inventory: [`docs/FEATURES.md`](docs/FEATURES.md).
+**YGC Final Round: 19 / 19 requirements complete.** Official brief: [`docs/YGC_FINAL_ROUND_RULES.md`](docs/YGC_FINAL_ROUND_RULES.md). Evidence: [`docs/YGC_FINAL_ROUND_CHECKLIST.md`](docs/YGC_FINAL_ROUND_CHECKLIST.md). Feature inventory: [`docs/FEATURES.md`](docs/FEATURES.md).
 
 ### YGC Final Round — Competition Checklist
 
