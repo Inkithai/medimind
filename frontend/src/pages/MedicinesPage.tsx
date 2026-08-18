@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
 import { Link } from "react-router-dom";
-import { api } from "../api/client";
+import { ApiError, api } from "../api/client";
 import { Card, CardBody } from "../components/Card";
 import { ErrorState } from "../components/ErrorState";
 import { LoadingState } from "../components/Spinner";
@@ -27,8 +27,21 @@ export function MedicinesPage() {
       const data = await api.getTimeline(credentials);
       setTimeline(data);
     } catch (err) {
-      setTimeline(null);
-      setError(err);
+      // 404 = no record yet (fresh workspace or snapshot still building) — the
+      // API's documented first-run contract. Show the page's normal empty
+      // state instead of a hard error, exactly like the Dashboard and Labs
+      // pages do for the same response.
+      if (err instanceof ApiError && err.status === 404) {
+        setTimeline({
+          visits: [],
+          medications_timeline: [],
+          lab_results_timeline: [],
+          known_allergies: [],
+        });
+      } else {
+        setTimeline(null);
+        setError(err);
+      }
     } finally {
       setLoading(false);
     }

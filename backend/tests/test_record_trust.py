@@ -165,6 +165,100 @@ def test_normalized_equivalent_doses_do_not_create_false_conflict():
     assert not [item for item in detect_conflicts(docs) if item["kind"] == "medication"]
 
 
+def test_identity_format_variants_do_not_quarantine_the_workspace():
+    """Regression (production, 2026-08-17): one patient's records extracted
+    patient_name in two legitimate formats — "PERERA, Anjali (Mrs.)" on the
+    lab reports and "Anjali Perera" elsewhere. Raw normalized strings made
+    those two DIFFERENT identities, firing a critical identity conflict that
+    quarantined all 7 documents: the dashboard then showed 0 medications,
+    0 lab results, 0 clinical events and "No records yet" after a successful
+    upload. Honorifics, punctuation, and surname-first printing are not
+    identity differences."""
+    docs = [
+        _doc("doc-1", "anjali-1.jpg", patient="PERERA, Anjali (Mrs.)", date="2026-06-10",
+             labs=[{"test_name": "Hemoglobin", "value": 10.2, "unit": "g/dL",
+                    "reference_range": "12-16", "flag": "low", "confidence": 0.9}]),
+        _doc("doc-2", "anjali-2.jpg", patient="Anjali Perera", date="2026-03-20",
+             meds=[_med(500, "500 mg")]),
+        _doc("doc-3", "anjali-3.png", patient="Anjali Perera", date="2026-01-15",
+             labs=[{"test_name": "Hemoglobin", "value": 11.0, "unit": "g/dL",
+                    "reference_range": "12-16", "flag": "low", "confidence": 0.88}]),
+        _doc("doc-4", "anjali-4.png", patient="PERERA, Anjali", date="2026-04-02",
+             meds=[_med(850, "850 mg")]),
+    ]
+    conflicts = detect_conflicts(docs)
+    assert not [item for item in conflicts if item["kind"] == "identity"], conflicts
+
+    trusted, summary = apply_conflict_quarantine(docs, conflicts)
+    assert summary["quarantined_documents"] == 0, summary
+    timeline = build_patient_timeline(trusted)
+    assert len(timeline["medications_timeline"]) == 2
+    assert len(timeline["lab_results_timeline"]) == 2
+    assert len(timeline["visits"]) == 4, "all four documents must enter the timeline"
+
+
+def test_genuinely_different_identities_still_quarantine():
+    """The fail-closed guarantee survives the format-variant fix: two really
+    different patients (different name token sets) still conflict."""
+    docs = [
+        _doc("doc-a", "jane.pdf", patient="PERERA, Anjali (Mrs.)", meds=[_med(500, "500 mg")]),
+        _doc("doc-b", "john.pdf", patient="Nimal Fernando", meds=[_med(500, "500 mg")]),
+    ]
+    conflicts = detect_conflicts(docs)
+    identity = next(item for item in conflicts if item["kind"] == "identity")
+    quarantined, summary = apply_conflict_quarantine(docs, conflicts)
+    assert summary["quarantined_documents"] == 2
+    assert len(identity["items"]) == 2
+
+
+def test_resolved_identity_unquarantines_format_variants():
+    """After resolving an identity conflict by picking an authoritative
+    source, documents whose patient_name is merely a FORMAT VARIANT of the
+    authoritative name must be un-quarantined — exact-string matching kept
+    "PERERA, Anjali (Mrs.)" quarantined forever after "Anjali Perera" was
+    confirmed authoritative."""
+    docs = [
+        _doc("doc-a", "a.pdf", patient="Anjali Perera", meds=[_med(500, "500 mg")]),
+        _doc("doc-b", "b.pdf", patient="PERERA, Anjali (Mrs.)", meds=[_med(500, "500 mg")]),
+        _doc("doc-c", "c.pdf", patient="Nimal Fernando", meds=[_med(500, "500 mg")]),
+    ]
+    conflicts = detect_conflicts(docs)
+    identity = next(item for item in conflicts if item["kind"] == "identity")
+    resolved = [
+        {**identity, "status": "resolved", "authoritative_document_id": "doc-a"},
+        *[item for item in conflicts if item is not identity],
+    ]
+    trusted, summary = apply_conflict_quarantine(docs, resolved)
+    quarantined_ids = {
+        doc["_document_id"]
+        for doc in trusted
+        if (doc.get("_trust") or {}).get("quarantined")
+    }
+    assert quarantined_ids == {"doc-c"}, quarantined_ids
+    timeline = build_patient_timeline(trusted)
+    assert len(timeline["visits"]) == 2, "both Anjali format variants must be admitted"
+
+
+def test_merge_conflict_state_drops_stale_persisted_identity_conflict():
+    """Reads re-detect conflicts every time; a persisted conflict that is no
+    longer detected must not keep quarantining the workspace (this is what
+    un-bricks a workspace like the production one after the fix deploys)."""
+    docs = [
+        _doc("doc-a", "a.pdf", patient="PERERA, Anjali (Mrs.)", meds=[_med(500, "500 mg")]),
+        _doc("doc-b", "b.pdf", patient="Anjali Perera", meds=[_med(500, "500 mg")]),
+    ]
+    stale = [{
+        "conflict_id": "conflict_stale_identity",
+        "kind": "identity",
+        "status": "unresolved",
+        "items": [],
+    }]
+    merged = merge_conflict_state(detect_conflicts(docs), stale)
+    assert merged == [], merged
+    trusted, summary = apply_conflict_quarantine(docs, merged)
+    assert summary["quarantined_documents"] == 0
+
+
 if __name__ == "__main__":
     tests = [value for name, value in sorted(globals().items()) if name.startswith("test_")]
     for test in tests:

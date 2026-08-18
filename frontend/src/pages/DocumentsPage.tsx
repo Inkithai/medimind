@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { api } from "../api/client";
+import { ApiError, api } from "../api/client";
 import { Card, CardBody } from "../components/Card";
 import { DocumentViewer } from "../components/DocumentViewer";
 import { ErrorState } from "../components/ErrorState";
@@ -36,8 +36,22 @@ export function DocumentsPage() {
         return targetId ? documents.find((visit) => visit._document_id === targetId) || null : null;
       });
     } catch (err) {
-      setTimeline(null);
-      setError(err);
+      // 404 = no record yet (fresh workspace or snapshot still building) — the
+      // API's documented first-run contract. Show the page's normal empty
+      // state instead of a hard error, exactly like the Dashboard and Labs
+      // pages do for the same response.
+      if (err instanceof ApiError && err.status === 404) {
+        setTimeline({
+          visits: [],
+          documents: [],
+          medications_timeline: [],
+          lab_results_timeline: [],
+          known_allergies: [],
+        });
+      } else {
+        setTimeline(null);
+        setError(err);
+      }
     } finally {
       setLoading(false);
     }

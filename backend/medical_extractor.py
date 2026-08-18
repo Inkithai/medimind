@@ -812,10 +812,61 @@ def _completion_token_budget(user_content: Any) -> int:
             except ValueError:
                 logger.warning("Ignoring invalid %s=%r; using 2048", n, v)
                 return 2048
-    # Default vision cap: Groq 8K TPM tier needs 2048, Gemini can handle more
+    # Default vision cap: Groq 8K TPM tier needs 2048; Gemini dense lab
+    # reports were observed truncating at 4096 output tokens in production
+    # (finish_reason=length, JSON cut mid-"lab_results"), so the untuned
+    # default floor is 8192. An explicit global budget override still wins,
+    # and if a tier rejects the budget the token-budget error path halves it.
+    _global_override_set = any(
+        os.environ.get(n) for n in (
+            f"{LLM_PROVIDER.upper()}_MAX_TOKENS", "LLM_MAX_TOKENS",
+            "GROQ_MAX_TOKENS", "GEMINI_MAX_TOKENS",
+        )
+    )
     if LLM_PROVIDER == "gemini":
-        return min(global_budget, 4096)
+        return global_budget if _global_override_set else 8192
     return min(global_budget, 2048)
+
+
+# finish_reason values that mean "the generation was cut off by the
+# completion-token limit before the JSON could finish" (OpenAI-compat
+# spelling 'length'; Gemini's native spelling 'MAX_TOKENS' defensively
+# included in case a provider leaks it through).
+_LENGTH_FINISH_REASONS = frozenset({"length", "max_tokens"})
+
+# How many times a truncated generation may escalate the completion budget
+# (each escalation doubles max_tokens up to the provider ceiling) before the
+# ladder gives up on this strategy. Bounds worst-case latency per file.
+_MAX_BUDGET_ESCALATIONS = 3
+
+
+def _max_completion_ceiling() -> int:
+    """Absolute completion-token ceiling used when escalating a truncated
+    generation. Provider/env overridable; Gemini comfortably emits 16K-token
+    JSON for dense lab reports, other providers get a conservative 8K."""
+    default = 16384 if LLM_PROVIDER == "gemini" else 8192
+    for n in (f"{LLM_PROVIDER.upper()}_MAX_COMPLETION_TOKENS", "LLM_MAX_COMPLETION_TOKENS"):
+        v = os.environ.get(n)
+        if v is not None:
+            try:
+                return max(512, int(v))
+            except ValueError:
+                logger.warning("Ignoring invalid %s=%r; using %d", n, v, default)
+                return default
+    return default
+
+
+def _finish_reason_text(response: Any) -> str:
+    """Lowercased finish_reason of a chat response, or '' when absent."""
+    try:
+        fr = response.choices[0].finish_reason
+    except (AttributeError, IndexError, TypeError):
+        return ""
+    return fr.strip().lower() if isinstance(fr, str) else ""
+
+
+def _response_was_truncated(response: Any) -> bool:
+    return _finish_reason_text(response) in _LENGTH_FINISH_REASONS
 
 
 # ---------------------------------------------------------------------------
@@ -1126,6 +1177,8 @@ def _completion_resilient(
         max_rate_limit_waits = 5
     last_raw_snippet: str = ""
     max_tokens = _completion_token_budget(user_content)
+    completion_ceiling = _max_completion_ceiling()
+    budget_escalations = 0
     suppress_state = _suppress_state(model) if _suppression_applies(model) else None
     # Provider-error trail for the final RuntimeError's root-cause hint:
     # (status, code) -> times seen across every rung and repair attempt.
@@ -1183,6 +1236,63 @@ def _completion_resilient(
                         request_kwargs["extra_body"] = probe_extra
                     response = _chat_completion(**request_kwargs)
                     raw = response.choices[0].message.content or ""
+                    truncated = _response_was_truncated(response)
+                    # Validate parseability before returning: if raw contains no parseable JSON
+                    # (e.g. a <think>-only reasoning dump), the same response format will likely
+                    # fail again — advance to the next rung instead of burning retries.
+                    parse_err: Optional[ValueError] = None
+                    if raw.strip():
+                        try:
+                            _parse_json_object(raw)
+                        except ValueError as err:
+                            parse_err = err
+                            last_error = err
+                            last_raw_snippet = raw[:500]
+                    if parse_err is None and raw.strip():
+                        if probe_idx is not None and suppress_state is not None:
+                            # Probe proven to work — lead with it from now on.
+                            suppress_state["good"] = probe_idx
+                            logger.info(
+                                "_completion_resilient: model='%s' clean JSON with suppression probe '%s' — "
+                                "using it as the default for this model",
+                                model, probe_label,
+                            )
+                        return raw
+                    if truncated:
+                        # The provider cut the generation at max_tokens BEFORE the
+                        # JSON closed (finish_reason='length'). This is the #1
+                        # cause of "valid-looking JSON that won't parse" on dense
+                        # lab reports — the raw text starts with '{' but ends
+                        # mid-string/mid-array. Advancing to the next rung used to
+                        # re-send the SAME request with the SAME budget, which
+                        # truncates at the same point again and only succeeds by
+                        # luck. Instead: raise the completion budget and retry
+                        # THIS rung; only advance (with the raised budget kept)
+                        # once the ceiling or escalation cap is reached.
+                        last_error = ValueError(
+                            "model output was truncated at the provider's token limit "
+                            f"(finish_reason={_finish_reason_text(response)}) before the JSON completed"
+                        )
+                        raised_budget = min(max_tokens * 2, completion_ceiling)
+                        if raised_budget > max_tokens and budget_escalations < _MAX_BUDGET_ESCALATIONS:
+                            budget_escalations += 1
+                            logger.warning(
+                                "_completion_resilient: model='%s' level=%d attempt=%d (%s) output was "
+                                "TRUNCATED at max_tokens=%d before the JSON completed — retrying this "
+                                "rung with max_tokens=%d (escalation %d/%d)",
+                                model, level, attempt, probe_label, max_tokens, raised_budget,
+                                budget_escalations, _MAX_BUDGET_ESCALATIONS,
+                            )
+                            max_tokens = raised_budget
+                            continue
+                        logger.warning(
+                            "_completion_resilient: model='%s' level=%d attempt=%d (%s) output was "
+                            "TRUNCATED (finish_reason=%s) and the completion budget cannot be raised "
+                            "further (max_tokens=%d, ceiling=%d) — advancing to the next rung: %s",
+                            model, level, attempt, probe_label, _finish_reason_text(response),
+                            max_tokens, completion_ceiling, parse_err or last_error,
+                        )
+                        break
                     if not raw or not raw.strip():
                         last_error = ValueError("model returned an empty response — no JSON to parse")
                         logger.warning(
@@ -1194,14 +1304,10 @@ def _completion_resilient(
                         # exact same request usually repeats it, so move on to the
                         # next probe/output mode instead of burning attempts.
                         break
-                    # Validate parseability before returning: if raw contains no parseable JSON
-                    # (e.g. a <think>-only reasoning dump), the same response format will likely
-                    # fail again — advance to the next rung instead of burning retries.
-                    try:
-                        _parse_json_object(raw)
-                    except ValueError as parse_err:
-                        last_error = parse_err
-                        last_raw_snippet = raw[:500]
+                    # Non-JSON output (reasoning dump, commentary, ...) with no
+                    # truncation involved — same request likely fails again, so
+                    # advance to the next rung instead of burning retries.
+                    if parse_err is not None:
                         if probe_idx is not None and _contains_reasoning_dump(raw):
                             # The switch provably left thinking on (provider
                             # silently ignored it) — cross it off for good so
@@ -1220,15 +1326,6 @@ def _completion_resilient(
                                 raw[:250].replace(chr(10), " "), parse_err,
                             )
                         break
-                    if probe_idx is not None and suppress_state is not None:
-                        # Probe proven to work — lead with it from now on.
-                        suppress_state["good"] = probe_idx
-                        logger.info(
-                            "_completion_resilient: model='%s' clean JSON with suppression probe '%s' — "
-                            "using it as the default for this model",
-                            model, probe_label,
-                        )
-                    return raw
                 except APIError as e:
                     if _is_unsupported_param_error(e, probe_extra):
                         # Provider/model doesn't recognize this suppression
@@ -1461,7 +1558,13 @@ def _completion_resilient(
     )
     if provider_summary:
         cause_bits.append(f"provider rejections along the way: {provider_summary}")
-    if last_error is not None and "could not be parsed" in str(last_error):
+    if last_error is not None and "truncated at the provider's token limit" in str(last_error):
+        cause_bits.append(
+            "the model's output kept being cut off by the provider's completion-token limit "
+            "before the JSON could finish, even after the budget was raised — the document may "
+            "be too dense for a single response (try fewer pages per file)"
+        )
+    elif last_error is not None and "could not be parsed" in str(last_error):
         cause_bits.append(
             "the model kept emitting reasoning/non-JSON instead of the required JSON across all output modes"
         )
@@ -1608,6 +1711,42 @@ def _find_first_json_object(text: str) -> Optional[Dict[str, Any]]:
     return None
 
 
+def _escape_control_chars_in_strings(candidate: str) -> str:
+    """Escape raw control characters that appear INSIDE JSON string values.
+
+    A frequent provider quirk: the model emits a literal newline/tab inside a
+    string value (e.g. a multi-line "clinical_notes") instead of the escaped
+    \\n/\\t form. json.loads rejects those with "Invalid control character",
+    and every other repair path fails on the same bytes. Outside string
+    literals, control characters are legal JSON whitespace and are left
+    untouched (escaping them there would corrupt the document).
+    """
+    if not any(ord(ch) < 0x20 for ch in candidate):
+        return candidate
+    short_escapes = {"\n": "\\n", "\r": "\\r", "\t": "\\t", "\b": "\\b", "\f": "\\f"}
+    out: List[str] = []
+    in_string = False
+    escaped = False
+    for ch in candidate:
+        if escaped:
+            out.append(ch)
+            escaped = False
+            continue
+        if ch == "\\":
+            out.append(ch)
+            escaped = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            out.append(ch)
+            continue
+        if in_string and ord(ch) < 0x20:
+            out.append(short_escapes.get(ch) or f"\\u{ord(ch):04x}")
+            continue
+        out.append(ch)
+    return "".join(out)
+
+
 def _try_repair_json(candidate: str) -> Optional[Dict[str, Any]]:
     """Attempt to repair common LLM JSON mistakes and parse.
 
@@ -1623,9 +1762,19 @@ def _try_repair_json(candidate: str) -> Optional[Dict[str, Any]]:
             return obj
     except json.JSONDecodeError:
         pass
+    no_trailing = re.sub(r",\s*([}\]])", r"\1", cleaned)
     try:
-        no_trailing = re.sub(r",\s*([}\]])", r"\1", cleaned)
         obj = json.loads(no_trailing)
+        if isinstance(obj, dict):
+            return obj
+    except json.JSONDecodeError:
+        pass
+    try:
+        # Raw control characters inside string values (a literal newline in
+        # "clinical_notes" etc.) — escape them and re-parse. Combines with the
+        # trailing-comma fix above since both quirks can appear together.
+        escaped = _escape_control_chars_in_strings(no_trailing)
+        obj = json.loads(escaped)
         if isinstance(obj, dict):
             return obj
     except json.JSONDecodeError:
