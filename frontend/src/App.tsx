@@ -28,6 +28,7 @@ import { AppointmentPrepPage } from "./pages/AppointmentPrepPage";
 import { RecordIntegrityPage } from "./pages/RecordIntegrityPage";
 import { FollowUpPage } from "./pages/FollowUpPage";
 import { ReviewPage } from "./pages/ReviewPage";
+import { JudgePrepPage } from "./pages/JudgePrepPage";
 import { Spinner } from "./components/Spinner";
 import { useI18n } from "./i18n/I18nContext";
 
