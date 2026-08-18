@@ -28,6 +28,16 @@ const SECTIONS: Section[] = [
   { key: "duplicate_prescriptions", titleKey: "safety.duplicates", tone: "info" },
 ];
 
+function uniqueBy<T>(items: T[], keyOf: (item: T) => string): T[] {
+  const unique = new Map<string, T>();
+  for (const item of items) unique.set(keyOf(item), item);
+  return [...unique.values()];
+}
+
+function normalized(value: unknown): string {
+  return String(value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
 export function CrossCheckView({ report, dosageReport }: { report: CrossCheckReport; dosageReport?: DosageReport | null }) {
   const { t, formatNumber } = useI18n();
   const canonicalAlerts = collectSafetyAlerts(report, dosageReport);
@@ -40,19 +50,31 @@ export function CrossCheckView({ report, dosageReport }: { report: CrossCheckRep
   );
   const guidelinePairs = new Set(
     (report.guideline_flagged_combinations || []).map((item) =>
-      [item.opioid, item.depressant].map((value) => String(value || "").trim().toLowerCase()).sort().join("+")
+      [item.opioid, item.depressant].map(normalized).sort().join("+")
     )
   );
   const displayReport: CrossCheckReport = {
     ...report,
-    potential_drug_interactions: report.potential_drug_interactions.filter((item) =>
-      item.timing?.status !== "not_concurrent" && !guidelinePairs.has(
-        item.medications_involved.map((value) => value.trim().toLowerCase()).sort().join("+")
-      )
+    potential_drug_interactions: uniqueBy(
+      report.potential_drug_interactions.filter((item) =>
+        item.timing?.status !== "not_concurrent" && !guidelinePairs.has(
+          item.medications_involved.map(normalized).sort().join("+")
+        )
+      ),
+      (item) => item.medications_involved.map(normalized).sort().join("+")
     ),
-    duplicate_prescriptions: report.duplicate_prescriptions.filter((item) => item.timing?.status !== "not_concurrent"),
-    conflicting_dosage_instructions: report.conflicting_dosage_instructions.filter((item) => item.timing?.status !== "not_concurrent"),
-    allergy_conflicts: report.allergy_conflicts.filter((item) => item.timing?.status !== "not_concurrent"),
+    duplicate_prescriptions: uniqueBy(
+      report.duplicate_prescriptions.filter((item) => item.timing?.status !== "not_concurrent"),
+      (item) => normalized(item.medication)
+    ),
+    conflicting_dosage_instructions: uniqueBy(
+      report.conflicting_dosage_instructions.filter((item) => item.timing?.status !== "not_concurrent"),
+      (item) => normalized(item.medication)
+    ),
+    allergy_conflicts: uniqueBy(
+      report.allergy_conflicts.filter((item) => item.timing?.status !== "not_concurrent"),
+      (item) => `${normalized(item.medication)}:${normalized(item.allergy)}`
+    ),
   };
   const hasLowConfidence = canonicalAlerts.some(
     (item) => typeof item.confidence === "number" && item.confidence < 0.6

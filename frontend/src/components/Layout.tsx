@@ -100,12 +100,12 @@ export function Layout() {
   // Desktop-only: collapse the sidebar to an icon rail (persisted).
   const [collapsed, setCollapsed] = useState(readCollapsed);
   const [tooltip, setTooltip] = useState<SidebarTooltipState | null>(null);
-  const [navSignals, setNavSignals] = useState({ safety: 0, safetyPending: false, hasChanges: false });
+  const [navSignals, setNavSignals] = useState({ safety: 0, safetyAvailable: false, safetyPending: false, hasChanges: false });
   const desktop = useDesktopLayout();
 
   useEffect(() => {
     if (!isConfigured) {
-      setNavSignals({ safety: 0, safetyPending: false, hasChanges: false });
+      setNavSignals({ safety: 0, safetyAvailable: false, safetyPending: false, hasChanges: false });
       return;
     }
     let cancelled = false;
@@ -114,12 +114,13 @@ export function Layout() {
         if (cancelled) return;
         setNavSignals({
           safety: collectSafetyAlerts(snapshot.cross_check_report, snapshot.dosage_report).length,
+          safetyAvailable: true,
           safetyPending: snapshot.rebuilt_from_documents === true,
           hasChanges: (snapshot.patient_timeline.documents || snapshot.patient_timeline.visits).length >= 2,
         });
       })
       .catch(() => {
-        if (!cancelled) setNavSignals({ safety: 0, safetyPending: false, hasChanges: false });
+        if (!cancelled) setNavSignals({ safety: 0, safetyAvailable: false, safetyPending: false, hasChanges: false });
       });
     return () => { cancelled = true; };
   }, [credentials, isConfigured, location.pathname]);
@@ -128,7 +129,7 @@ export function Layout() {
     const onSafetyUpdated = (event: Event) => {
       const count = Number((event as CustomEvent<{ count?: number }>).detail?.count);
       if (Number.isFinite(count)) {
-        setNavSignals((current) => ({ ...current, safety: count, safetyPending: false }));
+        setNavSignals((current) => ({ ...current, safety: count, safetyAvailable: true, safetyPending: false }));
       }
     };
     window.addEventListener("medimind:safety-updated", onSafetyUpdated);
@@ -409,7 +410,7 @@ export function Layout() {
                                 {safetyCount}
                               </span>
                             )}
-                            {safetyCount === 0 && item.to === "/safety" && !navSignals.safetyPending && (
+                            {safetyCount === 0 && item.to === "/safety" && navSignals.safetyAvailable && !navSignals.safetyPending && (
                               <span className={classNames("text-emerald-600", collapsed && "lg:hidden")} aria-label="No active safety alerts">✓</span>
                             )}
                             {item.to === "/safety" && navSignals.safetyPending && (
