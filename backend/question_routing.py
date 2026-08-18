@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Sequence, Tuple
 INTENTS: Dict[str, Dict[str, Any]] = {
     "medication_safety": {
         "label": "Medication safety",
-        "chunk_types": ["medication", "allergy", "clinical_note"],
+        "chunk_types": ["medication", "allergy", "clinical_note", "published_guidance"],
         "minimum_evidence": 2,
     },
     "lab_trend": {
@@ -39,7 +39,7 @@ INTENTS: Dict[str, Dict[str, Any]] = {
     },
     "medication": {
         "label": "Medication",
-        "chunk_types": ["medication", "clinical_note"],
+        "chunk_types": ["medication", "clinical_note", "published_guidance"],
         "minimum_evidence": 1,
     },
     "timeline": {

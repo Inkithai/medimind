@@ -1248,7 +1248,7 @@ async def _execute_upload_pipeline(
 
     # Consult triage: deterministic routing of every finding to a
     # pharmacist or doctor with urgency + specialty. Never de-escalates.
-    consult_triage_report = generate_consult_triage(cross_check, lab_trends, dosage_report)
+    consult_triage_report = generate_consult_triage(cross_check, lab_trends, dosage_report, timeline)
 
     # Graded OCR/translation risk banner across the whole record (never blocks).
     translation_risk = assess_documents_translation_risk(all_docs)
@@ -1727,7 +1727,7 @@ async def reprocess_document(
         trusted, conflicts, trust_summary, user_id
     )
     dosage_report = check_dosages(timeline)
-    consult_triage_report = generate_consult_triage(cross_check, lab_trends, dosage_report)
+    consult_triage_report = generate_consult_triage(cross_check, lab_trends, dosage_report, timeline)
     timeline["_record_fingerprint"] = timeline_fingerprint(timeline)
     db.save_patient_snapshot(
         user_id, timeline, cross_check, lab_trends=lab_trends,
@@ -1955,14 +1955,14 @@ async def _rebuild_after_document_deletion(
         user_id, remaining_documents
     )
     persisted_conflicts = db.sync_conflicts(user_id, detected) if detected else []
-    timeline = _timeline_from_trust_state(trusted, persisted_conflicts, trust_summary)
-    cross_check = _empty_cross_check(
-        "A source document was deleted. Safety findings from it were removed; "
-        "the remaining records will be checked again after the next record update."
+    # Re-run the complete safety pipeline immediately. Deletion must remove
+    # findings that depended on the deleted source without leaving the
+    # remaining medication record temporarily unchecked.
+    timeline, cross_check, lab_trends = await _derive_record(
+        trusted, persisted_conflicts, trust_summary, user_id
     )
-    lab_trends = track_lab_trends(timeline)
     dosage_report = check_dosages(timeline)
-    consult_triage_report = generate_consult_triage(cross_check, lab_trends, dosage_report)
+    consult_triage_report = generate_consult_triage(cross_check, lab_trends, dosage_report, timeline)
     db.save_patient_snapshot(
         user_id,
         timeline,
@@ -2245,6 +2245,68 @@ async def get_cross_check(user_id: str = Depends(get_current_user)) -> Dict[str,
     return _enhanced_cross_check(snapshot)
 
 
+@app.post("/api/v1/medication-safety/reanalyze")
+async def reanalyze_medication_safety(
+    user_id: str = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """Re-run and persist the complete safety/triage pipeline on demand.
+
+    Uses the corrected, conflict-filtered durable documents rather than a
+    potentially stale snapshot. The response includes before/after counts so
+    clients can explain whether findings were added or resolved.
+    """
+    if _workspace_has_active_upload(user_id):
+        raise HTTPException(409, "Wait for the active upload to finish before re-running safety analysis.")
+    documents = db.load_documents(user_id)
+    if not documents:
+        raise HTTPException(404, "No documents are available for safety analysis.")
+
+    previous = db.load_patient_snapshot(user_id) or {}
+    previous_cross_check = previous.get("cross_check_report") or {}
+    trusted, conflicts, trust_summary, detected = _prepare_current_trust_state(user_id, documents)
+    if detected:
+        conflicts = db.sync_conflicts(user_id, detected)
+    timeline, cross_check, lab_trends = await _derive_record(
+        trusted, conflicts, trust_summary, user_id
+    )
+    dosage_report = check_dosages(timeline)
+    triage = generate_consult_triage(
+        cross_check, lab_trends, dosage_report, timeline
+    )
+    db.save_patient_snapshot(
+        user_id, timeline, cross_check, lab_trends=lab_trends,
+        dosage_report=dosage_report, consult_triage=triage,
+    )
+    indexed, index_error, indexed_chunks = await _replace_index(user_id, timeline)
+
+    finding_lists = (
+        "potential_drug_interactions", "duplicate_prescriptions",
+        "conflicting_dosage_instructions", "allergy_conflicts",
+        "guideline_flagged_combinations", "concurrent_exposure",
+    )
+    count = lambda report: sum(len(report.get(key) or []) for key in finding_lists)
+    before_count = count(previous_cross_check)
+    after_count = count(cross_check)
+    audit.record(user_id, "medication_safety.reanalyzed", {
+        "findings_before": before_count,
+        "findings_after": after_count,
+        "indexed": indexed,
+    })
+    return {
+        "reanalyzed": True,
+        "findings_before": before_count,
+        "findings_after": after_count,
+        "net_change": after_count - before_count,
+        "resolved_count": max(0, before_count - after_count),
+        "cross_check_report": cross_check,
+        "dosage_report": dosage_report,
+        "consult_triage": triage,
+        "indexed": indexed,
+        "indexed_chunks": indexed_chunks,
+        "index_error": index_error,
+    }
+
+
 @app.get("/api/v1/lab-trends")
 async def get_lab_trends(user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
     """Returns the authenticated user's lab result trends (direction of
@@ -2322,7 +2384,7 @@ async def get_consult_triage(user_id: str = Depends(get_current_user)) -> Dict[s
         return snapshot["consult_triage"]
     lab_trends = _lab_trends_for_snapshot(snapshot)
     dosage_report = snapshot.get("dosage_report") or check_dosages(snapshot["patient_timeline"])
-    result = generate_consult_triage(snapshot["cross_check_report"], lab_trends, dosage_report)
+    result = generate_consult_triage(snapshot["cross_check_report"], lab_trends, dosage_report, snapshot["patient_timeline"])
     audit.record(user_id, "records.read", {"view": "consult_triage", "recomputed": True})
     return result
 
@@ -2562,6 +2624,7 @@ async def get_patient_snapshot(user_id: str = Depends(get_current_user)) -> Dict
     result["dosage_report"] = snapshot.get("dosage_report") or check_dosages(snapshot["patient_timeline"])
     result["consult_triage"] = snapshot.get("consult_triage") or generate_consult_triage(
         snapshot["cross_check_report"], result["lab_trends"], result["dosage_report"],
+        snapshot["patient_timeline"],
     )
     return result
 

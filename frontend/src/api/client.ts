@@ -571,6 +571,17 @@ export const api = {
     return request<CrossCheckReport>(credentials, "/api/v1/cross-check");
   },
 
+  reanalyzeMedicationSafety(credentials: Credentials): Promise<{
+    reanalyzed: boolean;
+    findings_before: number;
+    findings_after: number;
+    net_change: number;
+    resolved_count: number;
+    cross_check_report: CrossCheckReport;
+  }> {
+    return request(credentials, "/api/v1/medication-safety/reanalyze", { method: "POST" });
+  },
+
   getLabTrends(credentials: Credentials): Promise<LabTrendsReport> {
     return request<LabTrendsReport>(credentials, "/api/v1/lab-trends");
   },

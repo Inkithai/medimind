@@ -20,6 +20,8 @@ export function CrossCheckPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  const [reanalyzing, setReanalyzing] = useState(false);
+  const [reanalyzeNotice, setReanalyzeNotice] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -46,14 +48,49 @@ export function CrossCheckPage() {
           <h1 className="page-title">{t("safety.title")}</h1>
           <p className="secondary-text mt-2 max-w-2xl">{t("safety.subtitle")}</p>
         </div>
-        <button
-          onClick={() => setReloadKey((k) => k + 1)}
-          className="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
-        >
-          <RefreshIcon className="h-4 w-4" />
-          {t("common.refresh")}
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            disabled={reanalyzing}
+            onClick={async () => {
+              setReanalyzing(true);
+              setReanalyzeNotice(null);
+              setError(null);
+              try {
+                const result = await api.reanalyzeMedicationSafety(credentials);
+                setReport(result.cross_check_report);
+                setReanalyzeNotice(
+                  result.resolved_count > 0
+                    ? `Safety analysis updated. ${result.resolved_count} previous finding(s) resolved.`
+                    : `Safety analysis is current (${result.findings_after} finding(s)).`
+                );
+              } catch (err) {
+                setError(err);
+              } finally {
+                setReanalyzing(false);
+              }
+            }}
+            className="inline-flex items-center gap-2 rounded-md bg-brand-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 disabled:opacity-60"
+          >
+            <RefreshIcon className="h-4 w-4" />
+            {reanalyzing ? "Running full safety check…" : "Run full safety check"}
+          </button>
+          <button
+            type="button"
+            onClick={() => setReloadKey((k) => k + 1)}
+            className="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
+          >
+            <RefreshIcon className="h-4 w-4" />
+            {t("common.refresh")}
+          </button>
+        </div>
       </div>
+
+      {reanalyzeNotice && (
+        <div role="status" className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+          {reanalyzeNotice}
+        </div>
+      )}
 
       {loading && <LoadingState label={t("safety.loading")} />}
 
