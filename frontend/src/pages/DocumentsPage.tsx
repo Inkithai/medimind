@@ -200,6 +200,11 @@ export function DocumentsPage() {
                       await api.reprocessDocument(credentials, selected._document_id);
                       await load();
                     }}
+                    onDelete={async () => {
+                      await api.deleteDocument(credentials, selected._document_id);
+                      setSelected(null);
+                      await load();
+                    }}
                     initialEvidenceId={requestedEvidenceId}
                   />
                 ) : (

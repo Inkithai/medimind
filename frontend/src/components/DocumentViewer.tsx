@@ -12,12 +12,14 @@ export function DocumentViewer({
   onClose,
   onUpdated,
   onReprocess,
+  onDelete,
   initialEvidenceId,
 }: {
   visit: Visit;
   onClose?: () => void;
   onUpdated?: () => void;
   onReprocess?: () => Promise<void>;
+  onDelete?: () => Promise<void>;
   initialEvidenceId?: string | null;
 }) {
   const { t } = useI18n();
@@ -25,7 +27,12 @@ export function DocumentViewer({
   const [selectedEvidence, setSelectedEvidence] = useState<EvidenceRegion | null>(null);
   const [reprocessing, setReprocessing] = useState(false);
   const [reprocessError, setReprocessError] = useState<string | null>(null);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const titleId = useId();
+  const deleteTitleId = useId();
+  const deleteDescriptionId = useId();
   const originalTabId = useId();
   const structuredTabId = useId();
   const correctTabId = useId();
@@ -33,6 +40,19 @@ export function DocumentViewer({
   const structuredPanelId = useId();
   const correctPanelId = useId();
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const deleteTriggerRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    if (!deleteOpen) return;
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape" && !deleting) {
+        setDeleteOpen(false);
+        window.setTimeout(() => deleteTriggerRef.current?.focus(), 0);
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [deleteOpen, deleting]);
 
   useEffect(() => {
     const linkedEvidence = initialEvidenceId ? findEvidence(visit, initialEvidenceId) : null;
@@ -114,6 +134,19 @@ export function DocumentViewer({
           )}
           {reprocessError && (
             <p role="alert" className="text-xs text-red-600">{t("viewer.reprocessFailed")}: {reprocessError}</p>
+          )}
+          {onDelete && (
+            <button
+              ref={deleteTriggerRef}
+              type="button"
+              onClick={() => {
+                setDeleteError(null);
+                setDeleteOpen(true);
+              }}
+              className="inline-flex min-h-[36px] items-center rounded-md border border-red-200 bg-white px-3 py-1.5 text-xs font-semibold text-red-700 transition hover:border-red-300 hover:bg-red-50 focus-visible:ring-red-500"
+            >
+              {t("viewer.delete")}
+            </button>
           )}
           {onClose && (
             <button
@@ -372,6 +405,61 @@ export function DocumentViewer({
               <span className="font-semibold">{t("viewer.lowConfidence")}:</span> {visit.illegible_or_low_confidence_fields.join("; ")}
             </div>
           )}
+        </div>
+      )}
+
+      {deleteOpen && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/55 p-4" role="presentation">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={deleteTitleId}
+            aria-describedby={deleteDescriptionId}
+            className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl"
+          >
+            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-red-50 text-xl text-red-700" aria-hidden="true">!</div>
+            <h3 id={deleteTitleId} className="mt-4 text-lg font-bold text-slate-900">{t("viewer.deleteTitle")}</h3>
+            <p id={deleteDescriptionId} className="mt-2 text-sm leading-relaxed text-slate-600">
+              {t("viewer.deleteBody", { file: visit._source.file })}
+            </p>
+            <p className="mt-3 rounded-xl bg-red-50 px-3 py-2 text-xs leading-relaxed text-red-800">
+              {t("viewer.deleteImpact")}
+            </p>
+            {deleteError && <p role="alert" className="mt-3 text-sm text-red-700">{deleteError}</p>}
+            <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                autoFocus
+                disabled={deleting}
+                onClick={() => {
+                  setDeleteOpen(false);
+                  window.setTimeout(() => deleteTriggerRef.current?.focus(), 0);
+                }}
+                className="btn-secondary"
+              >
+                {t("common.cancel")}
+              </button>
+              <button
+                type="button"
+                disabled={deleting}
+                onClick={async () => {
+                  setDeleting(true);
+                  setDeleteError(null);
+                  try {
+                    await onDelete?.();
+                    setDeleteOpen(false);
+                  } catch (err) {
+                    setDeleteError(err instanceof Error ? err.message : String(err));
+                  } finally {
+                    setDeleting(false);
+                  }
+                }}
+                className="btn min-w-[150px] bg-red-600 text-white hover:bg-red-700 focus-visible:ring-red-500 disabled:cursor-not-allowed"
+              >
+                {deleting ? t("viewer.deleting") : t("viewer.deleteConfirm")}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </section>

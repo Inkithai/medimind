@@ -6,6 +6,7 @@ import { CrossCheckView } from "../components/CrossCheckView";
 import { ErrorState } from "../components/ErrorState";
 import { Card, CardBody } from "../components/Card";
 import { LoadingState } from "../components/Spinner";
+import { MedicalDisclaimer } from "../components/MedicalDisclaimer";
 import { RefreshIcon, UploadIcon } from "../components/icons";
 import { useAuth } from "../context/AuthContext";
 import { useStrictEffect } from "../hooks/useStrictEffect";
@@ -66,6 +67,7 @@ export function CrossCheckPage() {
       {!loading && report && (
         <>
           <CrossCheckView report={report} />
+          <MedicalDisclaimer medication />
           {hasSafetyIssues(report) && <ConsiderProfessionalCare />}
         </>
       )}

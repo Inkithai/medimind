@@ -139,6 +139,25 @@ def test_non_finite_search_values_are_rejected_before_provider_request():
     provider._request_json.assert_not_called()
 
 
+def test_taxonomy_specialty_id_is_normalized_for_google_text_search():
+    provider = GoogleProvider(api_key="AIza-test-key")
+    provider._request_json = mock.Mock(return_value={"places": []})
+
+    results = provider.search(
+        "Jaffna",
+        "doctor",
+        8,
+        latitude=9.668,
+        longitude=80.015,
+        specialty="general_practice",
+    )
+
+    assert results == []
+    operation, payload = provider._request_json.call_args.args
+    assert operation == "places:searchText"
+    assert payload["textQuery"] == "general practice in Jaffna"
+
+
 def test_specialty_search_uses_location_bias_and_transparent_ranking():
     cardiology = {
         **GOOGLE_PLACE,

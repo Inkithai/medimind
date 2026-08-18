@@ -367,6 +367,10 @@ Keys stay server-side. With `CARE_PROVIDER=google`, a Google rejection (invalid/
 `VECTOR_STORE=chroma` (default, local `CHROMA_DIR`) or `supabase` (Supabase `chunks` table, no volume). `inspect_chroma.py` works with both (`VECTOR_STORE=supabase python inspect_chroma.py`). After switching backends, delete `chroma_db` or clear `chunks` table and re-upload.
 
 #### Find care
+`DELETE /api/v1/documents/{document_id}` — permanently deletes the selected physical upload (all extracted pages), removes its stored original and corrections, then rebuilds the timeline, labs, conflicts, derived reports, and Q&A index from the remaining records.
+
+`DELETE /api/v1/workspace` — permanently deletes the authenticated workspace's originals, documents, snapshots, vector chunks, corrections, conflict/referral history, conversations, jobs, and audit metadata. The Settings screen keeps this separate from “Remove from this browser,” which only forgets the local anonymous access key.
+
 `GET /api/v1/care/suggestion` — specialty suggestion from the caller's saved records (general practice if none).
 `GET /api/v1/care/specialties` — same payload (catalogue + suggestion).
 `POST /api/v1/care/search {city, specialty?, days?, time_of_day?, radius_km?}` — **Geoapify** geocodes and lists nearby clinics/doctors/hospitals when `GEOAPIFY_API_KEY` is set; **OpenStreetMap** (Nominatim + Overpass) is the automatic fallback. Ranked by specialty match + opening hours + distance. The frontend map is **Leaflet**. Response `source.name` is `Geoapify` or `OpenStreetMap` — the UI never says a provider failed. 422 `city_not_found` if the city is unknown; 502 `directory_unavailable` (retryable) if both directories are down.

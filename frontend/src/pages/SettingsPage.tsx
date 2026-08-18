@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
 import { Alert } from "../components/Alert";
 import { Spinner } from "../components/Spinner";
@@ -12,6 +12,22 @@ export function SettingsPage() {
   const { t } = useI18n();
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deletingWorkspace, setDeletingWorkspace] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const deleteTriggerRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    if (!deleteOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !deletingWorkspace) {
+        setDeleteOpen(false);
+        window.setTimeout(() => deleteTriggerRef.current?.focus(), 0);
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [deleteOpen, deletingWorkspace]);
 
   async function handleTest() {
     setTesting(true);
@@ -106,9 +122,25 @@ export function SettingsPage() {
                   }}
                   className="btn-ghost text-red-600 hover:bg-red-50 hover:text-red-700"
                 >
-                  {t("settings.erase")}
+                  {t("settings.removeBrowser")}
                 </button>
               </div>
+
+              <section aria-labelledby="delete-workspace-title" className="rounded-xl border border-red-200 bg-red-50/60 p-4">
+                <h3 id="delete-workspace-title" className="text-sm font-bold text-red-900">{t("settings.dangerZone")}</h3>
+                <p className="mt-1 text-sm leading-relaxed text-red-800">{t("settings.deleteDataBody")}</p>
+                <button
+                  ref={deleteTriggerRef}
+                  type="button"
+                  onClick={() => {
+                    setDeleteError(null);
+                    setDeleteOpen(true);
+                  }}
+                  className="mt-3 inline-flex min-h-[44px] items-center rounded-xl border border-red-300 bg-white px-4 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-100 focus-visible:ring-red-500"
+                >
+                  {t("settings.deleteData")}
+                </button>
+              </section>
 
               <details className="rounded-xl border border-slate-200 bg-slate-50 p-4">
                 <summary className="cursor-pointer text-sm font-medium text-slate-600">
@@ -135,6 +167,58 @@ export function SettingsPage() {
           )}
         </div>
       </section>
+
+      {deleteOpen && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/55 p-4" role="presentation">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-workspace-dialog-title"
+            aria-describedby="delete-workspace-dialog-description"
+            className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl"
+          >
+            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-red-50 text-xl font-bold text-red-700" aria-hidden="true">!</div>
+            <h2 id="delete-workspace-dialog-title" className="mt-4 text-lg font-bold text-slate-900">{t("settings.deleteConfirmTitle")}</h2>
+            <p id="delete-workspace-dialog-description" className="mt-2 text-sm leading-relaxed text-slate-600">
+              {t("settings.deleteConfirmBody")}
+            </p>
+            {deleteError && <p role="alert" className="mt-3 text-sm text-red-700">{deleteError}</p>}
+            <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                autoFocus
+                disabled={deletingWorkspace}
+                onClick={() => {
+                  setDeleteOpen(false);
+                  window.setTimeout(() => deleteTriggerRef.current?.focus(), 0);
+                }}
+                className="btn-secondary"
+              >
+                {t("common.cancel")}
+              </button>
+              <button
+                type="button"
+                disabled={deletingWorkspace}
+                onClick={async () => {
+                  setDeletingWorkspace(true);
+                  setDeleteError(null);
+                  try {
+                    await api.deleteWorkspace(credentials);
+                    clearCredentials();
+                    window.location.href = "/";
+                  } catch (err) {
+                    setDeleteError(err instanceof Error ? err.message : String(err));
+                    setDeletingWorkspace(false);
+                  }
+                }}
+                className="btn min-w-[170px] bg-red-600 text-white hover:bg-red-700 focus-visible:ring-red-500 disabled:cursor-not-allowed"
+              >
+                {deletingWorkspace ? t("settings.deletingData") : t("settings.deleteConfirm")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

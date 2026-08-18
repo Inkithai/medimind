@@ -14,8 +14,9 @@ Design constraints:
     counts, session ids, question lengths) — never extracted medical data,
     answers, or document contents, so the audit trail itself is not a
     second copy of PHI.
-  * Append-only: this module can insert but has no update/delete helpers,
-    and the schema grants service_role only select+insert on the table.
+  * Append-only during normal operation: this module has no update/delete
+    helpers. The only deletion path is an explicit whole-workspace privacy
+    erasure, implemented centrally in db.delete_workspace_data.
 
 Env:
     AUDIT_LOG=true|false   (default true) master switch.
@@ -35,6 +36,7 @@ AUDIT_ENABLED = os.environ.get("AUDIT_LOG", "true").lower() in ("true", "1", "ye
 ACTIONS = (
     "documents.upload",         # files received for processing (sync or async)
     "documents.upload_result",  # pipeline finished (counts, indexed flag)
+    "documents.delete",         # one physical upload permanently removed
     "records.read",             # timeline / cross-check / lab-trends / snapshot read
     "records.export",           # full-record export generated
     "qa.ask",                   # single-shot QA question answered

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { useI18n } from "../i18n/I18nContext";
@@ -24,8 +25,16 @@ import { LanguageSelector } from "./LanguageSelector";
 interface NavItem {
   to: string;
   labelKey: string;
+  descriptionKey: string;
   icon: (props: { className?: string }) => ReactNode;
   chip: string;
+}
+
+interface SidebarTooltipState {
+  id: string;
+  title: string;
+  description: string;
+  top: number;
 }
 
 const NAV: NavItem[] = [
@@ -33,21 +42,21 @@ const NAV: NavItem[] = [
   // stroke; teal/cyan = records & communication, blue/violet = timelines &
   // analysis, amber/orange = trust & safety review, rose = alerts/risk,
   // slate = utilities).
-  { to: "/dashboard", labelKey: "nav.dashboard", icon: TimelineIcon, chip: "bg-brand-50 text-brand-700" },
-  { to: "/documents", labelKey: "nav.records", icon: FileIcon, chip: "bg-cyan-50 text-cyan-800" },
-  { to: "/review", labelKey: "nav.trustReview", icon: ShieldIcon, chip: "bg-amber-50 text-amber-800" },
-  { to: "/medicines", labelKey: "nav.medications", icon: PillIcon, chip: "bg-emerald-50 text-emerald-800" },
-  { to: "/labs", labelKey: "nav.labs", icon: BeakerIcon, chip: "bg-violet-50 text-violet-800" },
-  { to: "/history", labelKey: "nav.timeline", icon: TimelineIcon, chip: "bg-sky-50 text-sky-800" },
-  { to: "/changes", labelKey: "nav.changes", icon: ChangesIcon, chip: "bg-indigo-50 text-indigo-800" },
-  { to: "/appointment-prep", labelKey: "nav.appointmentPrep", icon: AppointmentIcon, chip: "bg-teal-50 text-teal-800" },
-  { to: "/follow-up", labelKey: "nav.actionCenter", icon: ReminderIcon, chip: "bg-teal-50 text-teal-800" },
-  { to: "/record-integrity", labelKey: "nav.recordCheck", icon: IntegrityIcon, chip: "bg-orange-50 text-orange-800" },
-  { to: "/safety", labelKey: "nav.safety", icon: ShieldIcon, chip: "bg-amber-50 text-amber-800" },
-  { to: "/risk-timeline", labelKey: "nav.riskTimeline", icon: ClockIcon, chip: "bg-rose-50 text-rose-800" },
-  { to: "/ask", labelKey: "nav.ask", icon: ChatIcon, chip: "bg-brand-50 text-brand-700" },
-  { to: "/find-care", labelKey: "nav.care", icon: LocationIcon, chip: "bg-cyan-50 text-cyan-800" },
-  { to: "/settings", labelKey: "nav.settings", icon: SettingsIcon, chip: "bg-slate-100 text-slate-700" },
+  { to: "/dashboard", labelKey: "nav.dashboard", descriptionKey: "nav.descriptions.dashboard", icon: TimelineIcon, chip: "bg-brand-50 text-brand-700" },
+  { to: "/documents", labelKey: "nav.records", descriptionKey: "nav.descriptions.records", icon: FileIcon, chip: "bg-cyan-50 text-cyan-800" },
+  { to: "/review", labelKey: "nav.trustReview", descriptionKey: "nav.descriptions.trustReview", icon: ShieldIcon, chip: "bg-amber-50 text-amber-800" },
+  { to: "/medicines", labelKey: "nav.medications", descriptionKey: "nav.descriptions.medications", icon: PillIcon, chip: "bg-emerald-50 text-emerald-800" },
+  { to: "/labs", labelKey: "nav.labs", descriptionKey: "nav.descriptions.labs", icon: BeakerIcon, chip: "bg-violet-50 text-violet-800" },
+  { to: "/history", labelKey: "nav.timeline", descriptionKey: "nav.descriptions.timeline", icon: TimelineIcon, chip: "bg-sky-50 text-sky-800" },
+  { to: "/changes", labelKey: "nav.changes", descriptionKey: "nav.descriptions.changes", icon: ChangesIcon, chip: "bg-indigo-50 text-indigo-800" },
+  { to: "/appointment-prep", labelKey: "nav.appointmentPrep", descriptionKey: "nav.descriptions.appointmentPrep", icon: AppointmentIcon, chip: "bg-teal-50 text-teal-800" },
+  { to: "/follow-up", labelKey: "nav.actionCenter", descriptionKey: "nav.descriptions.actionCenter", icon: ReminderIcon, chip: "bg-teal-50 text-teal-800" },
+  { to: "/record-integrity", labelKey: "nav.recordCheck", descriptionKey: "nav.descriptions.recordCheck", icon: IntegrityIcon, chip: "bg-orange-50 text-orange-800" },
+  { to: "/safety", labelKey: "nav.safety", descriptionKey: "nav.descriptions.safety", icon: ShieldIcon, chip: "bg-amber-50 text-amber-800" },
+  { to: "/risk-timeline", labelKey: "nav.riskTimeline", descriptionKey: "nav.descriptions.riskTimeline", icon: ClockIcon, chip: "bg-rose-50 text-rose-800" },
+  { to: "/ask", labelKey: "nav.ask", descriptionKey: "nav.descriptions.ask", icon: ChatIcon, chip: "bg-brand-50 text-brand-700" },
+  { to: "/find-care", labelKey: "nav.care", descriptionKey: "nav.descriptions.care", icon: LocationIcon, chip: "bg-cyan-50 text-cyan-800" },
+  { to: "/settings", labelKey: "nav.settings", descriptionKey: "nav.descriptions.settings", icon: SettingsIcon, chip: "bg-slate-100 text-slate-700" },
 ];
 
 const COLLAPSE_KEY = "medimind.sidebar.collapsed";
@@ -82,7 +91,12 @@ export function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   // Desktop-only: collapse the sidebar to an icon rail (persisted).
   const [collapsed, setCollapsed] = useState(readCollapsed);
+  const [tooltip, setTooltip] = useState<SidebarTooltipState | null>(null);
   const desktop = useDesktopLayout();
+
+  useEffect(() => {
+    if (!desktop || !collapsed) setTooltip(null);
+  }, [collapsed, desktop, location.pathname]);
 
   useEffect(() => {
     try {
@@ -133,6 +147,22 @@ export function Layout() {
 
   const closeSidebar = () => setSidebarOpen(false);
   const navInteractive = desktop || sidebarOpen;
+
+  const showCollapsedTooltip = (
+    anchor: HTMLElement,
+    id: string,
+    title: string,
+    description: string
+  ) => {
+    if (!desktop || !collapsed) return;
+    const rect = anchor.getBoundingClientRect();
+    setTooltip({
+      id,
+      title,
+      description,
+      top: Math.max(64, Math.min(window.innerHeight - 64, rect.top + rect.height / 2)),
+    });
+  };
 
   return (
     <div className="min-h-full lg:flex">
@@ -235,12 +265,26 @@ export function Layout() {
               <NavLink
                 to="/upload"
                 onClick={closeSidebar}
+                onMouseEnter={(event) => showCollapsedTooltip(
+                  event.currentTarget,
+                  "sidebar-tooltip-upload",
+                  t("nav.upload"),
+                  t("nav.descriptions.upload")
+                )}
+                onMouseLeave={() => setTooltip(null)}
+                onFocus={(event) => showCollapsedTooltip(
+                  event.currentTarget,
+                  "sidebar-tooltip-upload",
+                  t("nav.upload"),
+                  t("nav.descriptions.upload")
+                )}
+                onBlur={() => setTooltip(null)}
                 tabIndex={navInteractive ? undefined : -1}
+                aria-describedby={desktop && collapsed ? "sidebar-tooltip-upload" : undefined}
                 className={classNames(
                   "flex h-11 w-full items-center justify-center gap-2 rounded-[10px] bg-brand-600 px-3 text-[15px] font-semibold text-white shadow-sm transition hover:bg-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-300 focus-visible:ring-offset-2",
                   collapsed && "lg:px-0"
                 )}
-                title={collapsed ? t("nav.upload") : undefined}
               >
                 <UploadIcon className="h-5 w-5 shrink-0" />
                 <span className={classNames(collapsed && "lg:hidden")}>{t("nav.upload")}</span>
@@ -269,8 +313,22 @@ export function Layout() {
                     }
                     closeSidebar();
                   }}
+                  onMouseEnter={(event) => showCollapsedTooltip(
+                    event.currentTarget,
+                    `sidebar-tooltip-${index}`,
+                    t(item.labelKey),
+                    t(item.descriptionKey)
+                  )}
+                  onMouseLeave={() => setTooltip(null)}
+                  onFocus={(event) => showCollapsedTooltip(
+                    event.currentTarget,
+                    `sidebar-tooltip-${index}`,
+                    t(item.labelKey),
+                    t(item.descriptionKey)
+                  )}
+                  onBlur={() => setTooltip(null)}
                   aria-disabled={disabled}
-                  title={collapsed ? t(item.labelKey) : undefined}
+                  aria-describedby={desktop && collapsed ? `sidebar-tooltip-${index}` : undefined}
                   className={({ isActive }) =>
                     classNames(
                       "group flex min-h-[44px] items-center gap-2.5 rounded-[9px] px-2.5 text-[15px] font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-offset-1 lg:min-h-[42px]",
@@ -310,7 +368,22 @@ export function Layout() {
             <NavLink
               to="/about"
               onClick={closeSidebar}
-              title={t("about.nav")}
+              onMouseEnter={(event) => showCollapsedTooltip(
+                event.currentTarget,
+                "sidebar-tooltip-about",
+                t("about.nav"),
+                t("nav.descriptions.about")
+              )}
+              onMouseLeave={() => setTooltip(null)}
+              onFocus={(event) => showCollapsedTooltip(
+                event.currentTarget,
+                "sidebar-tooltip-about",
+                t("about.nav"),
+                t("nav.descriptions.about")
+              )}
+              onBlur={() => setTooltip(null)}
+              aria-label={collapsed ? t("about.nav") : undefined}
+              aria-describedby={desktop && collapsed ? "sidebar-tooltip-about" : undefined}
               className={({ isActive }) =>
                 classNames(
                   "flex min-h-[44px] items-center gap-2.5 rounded-[9px] px-2.5 text-[15px] font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-offset-1",
@@ -393,15 +466,39 @@ export function Layout() {
           <Outlet />
         </div>
       </main>
+
+      {tooltip && createPortal(
+        <div
+          id={tooltip.id}
+          role="tooltip"
+          style={{ left: 82, top: tooltip.top }}
+          className="sidebar-tooltip pointer-events-none fixed z-[100] w-[280px] -translate-y-1/2 rounded-xl border border-slate-200/90 bg-white px-4 py-3 text-left shadow-[0_16px_40px_-12px_rgba(15,23,42,0.28)]"
+        >
+          <span className="absolute -left-1.5 top-1/2 h-3 w-3 -translate-y-1/2 rotate-45 border-b border-l border-slate-200 bg-white" aria-hidden="true" />
+          <span className="block text-sm font-semibold text-slate-900">{tooltip.title}</span>
+          <span className="mt-0.5 block text-xs leading-relaxed text-slate-600">{tooltip.description}</span>
+        </div>,
+        document.body
+      )}
     </div>
   );
 }
 
 function Logo({ small }: { small?: boolean }) {
   return (
-    <div aria-hidden="true" className={classNames("flex shrink-0 items-center justify-center rounded-xl bg-brand-600 text-white shadow-sm", small ? "h-8 w-8" : "h-10 w-10")}>
-      <span className={classNames("font-black tracking-tight", small ? "text-sm" : "text-[18px]")}>M</span>
-    </div>
+    <span
+      aria-hidden="true"
+      className={classNames(
+        "flex shrink-0 items-center justify-center rounded-xl bg-white shadow-sm ring-1 ring-brand-100",
+        small ? "h-8 w-8" : "h-10 w-10"
+      )}
+    >
+      <img
+        src="/favicon.svg"
+        alt=""
+        className={classNames("block rounded-[9px]", small ? "h-7 w-7" : "h-9 w-9")}
+      />
+    </span>
   );
 }
 

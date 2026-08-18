@@ -350,6 +350,19 @@ def delete_session(patient_key: str, session_id: str) -> bool:
     return removed_memory or removed_durable
 
 
+def delete_patient_sessions(patient_key: str) -> int:
+    """Forget all in-memory conversations for a deleted workspace.
+
+    Durable rows are removed by ``db.delete_workspace_data`` in the same
+    workspace-deletion request.
+    """
+    with _SESSIONS_LOCK:
+        keys = [key for key in _SESSIONS if key[0] == patient_key]
+        for key in keys:
+            _SESSIONS.pop(key, None)
+    return len(keys)
+
+
 def session_count() -> int:
     """Number of live sessions — used by tests and operational checks."""
     with _SESSIONS_LOCK:

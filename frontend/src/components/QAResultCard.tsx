@@ -4,6 +4,7 @@ import { useI18n } from "../i18n/I18nContext";
 import { classNames, confidenceTone, formatConfidence, formatDate } from "../utils/format";
 import { Alert } from "./Alert";
 import { ConsiderProfessionalCare } from "./ConsiderProfessionalCare";
+import { MedicalDisclaimer } from "./MedicalDisclaimer";
 
 export function QAResultCard({
   result,
@@ -72,6 +73,8 @@ export function QAResultCard({
       <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-slate-800">
         {result.answer}
       </p>
+
+      {!embedded && <MedicalDisclaimer />}
 
       {result.confidence_reason && (
         <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">

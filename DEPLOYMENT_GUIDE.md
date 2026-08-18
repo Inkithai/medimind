@@ -245,6 +245,7 @@ SnapDeploy dashboard env vars  →  injected into container  →  os.environ.get
 - Check SnapDeploy logs for missing env vars
 - Verify `VECTOR_STORE=supabase` (not `chroma`)
 - Make sure `supabase_schema.sql` was run in Supabase
+- After upgrading an existing deployment, run the current `supabase_schema.sql` again so document/workspace deletion has the required service-role `DELETE` grants. The script is idempotent and does not remove existing records.
 
 ### Frontend shows "Could not reach the API"
 - Check `VITE_API_URL` is set correctly (no trailing slash)

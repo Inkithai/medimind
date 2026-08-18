@@ -167,6 +167,15 @@ def get_job(job_id: str, user_id: str) -> Optional[Dict[str, Any]]:
     return None
 
 
+def delete_user_jobs(user_id: str) -> int:
+    """Forget every in-memory upload job owned by a deleted workspace."""
+    with _JOBS_LOCK:
+        ids = [job_id for job_id, job in _JOBS.items() if job.get("user_id") == user_id]
+        for job_id in ids:
+            _JOBS.pop(job_id, None)
+    return len(ids)
+
+
 def list_jobs(user_id: str, limit: int = 20) -> List[Dict[str, Any]]:
     with _JOBS_LOCK:
         values = [

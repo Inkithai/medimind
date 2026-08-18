@@ -61,6 +61,7 @@ import conversation
 import db
 import jobs
 import storage
+import vector_store
 from care import CareConfigurationError, CareProviderError, get_care_provider
 from care.postprocess import finalize as finalize_facilities
 from care.recommendation import recommend_care
@@ -1932,6 +1933,156 @@ async def _replace_index(user_id: str, timeline: Dict[str, Any]) -> Tuple[bool, 
         return False, str(exc), 0
 
 
+
+
+async def _rebuild_after_document_deletion(
+    user_id: str,
+    remaining_documents: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Replace every derived view without retaining facts from a deleted source."""
+    db.clear_conflict_history(user_id)
+    if not remaining_documents:
+        db.delete_patient_snapshot(user_id)
+        await asyncio.to_thread(vector_store.delete_collection, user_id)
+        return {
+            "documents_remaining": 0,
+            "timeline": None,
+            "indexed": True,
+            "index_error": None,
+        }
+
+    trusted, conflicts, trust_summary, detected = _prepare_current_trust_state(
+        user_id, remaining_documents
+    )
+    persisted_conflicts = db.sync_conflicts(user_id, detected) if detected else []
+    timeline = _timeline_from_trust_state(trusted, persisted_conflicts, trust_summary)
+    cross_check = _empty_cross_check(
+        "A source document was deleted. Safety findings from it were removed; "
+        "the remaining records will be checked again after the next record update."
+    )
+    lab_trends = track_lab_trends(timeline)
+    dosage_report = check_dosages(timeline)
+    consult_triage_report = generate_consult_triage(cross_check, lab_trends, dosage_report)
+    db.save_patient_snapshot(
+        user_id,
+        timeline,
+        cross_check,
+        lab_trends=lab_trends,
+        dosage_report=dosage_report,
+        consult_triage=consult_triage_report,
+    )
+    indexed, index_error, _ = await _replace_index(user_id, timeline)
+    return {
+        "documents_remaining": len(remaining_documents),
+        "timeline": timeline,
+        "indexed": indexed,
+        "index_error": index_error,
+    }
+
+
+def _workspace_has_active_upload(user_id: str) -> bool:
+    return any(
+        job.get("status") in {"pending", "processing"}
+        for job in jobs.list_jobs(user_id, limit=100)
+    )
+
+
+@app.delete("/api/v1/documents/{document_id}")
+async def delete_document(
+    document_id: str,
+    user_id: str = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """Permanently delete one uploaded file and rebuild all dependent views."""
+    if _workspace_has_active_upload(user_id):
+        raise HTTPException(
+            409,
+            "A document upload is still processing. Wait for it to finish before deleting a document.",
+        )
+    documents = db.load_documents(user_id)
+    selected = next((doc for doc in documents if trust_document_id(doc) == document_id), None)
+    if selected is None:
+        raise HTTPException(404, "Document not found in this workspace.")
+
+    content_sha256 = selected.get("content_sha256")
+    public_id = selected.get("cloudinary_public_id")
+    source_file = ((selected.get("_source") or {}).get("file")) or None
+
+    def belongs_to_upload(doc: Dict[str, Any]) -> bool:
+        if content_sha256:
+            return doc.get("content_sha256") == content_sha256
+        if public_id:
+            return doc.get("cloudinary_public_id") == public_id
+        if source_file:
+            return ((doc.get("_source") or {}).get("file")) == source_file
+        return trust_document_id(doc) == document_id
+
+    deleted_group = [doc for doc in documents if belongs_to_upload(doc)]
+    remaining = [doc for doc in documents if not belongs_to_upload(doc)]
+    document_ids = [trust_document_id(doc) for doc in deleted_group]
+
+    # Remove the original first. If secure storage is unavailable, keep the
+    # database and every derived view unchanged so the user can safely retry.
+    try:
+        await asyncio.to_thread(storage.delete_patient_document, str(public_id or ""))
+    except storage.StorageDeletionError as exc:
+        raise HTTPException(502, str(exc)) from exc
+
+    deleted_rows = db.delete_document_group(
+        user_id,
+        content_sha256=str(content_sha256) if content_sha256 else None,
+        cloudinary_public_id=str(public_id) if public_id else None,
+        source_file=str(source_file) if source_file else None,
+        document_id=document_id,
+    )
+    if not deleted_rows:
+        raise HTTPException(409, "The document changed before it could be deleted. Refresh and try again.")
+    db.delete_document_corrections(user_id, document_ids)
+    # Stored conversations, completed job payloads, referral trails, and audit
+    # details may still quote the deleted source. Clear them rather than leave
+    # residual copies that the normal record rebuild cannot rewrite safely.
+    db.clear_document_derived_history(user_id)
+    jobs.delete_user_jobs(user_id)
+    conversation.delete_patient_sessions(user_id)
+    rebuild = await _rebuild_after_document_deletion(user_id, remaining)
+    audit.record(user_id, "documents.delete", {
+        "document_id": document_id,
+        "rows_deleted": deleted_rows,
+        "documents_remaining": len(remaining),
+    })
+    return {
+        "deleted": True,
+        "document_id": document_id,
+        "file_name": source_file,
+        "pages_deleted": deleted_rows,
+        **rebuild,
+    }
+
+
+@app.delete("/api/v1/workspace")
+async def delete_workspace(user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
+    """Permanently erase originals, extracted records, derived data and history."""
+    if _workspace_has_active_upload(user_id):
+        raise HTTPException(
+            409,
+            "A document upload is still processing. Wait for it to finish before deleting the workspace.",
+        )
+    documents = db.load_documents(user_id, include_corrections=False)
+    public_ids = [doc.get("cloudinary_public_id") for doc in documents]
+    try:
+        await asyncio.to_thread(storage.delete_workspace_documents, public_ids)
+    except storage.StorageDeletionError as exc:
+        raise HTTPException(502, str(exc)) from exc
+
+    # Clear the configured vector store before the database sweep. If this
+    # fails, abort while the durable record still exists so the UI can safely
+    # retry instead of reporting an error after deletion already completed.
+    await asyncio.to_thread(vector_store.delete_collection, user_id)
+    deleted = await asyncio.to_thread(db.delete_workspace_data, user_id)
+    # Clear process-local copies after durable deletion succeeds.
+    jobs.delete_user_jobs(user_id)
+    conversation.delete_patient_sessions(user_id)
+    logger.info("workspace permanently deleted: user=%s tables=%s", user_id, sorted(deleted))
+    return {"deleted": True}
 
 
 @app.get("/api/v1/documents")

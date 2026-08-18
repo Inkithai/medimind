@@ -787,6 +787,20 @@ export interface RecordRebuildResponse {
   conflict?: RecordConflict;
 }
 
+export interface DeleteDocumentResponse {
+  deleted: true;
+  document_id: string;
+  file_name?: string | null;
+  pages_deleted: number;
+  documents_remaining: number;
+  indexed: boolean;
+  index_error?: string | null;
+}
+
+export interface DeleteWorkspaceResponse {
+  deleted: true;
+}
+
 // ---- Patient snapshot (api.py GET /api/v1/patient-snapshot) --------------
 // One request that returns everything the dashboard needs, instead of three
 // separate calls to /timeline + /cross-check + /lab-trends.

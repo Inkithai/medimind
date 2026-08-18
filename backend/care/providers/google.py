@@ -472,9 +472,18 @@ def _optional_string(value: Any) -> Optional[str]:
 
 
 def _normalized_specialty(value: Optional[str]) -> Optional[str]:
+    """Turn either a taxonomy id or a display label into safe search text.
+
+    The Find Care UI stores stable specialty ids such as
+    ``general_practice`` and sends that id to this adapter.  Underscores are
+    valid in those ids but are not useful in a Google text query.  Previously
+    they were rejected as unsupported characters, causing every default
+    general-practice search to return HTTP 400 before Google or the OSM
+    fallback was called.
+    """
     if value is None or not value.strip():
         return None
-    normalized = " ".join(value.strip().split())
+    normalized = " ".join(value.strip().replace("_", " ").split())
     if len(normalized) > 80 or not all(character.isalnum() or character in " -/&" for character in normalized):
         raise ValueError("specialty contains unsupported characters or is too long.")
     return normalized
