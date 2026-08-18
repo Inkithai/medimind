@@ -1,5 +1,8 @@
 # MediMind Features
 
+Official Young Global Changers final-round status: **19 / 19 complete**. See
+[`YGC_FINAL_ROUND_CHECKLIST.md`](YGC_FINAL_ROUND_CHECKLIST.md).
+
 ## Visible Features
 
 - Upload → Extract → Timeline → Safety/Labs → Ask AI
