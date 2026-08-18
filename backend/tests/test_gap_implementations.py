@@ -28,9 +28,10 @@ def test_date_admission_rejects_partial_placeholders_and_keeps_complete_dates():
     assert sanitize_clinical_date("unknown") is None
     assert sanitize_clinical_date("2026-08-15") == "2026-08-15"
     assert sanitize_clinical_date("15 Aug 2026") == "15 Aug 2026"
-    # Complete locale-ambiguous dates remain usable under the shared
-    # record-wide date convention instead of being guessed independently.
-    assert sanitize_clinical_date("03/11/2025") == "03/11/2025"
+    # New extraction admission is fail-closed when numeric day/month order
+    # cannot be established from the value itself.
+    assert sanitize_clinical_date("03/11/2025") is None
+    assert sanitize_clinical_date("14/11/2025") == "14/11/2025"
 
 
 def test_date_admission_is_applied_recursively_to_extracted_entities():

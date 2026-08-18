@@ -36,6 +36,20 @@ import type {
 } from "../types/api";
 import type { ScoredCareRecommendationsResponse } from "../types/recommendations";
 
+export interface PatientProfileInput {
+  legal_name?: string | null;
+  preferred_name?: string | null;
+  date_of_birth?: string | null;
+  phone?: string | null;
+  emergency_contact?: string | null;
+  preferred_language?: string | null;
+}
+
+export interface PatientProfile extends PatientProfileInput {
+  user_id: string;
+  updated_at?: string | null;
+}
+
 export interface DocumentsResponse {
   user_id: string;
   count: number;
@@ -473,6 +487,18 @@ export const api = {
   deleteWorkspace(credentials: Credentials): Promise<DeleteWorkspaceResponse> {
     return request<DeleteWorkspaceResponse>(credentials, "/api/v1/workspace", {
       method: "DELETE",
+    });
+  },
+
+  getProfile(credentials: Credentials): Promise<PatientProfile> {
+    return request<PatientProfile>(credentials, "/api/v1/profile");
+  },
+
+  updateProfile(credentials: Credentials, profile: PatientProfileInput): Promise<PatientProfile> {
+    return request<PatientProfile>(credentials, "/api/v1/profile", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(profile),
     });
   },
 

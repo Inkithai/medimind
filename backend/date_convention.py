@@ -110,6 +110,15 @@ def sanitize_clinical_date(raw: Any) -> Optional[str]:
         return None
     if _DATE_PLACEHOLDER_RE.search(text) or _PARTIAL_DATE_RE.match(text):
         return None
+    # A complete all-numeric date is still unsafe when both day/month fields
+    # are <=12: there is no evidence whether 03/11 means March 11 or 3 November.
+    # The shared parser remains available for legacy records, but new AI output
+    # is admitted only when this ordering is unambiguous.
+    numeric = _SLASH_DATE_RE.fullmatch(text)
+    if numeric:
+        first, second = int(numeric.group(1)), int(numeric.group(2))
+        if first <= 12 and second <= 12:
+            return None
     parsed = parse_mixed_datetime(text)
     if parsed is None or not 1900 <= parsed.year <= 2100:
         return None

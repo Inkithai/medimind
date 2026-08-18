@@ -31,6 +31,7 @@ Env:
 
 import os
 import functools
+import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Sequence
 
@@ -40,6 +41,7 @@ from evidence import normalize_document_evidence
 from record_trust import apply_correction_events
 
 _client: Optional[Client] = None
+logger = logging.getLogger("db")
 
 
 def _get_client() -> Client:
@@ -84,6 +86,10 @@ def _conflict_events():
 
 def _referral_searches():
     return _get_client().table("referral_searches")
+
+
+def _profiles():
+    return _get_client().table("patient_profiles")
 
 
 class SchemaNotInitializedError(RuntimeError):
@@ -233,7 +239,7 @@ def save_patient_snapshot(
     lab_trends: Optional[Dict[str, Any]] = None,
     dosage_report: Optional[Dict[str, Any]] = None,
     consult_triage: Optional[Dict[str, Any]] = None,
-) -> None:
+) -> Dict[str, Any]:
     """Upserts the merged timeline + cross-check report (+ lab trends,
     dosage report, and consult triage, if computed) for this user.
 
@@ -254,11 +260,12 @@ def save_patient_snapshot(
         derived["dosage_report"] = dosage_report
     if consult_triage is not None:
         derived["consult_triage"] = consult_triage
+    saved = False
     if derived:
         fields["derived_reports"] = derived
         try:
             _snapshots().upsert(fields, on_conflict="user_id").execute()
-            return
+            saved = True
         except Exception as e:
             # PGRST204 = unknown column in schema cache (table predates the
             # derived_reports migration). Fall back to the legacy shape so
@@ -266,7 +273,80 @@ def save_patient_snapshot(
             if "derived_reports" not in str(e):
                 raise
             fields.pop("derived_reports", None)
-    _snapshots().upsert(fields, on_conflict="user_id").execute()
+    if not saved:
+        _snapshots().upsert(fields, on_conflict="user_id").execute()
+
+    # Keep normalized, independently queryable rows synchronized with the
+    # trusted snapshot. Older deployments can continue serving snapshots
+    # until the additive projection migration is applied.
+    return sync_clinical_projection(
+        user_id, timeline, cross_check, dosage_report=dosage_report or {}
+    )
+
+
+def sync_clinical_projection(
+    user_id: str,
+    timeline: Dict[str, Any],
+    cross_check: Dict[str, Any],
+    *,
+    dosage_report: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Reconcile normalized entity rows and return exact lifecycle counts."""
+    from clinical_projection import build_projection
+
+    projection = build_projection(user_id, timeline, cross_check, dosage_report)
+    summary: Dict[str, Any] = {"available": True, "tables": {}}
+    client = _get_client()
+    for table_name, wanted_rows in projection.items():
+        try:
+            response = client.table(table_name).select("*").eq("user_id", user_id).execute()
+            existing_rows = list(response.data or [])
+        except Exception as exc:
+            if getattr(exc, "code", None) == _MISSING_TABLE_CODE or _MISSING_TABLE_CODE in str(exc):
+                logger.warning("normalized projection unavailable; apply supabase_schema.sql: %s", table_name)
+                return {"available": False, "reason": "schema_not_migrated", "tables": {}}
+            raise
+
+        existing = {str(row.get("id")): row for row in existing_rows}
+        wanted = {str(row["id"]): row for row in wanted_rows}
+        created = updated = unchanged = removed = 0
+        upserts: List[Dict[str, Any]] = []
+        for row_id, row in wanted.items():
+            old = existing.get(row_id)
+            if old is None:
+                created += 1
+                upserts.append({**row, "updated_at": _now_iso()})
+            else:
+                comparable = {key: old.get(key) for key in row}
+                if comparable == row:
+                    unchanged += 1
+                else:
+                    updated += 1
+                    upserts.append({**row, "updated_at": _now_iso()})
+        stale = sorted(set(existing) - set(wanted))
+        if stale:
+            client.table(table_name).delete().eq("user_id", user_id).in_("id", stale).execute()
+            removed = len(stale)
+        if upserts:
+            client.table(table_name).upsert(upserts, on_conflict="id").execute()
+        summary["tables"][table_name] = {
+            "created": created, "updated": updated, "unchanged": unchanged, "removed": removed,
+        }
+    summary["safety_findings"] = summary["tables"].get("safety_findings", {})
+    return summary
+
+
+@_translate_missing_schema
+def load_clinical_entities(user_id: str, kind: str, limit: int = 500) -> List[Dict[str, Any]]:
+    """Read one normalized entity class, always tenant-scoped."""
+    from clinical_projection import ENTITY_TABLES
+    if kind not in ENTITY_TABLES:
+        raise ValueError(f"Unknown clinical entity kind: {kind}")
+    response = (
+        _get_client().table(kind).select("*").eq("user_id", user_id)
+        .order("event_date", desc=True).limit(max(1, min(1000, limit))).execute()
+    )
+    return list(response.data or [])
 
 
 @_translate_missing_schema
@@ -384,6 +464,13 @@ def delete_workspace_data(user_id: str) -> Dict[str, int]:
     the UI never claims deletion completed when it did not.
     """
     tables = [
+        ("safety_findings", "user_id"),
+        ("clinical_events", "user_id"),
+        ("clinical_lab_results", "user_id"),
+        ("clinical_allergies", "user_id"),
+        ("clinical_prescriptions", "user_id"),
+        ("clinical_medications", "user_id"),
+        ("patient_profiles", "user_id"),
         ("conflict_resolution_events", "user_id"),
         ("record_conflicts", "user_id"),
         ("extraction_corrections", "user_id"),
@@ -408,6 +495,25 @@ def delete_workspace_data(user_id: str) -> Dict[str, int]:
                 continue
             raise
     return deleted
+
+
+@_translate_missing_schema
+def load_patient_profile(user_id: str) -> Optional[Dict[str, Any]]:
+    response = _profiles().select("*").eq("user_id", user_id).limit(1).execute()
+    rows = response.data or []
+    return dict(rows[0]) if rows else None
+
+
+@_translate_missing_schema
+def save_patient_profile(user_id: str, profile: Dict[str, Any]) -> Dict[str, Any]:
+    allowed = {
+        "legal_name", "preferred_name", "date_of_birth", "phone",
+        "emergency_contact", "preferred_language",
+    }
+    row = {"user_id": user_id, "updated_at": _now_iso()}
+    row.update({key: profile.get(key) for key in allowed})
+    response = _profiles().upsert(row, on_conflict="user_id").execute()
+    return dict((response.data or [row])[0])
 
 
 @_translate_missing_schema

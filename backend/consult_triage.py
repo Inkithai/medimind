@@ -406,6 +406,25 @@ def generate_consult_triage(
             confidence=conflict.get("confidence"),
         ))
 
+    # Published full-list age restrictions that deterministically conflict
+    # with the patient age printed in the record.
+    for conflict in cross_check.get("eml_age_conflicts") or []:
+        item = _item(
+            trigger="essential_medicine_age_restriction",
+            subject=str(conflict.get("medication") or "medication age restriction"),
+            detail=conflict.get("explanation") or conflict.get("restriction") or "Published age restriction.",
+            route="doctor",
+            urgency="urgent",
+            why_this_route="The published age restriction may require changing the prescription, which is a prescriber decision.",
+            confidence=conflict.get("confidence"),
+        )
+        item["reference"] = {
+            "source": "Model List of Essential Medicines",
+            "page": conflict.get("source_page"),
+            "population": conflict.get("population"),
+        }
+        items.append(item)
+
     # Published, page-cited opioid + depressant combinations with proven
     # treatment-window overlap.
     for combination in cross_check.get("guideline_flagged_combinations") or []:

@@ -43,7 +43,7 @@ def test_reanalysis_rebuilds_persists_indexes_and_reports_counts():
          mock.patch.object(api.db, "load_patient_snapshot", return_value={"cross_check_report": old}), \
          mock.patch.object(api, "_prepare_current_trust_state", return_value=([], [], {}, [])), \
          mock.patch.object(api, "_derive_record", new=mock.AsyncMock(return_value=(timeline, clean, {"trends": []}))), \
-         mock.patch.object(api.db, "save_patient_snapshot") as save, \
+         mock.patch.object(api.db, "save_patient_snapshot", return_value={"available": True, "tables": {}, "safety_findings": {"created": 0, "updated": 0, "unchanged": 0, "removed": 1}}) as save, \
          mock.patch.object(api, "_replace_index", new=mock.AsyncMock(return_value=(True, None, 2))), \
          mock.patch.object(api.audit, "record"):
         with TestClient(api.app) as client:
