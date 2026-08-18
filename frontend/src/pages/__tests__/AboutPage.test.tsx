@@ -278,7 +278,8 @@ const tests: Array<[string, () => void]> = [
     () => {
       const linkBlock = layoutSource.slice(layoutSource.indexOf('to="/about"'));
       assert.ok(linkBlock.includes("focus-visible:ring"), "visible focus state");
-      assert.ok(linkBlock.includes('title={t("about.nav")}'), "accessible title from i18n");
+      assert.ok(linkBlock.includes('aria-label={collapsed ? t("about.nav")'), "accessible label from i18n");
+      assert.ok(linkBlock.includes('t("nav.descriptions.about")'), "collapsed tooltip explains the destination");
       assert.ok(linkBlock.includes("min-h-[44px]"), "44px touch target");
       // Collapses to an icon on main's desktop rail, like the other items.
       assert.ok(linkBlock.includes('collapsed && "lg:hidden"'), "label hides when collapsed");
