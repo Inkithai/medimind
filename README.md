@@ -373,7 +373,7 @@ Dedicated service (`medication_safety.py`) — not extraction and not RAG. The S
 - `GET /api/v1/medication-safety` — structured report plus `service`, `module`, `dosage_report`, and a not-a-diagnosis disclaimer. 404 if no snapshot. Auth required.
 - `POST /api/v1/medication-safety/reanalyze` — rebuilds and persists the full safety pipeline from current documents. 409 during an active upload, 404 if no documents. Returns `reanalyzed`, before/after finding counts, and `indexed`.
 
-Offline tests: `backend/tests/test_medication_safety_service.py` (engine) and `backend/tests/test_medication_safety_endpoints.py` (TestClient; mocks snapshot/rebuild, no LLM).
+Offline tests: `backend/tests/test_medication_safety_service.py` (engine), `backend/tests/test_medication_safety_endpoints.py` (TestClient), and `backend/tests/test_p1_p2_endpoints.py` (TestClient for vitals / symptoms / alerts / FHIR / measurements / messaging / guidelines).
 
 #### Corrections and source conflicts
 

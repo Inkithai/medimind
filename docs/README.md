@@ -48,7 +48,7 @@ docs for individual backend modules live next to the code they describe, in
 
 - Medication-safety HTTP contract: [`../backend/tests/test_medication_safety_endpoints.py`](../backend/tests/test_medication_safety_endpoints.py) (`GET /api/v1/medication-safety`, `POST /api/v1/medication-safety/reanalyze`; TestClient, offline mocks).
 - Medication-safety engine (no HTTP): [`../backend/tests/test_medication_safety_service.py`](../backend/tests/test_medication_safety_service.py).
-- Hidden speaker-notes page: `npm run test:judge-prep` in `frontend/` (`/ygc-prep` is type-the-URL only — not in the sidebar, landing, or footer).
+- P1/P2 HTTP contract: [`../backend/tests/test_p1_p2_endpoints.py`](../backend/tests/test_p1_p2_endpoints.py) (vitals, symptoms, preventive care, alerts, adherence, early warning, lifecycle, FHIR import, measurements, messaging, guidelines, reconciliation, deterioration, finding history).
 
 ## Backend module docs
 
