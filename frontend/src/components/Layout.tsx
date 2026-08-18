@@ -190,18 +190,20 @@ export function Layout() {
               collapsed && "lg:justify-center lg:px-2"
             )}
           >
-            <Logo />
-            <div className={classNames("min-w-0 flex-1", collapsed && "lg:hidden")}>
-              <p className="text-xl font-bold leading-tight text-slate-900">MediMind</p>
+            {/* When collapsed the logo/name hide and the toggle stays — the
+                expand control must NEVER disappear, or the rail could not be
+                opened again (collapse state persists in localStorage). */}
+            <div className={classNames("contents", collapsed && "lg:hidden")}>
+              <Logo />
+              <div className="min-w-0 flex-1">
+                <p className="text-xl font-bold leading-tight text-slate-900">MediMind</p>
+              </div>
             </div>
             {desktop && (
               <button
                 type="button"
                 onClick={() => setCollapsed((value) => !value)}
-                className={classNames(
-                  "hidden h-10 w-10 shrink-0 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 lg:flex",
-                  collapsed && "lg:hidden"
-                )}
+                className="hidden h-10 w-10 shrink-0 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 lg:flex"
                 aria-label={collapsed ? t("nav.expandSidebar") : t("nav.collapseSidebar")}
                 aria-expanded={!collapsed}
                 title={collapsed ? t("nav.expandSidebar") : t("nav.collapseSidebar")}

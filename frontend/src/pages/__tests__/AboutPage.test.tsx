@@ -302,6 +302,29 @@ const tests: Array<[string, () => void]> = [
     },
   ],
   [
+    "the sidebar can always be expanded again after collapsing",
+    () => {
+      // Regression: the collapse toggle once gained `collapsed && "lg:hidden"`,
+      // so a persisted collapse removed the ONLY expand control — the rail
+      // could never be opened again. The toggle must stay mounted in every
+      // state; only the logo/name block may hide.
+      const toggleBlock = layoutSource.slice(
+        layoutSource.indexOf("setCollapsed((value) => !value)") - 200,
+        layoutSource.indexOf("setCollapsed((value) => !value)") + 700
+      );
+      assert.ok(toggleBlock.includes("nav.expandSidebar"), "toggle carries the expand label");
+      assert.ok(
+        !toggleBlock.includes("lg:hidden"),
+        "the expand/collapse toggle must never hide when collapsed"
+      );
+      const brandBlock = layoutSource.slice(layoutSource.indexOf("<Logo />") - 200, layoutSource.indexOf("<Logo />") + 300);
+      assert.ok(
+        brandBlock.includes('collapsed && "lg:hidden"'),
+        "the logo/name block hides on the collapsed rail instead"
+      );
+    },
+  ],
+  [
     "every About string exists in Sinhala and Tamil",
     () => {
       for (const language of ["si", "ta"] as const) {

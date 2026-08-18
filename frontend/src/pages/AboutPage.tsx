@@ -259,8 +259,8 @@ function Panel({ children, className }: { children: ReactNode; className?: strin
  *  without making the default page enormous. */
 function TechDetails({ summary, children }: { summary: string; children: ReactNode }) {
   return (
-    <details className="group rounded-2xl border border-slate-200 bg-white shadow-sm [&::-webkit-details-marker]:hidden">
-      <summary className="flex min-h-[44px] cursor-pointer list-none items-center justify-between gap-3 px-5 py-3 text-sm font-semibold text-slate-900 transition hover:text-brand-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-400">
+    <details className="group rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <summary className="flex min-h-[44px] cursor-pointer list-none items-center justify-between gap-3 px-5 py-3 text-sm font-semibold text-slate-900 transition hover:text-brand-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-400 [&::-webkit-details-marker]:hidden">
         <span className="min-w-0">{summary}</span>
         <span
           aria-hidden="true"
@@ -817,8 +817,8 @@ function Interoperability() {
             </span>
           </div>
           <p className="mt-4 text-sm leading-relaxed text-slate-600">{t("about.fhirBody")}</p>
-          <details className="group mt-4 rounded-xl border border-slate-200 bg-white/80 [&::-webkit-details-marker]:hidden">
-            <summary className="flex min-h-[44px] cursor-pointer list-none items-center justify-between gap-3 px-4 py-2.5 text-sm font-semibold text-sky-800 transition hover:text-sky-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-400">
+          <details className="group mt-4 rounded-xl border border-slate-200 bg-white/80">
+            <summary className="flex min-h-[44px] cursor-pointer list-none items-center justify-between gap-3 px-4 py-2.5 text-sm font-semibold text-sky-800 transition hover:text-sky-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-400 [&::-webkit-details-marker]:hidden">
               {t("about.viewResources")}
               <span aria-hidden="true" className="text-slate-400 transition-transform group-open:rotate-180">▾</span>
             </summary>
@@ -934,9 +934,9 @@ function ApiOverview() {
         {API_GROUPS.map((group) => (
           <details
             key={group.titleKey}
-            className="group rounded-2xl border border-slate-200 bg-white shadow-sm [&::-webkit-details-marker]:hidden"
+            className="group rounded-2xl border border-slate-200 bg-white shadow-sm"
           >
-            <summary className="flex min-h-[44px] cursor-pointer list-none items-center justify-between gap-3 px-5 py-3 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-400">
+            <summary className="flex min-h-[44px] cursor-pointer list-none items-center justify-between gap-3 px-5 py-3 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-400 [&::-webkit-details-marker]:hidden">
               <h3 className="text-sm font-bold text-slate-900 group-hover:text-brand-800">
                 {t(group.titleKey)}
               </h3>
