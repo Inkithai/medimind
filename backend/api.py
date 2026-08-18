@@ -1,11 +1,12 @@
 """
 HTTP API (Phase 3 + 4)
 =========================================
-Exposes the extraction -> timeline -> cross-check -> trend-track -> retrieval
--> conversation pipeline (medical_extractor.py, lab_trends.py, retrieval.py,
-conversation.py) over HTTP, under the /api/v1/ prefix. This is a thin
-wrapper — all business logic stays in those modules; this file only handles
-request/response marshalling, validation, and HTTP status codes.
+Exposes the extraction -> timeline -> medication-safety -> trend-track ->
+retrieval -> conversation pipeline (medical_extractor.py,
+medication_safety.py, lab_trends.py, retrieval.py, conversation.py) over
+HTTP, under the /api/v1/ prefix. This is a thin wrapper — all business
+logic stays in those modules; this file only handles request/response
+marshalling, validation, and HTTP status codes.
 
 Every route except /health requires an authenticated caller (see auth.py):
     Authorization: Bearer <jwt>
@@ -119,9 +120,9 @@ from medical_extractor import (
     ProviderRateLimitError,
     _is_demo_document,
     build_patient_timeline,
-    cross_check_prescriptions,
     process_document,
 )
+from medication_safety import analyze_medication_safety, cross_check_prescriptions
 from memory_probe import log_rss
 from retrieval import answer_question, index_patient_timeline, preload_embedding_model, timeline_fingerprint
 from risk_timeline import build_treatment_windows, concurrent_exposure, risk_calendar
@@ -521,7 +522,7 @@ async def _cross_check_trusted_timeline(
             "Resolve quarantined conflicts and consult a doctor or pharmacist before making changes."
         )
     def _run() -> Dict[str, Any]:
-        return cross_check_prescriptions(timeline, graph_backed_findings=graph_backed_findings)
+        return analyze_medication_safety(timeline, graph_backed_findings=graph_backed_findings)
 
     return await asyncio.get_running_loop().run_in_executor(_DOCUMENT_EXECUTOR, _run)
 
@@ -2417,6 +2418,32 @@ async def get_cross_check(user_id: str = Depends(get_current_user)) -> Dict[str,
     if snapshot is None:
         raise HTTPException(404, "No cross-check report found for this user.")
     return _enhanced_cross_check(snapshot, user_id)
+
+
+@app.get("/api/v1/medication-safety")
+async def get_medication_safety(user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
+    """Dedicated medication-safety API.
+
+    Reads the saved patient timeline and returns the structured safety
+    analysis produced by ``medication_safety.py``. This is not extraction
+    and is not RAG — it is a separate service that writes analyses from
+    medications already on the record.
+    """
+    snapshot = _load_snapshot_or_rebuild(user_id)
+    if snapshot is None:
+        raise HTTPException(404, "No medication-safety report found for this user.")
+    report = _enhanced_cross_check(snapshot, user_id)
+    dosage = snapshot.get("dosage_report") or check_dosages(snapshot["patient_timeline"])
+    return {
+        **report,
+        "service": "medication_safety",
+        "module": "medication_safety.py",
+        "dosage_report": dosage,
+        "disclaimer": (
+            "This is an observation from uploaded records, not a diagnosis. "
+            "Consult a doctor or pharmacist before making any medication changes."
+        ),
+    }
 
 
 @app.post("/api/v1/medication-safety/reanalyze")

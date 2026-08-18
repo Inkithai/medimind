@@ -17,7 +17,9 @@ Every required item is implemented. The required flow is:
 - [x] **R2** — Merge extracted data into one patient timeline
   - `GET /api/v1/timeline`, History (`/history`)
 - [x] **R3** — Cross-check prescriptions for interactions, duplicates, or conflicting dosages
-  - `backend/drug_interactions.py`, `backend/dosage_rules.py`, `backend/document_dedup.py`, Safety (`/safety`)
+  - Dedicated service: `backend/medication_safety.py` (not extraction)
+  - Deterministic engines: `drug_interactions.py`, `dosage_rules.py`, `document_dedup.py`
+  - API: `GET /api/v1/medication-safety` · view: Safety (`/safety`)
 - [x] **R4** — Track lab result trends over time
   - `backend/lab_trends.py`, Test Results (`/labs`)
 - [x] **R5** — Explain lab trends in plain language
@@ -37,7 +39,7 @@ Every required item is implemented. The required flow is:
   - Heart-related flag → cardiologist; drug interaction → prescribing doctor / pharmacist
   - `backend/specialty_mapping.py`, `backend/consult_triage.py`, `GET /api/v1/care-recommendations`
 - [x] **R10** — Ask the user for their location (city/area)
-  - Find Local Care (`/care`) + `LocationPicker`
+  - Find Local Care (`/care`) city/area field; map picker also on `/find-care`
 - [x] **R11** — Ask the user for their availability (this week, evenings, etc.)
   - `any` / `today` / `this_week` / `evenings` / `weekends` on `/care`
 - [x] **R12** — Search real, publicly available doctors/clinics via Google Maps Places API or a free alternative

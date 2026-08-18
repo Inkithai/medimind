@@ -1,6 +1,7 @@
 # MediMind Features
 
-Official Young Global Changers final-round status: **19 / 19 complete**. See
+Official Young Global Changers final-round status: **19 / 19 complete**. Brief:
+[`YGC_FINAL_ROUND_RULES.md`](YGC_FINAL_ROUND_RULES.md). Checklist:
 [`YGC_FINAL_ROUND_CHECKLIST.md`](YGC_FINAL_ROUND_CHECKLIST.md).
 
 ## Visible Features

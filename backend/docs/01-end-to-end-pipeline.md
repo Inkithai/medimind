@@ -34,7 +34,7 @@ Find patterns and potential safety issues without diagnosing.
 
 ```text
 Timeline
- ├── Medication safety
+ ├── Medication Safety Service  (medication_safety.py — not extraction)
  ├── Allergy conflicts
  ├── Duplicate prescriptions
  └── Lab trends   (no language model)
@@ -98,7 +98,8 @@ Upload creates and updates the record. Timeline, safety, labs, and the search in
                             │
              ┌──────────────┼──────────────┐
              ▼              ▼              ▼
-          Safety        Lab Trends      Search Index
+     Medication Safety  Lab Trends      Search Index
+     (dedicated service)
              │              │              │
              └──────────────┼──────────────┘
                             ▼

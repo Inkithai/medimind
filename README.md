@@ -66,9 +66,13 @@ Zero matches return an empty list plus a “widen the search area” message. Mi
                 |
      ┌──────────┼──────────┐
      │          │          │
- Safety     Lab Trends   Vector Store (Chroma or Supabase `chunks`)
- check      deterministic   |  ← VECTOR_STORE=chroma (local) or supabase (no volume)
-     │          │           └──→ RAG Q&A / Conversations (query rewrite)
+ Medication  Lab Trends   Vector Store (Chroma or Supabase `chunks`)
+ Safety      deterministic   |  ← VECTOR_STORE=chroma (local) or supabase (no volume)
+ service                    └──→ RAG Q&A / Conversations (query rewrite)
+ (medication_safety.py —
+  interactions / duplicates /
+  dosage / allergy; not extraction)
+     │          │
      └──────────┴──────────→ JSON answer with citations
 ```
 
@@ -90,7 +94,8 @@ Vision+text use the same Gemini model; Groq needs two. All three are OpenAI-comp
 
 | File | What it handles |
 |---|---|
-| `medical_extractor.py` | `LLM_PROVIDER` layer, vision / text extraction, patient grouping, timeline creation, safety LLM call plus deterministic duplicate detection, local CLI persistence |
+| `medical_extractor.py` | `LLM_PROVIDER` layer, vision / text extraction, patient grouping, timeline creation, local CLI persistence. Does **not** own medication safety. |
+| `medication_safety.py` | Dedicated medication-safety service. Reads the timeline and writes analyses: deterministic interaction KB, allergy KB, duplicates, dosage, drug–lab / renal-hepatic / condition engines, numeric confidence grading. HTTP: `GET /api/v1/medication-safety`. |
 | `document_filter.py` | Fast post-extraction filter for non-medical files (no extra LLM call, reuses `document_type` + clinical fields) |
 | `lab_trends.py` | Pure Python trend engine — direction, crossings, recovery (`returned_to_normal`), unit-clash decline, and thousands-aware parsing |
 | `change_detection.py` / `record_integrity.py` | Deterministic longitudinal change detection and source-linked cross-document discrepancy checks |
