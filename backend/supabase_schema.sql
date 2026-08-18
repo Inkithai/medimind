@@ -11,8 +11,9 @@
 -- this backend can. Never point a frontend at these tables directly.
 -- ============================================================================
 
--- One row per extracted document (structured JSON from medical_extractor),
--- append-only per user.
+-- One row per extracted document (structured JSON from medical_extractor).
+-- Rows are append-only except for explicit authenticated document/workspace
+-- deletion and full-file replacement during reprocessing.
 create table if not exists public.documents (
     id          bigint generated always as identity primary key,
     user_id     text        not null,
@@ -105,7 +106,7 @@ create table if not exists public.audit_log (
     created_at timestamptz not null default now()
 );
 create index if not exists audit_log_user_id_idx on public.audit_log (user_id, created_at);
-grant select, insert on table public.audit_log to service_role;
+grant select, insert, delete on table public.audit_log to service_role;
 grant usage, select on sequence public.audit_log_id_seq to service_role;
 alter table public.audit_log enable row level security;
 -- Immutable user correction events. The source extraction in documents.data
@@ -126,7 +127,7 @@ create table if not exists public.extraction_corrections (
 );
 create index if not exists extraction_corrections_user_doc_idx
     on public.extraction_corrections (user_id, document_id, created_at);
-grant select, insert on table public.extraction_corrections to service_role;
+grant select, insert, delete on table public.extraction_corrections to service_role;
 alter table public.extraction_corrections enable row level security;
 
 -- Current conflict state. The original competing facts live in data.items;
@@ -148,7 +149,7 @@ create table if not exists public.record_conflicts (
 );
 create index if not exists record_conflicts_user_status_idx
     on public.record_conflicts (user_id, status, updated_at);
-grant select, insert, update on table public.record_conflicts to service_role;
+grant select, insert, update, delete on table public.record_conflicts to service_role;
 alter table public.record_conflicts enable row level security;
 
 -- Append-only audit trail for resolve/reopen decisions.
@@ -164,7 +165,7 @@ create table if not exists public.conflict_resolution_events (
 );
 create index if not exists conflict_resolution_events_user_idx
     on public.conflict_resolution_events (user_id, conflict_id, created_at);
-grant select, insert on table public.conflict_resolution_events to service_role;
+grant select, insert, delete on table public.conflict_resolution_events to service_role;
 alter table public.conflict_resolution_events enable row level security;
 
 -- Append-only referral trail: one row per local-care provider search a user
@@ -180,6 +181,6 @@ create table if not exists public.referral_searches (
 );
 create index if not exists referral_searches_user_idx
     on public.referral_searches (user_id, created_at desc);
-grant select, insert on table public.referral_searches to service_role;
+grant select, insert, delete on table public.referral_searches to service_role;
 grant usage, select on sequence public.referral_searches_id_seq to service_role;
 alter table public.referral_searches enable row level security;

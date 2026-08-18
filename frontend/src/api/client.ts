@@ -13,6 +13,8 @@ import type {
   CrossCheckReport,
   ConflictsResponse,
   DocumentCorrectionsResponse,
+  DeleteDocumentResponse,
+  DeleteWorkspaceResponse,
   FollowUpPlan,
   FacilityKind,
   HealthResponse,
@@ -458,6 +460,20 @@ export const api = {
   // of any in-process state.
   listDocuments(credentials: Credentials): Promise<DocumentsResponse> {
     return request<DocumentsResponse>(credentials, "/api/v1/documents");
+  },
+
+  deleteDocument(credentials: Credentials, documentId: string): Promise<DeleteDocumentResponse> {
+    return request<DeleteDocumentResponse>(
+      credentials,
+      `/api/v1/documents/${encodeURIComponent(documentId)}`,
+      { method: "DELETE" }
+    );
+  },
+
+  deleteWorkspace(credentials: Credentials): Promise<DeleteWorkspaceResponse> {
+    return request<DeleteWorkspaceResponse>(credentials, "/api/v1/workspace", {
+      method: "DELETE",
+    });
   },
 
   // Re-runs the full per-document pipeline for one stored document (fetches

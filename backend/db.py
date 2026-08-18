@@ -21,7 +21,8 @@ Core and trust tables are created idempotently by `supabase_schema.sql`:
     record_conflicts             current unresolved/resolved conflict state
     conflict_resolution_events   append-only source-decision audit history
 
-Original document JSON is never updated by the correction workflow.
+Original document JSON is never updated by the correction workflow. Rows
+are removed only by explicit authenticated document/workspace deletion.
 
 Env:
     SUPABASE_URL                e.g. https://abcdefgh.supabase.co
@@ -297,6 +298,97 @@ def replace_document_group(
     if pages:
         insert_documents(user_id, list(pages))
     return len(matched_ids)
+
+
+@_translate_missing_schema
+def delete_document_group(
+    user_id: str,
+    *,
+    content_sha256: Optional[str],
+    cloudinary_public_id: Optional[str],
+    source_file: Optional[str],
+    document_id: str,
+) -> int:
+    """Delete one physical upload, including every extracted page row.
+
+    New uploads share a content hash and Cloudinary id across all pages.
+    Older rows fall back to their source filename, then finally to the exact
+    application document id. Every query remains scoped to ``user_id``.
+    """
+    response = _documents().select("id, data").eq("user_id", user_id).execute()
+    matched_ids: List[Any] = []
+    for row in response.data or []:
+        data = row.get("data") if isinstance(row.get("data"), dict) else {}
+        row_document_id = str(data.get("_document_id") or f"db:{row['id']}")
+        same_upload = False
+        if content_sha256:
+            same_upload = data.get("content_sha256") == content_sha256
+        elif cloudinary_public_id:
+            same_upload = data.get("cloudinary_public_id") == cloudinary_public_id
+        elif source_file:
+            same_upload = (data.get("_source") or {}).get("file") == source_file
+        else:
+            same_upload = row_document_id == document_id
+        if same_upload:
+            matched_ids.append(row["id"])
+    if matched_ids:
+        _documents().delete().eq("user_id", user_id).in_("id", matched_ids).execute()
+    return len(matched_ids)
+
+
+@_translate_missing_schema
+def delete_document_corrections(user_id: str, document_ids: Sequence[str]) -> None:
+    """Remove correction events whose source document has been deleted."""
+    ids = [str(value) for value in document_ids if value]
+    if ids:
+        _corrections().delete().eq("user_id", user_id).in_("document_id", ids).execute()
+
+
+@_translate_missing_schema
+def clear_conflict_history(user_id: str) -> None:
+    """Clear derived conflict state before rebuilding it from remaining sources."""
+    _conflict_events().delete().eq("user_id", user_id).execute()
+    _conflicts().delete().eq("user_id", user_id).execute()
+
+
+@_translate_missing_schema
+def delete_patient_snapshot(user_id: str) -> None:
+    _snapshots().delete().eq("user_id", user_id).execute()
+
+
+@_translate_missing_schema
+def delete_workspace_data(user_id: str) -> Dict[str, int]:
+    """Permanently remove all persisted records owned by one workspace.
+
+    Optional tables may not exist on older deployments; a missing optional
+    table is skipped, while every other storage failure aborts the request so
+    the UI never claims deletion completed when it did not.
+    """
+    tables = [
+        ("conflict_resolution_events", "user_id"),
+        ("record_conflicts", "user_id"),
+        ("extraction_corrections", "user_id"),
+        ("referral_searches", "user_id"),
+        ("conversation_sessions", "user_id"),
+        ("jobs", "user_id"),
+        ("chunks", "patient_key"),
+        ("patient_snapshots", "user_id"),
+        ("documents", "user_id"),
+        # Audit metadata is deleted last so no user-linked residue remains.
+        ("audit_log", "user_id"),
+    ]
+    client = _get_client()
+    deleted: Dict[str, int] = {}
+    for table_name, field in tables:
+        try:
+            response = client.table(table_name).delete().eq(field, user_id).execute()
+            deleted[table_name] = len(response.data or [])
+        except Exception as exc:
+            if getattr(exc, "code", None) == _MISSING_TABLE_CODE or _MISSING_TABLE_CODE in str(exc):
+                deleted[table_name] = 0
+                continue
+            raise
+    return deleted
 
 
 @_translate_missing_schema

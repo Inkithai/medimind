@@ -4,6 +4,7 @@ import { Alert } from "../components/Alert";
 import { ErrorState } from "../components/ErrorState";
 import { Card, CardBody, CardHeader } from "../components/Card";
 import { QAResultCard } from "../components/QAResultCard";
+import { MedicalDisclaimer } from "../components/MedicalDisclaimer";
 import { Spinner } from "../components/Spinner";
 import {
   PlusIcon,
@@ -239,6 +240,7 @@ export function SessionPage() {
                 {t("conversation.send")}
               </button>
             </form>
+            <div className="mt-3"><MedicalDisclaimer /></div>
             <details className="mt-2 text-xs text-slate-500">
               <summary className="cursor-pointer font-medium text-slate-700">{t("ask.advanced")}</summary>
               <div className="mt-2 flex items-center gap-2">

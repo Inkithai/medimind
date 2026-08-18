@@ -77,6 +77,45 @@ def upload_patient_document(user_id: str, file_path: str, original_filename: str
     }
 
 
+class StorageDeletionError(RuntimeError):
+    """A stored original could not be permanently removed."""
+
+
+def delete_patient_document(public_id: str) -> None:
+    """Permanently remove one original from Cloudinary.
+
+    Older rows do not store Cloudinary's resource type, so try the supported
+    upload categories. A fully missing asset is treated as already deleted.
+    """
+    if not public_id or not public_id.strip():
+        return
+    _configure()
+    outcomes = []
+    errors = []
+    for resource_type in ("image", "raw", "video"):
+        try:
+            result = cloudinary.uploader.destroy(
+                public_id,
+                resource_type=resource_type,
+                invalidate=True,
+            )
+            outcomes.append(str((result or {}).get("result") or "").lower())
+        except Exception as exc:
+            errors.append(exc)
+    if "ok" in outcomes or (outcomes and all(value in {"not found", "not_found"} for value in outcomes)):
+        return
+    logger.error("storage: deletion failed for public id %s: outcomes=%s errors=%s", public_id, outcomes, errors)
+    raise StorageDeletionError(
+        "The original file could not be removed from secure storage. Nothing was deleted; please try again."
+    )
+
+
+def delete_workspace_documents(public_ids: Any) -> None:
+    """Remove every distinct original owned by a workspace."""
+    for public_id in sorted({str(value).strip() for value in public_ids if value and str(value).strip()}):
+        delete_patient_document(public_id)
+
+
 class StorageDownloadError(RuntimeError):
     """The stored original could not be fetched for reprocessing."""
 

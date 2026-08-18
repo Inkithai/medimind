@@ -6,6 +6,7 @@ import { Card, CardBody } from "../components/Card";
 import { LabTrendsView } from "../components/LabTrendsView";
 import { ConsiderProfessionalCare } from "../components/ConsiderProfessionalCare";
 import { LoadingState } from "../components/Spinner";
+import { MedicalDisclaimer } from "../components/MedicalDisclaimer";
 import { RefreshIcon, UploadIcon } from "../components/icons";
 import { useAuth } from "../context/AuthContext";
 import { useStrictEffect } from "../hooks/useStrictEffect";
@@ -66,6 +67,7 @@ export function LabTrendsPage() {
       {!loading && report && (
         <>
           <LabTrendsView report={report} />
+          <MedicalDisclaimer />
           {worthDiscussing(report) && (
             <ConsiderProfessionalCare message={t("care.labReview")} />
           )}

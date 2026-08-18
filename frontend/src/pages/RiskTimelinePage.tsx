@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import { Card, CardBody } from "../components/Card";
 import { LoadingState } from "../components/Spinner";
+import { MedicalDisclaimer } from "../components/MedicalDisclaimer";
 import { RefreshIcon, UploadIcon } from "../components/icons";
 import { RiskTimelineView } from "../components/RiskTimelineView";
 import { useAuth } from "../context/AuthContext";
@@ -60,7 +61,12 @@ export function RiskTimelinePage() {
         <NotFoundOrError error={error} onRetry={() => setReloadKey((k) => k + 1)} />
       )}
 
-      {!loading && report && <RiskTimelineView report={report} />}
+      {!loading && report && (
+        <>
+          <RiskTimelineView report={report} />
+          <MedicalDisclaimer />
+        </>
+      )}
     </div>
   );
 }
