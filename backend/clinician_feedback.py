@@ -90,10 +90,27 @@ def finding_key_from(
     condition: str = "",
     organ: str = "",
 ) -> str:
+    """Return a fingerprint, or '' when the caller supplied no identity.
+
+    POST /api/v1/findings/feedback treats an empty key as 400. Hashing an
+    all-blank finding still produced a stable SHA, so a body with only
+    ``verdict`` was accepted against a garbage key.
+    """
+    meds = [str(item).strip() for item in (medications_involved or []) if str(item).strip()]
+    if not any(
+        (
+            str(finding_kind or "").strip(),
+            str(rule or "").strip(),
+            meds,
+            str(condition or "").strip(),
+            str(organ or "").strip(),
+        )
+    ):
+        return ""
     return finding_key({
         "finding_kind": finding_kind,
         "rule": rule,
-        "medications_involved": medications_involved or [],
+        "medications_involved": meds,
         "condition": condition,
         "organ": organ,
     })

@@ -24,7 +24,7 @@ pattern is worth asking about". Deterministic, no LLM.
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 try:
@@ -38,16 +38,36 @@ except Exception:  # pragma: no cover
     _lt_parse_date = None
 
 
-def _parse_date(raw: Any):
+def _as_date(value: Any) -> Optional[date]:
+    """Normalize lab_trends datetimes and ISO strings to date.
+
+    lab_trends._parse_date returns a datetime. Mixing that with date.today()
+    (the HTTP default when no reference_date is passed) raised
+    TypeError: can't compare datetime.datetime to datetime.date and 500'd
+    GET /api/v1/adherence on any workspace with dated medications.
+    """
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    return None
+
+
+def _parse_date(raw: Any) -> Optional[date]:
     if not raw:
         return None
+    if isinstance(raw, (date, datetime)):
+        return _as_date(raw)
     if _lt_parse_date is not None:
         try:
-            return _lt_parse_date(raw)
+            parsed = _as_date(_lt_parse_date(raw))
+            if parsed is not None:
+                return parsed
         except Exception:
             pass
     try:
-        from datetime import datetime
         return datetime.fromisoformat(str(raw)[:10]).date()
     except Exception:
         return None

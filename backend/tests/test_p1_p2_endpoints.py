@@ -163,21 +163,19 @@ def test_vital_trends_and_early_warning_are_not_diagnoses():
     assert "trends" in vitals.json()
     assert warning.status_code == 200, warning.text
     assert "score" in warning.json()
-    assert "not a diagnosis" in warning.json().get("note", "").lower() or True
+    assert "not a diagnosis" in warning.json().get("note", "").lower()
     assert decline.status_code == 200, decline.text
 
 
 def test_adherence_and_reconciliation_read_the_timeline():
-    with mock.patch.object(api, "_load_snapshot_or_rebuild", return_value=dict(SNAPSHOT)), \
-         mock.patch("adherence.analyse_adherence", return_value={"signals": [], "note": "dates only"}), \
-         mock.patch("medication_reconciliation.reconcile_medications", return_value={"items": []}):
+    with mock.patch.object(api, "_load_snapshot_or_rebuild", return_value=dict(SNAPSHOT)):
         with _authed() as client:
             adherence = client.get("/api/v1/adherence")
             recon = client.get("/api/v1/medications/reconciliation")
     assert adherence.status_code == 200, adherence.text
-    assert adherence.json()["signals"] == []
+    assert "signals" in adherence.json()
     assert recon.status_code == 200, recon.text
-    assert recon.json()["items"] == []
+    assert "reconciled_medications" in recon.json()
 
 
 def test_managed_alerts_wrap_the_cross_check():
@@ -187,7 +185,8 @@ def test_managed_alerts_wrap_the_cross_check():
             response = client.get("/api/v1/findings/alerts")
     assert response.status_code == 200, response.text
     body = response.json()
-    assert "active_count" in body or "alerts" in body or "findings" in body or "suppressed_count" in body
+    assert body["active_count"] == 1
+    assert body["suppressed_count"] == 0
 
 
 def test_preventive_care_degrades_without_a_record():
@@ -214,6 +213,7 @@ def test_symptom_analyse_validates_and_refuses_diagnosis():
 
 def test_finding_feedback_round_trip():
     with _authed() as client:
+        missing = client.post("/api/v1/findings/feedback", json={"verdict": "confirmed"})
         bad = client.post("/api/v1/findings/feedback", json={"finding_key": "abc", "verdict": "not-a-verdict"})
         created = client.post(
             "/api/v1/findings/feedback",
@@ -226,6 +226,7 @@ def test_finding_feedback_round_trip():
         )
         listed = client.get("/api/v1/findings/feedback")
         metrics = client.get("/api/v1/findings/feedback/metrics")
+    assert missing.status_code == 400
     assert bad.status_code == 400
     assert created.status_code == 200, created.text
     assert created.json()["verdict"] == "confirmed"
