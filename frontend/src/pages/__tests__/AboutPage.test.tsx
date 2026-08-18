@@ -265,7 +265,7 @@ const tests: Array<[string, () => void]> = [
         layoutSource.indexOf("export function Layout")
       );
       assert.ok(!navArray.includes("/about"), "About must not be in the workflow NAV array");
-      assert.equal((navArray.match(/to: "/g) || []).length, 15, "all 15 workflow items are present");
+      assert.equal((navArray.match(/to: "/g) || []).length, 22, "all 22 workflow items are present");
       // The tagline is the only content the sidebar redesign removes.
       assert.ok(
         !layoutSource.includes('t("common.tagline")'),

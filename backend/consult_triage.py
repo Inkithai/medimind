@@ -506,6 +506,35 @@ def generate_consult_triage(
                 confidence=finding.get("confidence"),
             ))
 
+    # --- Drug-lab / renal-hepatic / condition-contraindication findings -----
+    # These are newer deterministic layers (drug_lab_interactions.py,
+    # renal_hepatic_dosing.py, condition_contraindications.py). They all
+    # surface a reason a prescriber should look again, so they route to a
+    # doctor; urgency follows the finding's own severity.
+    for _key, _trigger in (
+        ("drug_lab_findings", "drug_lab_interaction"),
+        ("renal_hepatic_findings", "renal_hepatic_dose_review"),
+        ("condition_contraindications", "condition_contraindication"),
+    ):
+        for finding in cross_check.get(_key) or []:
+            sev = str(finding.get("severity") or "moderate").lower()
+            urgency = "urgent" if sev == "high" else ("soon" if sev == "moderate" else "routine")
+            subj = " / ".join(finding.get("medications_involved") or []) or str(
+                finding.get("rule") or "medication"
+            )
+            items.append(_item(
+                trigger=_trigger,
+                subject=subj,
+                detail=finding.get("explanation") or "",
+                route="doctor",
+                urgency=urgency,
+                why_this_route=(
+                    "Reviewing or changing a medicine because of this patient's own "
+                    "lab results or conditions is a prescribing decision."
+                ),
+                confidence=finding.get("confidence"),
+            ))
+
     # --- Lab trend findings -------------------------------------------------
     for trend in lab_trends.get("trends") or []:
         test_name = str(trend.get("test_name") or "lab test")

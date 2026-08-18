@@ -70,6 +70,13 @@ export const en = {
     recordCheck: "Record Check",
     safety: "Safety Alerts",
     riskTimeline: "Risk Timeline",
+    clinicalSafety: "Clinical Safety",
+    vitals: "Vitals & Monitoring",
+    preventive: "Preventive Care",
+    symptoms: "Symptom Check",
+    guidelines: "Guidelines",
+    messages: "Messages",
+    fhir: "Import Record",
     ask: "Ask AI",
     care: "Find Care",
     settings: "Settings",
@@ -90,6 +97,13 @@ export const en = {
       recordCheck: "Find and resolve differences between records.",
       safety: "Review possible medicine and allergy concerns.",
       riskTimeline: "See how safety signals changed over time.",
+      clinicalSafety: "Drug–lab, organ-function and condition findings with reviewer actions.",
+      vitals: "Vital-sign trends, early-warning screen and adherence signals.",
+      preventive: "Screening and immunisation reminders for you.",
+      symptoms: "Cross-reference a symptom against your record. Not a diagnosis.",
+      guidelines: "Review status of the clinical knowledge sources used.",
+      messages: "Message a provider about a finding.",
+      fhir: "Import an electronic health record (FHIR R4) directly.",
       ask: "Ask questions answered from your own records.",
       care: "Find nearby healthcare facilities and professionals.",
       settings: "Manage your workspace and preferences.",
@@ -357,12 +371,7 @@ export const en = {
     pinSet: "The pin is set. We're updating the place name.",
     coordinates: "Selected coordinates",
     details: "Address details",
-    detailsHelp: "Add a street, building, apartment, or useful directions.",
-    detailsPlaceholder: "For example: No. 12, Beach Road",
-    mapInstructions: "Drag the pin or select a point on the map to adjust the location",
-    current: "Current location",
-    droppedPin: "Dropped pin",
-    unsupported: "Your browser doesn't support location access. Search for a place instead.",
+    detailsHelp: "Add a street, building, apartment, or useful dirsupport location access. Search for a place instead.",
     denied: "Location access was blocked. Allow it in browser settings or search for a place.",
     timedOut: "We couldn't get your location in time. Try again or search for a place.",
     failed: "We couldn't find your current location. Search for a place instead.",
@@ -828,6 +837,35 @@ export const en = {
     menuClosed: "Navigation menu closed",
     routeChanged: "Navigated to {{title}}",
   },
+  clinicalSafety: {
+    title: "Clinical Safety",
+    subtitle: "Drug–lab, organ-function, and condition-contraindication findings, with reviewer actions and alert management.",
+  },
+  vitals: {
+    title: "Vitals & Monitoring",
+    subtitle: "Longitudinal vital-sign trends, an early-warning screen, and possible adherence signals. Add your own home readings.",
+  },
+  preventive: {
+    title: "Preventive Care",
+    subtitle: "Screening and immunisation reminders based on your age, sex, and the conditions on record.",
+  },
+  symptoms: {
+    title: "Symptom Check",
+    subtitle: "Describe a symptom and cross-reference it against your medications, conditions, and recent labs. Not a diagnosis.",
+  },
+  guidelines: {
+    title: "Guidelines",
+    subtitle: "Version and review status of every curated clinical knowledge source the app relies on.",
+  },
+  messages: {
+    title: "Provider Messages",
+    subtitle: "Message a provider about a finding. Stored in your workspace.",
+  },
+  fhir: {
+    title: "Import FHIR Record",
+    subtitle: "Import an existing electronic health record (FHIR R4 Bundle) instead of uploading individual documents. The structured data is read straight into your workspace.",
+  },
+
 } as const;
 
 export type TranslationKey = string;

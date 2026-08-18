@@ -3604,6 +3604,38 @@ def cross_check_prescriptions(
     except Exception as e:
         logger.warning("Deterministic allergy check failed (LLM findings kept): %s", e)
 
+    # Deterministic drug-LAB interaction pass: connects each active medication
+    # to the patient's OWN most-recent lab value and flags dangerous
+    # combinations (e.g. ACE inhibitor + potassium 5.9 mmol/L). Never
+    # LLM-dependent; danger decided on positive evidence only.
+    try:
+        from drug_lab_interactions import check_drug_lab_findings, merge_drug_lab_findings
+        merge_drug_lab_findings(result, check_drug_lab_findings(active_timeline))
+    except Exception as e:
+        logger.warning("Deterministic drug-lab check failed (LLM findings kept): %s", e)
+
+    # Deterministic renal/hepatic dosing pass: flags medicines that commonly
+    # need a lower dose or closer monitoring when kidney or liver function is
+    # reduced, against this patient's own organ-function markers. Does NOT
+    # recommend a dose — only surfaces the reason to ask a prescriber.
+    try:
+        from renal_hepatic_dosing import check_renal_hepatic_findings, merge_renal_hepatic_findings
+        merge_renal_hepatic_findings(result, check_renal_hepatic_findings(active_timeline))
+    except Exception as e:
+        logger.warning("Deterministic renal/hepatic check failed (LLM findings kept): %s", e)
+
+    # Deterministic condition-contraindication pass: flags medicines that
+    # clash with conditions explicitly documented in this record (e.g. NSAID
+    # + peptic ulcer, beta-blocker + asthma, ACE inhibitor + pregnancy).
+    try:
+        from condition_contraindications import (
+            check_condition_contraindications,
+            merge_condition_contraindications,
+        )
+        merge_condition_contraindications(result, check_condition_contraindications(active_timeline))
+    except Exception as e:
+        logger.warning("Deterministic condition check failed (LLM findings kept): %s", e)
+
     from medication_history import detect_medication_transitions, enrich_cross_check_sources
 
     result.update(detect_medication_transitions(timeline))

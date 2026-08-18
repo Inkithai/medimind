@@ -34,6 +34,25 @@ import type {
   CareSearchResponse,
   CareDay,
   CareTimeOfDay,
+  VitalTrendsReport,
+  EarlyWarningReport,
+  AdherenceReport,
+  SymptomAnalysis,
+  PreventiveCareReport,
+  ManagedAlertsReport,
+  FindingFeedbackInput,
+  FindingFeedbackEntry,
+  FeedbackMetrics,
+  FindingLifecycleInput,
+  FindingLifecycleResult,
+  FindingLifecycleOverview,
+  FhirImportResult,
+  PatientMeasurementInput,
+  PatientMeasurement,
+  ProviderMessageInput,
+  ProviderMessage,
+  ProviderThread,
+  GuidelinesStatus,
 } from "../types/api";
 import type { ScoredCareRecommendationsResponse } from "../types/recommendations";
 
@@ -783,5 +802,114 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
+  },
+
+  // ---- Clinical-safety & longitudinal CDS (P0/P1/P2) --------------------- //
+  getVitalTrends(credentials: Credentials): Promise<VitalTrendsReport> {
+    return request<VitalTrendsReport>(credentials, "/api/v1/vital-trends");
+  },
+  getEarlyWarning(credentials: Credentials): Promise<EarlyWarningReport> {
+    return request<EarlyWarningReport>(credentials, "/api/v1/early-warning");
+  },
+  getAdherence(credentials: Credentials): Promise<AdherenceReport> {
+    return request<AdherenceReport>(credentials, "/api/v1/adherence");
+  },
+  analyseSymptom(
+    credentials: Credentials,
+    symptom: string,
+    duration?: string
+  ): Promise<SymptomAnalysis> {
+    return request<SymptomAnalysis>(credentials, "/api/v1/symptoms/analyse", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ symptom, duration }),
+    });
+  },
+  getPreventiveCare(credentials: Credentials): Promise<PreventiveCareReport> {
+    return request<PreventiveCareReport>(credentials, "/api/v1/preventive-care");
+  },
+  getManagedAlerts(credentials: Credentials): Promise<ManagedAlertsReport> {
+    return request<ManagedAlertsReport>(credentials, "/api/v1/findings/alerts");
+  },
+  recordFindingFeedback(
+    credentials: Credentials,
+    body: FindingFeedbackInput
+  ): Promise<FindingFeedbackEntry> {
+    return request<FindingFeedbackEntry>(credentials, "/api/v1/findings/feedback", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  },
+  listFindingFeedback(credentials: Credentials): Promise<{ feedback: FindingFeedbackEntry[] }> {
+    return request<{ feedback: FindingFeedbackEntry[] }>(credentials, "/api/v1/findings/feedback");
+  },
+  getFeedbackMetrics(credentials: Credentials): Promise<FeedbackMetrics> {
+    return request<FeedbackMetrics>(credentials, "/api/v1/findings/feedback/metrics");
+  },
+  setFindingLifecycle(
+    credentials: Credentials,
+    body: FindingLifecycleInput
+  ): Promise<FindingLifecycleResult> {
+    return request<FindingLifecycleResult>(credentials, "/api/v1/findings/lifecycle", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  },
+  getFindingLifecycle(credentials: Credentials): Promise<FindingLifecycleOverview> {
+    return request<FindingLifecycleOverview>(credentials, "/api/v1/findings/lifecycle");
+  },
+  importFhir(credentials: Credentials, bundle: unknown): Promise<FhirImportResult> {
+    return request<FhirImportResult>(credentials, "/api/v1/import/fhir", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ bundle }),
+    });
+  },
+  recordPatientMeasurement(
+    credentials: Credentials,
+    body: PatientMeasurementInput
+  ): Promise<PatientMeasurement> {
+    return request<PatientMeasurement>(credentials, "/api/v1/patient-data/measurements", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  },
+  listPatientMeasurements(
+    credentials: Credentials,
+    kind?: string
+  ): Promise<{ measurements: PatientMeasurement[] }> {
+    const qs = kind ? `?kind=${encodeURIComponent(kind)}` : "";
+    return request<{ measurements: PatientMeasurement[] }>(
+      credentials,
+      `/api/v1/patient-data/measurements${qs}`
+    );
+  },
+  sendProviderMessage(
+    credentials: Credentials,
+    body: ProviderMessageInput
+  ): Promise<ProviderMessage> {
+    return request<ProviderMessage>(credentials, "/api/v1/provider-messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  },
+  listProviderThreads(credentials: Credentials): Promise<{ threads: ProviderThread[] }> {
+    return request<{ threads: ProviderThread[] }>(credentials, "/api/v1/provider-messages");
+  },
+  listProviderMessages(
+    credentials: Credentials,
+    threadId: string
+  ): Promise<{ thread_id: string; messages: ProviderMessage[] }> {
+    return request<{ thread_id: string; messages: ProviderMessage[] }>(
+      credentials,
+      `/api/v1/provider-messages?thread_id=${encodeURIComponent(threadId)}`
+    );
+  },
+  getGuidelinesStatus(credentials: Credentials): Promise<GuidelinesStatus> {
+    return request<GuidelinesStatus>(credentials, "/api/v1/guidelines/status");
   },
 };

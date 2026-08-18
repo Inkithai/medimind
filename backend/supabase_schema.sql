@@ -250,3 +250,43 @@ create table if not exists public.patient_profiles (
 );
 grant select, insert, update, delete on table public.patient_profiles to service_role;
 alter table public.patient_profiles enable row level security;
+
+-- Reviewer feedback on individual safety findings (clinician feedback loop +
+-- alert-fatigue / override capture). In-memory-first; this table is a
+-- best-effort mirror and is optional — the API records feedback in memory even
+-- when the table is absent.
+create table if not exists public.finding_feedback (
+    id bigint generated always as identity primary key,
+    user_id text not null,
+    finding_key text not null,
+    finding_kind text,
+    rule text,
+    verdict text not null check (verdict in ('confirmed','false_positive','needs_change','overridden')),
+    reason text,
+    note text,
+    reviewer text,
+    created_at timestamptz not null default now()
+);
+create index if not exists ix_finding_feedback_user on public.finding_feedback (user_id);
+create index if not exists ix_finding_feedback_key on public.finding_feedback (user_id, finding_key);
+grant select, insert, update, delete on table public.finding_feedback to service_role;
+alter table public.finding_feedback enable row level security;
+
+-- Per-run snapshots of which clinical findings existed, for the finding-history
+-- audit trail (new / resolved / persisted across re-analyses). In-memory-first;
+-- best-effort mirror.
+create table if not exists public.finding_history (
+    id bigint generated always as identity primary key,
+    user_id text not null,
+    run_id text not null,
+    captured_at timestamptz not null,
+    finding_key text not null,
+    finding_kind text,
+    list text,
+    severity text,
+    rule text
+);
+create index if not exists ix_finding_history_user on public.finding_history (user_id);
+create index if not exists ix_finding_history_run on public.finding_history (user_id, run_id);
+grant select, insert, update, delete on table public.finding_history to service_role;
+alter table public.finding_history enable row level security;
