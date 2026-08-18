@@ -11,6 +11,7 @@ import type {
   CareRecommendationContext,
   CareProviderSearchResponse,
   CrossCheckReport,
+  DosageReport,
   ConflictsResponse,
   DocumentCorrectionsResponse,
   DeleteDocumentResponse,
@@ -35,6 +36,20 @@ import type {
   CareTimeOfDay,
 } from "../types/api";
 import type { ScoredCareRecommendationsResponse } from "../types/recommendations";
+
+export interface PatientProfileInput {
+  legal_name?: string | null;
+  preferred_name?: string | null;
+  date_of_birth?: string | null;
+  phone?: string | null;
+  emergency_contact?: string | null;
+  preferred_language?: string | null;
+}
+
+export interface PatientProfile extends PatientProfileInput {
+  user_id: string;
+  updated_at?: string | null;
+}
 
 export interface DocumentsResponse {
   user_id: string;
@@ -476,6 +491,18 @@ export const api = {
     });
   },
 
+  getProfile(credentials: Credentials): Promise<PatientProfile> {
+    return request<PatientProfile>(credentials, "/api/v1/profile");
+  },
+
+  updateProfile(credentials: Credentials, profile: PatientProfileInput): Promise<PatientProfile> {
+    return request<PatientProfile>(credentials, "/api/v1/profile", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(profile),
+    });
+  },
+
   // Re-runs the full per-document pipeline for one stored document (fetches
   // the original from storage, re-extracts, rebuilds timeline/safety/index).
   reprocessDocument(credentials: Credentials, documentId: string): Promise<ReprocessDocumentResponse> {
@@ -569,6 +596,22 @@ export const api = {
 
   getCrossCheck(credentials: Credentials): Promise<CrossCheckReport> {
     return request<CrossCheckReport>(credentials, "/api/v1/cross-check");
+  },
+
+  getDosageReport(credentials: Credentials): Promise<DosageReport> {
+    return request<DosageReport>(credentials, "/api/v1/dosage-report");
+  },
+
+  reanalyzeMedicationSafety(credentials: Credentials): Promise<{
+    reanalyzed: boolean;
+    findings_before: number;
+    findings_after: number;
+    net_change: number;
+    resolved_count: number;
+    cross_check_report: CrossCheckReport;
+    dosage_report: DosageReport;
+  }> {
+    return request(credentials, "/api/v1/medication-safety/reanalyze", { method: "POST" });
   },
 
   getLabTrends(credentials: Credentials): Promise<LabTrendsReport> {

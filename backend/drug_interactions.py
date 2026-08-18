@@ -129,6 +129,18 @@ _RULES: List[Tuple[str, str, str, str]] = [
     ("clopidogrel", "omeprazole", "moderate",
      "Omeprazole can reduce the antiplatelet effect of clopidogrel by "
      "inhibiting its activation."),
+    ("warfarin", "ciprofloxacin", "moderate",
+     "Ciprofloxacin can increase warfarin's anticoagulant effect, raising INR "
+     "and bleeding risk; closer monitoring may be needed."),
+    ("lisinopril", "ibuprofen", "moderate",
+     "Ibuprofen can reduce lisinopril's blood-pressure-lowering effect and the "
+     "combination may impair kidney function."),
+    ("digoxin", "furosemide", "moderate",
+     "Furosemide-related potassium loss can increase sensitivity to digoxin and "
+     "the risk of digoxin toxicity."),
+    ("amlodipine", "simvastatin", "moderate",
+     "Amlodipine can increase simvastatin exposure; higher simvastatin doses "
+     "raise the risk of muscle toxicity."),
 ]
 
 KB_CONFIDENCE = 0.97  # exact ingredient-set match against an established rule

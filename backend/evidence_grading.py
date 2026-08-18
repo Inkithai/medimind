@@ -43,7 +43,7 @@ THREE GRADES
                     behind it. Capped, flagged, and told to be confirmed.
 """
 
-from typing import Any, Dict, Optional, Set
+from typing import Any, Callable, Dict, Optional, Set
 
 # Ungrounded findings are capped here. Matches retrieval.LOW_CONFIDENCE_THRESHOLD
 # so "low confidence" means one thing across the product — and so the QA
@@ -97,6 +97,7 @@ def _finding_drug_names(finding: Dict[str, Any]) -> Set[str]:
 def grade_finding(
     finding: Dict[str, Any],
     graph_backed_findings: Optional[Dict[str, Dict[str, Any]]] = None,
+    claim_reference: Optional[Callable[[Dict[str, Any]], Optional[Dict[str, Any]]]] = None,
 ) -> Dict[str, Any]:
     """
     Grades one finding in place and returns it.
@@ -124,6 +125,20 @@ def grade_finding(
         finding["grounded"] = True
         finding.setdefault("evidence_note", DETERMINISTIC_NOTE)
         return finding
+
+    # A source that makes this exact claim is stronger evidence than a graph
+    # merely showing that one named drug appears in a reference document.
+    if claim_reference is not None:
+        citation = claim_reference(finding)
+        if citation:
+            finding["evidence_source"] = REFERENCE_GRAPH
+            finding["grounded"] = True
+            finding["reference"] = citation
+            finding["evidence_note"] = (
+                "Backed by published clinical guidance, with source and page — "
+                "not the model's own recollection."
+            )
+            return finding
 
     graph_backed_findings = graph_backed_findings or {}
     matched = {
@@ -162,6 +177,7 @@ def grade_finding(
 def grade_cross_check(
     cross_check: Dict[str, Any],
     graph_backed_findings: Optional[Dict[str, Dict[str, Any]]] = None,
+    claim_reference: Optional[Callable[[Dict[str, Any]], Optional[Dict[str, Any]]]] = None,
 ) -> Dict[str, Any]:
     """
     Grades every finding in a cross_check report, in place, and adds an
@@ -179,7 +195,7 @@ def grade_cross_check(
         for finding in cross_check.get(list_name) or []:
             if not isinstance(finding, dict):
                 continue
-            grade_finding(finding, graph_backed_findings)
+            grade_finding(finding, graph_backed_findings, claim_reference)
             counts[finding["evidence_source"]] += 1
 
     total = sum(counts.values())

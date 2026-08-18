@@ -360,6 +360,27 @@ export interface GradedFinding {
   timing?: FindingTiming;
 }
 
+export interface GuidelineCombination extends GradedFinding {
+  opioid?: string;
+  depressant?: string;
+  plain?: string;
+  quote?: string;
+  status?: string;
+  window_start?: string | null;
+  window_end?: string | null;
+  citation?: { source?: string; page?: number; publication_no?: string };
+}
+
+export interface EmlAgeConflict extends GradedFinding {
+  medication?: string;
+  restriction?: string;
+  explanation?: string;
+  severity?: string;
+  confidence?: number;
+  source_page?: number;
+  population?: string;
+}
+
 export interface CrossCheckReport {
   // Every finding may additionally carry evidence-grading and timing fields
   // (GradedFinding) — added deterministically server-side.
@@ -367,6 +388,8 @@ export interface CrossCheckReport {
   duplicate_prescriptions: (DuplicatePrescription & GradedFinding)[];
   conflicting_dosage_instructions: (ConflictingDosage & GradedFinding)[];
   allergy_conflicts: (AllergyConflict & GradedFinding)[];
+  guideline_flagged_combinations?: GuidelineCombination[];
+  eml_age_conflicts?: EmlAgeConflict[];
   medication_changes?: MedicationTransition[];
   medication_continuations?: MedicationTransition[];
   overall_recommendation: string;
@@ -805,11 +828,36 @@ export interface DeleteWorkspaceResponse {
 // One request that returns everything the dashboard needs, instead of three
 // separate calls to /timeline + /cross-check + /lab-trends.
 
+export interface DosageFinding {
+  kind: string;
+  medication?: string;
+  ingredient?: string;
+  explanation?: string;
+  confidence?: number;
+  severity?: string;
+  source?: string;
+}
+
+export interface DosageReport {
+  findings: DosageFinding[];
+  checked_medications?: number;
+  note?: string;
+}
+
+export interface PatientProfileSummary {
+  legal_name?: string | null;
+  preferred_name?: string | null;
+  date_of_birth?: string | null;
+}
+
 export interface PatientSnapshot {
   user_id: string;
   patient_timeline: Timeline;
   cross_check_report: CrossCheckReport;
   lab_trends: LabTrendsReport;
+  dosage_report?: DosageReport;
+  consult_triage?: { referral_items?: Array<{ trigger?: string; urgency?: string }> };
+  patient_profile?: PatientProfileSummary | null;
   trust_summary?: TrustSummary;
   updated_at: string | null;
   // True when the server reconstructed this view from the durable documents

@@ -48,6 +48,7 @@ load_dotenv(override=True)
 import re
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from datetime import date
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, Dict, List, Literal, Optional, Tuple
@@ -368,6 +369,35 @@ class ConflictReopenRequest(BaseModel):
     note: Optional[str] = Field(default=None, max_length=1000)
 
 
+class PatientProfileRequest(BaseModel):
+    legal_name: Optional[str] = Field(default=None, max_length=200)
+    preferred_name: Optional[str] = Field(default=None, max_length=200)
+    date_of_birth: Optional[str] = None
+    phone: Optional[str] = Field(default=None, max_length=50)
+    emergency_contact: Optional[str] = Field(default=None, max_length=300)
+    preferred_language: Optional[str] = Field(default=None, max_length=50)
+
+    @field_validator("date_of_birth")
+    @classmethod
+    def validate_birth_date(cls, value: Optional[str]) -> Optional[str]:
+        if value in (None, ""):
+            return None
+        from date_convention import sanitize_clinical_date
+        cleaned = sanitize_clinical_date(value)
+        if cleaned is None or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", cleaned):
+            raise ValueError("Date of birth must be a complete YYYY-MM-DD date.")
+        parsed = date.fromisoformat(cleaned)
+        if parsed > date.today():
+            raise ValueError("Date of birth cannot be in the future.")
+        return cleaned
+
+    @field_validator("legal_name", "preferred_name", "phone", "emergency_contact", "preferred_language")
+    @classmethod
+    def trim_optional(cls, value: Optional[str]) -> Optional[str]:
+        cleaned = (value or "").strip()
+        return cleaned or None
+
+
 def _empty_cross_check(reason: str) -> Dict[str, Any]:
     return {
         "potential_drug_interactions": [],
@@ -443,6 +473,44 @@ def _antidote_context(
     return graph_backed_findings_from_antidotes(references), notes
 
 
+def _attach_eml_age_safety(
+    cross_check: Dict[str, Any], timeline: Dict[str, Any], user_id: Optional[str] = None
+) -> None:
+    """Attach full-list age restrictions when the optional graph is populated."""
+    if not graph_db.is_configured():
+        cross_check.setdefault("eml_age_restrictions", [])
+        cross_check.setdefault("eml_age_conflicts", [])
+        return
+    medication_names = sorted({
+        str(ingredient).strip().lower()
+        for medication in timeline.get("medications_timeline") or []
+        for ingredient in medication.get("ingredients") or []
+        if str(ingredient).strip()
+    })
+    if not medication_names:
+        return
+    try:
+        from eml_kg import lookup_age_restrictions
+        from eml_safety import evaluate_age_restrictions, patient_age_from_timeline
+        restrictions = lookup_age_restrictions(medication_names)
+        age = patient_age_from_timeline(timeline)
+        if age is None and user_id:
+            try:
+                profile = db.load_patient_profile(user_id)
+                if profile and profile.get("date_of_birth"):
+                    born = date.fromisoformat(str(profile["date_of_birth"]))
+                    today = date.today()
+                    age = today.year - born.year - ((today.month, today.day) < (born.month, born.day))
+            except Exception:
+                pass
+        cross_check["eml_age_restrictions"] = restrictions
+        cross_check["eml_age_conflicts"] = evaluate_age_restrictions(age, restrictions)
+    except Exception as exc:
+        logger.warning("full EML age lookup skipped: %s", exc)
+        cross_check.setdefault("eml_age_restrictions", [])
+        cross_check.setdefault("eml_age_conflicts", [])
+
+
 async def _cross_check_trusted_timeline(
     timeline: Dict[str, Any],
     graph_backed_findings: Optional[Dict[str, Dict[str, Any]]] = None,
@@ -472,6 +540,45 @@ class CareProviderSearchRequest(BaseModel):
     flag_id: str = Field(min_length=1, max_length=160)
     location: str = Field(min_length=2, max_length=200)
     availability: Literal["any", "today", "this_week", "evenings", "weekends"] = "any"
+
+
+# ---------------------------------------------------------------------------
+# Patient profile and normalized clinical entities
+# ---------------------------------------------------------------------------
+
+@app.get("/api/v1/profile")
+async def get_patient_profile(user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
+    profile = db.load_patient_profile(user_id)
+    return profile or {
+        "user_id": user_id, "legal_name": None, "preferred_name": None,
+        "date_of_birth": None, "phone": None, "emergency_contact": None,
+        "preferred_language": None, "updated_at": None,
+    }
+
+
+@app.put("/api/v1/profile")
+async def update_patient_profile(
+    request: PatientProfileRequest,
+    user_id: str = Depends(get_current_user),
+) -> Dict[str, Any]:
+    profile = db.save_patient_profile(user_id, request.model_dump())
+    audit.record(user_id, "profile.updated", {
+        "fields": sorted(key for key, value in request.model_dump().items() if value is not None),
+    })
+    return profile
+
+
+@app.get("/api/v1/clinical-entities/{kind}")
+async def get_clinical_entities(
+    kind: Literal[
+        "clinical_medications", "clinical_prescriptions", "clinical_allergies",
+        "clinical_lab_results", "clinical_events", "safety_findings",
+    ],
+    limit: int = Query(default=500, ge=1, le=1000),
+    user_id: str = Depends(get_current_user),
+) -> Dict[str, Any]:
+    rows = db.load_clinical_entities(user_id, kind, limit)
+    return {"kind": kind, "count": len(rows), "items": rows}
 
 
 # ---------------------------------------------------------------------------
@@ -1015,6 +1122,27 @@ async def _execute_upload_pipeline(
         # Held files are excluded BEFORE storage/persistence — never silently
         # merged — unless the caller explicitly confirmed the mismatch.
         identity_existing_docs = db.load_documents(user_id)
+        # Patient-entered profile data is an additional identity signal, never
+        # an override. Represent it in the same comparison shape as history so
+        # mismatches are held for confirmation rather than silently merged.
+        try:
+            profile = db.load_patient_profile(user_id)
+        except Exception:
+            profile = None  # additive migration may not yet be deployed
+        if profile and (profile.get("legal_name") or profile.get("preferred_name")):
+            profile_doc: Dict[str, Any] = {
+                "patient_name": profile.get("legal_name") or profile.get("preferred_name"),
+                "date": date.today().isoformat(),
+                "patient_gender": None,
+            }
+            if profile.get("date_of_birth"):
+                try:
+                    born = date.fromisoformat(str(profile["date_of_birth"]))
+                    today = date.today()
+                    profile_doc["patient_age"] = today.year - born.year - ((today.month, today.day) < (born.month, born.day))
+                except ValueError:
+                    pass
+            identity_existing_docs.append(profile_doc)
         identity_review: Optional[Dict[str, Any]] = None
         if extracted and not confirm_identity_mismatch:
             _progress("safety", "Checking the documents belong to this record")
@@ -1189,6 +1317,7 @@ async def _execute_upload_pipeline(
         # Safety is another provider call, so it shares the same bounded pool
         # as extraction instead of bypassing load control or blocking polling.
         cross_check = await _cross_check_trusted_timeline(timeline, graph_backed_findings)
+        _attach_eml_age_safety(cross_check, timeline, user_id)
     except NonMedicalDocumentError as exc:
         raise UploadPipelineError(422, str(exc), code="not_medical", retryable=False) from exc
     except ProviderRateLimitError as exc:
@@ -1248,7 +1377,7 @@ async def _execute_upload_pipeline(
 
     # Consult triage: deterministic routing of every finding to a
     # pharmacist or doctor with urgency + specialty. Never de-escalates.
-    consult_triage_report = generate_consult_triage(cross_check, lab_trends, dosage_report)
+    consult_triage_report = generate_consult_triage(cross_check, lab_trends, dosage_report, timeline)
 
     # Graded OCR/translation risk banner across the whole record (never blocks).
     translation_risk = assess_documents_translation_risk(all_docs)
@@ -1727,7 +1856,7 @@ async def reprocess_document(
         trusted, conflicts, trust_summary, user_id
     )
     dosage_report = check_dosages(timeline)
-    consult_triage_report = generate_consult_triage(cross_check, lab_trends, dosage_report)
+    consult_triage_report = generate_consult_triage(cross_check, lab_trends, dosage_report, timeline)
     timeline["_record_fingerprint"] = timeline_fingerprint(timeline)
     db.save_patient_snapshot(
         user_id, timeline, cross_check, lab_trends=lab_trends,
@@ -1917,6 +2046,7 @@ async def _derive_record(
         timeline, user_id, "record_rebuild"
     )
     cross_check = await _cross_check_trusted_timeline(timeline, graph_backed_findings)
+    _attach_eml_age_safety(cross_check, timeline, user_id)
     cross_check["antidote_reference_notes"] = antidote_reference_notes
     lab_trends = track_lab_trends(timeline)
     return timeline, cross_check, lab_trends
@@ -1955,14 +2085,14 @@ async def _rebuild_after_document_deletion(
         user_id, remaining_documents
     )
     persisted_conflicts = db.sync_conflicts(user_id, detected) if detected else []
-    timeline = _timeline_from_trust_state(trusted, persisted_conflicts, trust_summary)
-    cross_check = _empty_cross_check(
-        "A source document was deleted. Safety findings from it were removed; "
-        "the remaining records will be checked again after the next record update."
+    # Re-run the complete safety pipeline immediately. Deletion must remove
+    # findings that depended on the deleted source without leaving the
+    # remaining medication record temporarily unchecked.
+    timeline, cross_check, lab_trends = await _derive_record(
+        trusted, persisted_conflicts, trust_summary, user_id
     )
-    lab_trends = track_lab_trends(timeline)
     dosage_report = check_dosages(timeline)
-    consult_triage_report = generate_consult_triage(cross_check, lab_trends, dosage_report)
+    consult_triage_report = generate_consult_triage(cross_check, lab_trends, dosage_report, timeline)
     db.save_patient_snapshot(
         user_id,
         timeline,
@@ -2245,6 +2375,70 @@ async def get_cross_check(user_id: str = Depends(get_current_user)) -> Dict[str,
     return _enhanced_cross_check(snapshot)
 
 
+@app.post("/api/v1/medication-safety/reanalyze")
+async def reanalyze_medication_safety(
+    user_id: str = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """Re-run and persist the complete safety/triage pipeline on demand.
+
+    Uses the corrected, conflict-filtered durable documents rather than a
+    potentially stale snapshot. The response includes before/after counts so
+    clients can explain whether findings were added or resolved.
+    """
+    if _workspace_has_active_upload(user_id):
+        raise HTTPException(409, "Wait for the active upload to finish before re-running safety analysis.")
+    documents = db.load_documents(user_id)
+    if not documents:
+        raise HTTPException(404, "No documents are available for safety analysis.")
+
+    previous = db.load_patient_snapshot(user_id) or {}
+    previous_cross_check = previous.get("cross_check_report") or {}
+    trusted, conflicts, trust_summary, detected = _prepare_current_trust_state(user_id, documents)
+    if detected:
+        conflicts = db.sync_conflicts(user_id, detected)
+    timeline, cross_check, lab_trends = await _derive_record(
+        trusted, conflicts, trust_summary, user_id
+    )
+    dosage_report = check_dosages(timeline)
+    triage = generate_consult_triage(
+        cross_check, lab_trends, dosage_report, timeline
+    )
+    reconciliation = db.save_patient_snapshot(
+        user_id, timeline, cross_check, lab_trends=lab_trends,
+        dosage_report=dosage_report, consult_triage=triage,
+    ) or {"available": False, "tables": {}}
+    indexed, index_error, indexed_chunks = await _replace_index(user_id, timeline)
+
+    finding_lists = (
+        "potential_drug_interactions", "duplicate_prescriptions",
+        "conflicting_dosage_instructions", "allergy_conflicts",
+        "guideline_flagged_combinations", "concurrent_exposure", "eml_age_conflicts",
+    )
+    count = lambda report: sum(len(report.get(key) or []) for key in finding_lists)
+    before_count = count(previous_cross_check)
+    after_count = count(cross_check)
+    audit.record(user_id, "medication_safety.reanalyzed", {
+        "findings_before": before_count,
+        "findings_after": after_count,
+        "indexed": indexed,
+    })
+    return {
+        "reanalyzed": True,
+        "findings_before": before_count,
+        "findings_after": after_count,
+        "net_change": after_count - before_count,
+        "resolved_count": max(0, before_count - after_count),
+        "finding_reconciliation": reconciliation.get("safety_findings", {}),
+        "normalized_projection": reconciliation,
+        "cross_check_report": cross_check,
+        "dosage_report": dosage_report,
+        "consult_triage": triage,
+        "indexed": indexed,
+        "indexed_chunks": indexed_chunks,
+        "index_error": index_error,
+    }
+
+
 @app.get("/api/v1/lab-trends")
 async def get_lab_trends(user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
     """Returns the authenticated user's lab result trends (direction of
@@ -2322,7 +2516,7 @@ async def get_consult_triage(user_id: str = Depends(get_current_user)) -> Dict[s
         return snapshot["consult_triage"]
     lab_trends = _lab_trends_for_snapshot(snapshot)
     dosage_report = snapshot.get("dosage_report") or check_dosages(snapshot["patient_timeline"])
-    result = generate_consult_triage(snapshot["cross_check_report"], lab_trends, dosage_report)
+    result = generate_consult_triage(snapshot["cross_check_report"], lab_trends, dosage_report, snapshot["patient_timeline"])
     audit.record(user_id, "records.read", {"view": "consult_triage", "recomputed": True})
     return result
 
@@ -2431,6 +2625,45 @@ async def upload_antidote_reference(
         "population": section["population"],
         "entries_ingested": count,
         "categories": categories,
+    }
+
+
+@app.post("/api/v1/knowledge-graph/essential-medicines", status_code=201)
+async def upload_full_essential_medicines_reference(
+    file: UploadFile = File(...),
+    user_id: str = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """Parse and idempotently ingest a complete adult/children list."""
+    if not graph_db.is_configured():
+        raise HTTPException(503, "The reference graph is not configured on this server.")
+    if Path(file.filename or "").suffix.lower() != ".pdf":
+        raise HTTPException(400, "Full essential-medicines ingestion requires a PDF.")
+    from eml_kg import extract_full_list, ingest_full_list
+    with TemporaryDirectory() as tmp_dir:
+        path = Path(tmp_dir) / (file.filename or "essential-medicines.pdf")
+        path.write_bytes(await file.read())
+        try:
+            parsed = await asyncio.to_thread(extract_full_list, str(path))
+        except Exception as exc:
+            raise HTTPException(422, f"Could not parse the essential-medicines list: {exc}") from exc
+    if not parsed.get("entries"):
+        raise HTTPException(422, "No essential-medicine entries were found in this PDF.")
+    try:
+        counts = await asyncio.to_thread(
+            ingest_full_list, parsed, source_document=file.filename or path.name
+        )
+    except Exception as exc:
+        raise HTTPException(503, f"The reference graph is unreachable: {exc}") from exc
+    audit.record(user_id, "knowledge_graph.full_eml_ingested", {
+        "source_document": file.filename,
+        "population": parsed.get("population"),
+        **counts,
+    })
+    return {
+        "source_document": file.filename,
+        "population": parsed.get("population"),
+        "age_restrictions": len(parsed.get("age_restrictions") or []),
+        **counts,
     }
 
 
@@ -2562,7 +2795,14 @@ async def get_patient_snapshot(user_id: str = Depends(get_current_user)) -> Dict
     result["dosage_report"] = snapshot.get("dosage_report") or check_dosages(snapshot["patient_timeline"])
     result["consult_triage"] = snapshot.get("consult_triage") or generate_consult_triage(
         snapshot["cross_check_report"], result["lab_trends"], result["dosage_report"],
+        snapshot["patient_timeline"],
     )
+    try:
+        result["patient_profile"] = db.load_patient_profile(user_id)
+    except Exception:
+        # Profile storage is additive; an older deployment must still serve
+        # the clinical dashboard accurately while its schema is upgraded.
+        result["patient_profile"] = None
     return result
 
 

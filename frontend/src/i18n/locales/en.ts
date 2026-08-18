@@ -64,7 +64,7 @@ export const en = {
     medications: "Medications",
     labs: "Lab Results",
     timeline: "Timeline",
-    changes: "What Changed?",
+    changes: "Record Changes",
     appointmentPrep: "Appointment Prep",
     actionCenter: "Action Center",
     recordCheck: "Record Check",
@@ -74,6 +74,9 @@ export const en = {
     care: "Find Care",
     settings: "Settings",
     upload: "Upload Document",
+    groupRecords: "My records",
+    groupInsights: "Insights & analysis",
+    groupActions: "Take action",
     descriptions: {
       dashboard: "See a quick overview of your health records.",
       records: "Browse uploaded documents and extracted details.",

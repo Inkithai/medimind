@@ -184,3 +184,69 @@ create index if not exists referral_searches_user_idx
 grant select, insert, delete on table public.referral_searches to service_role;
 grant usage, select on sequence public.referral_searches_id_seq to service_role;
 alter table public.referral_searches enable row level security;
+
+-- --------------------------------------------------------------------------
+-- Rebuildable normalized clinical projection
+-- --------------------------------------------------------------------------
+-- Immutable document JSON remains the source of truth. These tables provide
+-- independently queryable rows and stable identities for reconciliation.
+create table if not exists public.clinical_medications (
+    id text primary key, user_id text not null, document_id text,
+    event_date date, data jsonb not null, updated_at timestamptz not null default now()
+);
+create table if not exists public.clinical_prescriptions (
+    id text primary key, user_id text not null, document_id text,
+    medication_id text not null references public.clinical_medications(id) on delete cascade,
+    event_date date, data jsonb not null, updated_at timestamptz not null default now()
+);
+create table if not exists public.clinical_allergies (
+    id text primary key, user_id text not null, document_id text,
+    event_date date, data jsonb not null, updated_at timestamptz not null default now()
+);
+create table if not exists public.clinical_lab_results (
+    id text primary key, user_id text not null, document_id text,
+    event_date date, data jsonb not null, updated_at timestamptz not null default now()
+);
+create table if not exists public.clinical_events (
+    id text primary key, user_id text not null, document_id text,
+    event_date date, data jsonb not null, updated_at timestamptz not null default now()
+);
+create table if not exists public.safety_findings (
+    id text primary key, issue_key text not null unique, user_id text not null,
+    document_id text, event_date date, finding_type text not null,
+    status text not null check (status in ('active', 'resolved')),
+    data jsonb not null, updated_at timestamptz not null default now()
+);
+
+create index if not exists clinical_medications_user_idx on public.clinical_medications (user_id);
+create index if not exists clinical_prescriptions_user_date_idx on public.clinical_prescriptions (user_id, event_date desc);
+create index if not exists clinical_allergies_user_idx on public.clinical_allergies (user_id);
+create index if not exists clinical_lab_results_user_date_idx on public.clinical_lab_results (user_id, event_date desc);
+create index if not exists clinical_events_user_date_idx on public.clinical_events (user_id, event_date desc);
+create index if not exists safety_findings_user_status_idx on public.safety_findings (user_id, status, updated_at desc);
+
+grant select, insert, update, delete on table
+    public.clinical_medications, public.clinical_prescriptions,
+    public.clinical_allergies, public.clinical_lab_results,
+    public.clinical_events, public.safety_findings to service_role;
+alter table public.clinical_medications enable row level security;
+alter table public.clinical_prescriptions enable row level security;
+alter table public.clinical_allergies enable row level security;
+alter table public.clinical_lab_results enable row level security;
+alter table public.clinical_events enable row level security;
+alter table public.safety_findings enable row level security;
+
+-- Patient-entered profile data is an additional identity signal. It never
+-- silently overrides identity extracted from source documents.
+create table if not exists public.patient_profiles (
+    user_id text primary key,
+    legal_name text,
+    preferred_name text,
+    date_of_birth date,
+    phone text,
+    emergency_contact text,
+    preferred_language text,
+    updated_at timestamptz not null default now()
+);
+grant select, insert, update, delete on table public.patient_profiles to service_role;
+alter table public.patient_profiles enable row level security;

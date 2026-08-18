@@ -605,6 +605,42 @@ def build_chunks_from_timeline(patient_key: str, timeline: Dict[str, Any]) -> Li
             },
         })
 
+    # Exact, medication-class-selected published guidance. These chunks are
+    # clearly labelled as external guidance, never as facts printed in the
+    # patient's documents, and carry publication/page metadata for citation.
+    from reference_library import find_relevant_guidance
+    for guidance in find_relevant_guidance(timeline):
+        citation = guidance.get("citation") or {}
+        source = citation.get("source") or guidance.get("source") or "Published clinical guidance"
+        page = citation.get("page") or guidance.get("page") or 0
+        text = (
+            "PUBLISHED GUIDANCE (not a patient-record fact): "
+            f"{guidance.get('quote')} Plain-language note: {guidance.get('plain')} "
+            f"Source: {source}, page {page}."
+        )
+        chunks.append({
+            "id": _chunk_id(patient_key, source, "published_guidance", text),
+            "text": text,
+            "metadata": {
+                "patient_key": patient_key,
+                "date": "",
+                "source_file": source,
+                "source_page": int(page or 0),
+                "document_id": "",
+                "fact_path": f"/published_guidance/{guidance.get('id') or ''}",
+                # Medication and safety intents permit this category through
+                # question_routing; it remains distinct for transparency.
+                "chunk_type": "published_guidance",
+                "record_fingerprint": fingerprint,
+                "document_type": "published_guidance",
+                "verification_status": "published_reference",
+                "source_method": "curated_reference_library",
+                "extraction_confidence": 1.0,
+                "evidence_score": 1.0,
+                "evidence_tier": "A",
+            },
+        })
+
     return chunks
 
 

@@ -85,6 +85,56 @@ def parse_mixed_datetime(raw: Any, dayfirst: bool = True) -> Optional[datetime]:
         return None
 
 
+_DATE_PLACEHOLDER_RE = re.compile(r"[xX?*_]|\byyyy\b", re.IGNORECASE)
+_PARTIAL_DATE_RE = re.compile(r"^\s*(?:\d{4}|\d{4}[-/.]\d{1,2})\s*$")
+_NON_DATE_MARKERS = {"unknown", "null", "none", "n/a", "na", "not available", "undated"}
+
+
+def sanitize_clinical_date(raw: Any) -> Optional[str]:
+    """Admission gate for model-extracted clinical dates.
+
+    Keeps complete dates in their source representation (including full
+    locale-specific dates), but rejects placeholders, partial dates, malformed
+    values and implausible years before they enter the durable record. Ambiguous
+    full numeric dates are retained because the record-wide convention resolver
+    interprets them consistently downstream.
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, (date, datetime)):
+        return raw.date().isoformat() if isinstance(raw, datetime) else raw.isoformat()
+    if not isinstance(raw, str):
+        return None
+    text = raw.strip()
+    if not text or text.lower() in _NON_DATE_MARKERS:
+        return None
+    if _DATE_PLACEHOLDER_RE.search(text) or _PARTIAL_DATE_RE.match(text):
+        return None
+    # A complete all-numeric date is still unsafe when both day/month fields
+    # are <=12: there is no evidence whether 03/11 means March 11 or 3 November.
+    # The shared parser remains available for legacy records, but new AI output
+    # is admitted only when this ordering is unambiguous.
+    numeric = _SLASH_DATE_RE.fullmatch(text)
+    if numeric:
+        first, second = int(numeric.group(1)), int(numeric.group(2))
+        if first <= 12 and second <= 12:
+            return None
+    parsed = parse_mixed_datetime(text)
+    if parsed is None or not 1900 <= parsed.year <= 2100:
+        return None
+    # Require evidence of day, month and year in the source, not values that
+    # dateutil could fill from today's date.
+    digit_groups = re.findall(r"\d+", text)
+    has_month_word = bool(re.search(
+        r"\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|"
+        r"jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b",
+        text, re.IGNORECASE,
+    ))
+    if len(digit_groups) < (2 if has_month_word else 3):
+        return None
+    return text
+
+
 def parse_mixed_date(raw: Any, dayfirst: bool = True) -> Optional[date]:
     """Calendar-date variant of parse_mixed_datetime (drops time/tz)."""
     parsed = parse_mixed_datetime(raw, dayfirst=dayfirst)

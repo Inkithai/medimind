@@ -23,6 +23,8 @@ export function DocumentsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
   const [selected, setSelected] = useState<Visit | null>(null);
+  const [documentAction, setDocumentAction] = useState<{ id: string; kind: "reprocess" | "delete" } | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -116,6 +118,11 @@ export function DocumentsPage() {
                   <p className="text-xs text-slate-600">{t("documentsPage.clickFile")}</p>
                 </div>
 
+                {actionError && (
+                  <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+                    Document action failed: {actionError}
+                  </div>
+                )}
                 <div className="space-y-2">
                   {documentVisits.map((visit, idx) => {
                     const isSelected = selected?._document_id === visit._document_id;
@@ -126,16 +133,19 @@ export function DocumentsPage() {
                       (visit.vital_signs?.length || 0) +
                       (visit.imaging_results?.length || 0);
                     return (
-                      <button
-                        type="button"
+                      <div
                         key={`${visit._source.file}-${idx}`}
-                        onClick={() => setSelected(visit)}
-                        aria-pressed={isSelected}
-                        aria-label={`${visit._source.file} — ${documentTypeLabel(visit.document_type)} — ${formatDate(visit.date)}`}
-                        className={`w-full rounded-xl border bg-white px-4 py-3 text-left shadow-sm transition hover:shadow ${
+                        className={`overflow-hidden rounded-xl border bg-white shadow-sm transition hover:shadow ${
                           isSelected ? "border-brand-300 ring-2 ring-brand-100" : "border-slate-200"
                         }`}
                       >
+                        <button
+                          type="button"
+                          onClick={() => setSelected(visit)}
+                          aria-pressed={isSelected}
+                          aria-label={`${visit._source.file} — ${documentTypeLabel(visit.document_type)} — ${formatDate(visit.date)}`}
+                          className="w-full px-4 py-3 text-left"
+                        >
                         <div className="flex items-start justify-between gap-2">
                           <div className="flex items-center gap-2">
                             <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-50 text-slate-500">
@@ -184,7 +194,57 @@ export function DocumentsPage() {
                         {visit.provider_or_doctor && (
                           <p className="mt-1 truncate text-xs text-slate-400">{visit.provider_or_doctor}</p>
                         )}
-                      </button>
+                        </button>
+                        <div className="flex flex-wrap items-center gap-2 border-t border-slate-100 bg-slate-50/70 px-3 py-2">
+                          <button
+                            type="button"
+                            onClick={() => setSelected(visit)}
+                            className="rounded-md px-2.5 py-1.5 text-xs font-semibold text-brand-700 hover:bg-brand-50"
+                          >
+                            View & correct
+                          </button>
+                          <button
+                            type="button"
+                            disabled={documentAction !== null}
+                            onClick={async () => {
+                              setDocumentAction({ id: visit._document_id, kind: "reprocess" });
+                              setActionError(null);
+                              try {
+                                await api.reprocessDocument(credentials, visit._document_id);
+                                await load();
+                              } catch (err) {
+                                setActionError(err instanceof Error ? err.message : String(err));
+                              } finally {
+                                setDocumentAction(null);
+                              }
+                            }}
+                            className="rounded-md px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-white disabled:opacity-50"
+                          >
+                            {documentAction?.id === visit._document_id && documentAction.kind === "reprocess" ? "Reprocessing…" : "Reprocess"}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={documentAction !== null}
+                            onClick={async () => {
+                              if (!window.confirm(`Permanently delete “${visit._source.file}”? Its facts will be removed and all safety checks rebuilt.`)) return;
+                              setDocumentAction({ id: visit._document_id, kind: "delete" });
+                              setActionError(null);
+                              try {
+                                await api.deleteDocument(credentials, visit._document_id);
+                                if (selected?._document_id === visit._document_id) setSelected(null);
+                                await load();
+                              } catch (err) {
+                                setActionError(err instanceof Error ? err.message : String(err));
+                              } finally {
+                                setDocumentAction(null);
+                              }
+                            }}
+                            className="ml-auto rounded-md px-2.5 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50"
+                          >
+                            {documentAction?.id === visit._document_id && documentAction.kind === "delete" ? "Deleting…" : "Delete"}
+                          </button>
+                        </div>
+                      </div>
                     );
                   })}
                 </div>

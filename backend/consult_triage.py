@@ -57,6 +57,8 @@ Deterministic, no LLM calls.
 
 from __future__ import annotations
 
+import json
+import os
 import re
 from typing import Any, Dict, List, Optional
 
@@ -170,6 +172,85 @@ def _specialty_for_lab(test_name: str) -> Dict[str, str]:
     return dict(_GP_SPECIALTY)
 
 
+def _assign_model_specialties(items: List[Dict[str, Any]]) -> None:
+    """Optional LLM fallback after deterministic specialty mapping.
+
+    It never decides whether/when to refer and never replaces a rule-map
+    match. Failure leaves the safe GP fallback untouched. Enable with
+    MEDIMIND_MODEL_SPECIALTY_SELECTION=true.
+    """
+    if os.environ.get("MEDIMIND_MODEL_SPECIALTY_SELECTION", "false").lower() not in {"1", "true", "yes"}:
+        return
+    candidates = [
+        (index, item) for index, item in enumerate(items)
+        if item.get("route") == "doctor"
+        and (item.get("specialty") or {}).get("key") == "general_physician"
+        and item.get("trigger") != "lab_approaching_boundary"
+    ]
+    if not candidates:
+        return
+    schema = {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "specialty_fallback",
+            "strict": True,
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "assignments": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": {"type": "integer"},
+                                "specialty": {"type": "string"},
+                                "reason": {"type": "string"},
+                                "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+                            },
+                            "required": ["id", "specialty", "reason", "confidence"],
+                            "additionalProperties": False,
+                        },
+                    },
+                },
+                "required": ["assignments"],
+                "additionalProperties": False,
+            },
+        },
+    }
+    payload = [
+        {"id": index, "trigger": item.get("trigger"), "subject": item.get("subject"), "detail": item.get("detail")}
+        for index, item in candidates
+    ]
+    try:
+        from medical_extractor import MODEL, _completion_resilient, _parse_json_object
+        raw = _completion_resilient(
+            model=MODEL,
+            system_prompt=(
+                "Assign one appropriate medical specialty to each already doctor-routed finding. "
+                "Do not diagnose or alter urgency. Use a patient-friendly label; choose 'General practitioner' "
+                "when no specialist is clearly justified."
+            ),
+            user_content=json.dumps(payload),
+            strict_format=schema,
+        )
+        assignments = _parse_json_object(raw).get("assignments") or []
+    except Exception:
+        return
+    valid = {index for index, _ in candidates}
+    for assignment in assignments:
+        index = assignment.get("id")
+        specialty = str(assignment.get("specialty") or "").strip()
+        if index not in valid or not specialty:
+            continue
+        items[index]["specialty"] = {
+            "key": re.sub(r"[^a-z0-9]+", "_", specialty.lower()).strip("_") or "general_physician",
+            "specialty": specialty,
+            "reason": str(assignment.get("reason") or "Selected for this routed finding."),
+            "basis": "model_fallback",
+            "confidence": assignment.get("confidence"),
+        }
+
+
 def _confidence_caveat(confidence: Optional[float]) -> Optional[str]:
     if isinstance(confidence, (int, float)) and confidence <= LOW_CONFIDENCE_AT_OR_BELOW:
         return (
@@ -208,10 +289,31 @@ def _item(
     return entry
 
 
+def _apply_timing(item: Dict[str, Any], finding: Dict[str, Any]) -> Dict[str, Any]:
+    """Keep historical findings visible without presenting them as live risk."""
+    timing = finding.get("timing") if isinstance(finding, dict) else None
+    if not isinstance(timing, dict):
+        return item
+    item["timing"] = timing
+    status = timing.get("status")
+    if status == "not_concurrent":
+        item["urgency"] = "routine"
+        item["urgency_meaning"] = URGENCY_MEANING["routine"]
+        item["is_historical"] = True
+        item["why_this_route"] = (
+            "The documented courses did not overlap, so this is not presented as a "
+            "current interaction. It remains visible for routine medication-history review."
+        )
+    elif status in {"concurrent", "possible"}:
+        item["is_historical"] = False
+    return item
+
+
 def generate_consult_triage(
     cross_check: Optional[Dict[str, Any]],
     lab_trends: Optional[Dict[str, Any]] = None,
     dosage_report: Optional[Dict[str, Any]] = None,
+    timeline: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Builds the full triage report from findings that already exist.
@@ -224,6 +326,7 @@ def generate_consult_triage(
     cross_check = cross_check or {}
     lab_trends = lab_trends or {}
     dosage_report = dosage_report or {}
+    timeline = timeline or {}
 
     # --- Cross-check findings ---------------------------------------------
     for conflict in cross_check.get("allergy_conflicts") or []:
@@ -247,7 +350,7 @@ def generate_consult_triage(
         subject = " + ".join(str(m) for m in meds) or "drug interaction"
         severity = str(interaction.get("severity") or "moderate").lower()
         if severity == "high":
-            items.append(_item(
+            items.append(_apply_timing(_item(
                 trigger="drug_interaction_high",
                 subject=subject,
                 detail=interaction.get("explanation") or "",
@@ -258,9 +361,9 @@ def generate_consult_triage(
                     "reconsidering — a prescribing decision."
                 ),
                 confidence=interaction.get("confidence"),
-            ))
+            ), interaction))
         else:
-            items.append(_item(
+            items.append(_apply_timing(_item(
                 trigger=f"drug_interaction_{severity}",
                 subject=subject,
                 detail=interaction.get("explanation") or "",
@@ -272,7 +375,7 @@ def generate_consult_triage(
                     "appointment."
                 ),
                 confidence=interaction.get("confidence"),
-            ))
+            ), interaction))
 
     for duplicate in cross_check.get("duplicate_prescriptions") or []:
         items.append(_item(
@@ -302,6 +405,75 @@ def generate_consult_triage(
             ),
             confidence=conflict.get("confidence"),
         ))
+
+    # Published full-list age restrictions that deterministically conflict
+    # with the patient age printed in the record.
+    for conflict in cross_check.get("eml_age_conflicts") or []:
+        item = _item(
+            trigger="essential_medicine_age_restriction",
+            subject=str(conflict.get("medication") or "medication age restriction"),
+            detail=conflict.get("explanation") or conflict.get("restriction") or "Published age restriction.",
+            route="doctor",
+            urgency="urgent",
+            why_this_route="The published age restriction may require changing the prescription, which is a prescriber decision.",
+            confidence=conflict.get("confidence"),
+        )
+        item["reference"] = {
+            "source": "Model List of Essential Medicines",
+            "page": conflict.get("source_page"),
+            "population": conflict.get("population"),
+        }
+        items.append(item)
+
+    # Published, page-cited opioid + depressant combinations with proven
+    # treatment-window overlap.
+    for combination in cross_check.get("guideline_flagged_combinations") or []:
+        citation = combination.get("citation") or {}
+        item = _item(
+            trigger="guideline_flagged_combination",
+            subject=f"{combination.get('opioid') or 'opioid'} + {combination.get('depressant') or 'sedative'}",
+            detail=combination.get("plain") or combination.get("quote") or "Published guidance flags this combination.",
+            route="doctor",
+            urgency="urgent",
+            why_this_route=(
+                "Published safety guidance warns about this concurrently prescribed "
+                "combination; changing either prescription requires a prescriber."
+            ),
+            confidence=0.9,
+        )
+        item["reference"] = citation
+        item["evidence_source"] = "published_reference"
+        item["timing"] = {
+            "status": combination.get("status") or "concurrent",
+            "window_start": combination.get("window_start"),
+            "window_end": combination.get("window_end"),
+        }
+        items.append(item)
+
+    # Two live prescriptions supplying the same ingredient are more urgent
+    # than a historical duplicate in the record.
+    for exposure in cross_check.get("concurrent_exposure") or []:
+        detail = exposure.get("note") or "Two active prescriptions supplied the same ingredient."
+        if exposure.get("cumulative_daily_dose") is not None and exposure.get("dosage_unit"):
+            detail += f" Combined daily dose: {exposure['cumulative_daily_dose']} {exposure['dosage_unit']}."
+        item = _item(
+            trigger="concurrent_duplicate_ingredient",
+            subject=str(exposure.get("ingredient") or "duplicate ingredient"),
+            detail=detail,
+            route="pharmacist",
+            urgency="urgent",
+            why_this_route=(
+                "A pharmacist can immediately reconcile the two live dispensing records "
+                "and contact the prescriber if the overlap was not intended."
+            ),
+            confidence=0.9,
+        )
+        item["timing"] = {
+            "status": exposure.get("status") or "concurrent",
+            "window_start": exposure.get("window_start"),
+            "window_end": exposure.get("window_end"),
+        }
+        items.append(item)
 
     # --- Deterministic dosage findings -------------------------------------
     for finding in dosage_report.get("findings") or []:
@@ -356,6 +528,27 @@ def generate_consult_triage(
                 confidence=trend.get("confidence"),
                 specialty=specialty,
             ))
+        elif (
+            (trend.get("data_points") or [])
+            and str((trend.get("data_points") or [])[0].get("flag") or "").lower() in {"high", "low"}
+            and str((trend.get("data_points") or [])[-1].get("flag") or "").lower() in {"high", "low"}
+        ):
+            items.append(_item(
+                trigger="lab_persistently_abnormal",
+                subject=test_name,
+                detail=trend.get("explanation") or (
+                    f"{test_name} is outside the supplied reference range at both the "
+                    "earliest and latest available readings."
+                ),
+                route="doctor",
+                urgency="soon",
+                why_this_route=(
+                    "A persistently out-of-range series needs interpretation in clinical "
+                    "context, even when there is no normal-to-abnormal crossing."
+                ),
+                confidence=trend.get("confidence"),
+                specialty=specialty,
+            ))
         elif trend.get("approaching_threshold"):
             items.append(_item(
                 trigger="lab_approaching_boundary",
@@ -373,6 +566,63 @@ def generate_consult_triage(
                 confidence=trend.get("confidence"),
                 specialty=specialty,
             ))
+
+    # --- Extraction/translation quality referrals --------------------------
+    from language_guard import assess_translation_risk
+    for visit in timeline.get("visits") or []:
+        source = ((visit.get("_source") or {}).get("file")) or "uploaded document"
+        language_risk = assess_translation_risk(visit)
+        if language_risk.get("flag") in {"review", "high"}:
+            ocr = language_risk.get("ocr_confidence")
+            translation = language_risk.get("translation_confidence")
+            translation_is_dominant = (
+                isinstance(translation, (int, float))
+                and (not isinstance(ocr, (int, float)) or translation < ocr)
+            )
+            if translation_is_dominant:
+                items.append(_item(
+                    trigger="translation_uncertain",
+                    subject=source,
+                    detail=language_risk.get("advice") or "Medication-name translation should be verified.",
+                    route="pharmacist",
+                    urgency="soon",
+                    why_this_route=(
+                        "A pharmacist can compare the original wording with the dispensed "
+                        "generic medicine before uncertain normalization affects safety checks."
+                    ),
+                    confidence=language_risk.get("effective_confidence"),
+                ))
+            else:
+                items.append(_item(
+                    trigger="low_extraction_confidence",
+                    subject=source,
+                    detail=language_risk.get("advice") or "The source was difficult to read.",
+                    route="pharmacist",
+                    urgency="routine",
+                    why_this_route=(
+                        "A clearer copy is preferred; a pharmacist can confirm medication "
+                        "details against the dispensing record."
+                    ),
+                    confidence=language_risk.get("effective_confidence"),
+                ))
+
+        illegible = visit.get("illegible_or_low_confidence_fields") or []
+        overall = visit.get("overall_confidence")
+        if illegible and language_risk.get("flag") == "none":
+            items.append(_item(
+                trigger="low_extraction_confidence",
+                subject=source,
+                detail=f"Fields needing verification: {', '.join(str(value) for value in illegible)}.",
+                route="pharmacist",
+                urgency="routine",
+                why_this_route="The extracted fields should be checked against the original or dispensing record.",
+                confidence=overall if isinstance(overall, (int, float)) else None,
+            ))
+
+    # Deterministic specialty mapping has already run while items were built.
+    # Optionally resolve only the remaining GP fallbacks with a structured
+    # model call; any failure retains GP and cannot lose/de-escalate referral.
+    _assign_model_specialties(items)
 
     # --- Assemble the report -------------------------------------------------
     items.sort(key=lambda item: URGENCY_ORDER[item["urgency"]], reverse=True)

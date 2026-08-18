@@ -2414,7 +2414,7 @@ def image_to_base64(img: Image.Image) -> str:    # Downscale image if too large 
 # ---------------------------------------------------------------------------
 
 def _normalize_extraction_result(result: Dict[str, Any]) -> Dict[str, Any]:
-    """Backfill fields when a provider falls back from strict JSON schema."""
+    """Backfill fields and enforce deterministic clinical-date admission."""
     diagnoses = result.get("diagnoses_or_conditions")
     if not isinstance(diagnoses, list):
         result["diagnoses_or_conditions"] = []
@@ -2422,6 +2422,26 @@ def _normalize_extraction_result(result: Dict[str, Any]) -> Dict[str, Any]:
         result["diagnoses_or_conditions"] = [
             value.strip() for value in diagnoses if isinstance(value, str) and value.strip()
         ]
+
+    from date_convention import sanitize_clinical_date
+
+    date_fields = {
+        "date", "onset_date", "procedure_date", "study_date", "measured_at",
+        "start_date", "end_date", "result_date",
+    }
+
+    def sanitize(value: Any) -> None:
+        if isinstance(value, dict):
+            for key, child in list(value.items()):
+                if key in date_fields:
+                    value[key] = sanitize_clinical_date(child)
+                else:
+                    sanitize(child)
+        elif isinstance(value, list):
+            for child in value:
+                sanitize(child)
+
+    sanitize(result)
     return result
 
 
@@ -3597,7 +3617,8 @@ def cross_check_prescriptions(
     # already tells users it is (a reasoning layer, not a validated
     # drug-interaction database).
     from evidence_grading import grade_cross_check
-    grade_cross_check(result, graph_backed_findings)
+    from reference_library import samhsa_claim_reference
+    grade_cross_check(result, graph_backed_findings, claim_reference=samhsa_claim_reference)
 
     # Place every finding in time. Within the active set all courses overlap
     # at the reference date; timing still documents each finding's window
@@ -3605,6 +3626,13 @@ def cross_check_prescriptions(
     from risk_timeline import annotate_findings_with_timing, concurrent_exposure
     annotate_findings_with_timing(result, timeline)
     result["concurrent_exposure"] = concurrent_exposure(active_timeline)
+
+    # Published opioid safety guidance is matched deterministically against
+    # dated treatment windows. This produces a separately cited finding only
+    # when an opioid and depressant course actually overlap.
+    from reference_library import find_concurrent_depressant_risk, find_relevant_guidance
+    result["guideline_flagged_combinations"] = find_concurrent_depressant_risk(timeline)
+    result["published_guidance"] = find_relevant_guidance(active_timeline)
 
     result["reference_date"] = activity["reference_date"]
     result["medication_activity"] = activity

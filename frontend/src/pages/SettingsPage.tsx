@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { api } from "../api/client";
+import { api, type PatientProfileInput } from "../api/client";
 import { Alert } from "../components/Alert";
 import { Spinner } from "../components/Spinner";
 import { SettingsIcon } from "../components/icons";
@@ -15,7 +15,29 @@ export function SettingsPage() {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deletingWorkspace, setDeletingWorkspace] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleteConfirmation, setDeleteConfirmation] = useState("");
+  const [profile, setProfile] = useState<PatientProfileInput>({});
+  const [profileLoading, setProfileLoading] = useState(false);
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileNotice, setProfileNotice] = useState<string | null>(null);
   const deleteTriggerRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    if (!isConfigured) return;
+    let cancelled = false;
+    setProfileLoading(true);
+    api.getProfile(credentials)
+      .then((value) => {
+        if (!cancelled) setProfile(value);
+      })
+      .catch((error) => {
+        if (!cancelled) setProfileNotice(error instanceof Error ? error.message : String(error));
+      })
+      .finally(() => {
+        if (!cancelled) setProfileLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [credentials, isConfigured]);
 
   useEffect(() => {
     if (!deleteOpen) return;
@@ -67,6 +89,56 @@ export function SettingsPage() {
         <div className="mt-3 max-w-sm"><LanguageSelector /></div>
       </section>
 
+      <section aria-labelledby="profile-settings-title" className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <h2 id="profile-settings-title" className="card-title">Patient profile</h2>
+        <p className="secondary-text mt-1 max-w-2xl">
+          Optional identity and contact details. Profile identity is used only as an additional mismatch signal and never silently overrides uploaded records.
+        </p>
+        {profileLoading ? (
+          <div className="mt-4 flex items-center gap-2 text-sm text-slate-600"><Spinner className="h-4 w-4" /> Loading profile…</div>
+        ) : (
+          <form
+            className="mt-4 grid gap-4 sm:grid-cols-2"
+            onSubmit={async (event) => {
+              event.preventDefault();
+              setProfileSaving(true);
+              setProfileNotice(null);
+              try {
+                const saved = await api.updateProfile(credentials, profile);
+                setProfile(saved);
+                setProfileNotice("Profile saved securely.");
+              } catch (error) {
+                setProfileNotice(error instanceof Error ? error.message : String(error));
+              } finally {
+                setProfileSaving(false);
+              }
+            }}
+          >
+            <label className="text-sm font-medium text-slate-700">Legal name
+              <input className="input mt-1 w-full" value={profile.legal_name || ""} onChange={(e) => setProfile({ ...profile, legal_name: e.target.value })} autoComplete="name" />
+            </label>
+            <label className="text-sm font-medium text-slate-700">Preferred name
+              <input className="input mt-1 w-full" value={profile.preferred_name || ""} onChange={(e) => setProfile({ ...profile, preferred_name: e.target.value })} />
+            </label>
+            <label className="text-sm font-medium text-slate-700">Date of birth
+              <input type="date" className="input mt-1 w-full" value={profile.date_of_birth || ""} max={new Date().toISOString().slice(0, 10)} onChange={(e) => setProfile({ ...profile, date_of_birth: e.target.value })} />
+            </label>
+            <label className="text-sm font-medium text-slate-700">Phone
+              <input type="tel" className="input mt-1 w-full" value={profile.phone || ""} onChange={(e) => setProfile({ ...profile, phone: e.target.value })} autoComplete="tel" />
+            </label>
+            <label className="text-sm font-medium text-slate-700 sm:col-span-2">Emergency contact
+              <input className="input mt-1 w-full" value={profile.emergency_contact || ""} onChange={(e) => setProfile({ ...profile, emergency_contact: e.target.value })} placeholder="Name and contact details" />
+            </label>
+            <div className="flex items-center gap-3 sm:col-span-2">
+              <button type="submit" disabled={profileSaving || !isConfigured} className="btn-primary">
+                {profileSaving ? "Saving…" : "Save patient profile"}
+              </button>
+              {profileNotice && <p role="status" className="text-sm text-slate-600">{profileNotice}</p>}
+            </div>
+          </form>
+        )}
+      </section>
+
       <section aria-labelledby="workspace-settings-title" className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
         <div className="flex items-center gap-3">
           <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-brand-50 text-brand-600">
@@ -110,7 +182,11 @@ export function SettingsPage() {
                   {testing && <Spinner className="h-4 w-4" />} {testing ? t("settings.checking") : t("settings.check")}
                 </button>
                 <button
-                  onClick={() => void createNewWorkspace()}
+                  onClick={() => {
+                    if (window.confirm("Start a new workspace? This browser will lose access to the current workspace unless you saved its code. Stored data is not deleted.")) {
+                      void createNewWorkspace();
+                    }
+                  }}
                   className="btn-secondary"
                 >
                   {t("settings.new")}
@@ -134,6 +210,7 @@ export function SettingsPage() {
                   type="button"
                   onClick={() => {
                     setDeleteError(null);
+                    setDeleteConfirmation("");
                     setDeleteOpen(true);
                   }}
                   className="mt-3 inline-flex min-h-[44px] items-center rounded-xl border border-red-300 bg-white px-4 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-100 focus-visible:ring-red-500"
@@ -182,11 +259,22 @@ export function SettingsPage() {
             <p id="delete-workspace-dialog-description" className="mt-2 text-sm leading-relaxed text-slate-600">
               {t("settings.deleteConfirmBody")}
             </p>
+            <label className="mt-4 block text-sm font-semibold text-slate-800">
+              Type <span className="font-mono text-red-700">RESET</span> to confirm
+              <input
+                value={deleteConfirmation}
+                onChange={(event) => setDeleteConfirmation(event.target.value)}
+                autoFocus
+                autoComplete="off"
+                spellCheck={false}
+                className="input mt-2 w-full font-mono"
+                aria-describedby="delete-workspace-dialog-description"
+              />
+            </label>
             {deleteError && <p role="alert" className="mt-3 text-sm text-red-700">{deleteError}</p>}
             <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
               <button
                 type="button"
-                autoFocus
                 disabled={deletingWorkspace}
                 onClick={() => {
                   setDeleteOpen(false);
@@ -198,8 +286,9 @@ export function SettingsPage() {
               </button>
               <button
                 type="button"
-                disabled={deletingWorkspace}
+                disabled={deletingWorkspace || deleteConfirmation !== "RESET"}
                 onClick={async () => {
+                  if (deleteConfirmation !== "RESET") return;
                   setDeletingWorkspace(true);
                   setDeleteError(null);
                   try {
@@ -211,7 +300,7 @@ export function SettingsPage() {
                     setDeletingWorkspace(false);
                   }
                 }}
-                className="btn min-w-[170px] bg-red-600 text-white hover:bg-red-700 focus-visible:ring-red-500 disabled:cursor-not-allowed"
+                className="btn min-w-[170px] bg-red-600 text-white hover:bg-red-700 focus-visible:ring-red-500 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {deletingWorkspace ? t("settings.deletingData") : t("settings.deleteConfirm")}
               </button>
