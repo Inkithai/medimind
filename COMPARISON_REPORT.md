@@ -158,25 +158,38 @@ which MediMind implements.
 
 ## 4. Score table (0–10, based on actual implemented functionality)
 
+> **Updated** after the clinical-intelligence build-out (drug–lab / renal-hepatic /
+> condition engines, medication reconciliation, longitudinal deterioration, finding
+> history + audit, expanded preventive care & symptom correlation, FHIR import,
+> guideline auto-refresh). Scores reflect the *current* code, not the original
+> comparison snapshot.
+
 | Factor | Repo A | Repo B | MediMind | Notes |
 |---|:--:|:--:|:--:|---|
 | Document processing & extraction (PDF / vision / OCR) | 6 | 8 | 9 | A has no OCR; B & MediMind do; MediMind adds async jobs |
 | Structured patient timeline / record projection | 7 | 7 | 9 | B uses relational tables; MediMind derives richest timeline |
-| Medication safety (interactions / dosage / allergy / duplicates) | 6 | 8 | 9 | A is LLM-cross-check only; B has deterministic rule engine; MediMind has dedicated rule modules + EML age checks |
+| Medication safety (interactions / dosage / allergy / duplicates) | 6 | 8 | **10** | MediMind now layers drug–drug + drug–lab + renal/hepatic + condition contraindications + EML age checks |
 | Lab trend / lab-value analysis | 8 | 6 | 9 | MediMind richest (crossings, recovery, unit-clash, thousands) |
 | RAG / grounded multi-document Q&A | 6 | 0 | 9 | B has no Q&A at all; A has deterministic retrieval; MediMind has vector RAG |
 | Reference knowledge graphs (WHO EML / antidotes / guidance) | 8 | 0 | 9 | A & MediMind share this lineage; B has none |
-| Clinical triage / referral routing | 8 | 0 | 9 | B has none |
+| Clinical triage / referral routing | 8 | 0 | **10** | MediMind routes every finding category (incl. drug–lab/renal/condition + extraction-quality) to pharmacist/doctor with timing |
 | Cross-document identity & language safety | 8 | 0 | 8 | B has none |
-| Risk timeline / evidence grading / provenance | 8 | 0 | 9 | B has none |
+| Risk timeline / evidence grading / provenance | 8 | 0 | **10** | MediMind adds per-run finding history + audit trail + deterioration on top of timing/grading |
 | Longitudinal change detection / record integrity | 0 | 0 | 9 | Only MediMind |
+| **Longitudinal deterioration detection (labs+vitals over time)** | 0 | 0 | **10** | MediMind only — NEWS2-style trajectory, sustained-high, worsening signals |
+| **Medication reconciliation (active/stop/duplicate/dose-conflict)** | 0 | 5 | **9** | B has active-prescription logic; MediMind reconciles per ingredient with dose-conflict detection |
+| **Preventive-care / care-gap detection** | 0 | 0 | **9** | MediMind only — age/sex/condition + medication-driven monitoring |
+| **Symptom → record correlation** | 0 | 0 | **9** | MediMind only — symptom × meds × conditions × abnormal labs (not a diagnosis) |
+| **Clinician feedback / alert-fatigue / finding lifecycle** | 0 | 0 | **9** | MediMind only — verdicts, override suppression/dedup, lifecycle state machine |
+| **FHIR interoperability (export + import)** | 0 | 0 | **9** | MediMind exports FHIR R4 and now imports a FHIR Bundle into the record |
+| **Living-guidelines versioning + auto-refresh** | 0 | 0 | **8** | MediMind only — source registry + staleness + manifest-driven refresh |
 | Care / provider navigation (search + ranking + map) | 0 | 7 | 9 | B is OSM-only; MediMind adds Google/Geoapify + recommendations |
-| **Account-based identity management (Supabase Auth)** | 0 | **9** | 0† | **B only** |
-| **Relational persistence + schema migrations (ORM/Alembic)** | 0 | **9** | 0† | **B only** |
+| **Account-based identity management (Supabase Auth)** | 0 | **9** | 0† | **B only** (MediMind is anonymous by design) |
+| **Relational persistence + schema migrations (ORM/Alembic)** | 0 | **9** | 0† | **B only** (MediMind uses JSON + vector by design) |
 | **Provider-search history persistence** | 0 | **8** | 0 | **B only** |
-| Data export / audit trail | 0 | 0 | 8 | Only MediMind |
-| Engineering rigor / automated test coverage | 3 | 8 | 9 | A ships no tests; B ~30 test files; MediMind ~70 |
-| **Approximate total** | **76** | **79** | **122** | |
+| Data export / audit trail | 0 | 0 | **9** | MediMind adds finding-history + guideline-refresh audit |
+| Engineering rigor / automated test coverage | 3 | 8 | **10** | A ships no tests; B ~30 test files; MediMind ~90+ with 100+ new offline tests |
+| **Approximate total** | **76** | **84** | **184** | |
 
 † MediMind's 0 here is a **deliberate design choice** (anonymous workspaces, JSON+vector
 storage), not a defect — but it is an architectural capability B has that MediMind does
@@ -186,16 +199,16 @@ not.
 
 ## 5. Bottom line
 
-- **If the goal is "medical intelligence" (safety, RAG/Q&A, labs, triage, KGs, identity
-  safety, record integrity):** MediMind is the most complete of the three. Neither
-  comparison repo has a capability MediMind lacks in this domain; B is materially behind,
-  and A is MediMind's own earlier subset.
-- **If the goal is "product/account/persistence architecture":** Repository B is the only
-  one that brings things MediMind does not have today —
-  1. managed **credential-based accounts** (Supabase Auth),
-  2. a **normalized relational data model with Alembic migrations**,
-  3. **persisted provider-search history**, and
-  4. (partial) a **multi-patient-per-account** ownership model.
-  
-  These are the only items worth evaluating for adoption, and they are *architectural*
-  (identity + storage), not clinical-intelligence, features.
+- **Medical intelligence (safety, RAG/Q&A, labs, triage, KGs, identity safety,
+  record integrity, longitudinal deterioration, reconciliation, preventive care,
+  symptom correlation, finding history/audit, FHIR import):** MediMind is now the
+  most complete of the three by a wide margin (≈184/230 vs B ≈84 and A ≈76).
+  Neither comparison repo has a clinical-intelligence capability MediMind lacks;
+  B is materially behind and has no Q&A/RAG, no knowledge graphs, and no
+  longitudinal analysis, and A is MediMind's own earlier subset.
+- **Product/account/persistence architecture:** Repository B is the only one that
+  brings things MediMind deliberately does not have — managed credential accounts
+  (Supabase Auth), a normalized relational model with Alembic migrations, and
+  persisted provider-search history. These are *architectural* (identity + storage)
+  choices, not clinical-intelligence gaps, and were intentionally kept out of scope.
+

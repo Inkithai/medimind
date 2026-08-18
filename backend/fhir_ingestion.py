@@ -46,6 +46,27 @@ def _code(res: Dict[str, Any], key: str) -> str:
     return _text(res.get(key))
 
 
+def _interpretation_flag(res: Dict[str, Any]) -> str:
+    """Map a FHIR Observation.interpretation to the pipeline's flag vocabulary
+    (normal/high/low/unknown). Tolerates missing, empty, or oddly-shaped
+    interpretation arrays without raising."""
+    interp = res.get("interpretation")
+    if not isinstance(interp, list) or not interp:
+        return "unknown"
+    coding = interp[0].get("coding") if isinstance(interp[0], dict) else None
+    if not isinstance(coding, list) or not coding:
+        return "unknown"
+    code = coding[0].get("code") if isinstance(coding[0], dict) else None
+    code = str(code or "").strip().upper()
+    if code in ("H", "HU", ">", "AA", "HH"):
+        return "high"
+    if code in ("L", "LU", "<", "LL"):
+        return "low"
+    if code in ("N",):
+        return "normal"
+    return "unknown"
+
+
 def _value(res: Dict[str, Any]) -> Optional[str]:
     comp = res.get("component")
     if isinstance(comp, list) and comp:
@@ -112,7 +133,7 @@ def parse_fhir_bundle(bundle: Any, *, document_id: str = "fhir_import") -> Dict[
                 "value": str(val),
                 "unit": "",
                 "reference_range": None,
-                "flag": res.get("interpretation", [{}])[0].get("coding", [{}])[0].get("code", "unknown") if isinstance(res.get("interpretation"), list) else "unknown",
+                "flag": _interpretation_flag(res),
                 "confidence": 0.99,
             }
             if any(k in code for k in _VITAL_KEYWORDS):

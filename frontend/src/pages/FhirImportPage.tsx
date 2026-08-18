@@ -4,30 +4,14 @@ import { api } from "../api/client";
 import { Card, CardBody, CardHeader } from "../components/Card";
 import { StatusBadge } from "../components/StatusBadge";
 import { MedicalDisclaimer } from "../components/MedicalDisclaimer";
-import { UploadIcon, LinkIcon, FileIcon } from "../components/icons";
+import { UploadIcon, FileIcon } from "../components/icons";
 import { useAuth } from "../context/AuthContext";
 import { useI18n } from "../i18n/I18nContext";
 import type { FhirImportResult } from "../types/api";
 
-// A compact but realistic FHIR R4 sample so the feature is demonstrable without
-// a real export on hand. Covers the resources the importer understands.
-const SAMPLE_FHIR = {
-  resourceType: "Bundle",
-  type: "collection",
-  entry: [
-    { resource: { resourceType: "Patient", name: [{ given: ["Jane"], family: "Doe" }], gender: "female", birthDate: "1958-03-12" } },
-    { resource: { resourceType: "Encounter", period: { start: "2024-05-10" } } },
-    { resource: { resourceType: "MedicationStatement", status: "active", medicationCodeableConcept: { text: "Warfarin 5mg" } } },
-    { resource: { resourceType: "MedicationStatement", status: "active", medicationCodeableConcept: { text: "Ibuprofen 400mg" } } },
-    { resource: { resourceType: "MedicationStatement", status: "active", medicationCodeableConcept: { text: "Metformin 500mg" } } },
-    { resource: { resourceType: "Observation", code: { text: "Potassium" }, valueQuantity: { value: 5.9, unit: "mmol/L" }, interpretation: [{ coding: [{ code: "H" }] }] } },
-    { resource: { resourceType: "Observation", code: { text: "Creatinine" }, valueQuantity: { value: 160, unit: "umol/L" }, interpretation: [{ coding: [{ code: "H" }] }] } },
-    { resource: { resourceType: "Observation", code: { text: "Blood Pressure" }, valueQuantity: { value: "148/94", unit: "mmHg" } } },
-    { resource: { resourceType: "Condition", code: { text: "Atrial fibrillation" } } },
-    { resource: { resourceType: "Condition", code: { text: "Type 2 diabetes mellitus" } } },
-    { resource: { resourceType: "AllergyIntolerance", code: { text: "Penicillin" } } },
-  ],
-};
+// NOTE: no sample/mock patient data is bundled here. The import accepts only
+// real, user-provided FHIR Bundles (pasted or uploaded). See project policy:
+// all displayed information must come from real backend / user-provided data.
 
 const COUNT_LABELS: Record<string, string> = {
   medications: "Medications",
@@ -51,12 +35,6 @@ export function FhirImportPage() {
     reader.onload = () => setText(String(reader.result || ""));
     reader.onerror = () => setError("Could not read that file.");
     reader.readAsText(file);
-  }
-
-  function loadSample() {
-    setText(JSON.stringify(SAMPLE_FHIR, null, 2));
-    setResult(null);
-    setError(null);
   }
 
   async function runImport() {
@@ -93,16 +71,7 @@ export function FhirImportPage() {
       <Card>
         <CardHeader
           title="FHIR R4 Bundle"
-          description="Paste a Bundle, or upload a .json file. The importer understands Patient, MedicationStatement/Request, Observation, Condition, AllergyIntolerance, Encounter and DiagnosticReport."
-          action={
-            <button
-              type="button"
-              onClick={loadSample}
-              className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50"
-            >
-              <LinkIcon className="h-3.5 w-3.5" /> Load sample
-            </button>
-          }
+          description="Paste your Bundle, or upload a .json file from your health record export. The importer understands Patient, MedicationStatement/Request, Observation, Condition, AllergyIntolerance, Encounter and DiagnosticReport."
         />
         <CardBody className="space-y-3">
           <textarea
