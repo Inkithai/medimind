@@ -76,6 +76,8 @@ export default function App() {
   return (
     <Routes>
       <Route path="/" element={<LandingPage />} />
+      {/* Speaker notes only — no nav, sidebar, or landing link. Type /ygc-prep. */}
+      <Route path="/ygc-prep" element={<JudgePrepPage />} />
       <Route element={<Layout />}>
         <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="/settings" element={<SettingsPage />} />

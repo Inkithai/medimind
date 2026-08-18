@@ -44,6 +44,12 @@ docs for individual backend modules live next to the code they describe, in
 | `MediMind_YGC_Round1_Demo_Transcript_and_Preparation.docx` | Demo script and prep notes. |
 | `ygc_round1_tech_doc.docx` | Round 1 technical document. |
 
+## Tests that lock recent work
+
+- Medication-safety HTTP contract: [`../backend/tests/test_medication_safety_endpoints.py`](../backend/tests/test_medication_safety_endpoints.py) (`GET /api/v1/medication-safety`, `POST /api/v1/medication-safety/reanalyze`; TestClient, offline mocks).
+- Medication-safety engine (no HTTP): [`../backend/tests/test_medication_safety_service.py`](../backend/tests/test_medication_safety_service.py).
+- Hidden speaker-notes page: `npm run test:judge-prep` in `frontend/` (`/ygc-prep` is type-the-URL only — not in the sidebar, landing, or footer).
+
 ## Backend module docs
 
 See [`../backend/docs/`](../backend/docs/) for

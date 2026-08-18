@@ -234,6 +234,8 @@ Citations resolve to documents by **exact** filename match (`frontend/src/utils/
 - **Find Care** `/find-care` — search-as-you-type or current location → map confirmation → provider-neutral hospitals, clinics, pharmacies, laboratories, and doctors within the selected radius.
 - **About MediMind** `/about` — current capabilities, hybrid architecture, safety/data boundaries, and an honest prioritized roadmap.
 
+A hidden speaker-notes URL (`/ygc-prep`) is registered outside the workspace layout for the live demo. It is not linked from the sidebar, landing page, footer, or workflow NAV — type the path. Component tests: `npm run test:judge-prep`.
+
 States distinguished: loading, empty 404 (no record), 401 auth, 422 validation/non-medical, 502 ML pipeline, network/CORS.
 
 #### Source evidence contract
@@ -260,7 +262,7 @@ cd frontend
 npm install
 npm run dev       # http://localhost:5173, proxies /api → http://127.0.0.1:8000
 npm run lint      # TypeScript verification
-npm run test      # auth, i18n, axe accessibility, keyboard, geolocation, and care regressions
+npm run test      # auth, i18n, axe, geolocation, care, About, timeline empty-state, hidden /ygc-prep
 npm run build     # production bundle
 ```
 
@@ -364,6 +366,14 @@ X-User-Id: <user_id>
 `POST /api/v1/documents` — multipart `files` field. Merges with prior uploads. Validates non-medical via `document_filter.py` (422 if `other` with no clinical content). Fixes `_source.file` to original filename (not temp path). Returns timeline + cross-check + lab_trends + indexed flag. If `indexed:false` includes `index_error`. Failures are per-file: one unreadable/non-medical file no longer fails the whole batch — kept files are merged normally and response includes `failed_files: [{file, file_id, file_index, error, kind, code, retryable, retry_after_seconds}]`. Provider traces are logged server-side; clients receive short, actionable messages. The request only fails outright when nothing was kept: 422 for content problems, 502 for a provider/storage interruption.
 
 `GET /api/v1/timeline`, `/cross-check`, `/lab-trends` — 404 if no snapshot yet. Reads replay current corrections and quarantine policy so an older snapshot cannot leak conflicting facts.
+
+#### Medication safety
+Dedicated service (`medication_safety.py`) — not extraction and not RAG. The Safety page (`/safety`) calls this surface.
+
+- `GET /api/v1/medication-safety` — structured report plus `service`, `module`, `dosage_report`, and a not-a-diagnosis disclaimer. 404 if no snapshot. Auth required.
+- `POST /api/v1/medication-safety/reanalyze` — rebuilds and persists the full safety pipeline from current documents. 409 during an active upload, 404 if no documents. Returns `reanalyzed`, before/after finding counts, and `indexed`.
+
+Offline tests: `backend/tests/test_medication_safety_service.py` (engine) and `backend/tests/test_medication_safety_endpoints.py` (TestClient; mocks snapshot/rebuild, no LLM).
 
 #### Corrections and source conflicts
 
