@@ -1980,12 +1980,24 @@ async def _rebuild_after_document_deletion(
     }
 
 
+def _workspace_has_active_upload(user_id: str) -> bool:
+    return any(
+        job.get("status") in {"pending", "processing"}
+        for job in jobs.list_jobs(user_id, limit=100)
+    )
+
+
 @app.delete("/api/v1/documents/{document_id}")
 async def delete_document(
     document_id: str,
     user_id: str = Depends(get_current_user),
 ) -> Dict[str, Any]:
     """Permanently delete one uploaded file and rebuild all dependent views."""
+    if _workspace_has_active_upload(user_id):
+        raise HTTPException(
+            409,
+            "A document upload is still processing. Wait for it to finish before deleting a document.",
+        )
     documents = db.load_documents(user_id)
     selected = next((doc for doc in documents if trust_document_id(doc) == document_id), None)
     if selected is None:
@@ -2025,6 +2037,12 @@ async def delete_document(
     if not deleted_rows:
         raise HTTPException(409, "The document changed before it could be deleted. Refresh and try again.")
     db.delete_document_corrections(user_id, document_ids)
+    # Stored conversations, completed job payloads, referral trails, and audit
+    # details may still quote the deleted source. Clear them rather than leave
+    # residual copies that the normal record rebuild cannot rewrite safely.
+    db.clear_document_derived_history(user_id)
+    jobs.delete_user_jobs(user_id)
+    conversation.delete_patient_sessions(user_id)
     rebuild = await _rebuild_after_document_deletion(user_id, remaining)
     audit.record(user_id, "documents.delete", {
         "document_id": document_id,
@@ -2043,11 +2061,7 @@ async def delete_document(
 @app.delete("/api/v1/workspace")
 async def delete_workspace(user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
     """Permanently erase originals, extracted records, derived data and history."""
-    active_jobs = [
-        job for job in jobs.list_jobs(user_id, limit=100)
-        if job.get("status") in {"pending", "processing"}
-    ]
-    if active_jobs:
+    if _workspace_has_active_upload(user_id):
         raise HTTPException(
             409,
             "A document upload is still processing. Wait for it to finish before deleting the workspace.",
@@ -2059,13 +2073,14 @@ async def delete_workspace(user_id: str = Depends(get_current_user)) -> Dict[str
     except storage.StorageDeletionError as exc:
         raise HTTPException(502, str(exc)) from exc
 
+    # Clear the configured vector store before the database sweep. If this
+    # fails, abort while the durable record still exists so the UI can safely
+    # retry instead of reporting an error after deletion already completed.
+    await asyncio.to_thread(vector_store.delete_collection, user_id)
     deleted = await asyncio.to_thread(db.delete_workspace_data, user_id)
     # Clear process-local copies after durable deletion succeeds.
     jobs.delete_user_jobs(user_id)
     conversation.delete_patient_sessions(user_id)
-    # db.delete_workspace_data removes Supabase chunks; this also covers a
-    # deployment using the local Chroma vector-store adapter.
-    await asyncio.to_thread(vector_store.delete_collection, user_id)
     logger.info("workspace permanently deleted: user=%s tables=%s", user_id, sorted(deleted))
     return {"deleted": True}
 

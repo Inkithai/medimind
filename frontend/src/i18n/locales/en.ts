@@ -203,7 +203,7 @@ export const en = {
     delete: "Delete",
     deleteTitle: "Delete this document?",
     deleteBody: "“{{file}}” and every extracted page from this upload will be permanently deleted.",
-    deleteImpact: "Information from this document will also be removed from your timeline, medications, lab trends, safety checks, and AI answers. This cannot be undone.",
+    deleteImpact: "Information from this document will also be removed from your timeline, medications, lab trends, safety checks, AI answers, saved conversations, and derived history. This cannot be undone.",
     deleteConfirm: "Delete permanently",
     deleting: "Deleting…",
     original: "Original",

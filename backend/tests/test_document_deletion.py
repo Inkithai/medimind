@@ -38,10 +38,14 @@ def test_delete_document_removes_every_page_and_rebuilds_without_the_upload():
         "indexed": True,
         "index_error": None,
     }
-    with mock.patch.object(api.db, "load_documents", return_value=[*deleted_pages, remaining]), \
+    with mock.patch.object(api.jobs, "list_jobs", return_value=[]), \
+         mock.patch.object(api.db, "load_documents", return_value=[*deleted_pages, remaining]), \
          mock.patch.object(api.storage, "delete_patient_document") as delete_original, \
          mock.patch.object(api.db, "delete_document_group", return_value=2) as delete_rows, \
          mock.patch.object(api.db, "delete_document_corrections") as delete_corrections, \
+         mock.patch.object(api.db, "clear_document_derived_history") as clear_history, \
+         mock.patch.object(api.jobs, "delete_user_jobs") as clear_jobs, \
+         mock.patch.object(api.conversation, "delete_patient_sessions") as clear_sessions, \
          mock.patch.object(api, "_rebuild_after_document_deletion", new=mock.AsyncMock(return_value=rebuild)) as rebuild_record, \
          mock.patch.object(api.audit, "record"):
         response = asyncio.run(api.delete_document("doc-1", "user"))
@@ -52,8 +56,23 @@ def test_delete_document_removes_every_page_and_rebuilds_without_the_upload():
     delete_original.assert_called_once_with("mediscan/user/report")
     assert delete_rows.call_args.kwargs["content_sha256"] == "same-hash"
     assert delete_corrections.call_args.args == ("user", ["doc-1", "doc-2"])
+    clear_history.assert_called_once_with("user")
+    clear_jobs.assert_called_once_with("user")
+    clear_sessions.assert_called_once_with("user")
     passed_remaining = rebuild_record.call_args.args[1]
     assert [item["_document_id"] for item in passed_remaining] == ["doc-3"]
+
+
+def test_delete_document_waits_for_an_active_upload():
+    with mock.patch.object(api.jobs, "list_jobs", return_value=[{"status": "pending"}]), \
+         mock.patch.object(api.db, "delete_document_group") as delete_rows:
+        try:
+            asyncio.run(api.delete_document("doc-1", "user"))
+        except api.HTTPException as exc:
+            assert exc.status_code == 409
+        else:
+            raise AssertionError("an active upload must block document deletion")
+    delete_rows.assert_not_called()
 
 
 def test_delete_workspace_waits_for_an_active_upload():

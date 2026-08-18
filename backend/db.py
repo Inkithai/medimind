@@ -352,6 +352,25 @@ def clear_conflict_history(user_id: str) -> None:
 
 
 @_translate_missing_schema
+def clear_document_derived_history(user_id: str) -> None:
+    """Remove histories that may quote or cache facts from a deleted source.
+
+    Conversation turns, completed upload results, referral trails, and prior
+    audit details can all retain a filename or source-derived text even after
+    the document row is gone. They cannot be safely edited per page, so an
+    explicit source deletion clears these per-workspace histories.
+    """
+    client = _get_client()
+    for table_name in ("conversation_sessions", "jobs", "referral_searches", "audit_log"):
+        try:
+            client.table(table_name).delete().eq("user_id", user_id).execute()
+        except Exception as exc:
+            if getattr(exc, "code", None) == _MISSING_TABLE_CODE or _MISSING_TABLE_CODE in str(exc):
+                continue
+            raise
+
+
+@_translate_missing_schema
 def delete_patient_snapshot(user_id: str) -> None:
     _snapshots().delete().eq("user_id", user_id).execute()
 
