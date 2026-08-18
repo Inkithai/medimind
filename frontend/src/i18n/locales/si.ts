@@ -74,6 +74,9 @@ export const si = {
     care: "ප්‍රතිකාර සොයන්න",
     settings: "සැකසුම්",
     upload: "ලේඛනයක් උඩුගත කරන්න",
+    groupRecords: "මගේ වාර්තා",
+    groupInsights: "අවබෝධ සහ විශ්ලේෂණ",
+    groupActions: "ක්‍රියාමාර්ග ගන්න",
     descriptions: {
       dashboard: "ඔබේ සෞඛ්‍ය වාර්තාවල කෙටි සාරාංශයක් බලන්න.",
       records: "උඩුගත කළ ලේඛන සහ ලබාගත් විස්තර බලන්න.",

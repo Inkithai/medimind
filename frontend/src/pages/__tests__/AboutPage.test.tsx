@@ -296,10 +296,10 @@ const tests: Array<[string, () => void]> = [
         "nav rows and About row share the active treatment"
       );
       assert.ok(layoutSource.includes("shadow-[inset_3px_0_0_#0F766E]"), "teal edge marker");
-      // Reset data reads as destructive without becoming a solid red button.
-      const resetBlock = layoutSource.slice(layoutSource.indexOf("nav.resetData") - 800);
-      assert.ok(resetBlock.includes("text-red-700"), "destructive text colour");
-      assert.ok(!resetBlock.includes("bg-red-600"), "not a solid red button");
+      // Destructive deletion no longer sits beside New workspace in the
+      // sidebar; it lives behind the explicit confirmation flow in Settings.
+      assert.ok(!layoutSource.includes('t("nav.resetData")'), "no casual destructive sidebar action");
+      assert.ok(layoutSource.includes("Permanent deletion is available in Settings"), "points to safe deletion flow");
     },
   ],
   [

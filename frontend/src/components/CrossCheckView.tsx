@@ -1,7 +1,8 @@
 import { Link } from "react-router-dom";
 import { useI18n } from "../i18n/I18nContext";
-import type { CrossCheckReport, MedicationTransition, SourceReference } from "../types/api";
+import type { CrossCheckReport, DosageReport, MedicationTransition, SourceReference } from "../types/api";
 import { formatConfidence, severityTone } from "../utils/format";
+import { collectSafetyAlerts } from "../utils/safety";
 import { Alert } from "./Alert";
 import { Card, CardBody, CardHeader } from "./Card";
 import { EmptyState } from "./EmptyState";
@@ -27,15 +28,36 @@ const SECTIONS: Section[] = [
   { key: "duplicate_prescriptions", titleKey: "safety.duplicates", tone: "info" },
 ];
 
-export function CrossCheckView({ report }: { report: CrossCheckReport }) {
+export function CrossCheckView({ report, dosageReport }: { report: CrossCheckReport; dosageReport?: DosageReport | null }) {
   const { t, formatNumber } = useI18n();
-  const totalIssues =
-    SECTIONS.reduce((sum, section) => sum + (report[section.key]?.length || 0), 0) +
-    (report.medication_changes?.length || 0);
+  const canonicalAlerts = collectSafetyAlerts(report, dosageReport);
+  const totalIssues = canonicalAlerts.length;
   const continuations = report.medication_continuations || [];
-  const hasLowConfidence = SECTIONS.some((section) =>
-    (report[section.key] || []).some((item) => item.confidence < 0.6)
+  const supplementalKinds = new Set(["concurrent_duplicate", "age_restriction"]);
+  const supplementalAlerts = canonicalAlerts.filter((item) =>
+    supplementalKinds.has(item.kind) || item.evidenceSource === "published_reference" ||
+    (item.kind === "dosage" && item.key.startsWith("dosage-rule:"))
   );
+  const guidelinePairs = new Set(
+    (report.guideline_flagged_combinations || []).map((item) =>
+      [item.opioid, item.depressant].map((value) => String(value || "").trim().toLowerCase()).sort().join("+")
+    )
+  );
+  const displayReport: CrossCheckReport = {
+    ...report,
+    potential_drug_interactions: report.potential_drug_interactions.filter((item) =>
+      item.timing?.status !== "not_concurrent" && !guidelinePairs.has(
+        item.medications_involved.map((value) => value.trim().toLowerCase()).sort().join("+")
+      )
+    ),
+    duplicate_prescriptions: report.duplicate_prescriptions.filter((item) => item.timing?.status !== "not_concurrent"),
+    conflicting_dosage_instructions: report.conflicting_dosage_instructions.filter((item) => item.timing?.status !== "not_concurrent"),
+    allergy_conflicts: report.allergy_conflicts.filter((item) => item.timing?.status !== "not_concurrent"),
+  };
+  const hasLowConfidence = canonicalAlerts.some(
+    (item) => typeof item.confidence === "number" && item.confidence < 0.6
+  );
+  const hasHighRisk = canonicalAlerts.some((item) => item.severity === "high");
 
   return (
     <Card>
@@ -45,13 +67,13 @@ export function CrossCheckView({ report }: { report: CrossCheckReport }) {
         icon={<ShieldIcon className="h-5 w-5" />}
       />
       <CardBody className="space-y-5">
-        {report.overall_recommendation && (
+        {totalIssues > 0 && report.overall_recommendation && (
           <Alert variant="warning" title={t("safety.recommendation")}>
             {report.overall_recommendation}
           </Alert>
         )}
 
-        {(report.allergy_conflicts.length > 0 || report.potential_drug_interactions.some((item) => item.severity === "high")) && (
+        {hasHighRisk && (
           <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">
             <p className="font-semibold">{t("safety.highRisk")}</p>
             <p className="mt-1">{t("safety.highRiskBody")}</p>
@@ -74,19 +96,23 @@ export function CrossCheckView({ report }: { report: CrossCheckReport }) {
         {totalIssues === 0 ? (
           <EmptyState
             title={t("safety.noIssues")}
-            description={t("safety.noIssuesBody")}
+            description="No active medication interactions, duplicate prescriptions, above-ceiling doses, allergy conflicts, or applicable age restrictions were detected. This screening is limited to the uploaded records and configured rules."
           />
         ) : (
           <>
             {SECTIONS.map((section) => (
-              <IssueSection key={section.key} report={report} section={section} />
+              <IssueSection key={section.key} report={displayReport} section={section} />
             ))}
-            <TransitionSection
-              title={t("safety.changes")}
-              items={report.medication_changes || []}
-              tone="warning"
-            />
+            {supplementalAlerts.length > 0 && <CanonicalAlertSection items={supplementalAlerts} />}
           </>
+        )}
+
+        {(report.medication_changes?.length || 0) > 0 && (
+          <TransitionSection
+            title="Medication record changes (not automatically safety alerts)"
+            items={report.medication_changes || []}
+            tone="warning"
+          />
         )}
 
         {continuations.length > 0 && (
@@ -183,6 +209,32 @@ function IssueSection({ report, section }: { report: CrossCheckReport; section: 
             <p className="mt-2 text-xs text-slate-400">
               confidence {formatConfidence((item as { confidence?: number }).confidence)}
             </p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function CanonicalAlertSection({ items }: { items: ReturnType<typeof collectSafetyAlerts> }) {
+  if (!items.length) return null;
+  return (
+    <div>
+      <div className="mb-2 flex items-center gap-2">
+        <h3 className="text-sm font-semibold text-slate-900">Additional deterministic safety checks</h3>
+        <StatusBadge tone="warning">{items.length}</StatusBadge>
+      </div>
+      <div className="space-y-2">
+        {items.map((item) => (
+          <div key={item.key} className="rounded-lg border border-slate-200 bg-slate-50/60 px-4 py-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <StatusBadge tone={item.severity === "high" ? "danger" : item.severity === "moderate" ? "warning" : "info"}>
+                {item.severity}
+              </StatusBadge>
+              <p className="text-sm font-semibold text-slate-800">{item.title}</p>
+            </div>
+            <p className="mt-1 text-sm text-slate-600">{item.description}</p>
+            {item.evidenceSource && <p className="mt-2 text-xs text-slate-500">Evidence: {item.evidenceSource.replace(/_/g, " ")}</p>}
           </div>
         ))}
       </div>

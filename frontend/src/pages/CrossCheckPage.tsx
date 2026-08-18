@@ -11,12 +11,14 @@ import { RefreshIcon, UploadIcon } from "../components/icons";
 import { useAuth } from "../context/AuthContext";
 import { useStrictEffect } from "../hooks/useStrictEffect";
 import { useI18n } from "../i18n/I18nContext";
-import type { CrossCheckReport } from "../types/api";
+import type { CrossCheckReport, DosageReport } from "../types/api";
+import { collectSafetyAlerts } from "../utils/safety";
 
 export function CrossCheckPage() {
   const { credentials } = useAuth();
   const { t } = useI18n();
   const [report, setReport] = useState<CrossCheckReport | null>(null);
+  const [dosageReport, setDosageReport] = useState<DosageReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
   const [reloadKey, setReloadKey] = useState(0);
@@ -27,8 +29,12 @@ export function CrossCheckPage() {
     setLoading(true);
     setError(null);
     try {
-      const data = await api.getCrossCheck(credentials);
+      const [data, dosage] = await Promise.all([
+        api.getCrossCheck(credentials),
+        api.getDosageReport(credentials),
+      ]);
       setReport(data);
+      setDosageReport(dosage);
     } catch (err) {
       setReport(null);
       setError(err);
@@ -59,6 +65,10 @@ export function CrossCheckPage() {
               try {
                 const result = await api.reanalyzeMedicationSafety(credentials);
                 setReport(result.cross_check_report);
+                setDosageReport(result.dosage_report);
+                window.dispatchEvent(new CustomEvent("medimind:safety-updated", {
+                  detail: { count: collectSafetyAlerts(result.cross_check_report, result.dosage_report).length },
+                }));
                 setReanalyzeNotice(
                   result.resolved_count > 0
                     ? `Safety analysis updated. ${result.resolved_count} previous finding(s) resolved.`
@@ -103,7 +113,7 @@ export function CrossCheckPage() {
 
       {!loading && report && (
         <>
-          <CrossCheckView report={report} />
+          <CrossCheckView report={report} dosageReport={dosageReport} />
           <MedicalDisclaimer medication />
           {hasSafetyIssues(report) && <ConsiderProfessionalCare />}
         </>

@@ -1,15 +1,18 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { api } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import { useI18n } from "../i18n/I18nContext";
 import { classNames } from "../utils/format";
+import { collectSafetyAlerts } from "../utils/safety";
 import {
+  AlertIcon,
   AppointmentIcon,
   BeakerIcon,
+  ChartIcon,
   ChangesIcon,
   ChatIcon,
-  ClockIcon,
   FileIcon,
   PillIcon,
   LocationIcon,
@@ -17,6 +20,7 @@ import {
   ReminderIcon,
   SettingsIcon,
   ShieldIcon,
+  SparkleIcon,
   TimelineIcon,
   UploadIcon,
 } from "./icons";
@@ -28,6 +32,7 @@ interface NavItem {
   descriptionKey: string;
   icon: (props: { className?: string }) => ReactNode;
   chip: string;
+  group: "home" | "records" | "insights" | "actions" | "utility";
 }
 
 interface SidebarTooltipState {
@@ -38,25 +43,29 @@ interface SidebarTooltipState {
 }
 
 const NAV: NavItem[] = [
-  // Semantic, muted icon tiles (spec: pale background ~7-10% + medium-dark
-  // stroke; teal/cyan = records & communication, blue/violet = timelines &
-  // analysis, amber/orange = trust & safety review, rose = alerts/risk,
-  // slate = utilities).
-  { to: "/dashboard", labelKey: "nav.dashboard", descriptionKey: "nav.descriptions.dashboard", icon: TimelineIcon, chip: "bg-brand-50 text-brand-700" },
-  { to: "/documents", labelKey: "nav.records", descriptionKey: "nav.descriptions.records", icon: FileIcon, chip: "bg-cyan-50 text-cyan-800" },
-  { to: "/review", labelKey: "nav.trustReview", descriptionKey: "nav.descriptions.trustReview", icon: ShieldIcon, chip: "bg-amber-50 text-amber-800" },
-  { to: "/medicines", labelKey: "nav.medications", descriptionKey: "nav.descriptions.medications", icon: PillIcon, chip: "bg-emerald-50 text-emerald-800" },
-  { to: "/labs", labelKey: "nav.labs", descriptionKey: "nav.descriptions.labs", icon: BeakerIcon, chip: "bg-violet-50 text-violet-800" },
-  { to: "/history", labelKey: "nav.timeline", descriptionKey: "nav.descriptions.timeline", icon: TimelineIcon, chip: "bg-sky-50 text-sky-800" },
-  { to: "/changes", labelKey: "nav.changes", descriptionKey: "nav.descriptions.changes", icon: ChangesIcon, chip: "bg-indigo-50 text-indigo-800" },
-  { to: "/appointment-prep", labelKey: "nav.appointmentPrep", descriptionKey: "nav.descriptions.appointmentPrep", icon: AppointmentIcon, chip: "bg-teal-50 text-teal-800" },
-  { to: "/follow-up", labelKey: "nav.actionCenter", descriptionKey: "nav.descriptions.actionCenter", icon: ReminderIcon, chip: "bg-teal-50 text-teal-800" },
-  { to: "/record-integrity", labelKey: "nav.recordCheck", descriptionKey: "nav.descriptions.recordCheck", icon: IntegrityIcon, chip: "bg-orange-50 text-orange-800" },
-  { to: "/safety", labelKey: "nav.safety", descriptionKey: "nav.descriptions.safety", icon: ShieldIcon, chip: "bg-amber-50 text-amber-800" },
-  { to: "/risk-timeline", labelKey: "nav.riskTimeline", descriptionKey: "nav.descriptions.riskTimeline", icon: ClockIcon, chip: "bg-rose-50 text-rose-800" },
-  { to: "/ask", labelKey: "nav.ask", descriptionKey: "nav.descriptions.ask", icon: ChatIcon, chip: "bg-brand-50 text-brand-700" },
-  { to: "/find-care", labelKey: "nav.care", descriptionKey: "nav.descriptions.care", icon: LocationIcon, chip: "bg-cyan-50 text-cyan-800" },
-  { to: "/settings", labelKey: "nav.settings", descriptionKey: "nav.descriptions.settings", icon: SettingsIcon, chip: "bg-slate-100 text-slate-700" },
+  { group: "home", to: "/dashboard", labelKey: "nav.dashboard", descriptionKey: "nav.descriptions.dashboard", icon: SparkleIcon, chip: "bg-brand-50 text-brand-700" },
+  { group: "records", to: "/documents", labelKey: "nav.records", descriptionKey: "nav.descriptions.records", icon: FileIcon, chip: "bg-cyan-50 text-cyan-800" },
+  { group: "records", to: "/medicines", labelKey: "nav.medications", descriptionKey: "nav.descriptions.medications", icon: PillIcon, chip: "bg-emerald-50 text-emerald-800" },
+  { group: "records", to: "/labs", labelKey: "nav.labs", descriptionKey: "nav.descriptions.labs", icon: BeakerIcon, chip: "bg-violet-50 text-violet-800" },
+  { group: "records", to: "/history", labelKey: "nav.timeline", descriptionKey: "nav.descriptions.timeline", icon: TimelineIcon, chip: "bg-sky-50 text-sky-800" },
+  { group: "insights", to: "/changes", labelKey: "nav.changes", descriptionKey: "nav.descriptions.changes", icon: ChangesIcon, chip: "bg-indigo-50 text-indigo-800" },
+  { group: "insights", to: "/safety", labelKey: "nav.safety", descriptionKey: "nav.descriptions.safety", icon: AlertIcon, chip: "bg-red-50 text-red-800" },
+  { group: "insights", to: "/risk-timeline", labelKey: "nav.riskTimeline", descriptionKey: "nav.descriptions.riskTimeline", icon: ChartIcon, chip: "bg-rose-50 text-rose-800" },
+  { group: "insights", to: "/review", labelKey: "nav.trustReview", descriptionKey: "nav.descriptions.trustReview", icon: ShieldIcon, chip: "bg-amber-50 text-amber-800" },
+  { group: "insights", to: "/record-integrity", labelKey: "nav.recordCheck", descriptionKey: "nav.descriptions.recordCheck", icon: IntegrityIcon, chip: "bg-orange-50 text-orange-800" },
+  { group: "actions", to: "/appointment-prep", labelKey: "nav.appointmentPrep", descriptionKey: "nav.descriptions.appointmentPrep", icon: AppointmentIcon, chip: "bg-teal-50 text-teal-800" },
+  { group: "actions", to: "/follow-up", labelKey: "nav.actionCenter", descriptionKey: "nav.descriptions.actionCenter", icon: ReminderIcon, chip: "bg-fuchsia-50 text-fuchsia-800" },
+  { group: "actions", to: "/ask", labelKey: "nav.ask", descriptionKey: "nav.descriptions.ask", icon: ChatIcon, chip: "bg-brand-50 text-brand-700" },
+  { group: "actions", to: "/find-care", labelKey: "nav.care", descriptionKey: "nav.descriptions.care", icon: LocationIcon, chip: "bg-cyan-50 text-cyan-800" },
+  { group: "utility", to: "/settings", labelKey: "nav.settings", descriptionKey: "nav.descriptions.settings", icon: SettingsIcon, chip: "bg-slate-100 text-slate-700" },
+];
+
+const NAV_GROUPS: Array<{ key: NavItem["group"]; labelKey?: string }> = [
+  { key: "home" },
+  { key: "records", labelKey: "nav.groupRecords" },
+  { key: "insights", labelKey: "nav.groupInsights" },
+  { key: "actions", labelKey: "nav.groupActions" },
+  { key: "utility" },
 ];
 
 const COLLAPSE_KEY = "medimind.sidebar.collapsed";
@@ -84,15 +93,47 @@ function useDesktopLayout(): boolean {
 }
 
 export function Layout() {
-  const { isConfigured, credentials, createNewWorkspace, clearCredentials } = useAuth();
+  const { isConfigured, credentials, createNewWorkspace } = useAuth();
   const { t } = useI18n();
-  const navigate = useNavigate();
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   // Desktop-only: collapse the sidebar to an icon rail (persisted).
   const [collapsed, setCollapsed] = useState(readCollapsed);
   const [tooltip, setTooltip] = useState<SidebarTooltipState | null>(null);
+  const [navSignals, setNavSignals] = useState({ safety: 0, safetyPending: false, hasChanges: false });
   const desktop = useDesktopLayout();
+
+  useEffect(() => {
+    if (!isConfigured) {
+      setNavSignals({ safety: 0, safetyPending: false, hasChanges: false });
+      return;
+    }
+    let cancelled = false;
+    api.getPatientSnapshot(credentials)
+      .then((snapshot) => {
+        if (cancelled) return;
+        setNavSignals({
+          safety: collectSafetyAlerts(snapshot.cross_check_report, snapshot.dosage_report).length,
+          safetyPending: snapshot.rebuilt_from_documents === true,
+          hasChanges: (snapshot.patient_timeline.documents || snapshot.patient_timeline.visits).length >= 2,
+        });
+      })
+      .catch(() => {
+        if (!cancelled) setNavSignals({ safety: 0, safetyPending: false, hasChanges: false });
+      });
+    return () => { cancelled = true; };
+  }, [credentials, isConfigured, location.pathname]);
+
+  useEffect(() => {
+    const onSafetyUpdated = (event: Event) => {
+      const count = Number((event as CustomEvent<{ count?: number }>).detail?.count);
+      if (Number.isFinite(count)) {
+        setNavSignals((current) => ({ ...current, safety: count, safetyPending: false }));
+      }
+    };
+    window.addEventListener("medimind:safety-updated", onSafetyUpdated);
+    return () => window.removeEventListener("medimind:safety-updated", onSafetyUpdated);
+  }, []);
 
   useEffect(() => {
     if (!desktop || !collapsed) setTooltip(null);
@@ -296,66 +337,94 @@ export function Layout() {
             className="scroll-thin min-h-0 flex-1 space-y-0.5 overflow-y-auto overscroll-contain px-2 py-1"
             aria-label={t("nav.main")}
           >
-            {NAV.map((item, index) => {
-              const Icon = item.icon;
-              const worksWithoutWorkspace = item.to === "/settings";
-              const disabled = !worksWithoutWorkspace && !isConfigured;
+            {NAV_GROUPS.map((group) => {
+              const items = NAV.filter((item) => item.group === group.key);
               return (
-                <NavLink
-                  ref={index === (isConfigured ? 0 : NAV.length - 1) ? firstNavRef : undefined}
-                  key={item.to}
-                  to={disabled ? "#" : item.to}
-                  tabIndex={!navInteractive || disabled ? -1 : undefined}
-                  onClick={(event) => {
-                    if (disabled) {
-                      event.preventDefault();
-                      return;
-                    }
-                    closeSidebar();
-                  }}
-                  onMouseEnter={(event) => showCollapsedTooltip(
-                    event.currentTarget,
-                    `sidebar-tooltip-${index}`,
-                    t(item.labelKey),
-                    t(item.descriptionKey)
-                  )}
-                  onMouseLeave={() => setTooltip(null)}
-                  onFocus={(event) => showCollapsedTooltip(
-                    event.currentTarget,
-                    `sidebar-tooltip-${index}`,
-                    t(item.labelKey),
-                    t(item.descriptionKey)
-                  )}
-                  onBlur={() => setTooltip(null)}
-                  aria-disabled={disabled}
-                  aria-describedby={desktop && collapsed ? `sidebar-tooltip-${index}` : undefined}
-                  className={({ isActive }) =>
-                    classNames(
-                      "group flex min-h-[44px] items-center gap-2.5 rounded-[9px] px-2.5 text-[15px] font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-offset-1 lg:min-h-[42px]",
-                      collapsed && "lg:justify-center lg:px-0",
-                      // Settings stays in place but gets a little separation
-                      // to read as a utility destination (no group label added).
-                      item.to === "/settings" && "mt-2",
-                      disabled
-                        ? "cursor-not-allowed text-slate-400"
-                        : isActive
-                        ? // Pale-teal active treatment: background + weight/color
-                          // + teal edge marker — selection never relies on color alone.
-                          "bg-[#eaf6f4] font-semibold text-[#123c3a] shadow-[inset_3px_0_0_#0F766E]"
-                        : "text-slate-600 hover:bg-[#f3f7f6] hover:text-slate-900"
-                    )
-                  }
+                <div
+                  key={group.key}
+                  role="group"
+                  aria-labelledby={group.labelKey ? `nav-group-${group.key}` : undefined}
+                  className={classNames(group.key !== "home" && "mt-2 border-t border-slate-200/80 pt-2")}
                 >
-                  {({ isActive }) => (
-                    <>
-                      <span className={classNames("flex h-7 w-7 shrink-0 items-center justify-center rounded-[7px]", item.chip)}>
-                        <Icon className="h-4 w-4" />
-                      </span>
-                      <span className={classNames("min-w-0 flex-1 break-words", collapsed && "lg:hidden")}>{t(item.labelKey)}</span>
-                      {isActive && <span className="sr-only">({t("nav.currentPage")})</span>}
-                    </>
+                  {group.labelKey && (
+                    <p
+                      id={`nav-group-${group.key}`}
+                      className={classNames(
+                        "px-2.5 pb-1 pt-1 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400",
+                        collapsed && "lg:sr-only"
+                      )}
+                    >
+                      {t(group.labelKey)}
+                    </p>
                   )}
-                </NavLink>
+                  {items.map((item) => {
+                    const index = NAV.indexOf(item);
+                    const Icon = item.icon;
+                    const worksWithoutWorkspace = item.to === "/settings";
+                    const disabled = !worksWithoutWorkspace && !isConfigured;
+                    const safetyCount = item.to === "/safety" ? navSignals.safety : 0;
+                    const showNew = item.to === "/changes" && navSignals.hasChanges;
+                    return (
+                      <NavLink
+                        ref={index === (isConfigured ? 0 : NAV.length - 1) ? firstNavRef : undefined}
+                        key={item.to}
+                        to={disabled ? "#" : item.to}
+                        tabIndex={!navInteractive || disabled ? -1 : undefined}
+                        onClick={(event) => {
+                          if (disabled) {
+                            event.preventDefault();
+                            return;
+                          }
+                          closeSidebar();
+                        }}
+                        onMouseEnter={(event) => showCollapsedTooltip(event.currentTarget, `sidebar-tooltip-${index}`, t(item.labelKey), t(item.descriptionKey))}
+                        onMouseLeave={() => setTooltip(null)}
+                        onFocus={(event) => showCollapsedTooltip(event.currentTarget, `sidebar-tooltip-${index}`, t(item.labelKey), t(item.descriptionKey))}
+                        onBlur={() => setTooltip(null)}
+                        aria-disabled={disabled}
+                        aria-label={collapsed ? `${t(item.labelKey)}${navSignals.safetyPending && item.to === "/safety" ? ", analysis pending" : safetyCount ? `, ${safetyCount} alerts` : ""}` : undefined}
+                        aria-describedby={desktop && collapsed ? `sidebar-tooltip-${index}` : undefined}
+                        className={({ isActive }) => classNames(
+                          "group relative flex min-h-[44px] items-center gap-2.5 rounded-[9px] px-2.5 text-[15px] font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-offset-1 lg:min-h-[42px]",
+                          collapsed && "lg:justify-center lg:px-0",
+                          disabled ? "cursor-not-allowed text-slate-400" : isActive
+                            ? "bg-[#eaf6f4] font-semibold text-[#123c3a] shadow-[inset_3px_0_0_#0F766E]"
+                            : "text-slate-600 hover:bg-[#f3f7f6] hover:text-slate-900"
+                        )}
+                      >
+                        {({ isActive }) => (
+                          <>
+                            <span className={classNames("relative flex h-7 w-7 shrink-0 items-center justify-center rounded-[7px]", item.chip)}>
+                              <Icon className="h-4 w-4" />
+                              {(safetyCount > 0 || showNew || (item.to === "/safety" && navSignals.safetyPending)) && (
+                                <span className={classNames(
+                                  "absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full border-2 border-white",
+                                  item.to === "/safety" && navSignals.safetyPending ? "bg-amber-500" : "bg-red-500"
+                                )} aria-hidden="true" />
+                              )}
+                            </span>
+                            <span className={classNames("min-w-0 flex-1 break-words", collapsed && "lg:hidden")}>{t(item.labelKey)}</span>
+                            {safetyCount > 0 && (
+                              <span className={classNames("rounded-full bg-red-100 px-2 py-0.5 text-xs font-bold text-red-700", collapsed && "lg:hidden")}>
+                                {safetyCount}
+                              </span>
+                            )}
+                            {safetyCount === 0 && item.to === "/safety" && !navSignals.safetyPending && (
+                              <span className={classNames("text-emerald-600", collapsed && "lg:hidden")} aria-label="No active safety alerts">✓</span>
+                            )}
+                            {item.to === "/safety" && navSignals.safetyPending && (
+                              <span className={classNames("text-[10px] font-bold text-amber-700", collapsed && "lg:hidden")}>PENDING</span>
+                            )}
+                            {showNew && (
+                              <span className={classNames("rounded-full bg-indigo-100 px-1.5 py-0.5 text-[9px] font-bold text-indigo-700", collapsed && "lg:hidden")}>NEW</span>
+                            )}
+                            {isActive && <span className="sr-only">({t("nav.currentPage")})</span>}
+                          </>
+                        )}
+                      </NavLink>
+                    );
+                  })}
+                </div>
               );
             })}
           </nav>
@@ -410,25 +479,22 @@ export function Layout() {
             <div className={classNames("px-1", collapsed && "lg:hidden")}>
               <LanguageSelector className="mb-2 hidden lg:block" />
               {isConfigured && (
-                <div className="grid grid-cols-2 gap-2 pt-1">
-                  <button
-                    type="button"
-                    onClick={() => void createNewWorkspace()}
-                    className="min-h-[44px] rounded-lg border border-slate-300 bg-white px-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 lg:min-h-10"
-                    title={`${t("nav.newWorkspace")} (${credentials.userId})`}
-                  >
-                    {t("nav.newWorkspace")}
-                  </button>
+                <div className="pt-1">
                   <button
                     type="button"
                     onClick={() => {
-                      clearCredentials();
-                      navigate("/");
+                      if (window.confirm("Start a new workspace? This browser will lose access to the current workspace unless you saved its code. Stored data is not deleted.")) {
+                        void createNewWorkspace();
+                      }
                     }}
-                    className="min-h-[44px] rounded-lg border border-red-200 bg-white px-1.5 text-xs font-semibold text-red-700 transition hover:border-red-300 hover:bg-red-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400 lg:min-h-10"
+                    className="flex min-h-[44px] w-full items-center rounded-lg px-2 text-left text-xs font-semibold text-slate-600 transition hover:bg-slate-100 hover:text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 lg:min-h-10"
+                    title={`${t("nav.newWorkspace")} (${credentials.userId})`}
                   >
-                    {t("nav.resetData")}
+                    <span aria-hidden="true" className="mr-2 text-base">＋</span> {t("nav.newWorkspace")}
                   </button>
+                  <p className="px-2 pb-1 text-[10px] leading-relaxed text-slate-400">
+                    Permanent deletion is available in Settings.
+                  </p>
                 </div>
               )}
             </div>
@@ -459,13 +525,58 @@ export function Layout() {
             72rem content column. */}
         <div
           className={classNames(
-            "app-content mx-auto min-w-0 px-4 py-6 sm:px-6 lg:px-8 lg:py-8",
+            "app-content mx-auto min-w-0 px-4 pb-24 pt-6 sm:px-6 md:pb-6 lg:px-8 lg:py-8",
             location.pathname.startsWith("/about") ? "max-w-[1280px] lg:px-12" : "max-w-6xl"
           )}
         >
           <Outlet />
         </div>
       </main>
+
+      {isConfigured && (
+        <nav aria-label="Mobile primary navigation" className="fixed inset-x-0 bottom-0 z-20 grid grid-cols-5 border-t border-slate-200 bg-white/95 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 shadow-[0_-8px_24px_-16px_rgba(15,23,42,0.4)] backdrop-blur md:hidden">
+          {[
+            { to: "/dashboard", label: "Home", icon: SparkleIcon },
+            { to: "/documents", label: "Records", icon: FileIcon },
+            { to: "/upload", label: "Upload", icon: UploadIcon, primary: true },
+            { to: "/safety", label: "Insights", icon: AlertIcon },
+            { to: "/settings", label: "More", icon: SettingsIcon },
+          ].map((item) => {
+            const Icon = item.icon;
+            return (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                className={({ isActive }) => classNames(
+                  "relative flex min-h-[48px] flex-col items-center justify-center gap-0.5 rounded-xl text-[10px] font-semibold",
+                  item.primary ? "-mt-5 bg-brand-700 text-white shadow-lg" : isActive ? "text-brand-700" : "text-slate-500"
+                )}
+              >
+                <Icon className="h-5 w-5" />
+                <span>{item.label}</span>
+                {item.to === "/safety" && navSignals.safety > 0 && (
+                  <span className="absolute right-[22%] top-0.5 min-w-4 rounded-full bg-red-600 px-1 text-center text-[9px] text-white">{navSignals.safety}</span>
+                )}
+                {item.to === "/safety" && navSignals.safetyPending && (
+                  <span className="absolute right-[25%] top-1 h-2.5 w-2.5 rounded-full border border-white bg-amber-500" aria-label="Safety analysis pending" />
+                )}
+              </NavLink>
+            );
+          })}
+        </nav>
+      )}
+
+      {isConfigured && !location.pathname.startsWith("/ask") && (
+        <NavLink
+          to="/ask"
+          aria-label="Ask AI about your uploaded medical records"
+          title="Ask AI about your records"
+          className="fixed bottom-5 right-5 z-20 hidden min-h-[52px] items-center md:flex gap-2 rounded-full bg-brand-700 px-4 py-3 text-sm font-bold text-white shadow-lg transition hover:-translate-y-0.5 hover:bg-brand-800 focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-offset-2"
+        >
+          <ChatIcon className="h-5 w-5" />
+          <span className="hidden sm:inline">Ask AI</span>
+        </NavLink>
+      )}
 
       {tooltip && createPortal(
         <div

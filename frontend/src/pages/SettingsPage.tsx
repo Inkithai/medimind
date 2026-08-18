@@ -15,6 +15,7 @@ export function SettingsPage() {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deletingWorkspace, setDeletingWorkspace] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleteConfirmation, setDeleteConfirmation] = useState("");
   const [profile, setProfile] = useState<PatientProfileInput>({});
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileSaving, setProfileSaving] = useState(false);
@@ -181,7 +182,11 @@ export function SettingsPage() {
                   {testing && <Spinner className="h-4 w-4" />} {testing ? t("settings.checking") : t("settings.check")}
                 </button>
                 <button
-                  onClick={() => void createNewWorkspace()}
+                  onClick={() => {
+                    if (window.confirm("Start a new workspace? This browser will lose access to the current workspace unless you saved its code. Stored data is not deleted.")) {
+                      void createNewWorkspace();
+                    }
+                  }}
                   className="btn-secondary"
                 >
                   {t("settings.new")}
@@ -205,6 +210,7 @@ export function SettingsPage() {
                   type="button"
                   onClick={() => {
                     setDeleteError(null);
+                    setDeleteConfirmation("");
                     setDeleteOpen(true);
                   }}
                   className="mt-3 inline-flex min-h-[44px] items-center rounded-xl border border-red-300 bg-white px-4 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-100 focus-visible:ring-red-500"
@@ -253,11 +259,22 @@ export function SettingsPage() {
             <p id="delete-workspace-dialog-description" className="mt-2 text-sm leading-relaxed text-slate-600">
               {t("settings.deleteConfirmBody")}
             </p>
+            <label className="mt-4 block text-sm font-semibold text-slate-800">
+              Type <span className="font-mono text-red-700">RESET</span> to confirm
+              <input
+                value={deleteConfirmation}
+                onChange={(event) => setDeleteConfirmation(event.target.value)}
+                autoFocus
+                autoComplete="off"
+                spellCheck={false}
+                className="input mt-2 w-full font-mono"
+                aria-describedby="delete-workspace-dialog-description"
+              />
+            </label>
             {deleteError && <p role="alert" className="mt-3 text-sm text-red-700">{deleteError}</p>}
             <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
               <button
                 type="button"
-                autoFocus
                 disabled={deletingWorkspace}
                 onClick={() => {
                   setDeleteOpen(false);
@@ -269,8 +286,9 @@ export function SettingsPage() {
               </button>
               <button
                 type="button"
-                disabled={deletingWorkspace}
+                disabled={deletingWorkspace || deleteConfirmation !== "RESET"}
                 onClick={async () => {
+                  if (deleteConfirmation !== "RESET") return;
                   setDeletingWorkspace(true);
                   setDeleteError(null);
                   try {
@@ -282,7 +300,7 @@ export function SettingsPage() {
                     setDeletingWorkspace(false);
                   }
                 }}
-                className="btn min-w-[170px] bg-red-600 text-white hover:bg-red-700 focus-visible:ring-red-500 disabled:cursor-not-allowed"
+                className="btn min-w-[170px] bg-red-600 text-white hover:bg-red-700 focus-visible:ring-red-500 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {deletingWorkspace ? t("settings.deletingData") : t("settings.deleteConfirm")}
               </button>

@@ -2797,6 +2797,12 @@ async def get_patient_snapshot(user_id: str = Depends(get_current_user)) -> Dict
         snapshot["cross_check_report"], result["lab_trends"], result["dosage_report"],
         snapshot["patient_timeline"],
     )
+    try:
+        result["patient_profile"] = db.load_patient_profile(user_id)
+    except Exception:
+        # Profile storage is additive; an older deployment must still serve
+        # the clinical dashboard accurately while its schema is upgraded.
+        result["patient_profile"] = None
     return result
 
 

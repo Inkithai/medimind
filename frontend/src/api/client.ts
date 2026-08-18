@@ -11,6 +11,7 @@ import type {
   CareRecommendationContext,
   CareProviderSearchResponse,
   CrossCheckReport,
+  DosageReport,
   ConflictsResponse,
   DocumentCorrectionsResponse,
   DeleteDocumentResponse,
@@ -597,6 +598,10 @@ export const api = {
     return request<CrossCheckReport>(credentials, "/api/v1/cross-check");
   },
 
+  getDosageReport(credentials: Credentials): Promise<DosageReport> {
+    return request<DosageReport>(credentials, "/api/v1/dosage-report");
+  },
+
   reanalyzeMedicationSafety(credentials: Credentials): Promise<{
     reanalyzed: boolean;
     findings_before: number;
@@ -604,6 +609,7 @@ export const api = {
     net_change: number;
     resolved_count: number;
     cross_check_report: CrossCheckReport;
+    dosage_report: DosageReport;
   }> {
     return request(credentials, "/api/v1/medication-safety/reanalyze", { method: "POST" });
   },

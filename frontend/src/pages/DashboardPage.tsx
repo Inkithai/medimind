@@ -15,19 +15,22 @@ import {
   ChatIcon,
   TimelineIcon,
   ChangesIcon,
-  IntegrityIcon,
   ReminderIcon,
 } from "../components/icons";
 import { useAuth } from "../context/AuthContext";
 import { useStrictEffect } from "../hooks/useStrictEffect";
 import { useI18n } from "../i18n/I18nContext";
-import type { CrossCheckReport, LabTrendsReport, Timeline } from "../types/api";
+import type { CrossCheckReport, DosageReport, LabTrendsReport, PatientProfileSummary, Timeline } from "../types/api";
 import { formatDate, documentTypeLabel, relativeTime } from "../utils/format";
+import { collectSafetyAlerts } from "../utils/safety";
 
 interface RecordState {
   timeline: Timeline;
   crossCheck: CrossCheckReport;
   labTrends: LabTrendsReport;
+  dosageReport: DosageReport | null;
+  profile: PatientProfileSummary | null;
+  updatedAt: string | null;
   rebuiltFromDocuments: boolean;
 }
 
@@ -52,6 +55,9 @@ export function DashboardPage() {
         timeline: snapshot.patient_timeline,
         crossCheck: snapshot.cross_check_report,
         labTrends: snapshot.lab_trends,
+        dosageReport: snapshot.dosage_report || null,
+        profile: snapshot.patient_profile || null,
+        updatedAt: snapshot.updated_at,
         // The server rebuilds this from the saved documents when the cached
         // snapshot row is gone, so a backend restart never empties the
         // dashboard — it just means the safety check is pending.
@@ -123,12 +129,10 @@ export function DashboardPage() {
     (record.timeline.procedures_timeline?.length || 0) +
     (record.timeline.vital_signs_timeline?.length || 0) +
     (record.timeline.imaging_results_timeline?.length || 0);
-  const allergyCount = record.timeline.known_allergies.length;
-  const issueCount =
-    record.crossCheck.potential_drug_interactions.length +
-    record.crossCheck.duplicate_prescriptions.length +
-    record.crossCheck.conflicting_dosage_instructions.length +
-    record.crossCheck.allergy_conflicts.length;
+  const deduplicatedAllergies = deduplicateAllergies(record.timeline.known_allergies);
+  const allergyCount = deduplicatedAllergies.length;
+  const safetyAlerts = collectSafetyAlerts(record.crossCheck, record.dosageReport);
+  const issueCount = safetyAlerts.length;
   const trendsCount = record.labTrends.trends.length;
   const docCount = (record.timeline.documents || record.timeline.visits).length;
   const doctorCount = new Set(
@@ -147,13 +151,35 @@ export function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader onReload={() => setReloadKey((k) => k + 1)} />
+      <PageHeader
+        onReload={() => setReloadKey((k) => k + 1)}
+        patientName={record.profile?.preferred_name || record.profile?.legal_name || firstPatientName(record.timeline)}
+        lastVisit={lastVisit}
+        doctorCount={doctorCount}
+        docCount={docCount}
+        updatedAt={record.updatedAt}
+      />
+
+      {allergyCount > 0 && (
+        <section aria-labelledby="dashboard-allergies" className="rounded-2xl border border-red-200 bg-red-50 p-5 shadow-sm">
+          <h2 id="dashboard-allergies" className="text-sm font-bold text-red-950">
+            <span aria-hidden="true">⚠️</span> {t("dashboard.knownAllergies")}
+          </h2>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {deduplicatedAllergies.map((allergy) => (
+              <StatusBadge key={allergy.key} tone="danger">
+                {allergy.label}{allergy.merged > 1 ? ` · ${allergy.merged} similar entries merged` : ""}
+              </StatusBadge>
+            ))}
+          </div>
+          <p className="mt-3 text-xs text-red-800">Taken from uploaded records. Confirm the exact allergen and reaction with a healthcare professional.</p>
+        </section>
+      )}
 
       {record.rebuiltFromDocuments && (
         <Alert variant="info" title="Restored from your saved records">
           <p className="text-sm">
-            Everything below was rebuilt from your stored documents, so nothing was lost. The
-            medication safety check refreshes the next time you upload a document.
+            Your record views were rebuilt from stored documents. Medication safety analysis may still be pending; open Safety Alerts and run the full safety check before relying on the alert count.
           </p>
         </Alert>
       )}
@@ -174,8 +200,15 @@ export function DashboardPage() {
         </div>
       )}
 
-      {/* Stat cards */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+      <section aria-labelledby="records-glance-title" className="space-y-3">
+        <div className="flex items-end justify-between gap-3">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.12em] text-brand-700">Your records</p>
+            <h2 id="records-glance-title" className="section-title">At a glance</h2>
+          </div>
+          <span className="text-xs text-slate-500">Select a card to open its detailed view</span>
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
         <StatCard
           icon={<FileIcon className="h-6 w-6" />}
           label={t("common.documents")}
@@ -214,11 +247,17 @@ export function DashboardPage() {
           value={issueCount}
           to="/safety"
           chip={issueCount > 0 ? "bg-red-50 text-red-600" : "bg-emerald-50 text-emerald-600"}
-          sub={issueCount > 0 ? "Worth a look" : "Nothing flagged 🎉"}
+          sub={record.rebuiltFromDocuments ? "Safety analysis pending" : issueCount > 0 ? `${issueCount} active finding${issueCount === 1 ? "" : "s"} to review` : "No active findings detected"}
         />
-      </div>
+        </div>
+      </section>
 
       {docCount >= 2 && (
+        <section aria-labelledby="dashboard-insights-title" className="space-y-3">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.12em] text-indigo-700">Insights & analysis</p>
+            <h2 id="dashboard-insights-title" className="section-title">What MediMind found</h2>
+          </div>
         <Link
           to="/changes"
           className="group flex flex-col gap-4 overflow-hidden rounded-2xl border border-indigo-200 bg-gradient-to-r from-indigo-50 via-white to-sky-50 p-5 shadow-sm transition hover:border-indigo-300 hover:shadow-md sm:flex-row sm:items-center"
@@ -240,8 +279,14 @@ export function DashboardPage() {
             Review changes →
           </span>
         </Link>
+        </section>
       )}
 
+      <section aria-labelledby="dashboard-actions-title" className="space-y-3">
+        <div>
+          <p className="text-xs font-bold uppercase tracking-[0.12em] text-cyan-700">Take action</p>
+          <h2 id="dashboard-actions-title" className="section-title">Useful next steps</h2>
+        </div>
       <div className="grid gap-4 lg:grid-cols-3">
         <Link
           to="/appointment-prep"
@@ -251,7 +296,7 @@ export function DashboardPage() {
             <AppointmentIcon className="h-6 w-6" />
           </div>
           <div className="min-w-0 flex-1">
-            <p className="text-xs font-bold uppercase tracking-[0.12em] text-cyan-700">Turn insight into action</p>
+            <p className="text-xs font-bold uppercase tracking-[0.12em] text-cyan-700">Prepare</p>
             <h2 className="mt-1 text-lg font-bold text-slate-900">Prepare for your appointment</h2>
             <p className="mt-1 text-sm text-slate-600">Create a printable handoff and evidence-backed questions.</p>
             <p className="mt-2 text-sm font-semibold text-cyan-800 transition group-hover:translate-x-1">Prepare visit →</p>
@@ -265,40 +310,28 @@ export function DashboardPage() {
             <ReminderIcon className="h-6 w-6" />
           </div>
           <div className="min-w-0 flex-1">
-            <p className="text-xs font-bold uppercase tracking-[0.12em] text-fuchsia-700">Keep track</p>
+            <p className="text-xs font-bold uppercase tracking-[0.12em] text-fuchsia-700">Track</p>
             <h2 className="mt-1 text-lg font-bold text-slate-900">Open your Action Center</h2>
             <p className="mt-1 text-sm text-slate-600">Prioritize findings, choose reminders, and track completion.</p>
             <p className="mt-2 text-sm font-semibold text-fuchsia-800 transition group-hover:translate-x-1">View actions →</p>
           </div>
         </Link>
         <Link
-          to="/record-integrity"
-          className="group flex flex-col gap-4 rounded-2xl border border-orange-200 bg-white p-5 shadow-sm transition hover:border-orange-300 hover:shadow-md sm:flex-row sm:items-center lg:flex-col lg:items-start"
+          to="/ask"
+          className="group flex flex-col gap-4 rounded-2xl border border-brand-200 bg-white p-5 shadow-sm transition hover:border-brand-300 hover:shadow-md sm:flex-row sm:items-center lg:flex-col lg:items-start"
         >
-          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-orange-600 text-white shadow-sm">
-            <IntegrityIcon className="h-6 w-6" />
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-brand-700 text-white shadow-sm">
+            <ChatIcon className="h-6 w-6" />
           </div>
           <div className="min-w-0 flex-1">
-            <p className="text-xs font-bold uppercase tracking-[0.12em] text-orange-700">Trust your clinical memory</p>
-            <h2 className="mt-1 text-lg font-bold text-slate-900">Cross-check record integrity</h2>
-            <p className="mt-1 text-sm text-slate-600">Find conflicting facts and compare both source documents.</p>
-            <p className="mt-2 text-sm font-semibold text-orange-800 transition group-hover:translate-x-1">Run record checks →</p>
+            <p className="text-xs font-bold uppercase tracking-[0.12em] text-brand-700">Ask</p>
+            <h2 className="mt-1 text-lg font-bold text-slate-900">Ask about your records</h2>
+            <p className="mt-1 text-sm text-slate-600">Get an evidence-linked answer grounded in uploaded documents.</p>
+            <p className="mt-2 text-sm font-semibold text-brand-800 transition group-hover:translate-x-1">Ask AI →</p>
           </div>
         </Link>
       </div>
-
-      {allergyCount > 0 && (
-        <div className="rounded-2xl border border-red-100 bg-red-50/60 p-5">
-          <h2 className="text-sm font-semibold text-red-950"><span aria-hidden="true">⚠️</span> {t("dashboard.knownAllergies")}</h2>
-          <div className="mt-3 flex flex-wrap gap-2">
-            {record.timeline.known_allergies.map((a) => (
-              <StatusBadge key={a} tone="danger">
-                {a}
-              </StatusBadge>
-            ))}
-          </div>
-        </div>
-      )}
+      </section>
 
       <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
         {/* Recent records */}
@@ -316,7 +349,7 @@ export function DashboardPage() {
               recentVisits.map((v, i) => (
                 <Link
                   key={i}
-                  to="/documents"
+                  to={`/documents?document=${encodeURIComponent(v._document_id)}`}
                   className="flex items-center justify-between gap-3 rounded-xl border border-slate-100 px-4 py-3 transition hover:border-brand-200 hover:bg-slate-50"
                 >
                   <div className="flex min-w-0 items-center gap-3">
@@ -355,42 +388,25 @@ export function DashboardPage() {
               </Link>
             </div>
             {issueCount === 0 ? (
-              (record.timeline.trust_summary?.unresolved_conflicts || 0) > 0 ? (
+              record.rebuiltFromDocuments ? (
+                <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-base text-amber-900">
+                  Safety analysis has not been rerun since the dashboard was reconstructed. Open Safety Alerts and run the full safety check.
+                </div>
+              ) : (record.timeline.trust_summary?.unresolved_conflicts || 0) > 0 ? (
                 <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-base text-amber-800">
                   Safety results are withheld until conflicting sources are reviewed.
                 </div>
               ) : (
                 <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-base text-emerald-800">
-                  ✅ Nothing to worry about — no interactions, duplicates, or allergy conflicts found in your medicines.
+                  ✓ No active medication safety findings were detected in the uploaded records by the checks currently available.
                 </div>
               )
             ) : (
               <div className="mt-4 space-y-2">
-                {[
-                  ...record.crossCheck.allergy_conflicts.map((i) => ({
-                    severity: "high",
-                    title: `Allergy: ${i.medication} ↔ ${i.allergy}`,
-                    desc: i.explanation,
-                  })),
-                  ...record.crossCheck.potential_drug_interactions.map((i) => ({
-                    severity: i.severity,
-                    title: i.medications_involved.join(" + "),
-                    desc: i.explanation,
-                  })),
-                  ...record.crossCheck.conflicting_dosage_instructions.map((i) => ({
-                    severity: "moderate",
-                    title: `Dosage conflict: ${i.medication}`,
-                    desc: i.explanation,
-                  })),
-                  ...record.crossCheck.duplicate_prescriptions.map((i) => ({
-                    severity: "low",
-                    title: `Duplicate: ${i.medication}`,
-                    desc: i.explanation,
-                  })),
-                ]
+                {safetyAlerts
                   .slice(0, 3)
-                  .map((item, idx) => (
-                    <div key={idx} className="rounded-xl border border-amber-200 bg-amber-50/60 px-4 py-3">
+                  .map((item) => (
+                    <div key={item.key} className="rounded-xl border border-amber-200 bg-amber-50/60 px-4 py-3">
                       <div className="flex items-center gap-2">
                         <StatusBadge
                           tone={item.severity === "high" ? "danger" : item.severity === "moderate" ? "warning" : "info"}
@@ -399,7 +415,7 @@ export function DashboardPage() {
                         </StatusBadge>
                         <p className="text-base font-medium text-slate-800">{item.title}</p>
                       </div>
-                      <p className="secondary-text mt-1 line-clamp-2">{item.desc}</p>
+                      <p className="secondary-text mt-1 line-clamp-2">{item.description}</p>
                     </div>
                   ))}
                 {issueCount > 3 && (
@@ -434,25 +450,94 @@ export function DashboardPage() {
   );
 }
 
-function PageHeader({ onReload, reloading }: { onReload: () => void; reloading?: boolean }) {
+function firstPatientName(timeline: Timeline): string | null {
+  const names = timeline.visits
+    .map((visit) => visit.patient_name?.trim())
+    .filter((name): name is string => Boolean(name));
+  if (!names.length) return null;
+  const counts = new Map<string, { label: string; count: number }>();
+  for (const name of names) {
+    const key = name.toLocaleLowerCase();
+    const current = counts.get(key);
+    counts.set(key, { label: current?.label || name, count: (current?.count || 0) + 1 });
+  }
+  return [...counts.values()].sort((a, b) => b.count - a.count)[0]?.label || null;
+}
+
+function deduplicateAllergies(allergies: string[]): Array<{ key: string; label: string; merged: number }> {
+  const groups = new Map<string, { values: string[] }>();
+  for (const raw of allergies) {
+    const label = raw.trim();
+    if (!label) continue;
+    const normalized = label.toLocaleLowerCase().replace(/[^a-z0-9\s-]/g, " ").replace(/\s+/g, " ").trim();
+    // Most extracted allergy strings begin with the allergen, followed by
+    // reaction prose. Group only on that leading allergen phrase; never merge
+    // unrelated strings merely because they share reaction words.
+    const key = normalized
+      .split(/\s+(?:allergy|causing|caused|reaction|with)\b|\s*-\s*/)[0]
+      .trim();
+    const safeKey = key || normalized;
+    const group = groups.get(safeKey) || { values: [] };
+    if (!group.values.some((value) => value.toLocaleLowerCase() === label.toLocaleLowerCase())) {
+      group.values.push(label);
+    }
+    groups.set(safeKey, group);
+  }
+  return [...groups.entries()].map(([key, group]) => ({
+    key,
+    // Prefer the most informative source wording instead of fabricating a
+    // merged clinical statement.
+    label: [...group.values].sort((a, b) => b.length - a.length)[0],
+    merged: group.values.length,
+  }));
+}
+
+function PageHeader({
+  onReload,
+  reloading,
+  patientName,
+  lastVisit,
+  doctorCount,
+  docCount,
+  updatedAt,
+}: {
+  onReload: () => void;
+  reloading?: boolean;
+  patientName?: string | null;
+  lastVisit?: string | null;
+  doctorCount?: number;
+  docCount?: number;
+  updatedAt?: string | null;
+}) {
   const { t } = useI18n();
+  const safeName = patientName?.trim();
   return (
     <header className="flex flex-wrap items-start justify-between gap-4">
       <div>
-        <h1 className="page-title">{t("dashboard.title")}</h1>
+        <p className="text-xs font-bold uppercase tracking-[0.12em] text-brand-700">Patient record overview</p>
+        <h1 className="page-title">{safeName ? `${safeName}'s Health Overview` : t("dashboard.title")}</h1>
         <p className="secondary-text mt-2 max-w-2xl">{t("dashboard.subtitle")}</p>
+        {(lastVisit || docCount || updatedAt) && (
+          <p className="mt-2 text-xs text-slate-500">
+            {lastVisit ? `Last recorded visit: ${formatDate(lastVisit)}` : "No dated visit available"}
+            {typeof doctorCount === "number" && doctorCount > 0 ? ` · ${doctorCount} provider${doctorCount === 1 ? "" : "s"}` : ""}
+            {typeof docCount === "number" ? ` · ${docCount} document${docCount === 1 ? "" : "s"}` : ""}
+            {updatedAt ? ` · Overview refreshed ${relativeTime(updatedAt)}` : ""}
+          </p>
+        )}
       </div>
-      <div className="flex gap-2">
-        <Link to="/upload" className="btn-primary">
+      <div className="flex flex-wrap gap-2">
+        <Link to="/upload" className="btn-secondary">
           <UploadIcon className="h-5 w-5" /> {t("nav.upload")}
         </Link>
         <button
           onClick={onReload}
           disabled={reloading}
           className="btn-secondary"
-          aria-label={t("common.refresh")}
+          aria-label="Refresh the dashboard overview from saved analysis"
+          title="Fetch the latest saved records and analysis. This does not reprocess documents."
         >
-          <span aria-hidden="true">↻</span> {t("common.refresh")}
+          <span aria-hidden="true">↻</span> {reloading ? "Refreshing…" : "Refresh overview"}
         </button>
       </div>
     </header>
@@ -479,8 +564,9 @@ function StatCard({
     <Link
       to={to}
       aria-label={`${label}: ${formatNumber(value)}`}
-      className="group rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+      className="group relative rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-md focus-visible:ring-2 focus-visible:ring-brand-400"
     >
+      <span aria-hidden="true" className="absolute right-4 top-4 text-lg text-slate-300 transition group-hover:translate-x-0.5 group-hover:text-brand-600">→</span>
       <div className={`flex h-11 w-11 items-center justify-center rounded-xl transition group-hover:scale-105 ${chip}`}>
         {icon}
       </div>
