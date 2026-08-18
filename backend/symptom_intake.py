@@ -41,6 +41,15 @@ _SYMPTOMS: Dict[str, Tuple[str, Tuple[str, ...]]] = {
     "abdominal_pain": ("abdominal pain", ("abdom", "stomach pain", "tummy", "belly")),
     "headache": ("headache", ("headache", "head pain", "migraine")),
     "rash": ("skin rash", ("rash", "itch", "hives")),
+    "constipation": ("constipation", ("constipat", "hard stools", "unable to pass")),
+    "diarrhoea": ("diarrhoea", ("diarrh", "loose stool", "runny stool")),
+    "neuropathy": ("numbness or tingling", ("numb", "tingl", "pins and needles", "neuropathy")),
+    "palpitations": ("palpitations / racing heartbeat", ("palpitat", "racing heart", "fast heartbeat", "flutter")),
+    "joint_pain": ("joint pain", ("joint pain", "arthralgia", "joint ache", "stiff joints")),
+    "frequent_infections": ("frequent infections", ("frequent infection", "repeated infection", "recurrent infection", "keep getting sick", "getting infections")),
+    "chest_pain": ("chest pain or tightness", ("chest pain", "chest tight", "pressure in chest")),
+    "urinary_symptoms": ("urinary symptoms", ("burning urine", "painful urinat", "blood in urine", "frequent urinat")),
+    "vision_changes": ("vision changes", ("blurred vision", "vision change", "double vision")),
 }
 
 # symptom -> drug classes/ingredients that are RELEVANT (can be associated).
@@ -58,6 +67,29 @@ _RELEVANT_DRUGS: Dict[str, Dict[str, Any]] = {
     "headache": {"classes": (), "ingredients": set()},
     "rash": {"classes": (), "ingredients": {"amoxicillin", "ampicillin", "allopurinol", "sulfamethoxazole"}},
     "abdominal_pain": {"classes": ("nsaid",), "ingredients": {"metformin"}},
+    "constipation": {"classes": (), "ingredients": {"codeine", "morphine", "tramadol", "oxycodone", "amitriptyline", "nortriptyline", "verapamil", "diltiazem", "iron", "ferrous", "aluminium hydroxide"}},
+    "diarrhoea": {"classes": (), "ingredients": {"metformin", "clarithromycin", "amoxicillin", "azithromycin", "omeprazole", "esomeprazole", "magnesium hydroxide"}},
+    "neuropathy": {"classes": (), "ingredients": {"metformin", "phenytoin", "isoniazid", "vincristine", "amiodarone", "hydroxychloroquine"}},
+    "palpitations": {"classes": (), "ingredients": {"salbutamol", "salmetarol", "salmeterol", "terbutaline", "levothyroxine", "thyroxine", "theophylline", "amlodipine"}},
+    "joint_pain": {"classes": ("cyp3a4_statin",), "ingredients": {"simvastatin", "atorvastatin", "rosuvastatin", "furosemide", "hydrochlorothiazide"}},
+    "frequent_infections": {"classes": (), "ingredients": {"prednisolone", "prednisone", "dexamethasone", "hydrocortisone", "methylprednisolone", "azathioprine", "methotrexate", "ciclosporin", "tacrolimus", "mycophenolate"}},
+    "chest_pain": {"classes": (), "ingredients": {"sumatriptan", "rizatriptan", "salbutamol", "sildenafil", "tadalafil", "vardenafil", "levothyroxine", "erythropoietin"}},
+    "urinary_symptoms": {"classes": (), "ingredients": {"nitrofurantoin", "trimethoprim", "ciprofloxacin"}},
+    "vision_changes": {"classes": (), "ingredients": {"amiodarone", "hydroxychloroquine", "sildenafil", "tadalafil", "topiramate", "prednisolone", "prednisone"}},
+}
+
+# symptom -> documented conditions relevant to that symptom (cross-reference only).
+_RELEVANT_CONDITIONS: Dict[str, List[str]] = {
+    "chest_pain": ["heart", "angina", "coronary", "ischaem", "ischem"],
+    "shortness_of_breath": ["asthma", "copd", "heart failure", "cardiac failure", "pulmonary"],
+    "swelling": ["heart failure", "cardiac failure", "chronic kidney", "renal failure", "cirrhosis", "liver"],
+    "increased_thirst_urination": ["diabetes"],
+    "fatigue": ["diabetes", "hypothyroid", "anaemia", "anemia", "heart failure", "depression"],
+    "dizziness": ["hypertension", "diabetes", "arrhythmia", "atrial fibrillation"],
+    "palpitations": ["atrial fibrillation", "arrhythmia", "hyperthyroid", "thyroid"],
+    "constipation": ["hypothyroid", "diabetes"],
+    "neuropathy": ["diabetes"],
+    "frequent_infections": ["diabetes", "chronic kidney"],
 }
 
 # symptom -> lab analytes relevant to that symptom (for cross-reference)
@@ -68,12 +100,30 @@ _RELEVANT_LABS: Dict[str, List[str]] = {
     "muscle_pain": ["alt", "ast"],
     "increased_thirst_urination": ["glucose"],
     "shortness_of_breath": ["hemoglobin"],
+    "constipation": ["calcium", "sodium"],
+    "neuropathy": ["glucose"],
+    "palpitations": ["potassium"],
+    "fatigue": ["hemoglobin", "glucose"],
 }
 
 
 def _match_symptom(text: str) -> List[str]:
     t = (text or "").lower()
     return [key for key, (_, phrases) in _SYMPTOMS.items() if any(p in t for p in phrases)]
+
+
+def _relevant_conditions_for(key: str, conditions: List[str]) -> List[str]:
+    """Documented conditions relevant to a symptom (substring match on the
+    condition-relevance phrases). Returns the matching condition display names."""
+    phrases = _RELEVANT_CONDITIONS.get(key, [])
+    if not phrases or not conditions:
+        return []
+    matched: List[str] = []
+    for cond in conditions:
+        cl = (cond or "").lower()
+        if any(p in cl for p in phrases) and cond not in matched:
+            matched.append(cond)
+    return matched
 
 
 def _med_relevant(med: Dict[str, Any], spec: Dict[str, Any]) -> bool:
@@ -113,10 +163,12 @@ def analyse_symptom(
             sig = _relevant_lab_signal(timeline, analyte)
             if sig:
                 rel_labs.append(sig)
+        rel_conds = _relevant_conditions_for(key, conditions)
         findings.append({
             "symptom": display,
             "relevant_medications_on_record": rel_meds,
             "relevant_abnormal_labs": rel_labs,
+            "relevant_conditions_on_record": rel_conds,
         })
     if not findings:
         return {
@@ -139,6 +191,11 @@ def analyse_symptom(
             parts.append(
                 "Your recent lab results include abnormal readings relevant to this symptom: "
                 + ", ".join(f["relevant_abnormal_labs"])
+            )
+        if f.get("relevant_conditions_on_record"):
+            parts.append(
+                "Your record also lists conditions that can be associated with this symptom: "
+                + ", ".join(f["relevant_conditions_on_record"])
             )
         parts.append(
             "This is context to discuss with your clinician — it is not a diagnosis, and the "

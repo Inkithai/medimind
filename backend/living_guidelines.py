@@ -114,6 +114,7 @@ def registry_status(staleness_days: int = DEFAULT_STALENESS_DAYS) -> Dict[str, A
 def mark_reviewed(key: str, *, version: str, reviewed: Optional[str] = None) -> Dict[str, Any]:
     """Record that a source was reviewed (operator action after a manual
     check against the current published guideline)."""
+    _seed()
     reviewed = reviewed or date.today().isoformat()
     with _lock:
         entry = _registry.get(key)
@@ -128,3 +129,116 @@ def reset() -> None:
     with _lock:
         _registry.clear()
         _SEEDED = False
+
+
+# --------------------------------------------------------------------------- #
+# Auto-refresh (manifest-based)
+# --------------------------------------------------------------------------- #
+# True "auto-update" requires a content source and human clinical sign-off,
+# which lives outside this library. What IS implementable safely and without
+# fragile publisher-site scraping is a MANIFEST-driven check: the operator
+# hosts a small JSON file listing each curated source's current published
+# version (they curate it when a guideline changes). This module fetches that
+# manifest, compares each version against the registry, and flags — and can
+# apply — updates. It fails open: no manifest configured -> "manual review".
+
+_MANIFEST_TIMEOUT = 8.0
+
+
+def _manifest_url() -> Optional[str]:
+    import os
+    return os.environ.get("LIVING_GUIDELINES_MANIFEST_URL") or None
+
+
+def _fetch_manifest(url: Optional[str]) -> Optional[Dict[str, Any]]:
+    """Fetch and parse the manifest JSON. Returns None on any failure."""
+    if not url:
+        return None
+    try:
+        import json
+        import urllib.request
+        req = urllib.request.Request(url, headers={"User-Agent": "MediMind-living-guidelines/1.0"})
+        with urllib.request.urlopen(req, timeout=_MANIFEST_TIMEOUT) as resp:  # nosec - operator-configured URL
+            data = resp.read().decode("utf-8", errors="replace")
+        parsed = json.loads(data)
+        return parsed if isinstance(parsed, dict) else None
+    except Exception:
+        return None
+
+
+def _normalise_manifest(manifest: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    """Accept either {"sources": {key: {...}}} or a flat {key: {...}|version}."""
+    raw = manifest.get("sources") if isinstance(manifest.get("sources"), dict) else manifest
+    out: Dict[str, Dict[str, Any]] = {}
+    for key, val in (raw or {}).items():
+        if isinstance(val, str):
+            out[str(key)] = {"version": val}
+        elif isinstance(val, dict):
+            out[str(key)] = val
+    return out
+
+
+def check_for_updates(manifest_url: Optional[str] = None) -> Dict[str, Any]:
+    """Compare the registry against the manifest. Reports, per source, whether a
+    newer version is published. Does NOT change the registry."""
+    _seed()
+    url = manifest_url or _manifest_url()
+    manifest = _fetch_manifest(url)
+    if manifest is None:
+        return {
+            "checked": False,
+            "reason": ("No manifest configured (set LIVING_GUIDELINES_MANIFEST_URL) or it could "
+                       "not be fetched. Manual review is still required."),
+            "updates_available": [],
+        }
+    norm = _normalise_manifest(manifest)
+    with _lock:
+        registry_snapshot = {k: dict(v) for k, v in _registry.items()}
+    updates = []
+    for key, entry in registry_snapshot.items():
+        remote = norm.get(key)
+        if not remote:
+            continue
+        remote_version = str(remote.get("version") or "").strip()
+        local_version = str(entry.get("version") or "").strip()
+        if remote_version and remote_version != local_version:
+            updates.append({
+                "key": key,
+                "registered_version": local_version,
+                "latest_version": remote_version,
+                "url": remote.get("url"),
+                "notes": remote.get("notes"),
+                "update_available": True,
+            })
+    # sources in the manifest but not in the registry (new sources)
+    new_sources = [k for k in norm if k not in registry_snapshot]
+    return {
+        "checked": True,
+        "manifest_url": url,
+        "updates_available": updates,
+        "new_sources_in_manifest": new_sources,
+        "checked_at": date.today().isoformat(),
+    }
+
+
+def apply_updates(manifest_url: Optional[str] = None) -> Dict[str, Any]:
+    """Run check_for_updates and apply any newer versions to the registry,
+    recording the review. Returns what changed. Never raises — fetch failures
+    are reported, not thrown."""
+    check = check_for_updates(manifest_url)
+    if not check.get("checked"):
+        return {"applied": [], **check}
+    applied = []
+    for upd in check["updates_available"]:
+        try:
+            mark_reviewed(upd["key"], version=upd["latest_version"])
+            applied.append({"key": upd["key"], "version": upd["latest_version"]})
+        except Exception:
+            continue
+    return {
+        "applied": applied,
+        "applied_count": len(applied),
+        "checked_at": check.get("checked_at"),
+        "manifest_url": check.get("manifest_url"),
+        "new_sources_in_manifest": check.get("new_sources_in_manifest"),
+    }

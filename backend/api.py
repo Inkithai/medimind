@@ -2760,6 +2760,20 @@ async def guidelines_status() -> Dict[str, Any]:
     return registry_status()
 
 
+@app.post("/api/v1/guidelines/refresh")
+async def refresh_guidelines(user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
+    """Check the living-guidelines manifest (LIVING_GUIDELINES_MANIFEST_URL) for
+    newer published versions and apply any found. Fails open to 'manual review'
+    when no manifest is configured. Operator-gated (authenticated)."""
+    from living_guidelines import apply_updates
+    result = apply_updates()
+    audit.record(user_id, "guidelines.refresh", {
+        "applied": result.get("applied_count", 0),
+        "checked": result.get("checked", False),
+    })
+    return result
+
+
 @app.get("/api/v1/medications/reconciliation")
 async def get_medication_reconciliation(user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
     """Reconciled current medication list: active / duplicate / dose-conflict /

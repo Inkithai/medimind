@@ -51,6 +51,7 @@ _LAB_ALIASES: Dict[str, Tuple[str, ...]] = {
     "platelet": ("platelet", "platelets", "plt"),
     "hemoglobin": ("hemoglobin", "haemoglobin", "hgb", "hb"),
     "magnesium": ("magnesium", "mg", "serum magnesium"),
+    "calcium": ("calcium", "corrected calcium", "serum calcium"),
     "glucose": ("glucose", "blood glucose", "fasting glucose", "fbs", "rbs"),
 }
 

@@ -127,6 +127,101 @@ def generate_care_gaps(
         add("monitoring", "Kidney-function monitoring",
             "With chronic kidney disease on record, check that kidney function and "
             "blood pressure are monitored regularly.", "soon")
+    if _has_condition("atrial fibrillation", conditions) or _has_condition("afib", conditions) or "a-fib" in " ".join(conditions):
+        add("monitoring", "Stroke-prevention review",
+            "With atrial fibrillation on record, check that stroke-risk assessment and "
+            "any blood-thinning treatment are current and reviewed.", "soon")
+    if _has_condition("hypothyroid", conditions) or _has_condition("underactive thyroid", conditions):
+        add("monitoring", "Thyroid-function monitoring",
+            "With a thyroid condition on record, check that TSH monitoring and dose "
+            "review are current.", "routine")
+    if _has_condition("hyperlipid", conditions) or _has_condition("high cholesterol", conditions) or _has_condition("dyslipid", conditions):
+        add("monitoring", "Cholesterol monitoring",
+            "With a cholesterol disorder on record, check that lipid levels and any "
+            "treatment are reviewed periodically.", "routine")
+    if _has_condition("osteoporosis", conditions) or _has_condition("low bone density", conditions):
+        add("monitoring", "Bone-health review",
+            "With osteoporosis/low bone density on record, check that bone-density "
+            "assessment, calcium/vitamin D, and falls-prevention advice are current.", "routine")
+    if _has_condition("chronic liver", conditions) or _has_condition("cirrhosis", conditions):
+        add("monitoring", "Liver surveillance",
+            "With chronic liver disease on record, check that surveillance (e.g. varices "
+            "and liver-cancer screening) and liver-function tests are current.", "soon")
+    if _has_condition("heart failure", conditions):
+        add("monitoring", "Heart-failure review",
+            "With heart failure on record, check that symptom/medication review, weight "
+            "monitoring, and kidney function checks are current.", "soon")
+
+    # ---- medication-driven monitoring gaps (drug on record -> tests that
+    #      should accompany it; "not seen in your records" caveat applies). --
+    if any(d in med_text for d in ("warfarin",)):
+        add("monitoring", "INR / bleeding monitoring (warfarin)",
+            "Warfarin needs regular INR checks to keep the blood-thinning level safe. "
+            "Confirm your INR monitoring is current.", "soon")
+    if any(d in med_text for d in ("dabigatran", "rivaroxaban", "apixaban", "edoxaban")):
+        add("monitoring", "DOAC monitoring",
+            "Direct oral anticoagulants need periodic kidney-function and blood-count "
+            "checks. Confirm these are current.", "soon")
+    if "methotrexate" in med_text:
+        add("monitoring", "Methotrexate monitoring",
+            "Methotrexate requires regular blood-count and liver-function monitoring. "
+            "Confirm these are current.", "soon")
+    if any(d in med_text for d in ("simvastatin", "atorvastatin", "rosuvastatin", "fluvastatin", "pravastatin", "lovastatin")):
+        add("monitoring", "Statin monitoring",
+            "With a statin on record, check that cholesterol levels and any liver "
+            "monitoring are current.", "routine")
+    if any(d in med_text for d in ("furosemide", "bendroflumethiazide", "hydrochlorothiazide", "spironolactone", "indapamide", "chlorthalidone")):
+        add("monitoring", "Diuretic monitoring",
+            "Diuretics can affect kidney function and salts (sodium/potassium). Confirm "
+            "these are checked periodically.", "soon")
+    if any(d in med_text for d in ("lisinopril", "ramipril", "enalapril", "perindopril", "losartan", "valsartan", "candesartan")):
+        add("monitoring", "ACE-inhibitor / ARB monitoring",
+            "ACE inhibitors and ARBs need periodic kidney-function and potassium checks. "
+            "Confirm these are current.", "soon")
+    if "amiodarone" in med_text:
+        add("monitoring", "Amiodarone monitoring",
+            "Amiodarone requires regular thyroid, liver, and eye checks. Confirm these "
+            "are current.", "soon")
+    if "digoxin" in med_text:
+        add("monitoring", "Digoxin monitoring",
+            "Digoxin levels, kidney function, and potassium should be checked "
+            "periodically. Confirm these are current.", "soon")
+    if "metformin" in med_text:
+        add("monitoring", "Metformin monitoring",
+            "With metformin on record, check that HbA1c, kidney function, and (long "
+            "term) vitamin B12 are reviewed periodically.", "routine")
+    if any(d in med_text for d in ("phenytoin", "carbamazepine", "valproate", "valproic acid", "lamotrigine")):
+        add("monitoring", "Antiepileptic monitoring",
+            "Some antiepileptic medicines need drug-level, liver, or blood-count "
+            "monitoring. Confirm these are current.", "routine")
+    if any(d in med_text for d in ("azathioprine", "mercaptopurine", "ciclosporin", "cyclosporine", "tacrolimus", "mycophenolate", "methotrexate")):
+        add("monitoring", "Immunosuppressant monitoring",
+            "Immunosuppressants need regular blood-count and (often) drug-level "
+            "monitoring. Confirm these are current.", "soon")
+
+    # ---- extra screenings ----------------------------------------------
+    if isinstance(age, int) and 18 <= age <= 79:
+        add("screening", "Hepatitis C screening",
+            "A one-time hepatitis C test is recommended for most adults. Not seen in "
+            "your records.", "routine")
+        add("screening", "HIV screening",
+            "An HIV test is recommended at least once for adults. Not seen in your "
+            "records.", "routine")
+    if sex_norm in ("male", "m", "man") and isinstance(age, int) and age >= 65:
+        add("screening", "Abdominal aortic aneurysm (AAA) screening",
+            "An ultrasound AAA screening is generally offered once to older men. Not "
+            "seen in your records.", "routine")
+    if isinstance(age, int) and age >= 65:
+        add("screening", "Cognitive / memory check",
+            "Periodic review of memory and thinking is sensible from age 65. Mention "
+            "any concerns to your clinician.", "routine")
+    if _has_condition("smok", conditions) or _has_condition("tobacco", conditions):
+        if isinstance(age, int) and 50 <= age <= 80:
+            add("screening", "Lung-cancer screening (smoking history)",
+                "With a smoking history and age 50-80, a low-dose CT lung-cancer screen "
+                "may be appropriate — discuss with your clinician.", "soon")
+        add("lifestyle", "Smoking-cessation support",
+            "With smoking on record, ask about cessation support if you still smoke.", "soon")
 
     return {
         "age": age,
