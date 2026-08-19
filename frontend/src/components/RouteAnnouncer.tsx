@@ -18,7 +18,7 @@ const routeKeys: Record<string, string> = {
   "/care": "nav.care",
   "/find-care": "nav.care",
   "/appointment-prep": "nav.nextSteps",
-  "/about": "nav.aboutSettings",
+  "/about": "about.nav",
   "/settings": "nav.settings",
   "/guidelines": "nav.guidelines",
 };

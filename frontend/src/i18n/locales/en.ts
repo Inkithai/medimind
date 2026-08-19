@@ -83,7 +83,6 @@ export const en = {
     ask: "Ask AI",
     care: "Find Care",
     nextSteps: "Next Steps",
-    aboutSettings: "About & Settings",
     settings: "Settings",
     upload: "Upload Document",
     groupRecords: "My records",
@@ -113,7 +112,6 @@ export const en = {
       ask: "Ask a question or check a symptom, answered from your own records.",
       care: "Find nearby healthcare facilities and professionals.",
       nextSteps: "Prepare for a visit, work your follow-up queue, and see reminders.",
-      aboutSettings: "How MediMind works, its sources, and your workspace controls.",
       settings: "Manage your workspace and preferences.",
       upload: "Add a prescription, lab report, or medical document.",
       about: "Learn how MediMind works and handles your data.",
@@ -1138,7 +1136,7 @@ export const en = {
   },
   trustHub: {
     eyebrow: "Trust & control",
-    title: "About & Settings",
+    title: "About MediMind",
     subtitle:
       "How MediMind reads your records, which clinical sources it checks against, and full control of your workspace data.",
     tabsLabel: "About and settings views",

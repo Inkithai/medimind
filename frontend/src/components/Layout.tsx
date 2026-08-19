@@ -11,6 +11,7 @@ import {
   BeakerIcon,
   ChatIcon,
   FileIcon,
+  InfoIcon,
   PillIcon,
   IntegrityIcon,
   SettingsIcon,
@@ -38,8 +39,10 @@ interface SidebarTooltipState {
 }
 
 /**
- * The sidebar is the product's table of contents, so it lists the eleven
- * things a patient actually does — not every screen that exists. Sibling
+ * The sidebar is the product's table of contents, so it lists the ten
+ * things a patient actually does — not every screen that exists. Upload is
+ * the eleventh, and it is the prominent green button above this list rather
+ * than a duplicate row inside it. Sibling
  * screens that answer the same question are tabs inside these entries
  * (Safety has three, Next steps has four), and a couple of routes are
  * deliberately unlisted: the analysis audit log, reached from About →
@@ -53,14 +56,6 @@ const NAV: NavItem[] = [
     descriptionKey: "nav.descriptions.dashboard",
     icon: SparkleIcon,
     chip: "bg-brand-50 text-brand-700",
-  },
-  {
-    group: "home",
-    to: "/upload",
-    labelKey: "nav.upload",
-    descriptionKey: "nav.descriptions.upload",
-    icon: UploadIcon,
-    chip: "bg-indigo-50 text-indigo-800",
   },
   {
     group: "records",
@@ -127,12 +122,17 @@ const NAV: NavItem[] = [
     chip: "bg-teal-50 text-teal-800",
   },
   {
+    /* Judge- and patient-facing transparency page: how MediMind reads a
+       record, what it checks against, what it does with your data. It is
+       named "About MediMind" rather than folded behind a settings gear,
+       because it is the page someone evaluating the product looks for.
+       Guidelines, Settings and the analysis log sit inside it as tabs. */
     group: "utility",
     to: "/about",
-    labelKey: "nav.aboutSettings",
-    descriptionKey: "nav.descriptions.aboutSettings",
-    icon: SettingsIcon,
-    chip: "bg-slate-100 text-slate-700",
+    labelKey: "about.nav",
+    descriptionKey: "nav.descriptions.about",
+    icon: InfoIcon,
+    chip: "bg-brand-50 text-brand-700",
   },
 ];
 
@@ -642,11 +642,58 @@ export function Layout() {
 
           {/* Secondary and informational — deliberately outside the workflow
               nav above, and available with or without a workspace. Same row
-              treatment and active state as the main navigation, so About reads
-              as part of the application rather than an unrelated footer box. */}
-          {/* About & settings is a first-class nav row now, so the footer
-              only carries the workspace utilities. */}
+              treatment and active state as the main navigation, so Settings
+              reads as part of the application rather than an unrelated
+              footer box. Settings is a utility, not one of the eleven jobs
+              the sidebar advertises, but it is common enough that hunting for
+              it inside About would be worse. It is also a tab there. */}
           <div className="shrink-0 border-t border-[#e5ebe9] px-2 pb-3 pt-2">
+            <NavLink
+              to="/settings"
+              onClick={closeSidebar}
+              onMouseEnter={(event) =>
+                showTooltip(
+                  event.currentTarget,
+                  "sidebar-tooltip-settings",
+                  t("nav.settings"),
+                  t("nav.descriptions.settings"),
+                )
+              }
+              onMouseLeave={() => setTooltip(null)}
+              onFocus={(event) =>
+                showTooltip(
+                  event.currentTarget,
+                  "sidebar-tooltip-settings",
+                  t("nav.settings"),
+                  t("nav.descriptions.settings"),
+                )
+              }
+              onBlur={() => setTooltip(null)}
+              aria-label={collapsed ? t("nav.settings") : undefined}
+              aria-describedby={desktop ? "sidebar-tooltip-settings" : undefined}
+              className={({ isActive }) =>
+                classNames(
+                  "flex min-h-[44px] items-center gap-2.5 rounded-[9px] px-2.5 text-[15px] font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-offset-1",
+                  collapsed && "lg:justify-center lg:px-0",
+                  isActive
+                    ? "bg-[#eaf6f4] font-semibold text-[#123c3a] shadow-[inset_3px_0_0_#0F766E]"
+                    : "text-slate-600 hover:bg-[#f3f7f6] hover:text-slate-900",
+                )
+              }
+            >
+              {({ isActive }) => (
+                <>
+                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[7px] bg-slate-100 text-slate-700">
+                    <SettingsIcon className="h-4 w-4" />
+                  </span>
+                  <span className={classNames("min-w-0 truncate", collapsed && "lg:hidden")}>
+                    {t("nav.settings")}
+                  </span>
+                  {isActive && <span className="sr-only">({t("nav.currentPage")})</span>}
+                </>
+              )}
+            </NavLink>
+
             <div className={classNames("px-1", collapsed && "lg:hidden")}>
               <LanguageSelector className="mb-2 hidden lg:block" />
               {isConfigured && (

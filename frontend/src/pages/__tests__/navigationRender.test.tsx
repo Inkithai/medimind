@@ -426,13 +426,13 @@ await check("every hub prints exactly one page title", async () => {
   }
 });
 
-await check("the sidebar shows eleven destinations and no merged leftovers", async () => {
+await check("the sidebar shows ten destinations and no merged leftovers", async () => {
   const { container, unmount } = await renderAt("/dashboard");
   try {
     const nav = container.querySelector("nav[aria-label]");
     assert(nav !== null, "sidebar nav is missing");
     const hrefs = Array.from(nav?.querySelectorAll("a") || []).map((a) => a.getAttribute("href"));
-    assert(hrefs.length === 11, `expected 11 sidebar links, saw ${hrefs.length}`);
+    assert(hrefs.length === 10, `expected 10 sidebar links, saw ${hrefs.length}`);
     for (const gone of [
       "/clinical-safety",
       "/risk-timeline",

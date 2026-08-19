@@ -2,7 +2,7 @@
  * Navigation contract tests.
  *
  * The information architecture makes one promise: the sidebar shrank from
- * nineteen entries to eleven, but the app did not lose a single capability.
+ * nineteen rows to ten, but the app did not lose a single capability.
  * Every merged screen is a tab, every old path still resolves, and the two
  * pages that are meant to be private stay unlisted.
  *
@@ -49,13 +49,12 @@ function routeExists(path: string): boolean {
 
 const tests: Array<[string, () => void]> = [
   [
-    "the sidebar lists exactly eleven destinations",
+    "the sidebar lists exactly ten destinations, plus the Upload button",
     () => {
       const entries = navArray.match(/to: "([^"]+)"/g) || [];
-      assert.equal(entries.length, 11, `expected 11 sidebar entries, found ${entries.length}`);
+      assert.equal(entries.length, 10, `expected 10 sidebar entries, found ${entries.length}`);
       const expected = [
         "/dashboard",
-        "/upload",
         "/documents",
         "/medicines",
         "/labs",
@@ -334,6 +333,43 @@ const tests: Array<[string, () => void]> = [
         );
         assert.ok(source.includes("embedded"), `${page} must react to the embedded prop`);
       }
+    },
+  ],
+
+  [
+    "Upload is the green button, not a duplicate nav row",
+    () => {
+      assert.ok(
+        !navArray.includes('to: "/upload"'),
+        "Upload must not appear both as the CTA button and as a nav row",
+      );
+      const cta = layoutSource.slice(layoutSource.indexOf("{isConfigured && ("));
+      assert.ok(cta.includes('to="/upload"'), "the prominent Upload button is still rendered");
+      assert.ok(cta.includes("bg-brand-600"), "Upload keeps its primary-button treatment");
+    },
+  ],
+
+  [
+    "About MediMind is named in the sidebar and Settings stays one click away",
+    () => {
+      // The transparency page is the one judges hunt for, so it keeps its
+      // own name in the nav rather than sitting behind a gear icon.
+      assert.ok(navArray.includes('labelKey: "about.nav"'), "About row is named About MediMind");
+      assert.ok(navArray.includes("icon: InfoIcon"), "About row uses the info icon");
+      // Settings is a utility rather than one of the ten jobs, so it
+      // lives in the footer strip — still one click, still an active state.
+      const footer = layoutSource.slice(layoutSource.indexOf("border-t border-[#e5ebe9]"));
+      assert.ok(footer.includes('to="/settings"'), "Settings is reachable from the sidebar footer");
+      assert.ok(footer.includes("min-h-[44px]"), "the Settings row keeps a 44px touch target");
+      assert.ok(
+        !navArray.includes('to: "/settings"'),
+        "Settings is not counted among the workflow destinations",
+      );
+      // ...and it is still a tab inside About, so nothing is lost either way.
+      assert.ok(
+        read("../TrustHubPage.tsx").includes("<SettingsPage embedded />"),
+        "Settings is also a tab inside About",
+      );
     },
   ],
 

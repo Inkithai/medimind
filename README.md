@@ -458,11 +458,11 @@ Zero-login anonymous model:
 - **Ask AI** `/ask` — intent-routed RAG plus complete-record retrieval for list/completeness questions, evidence sufficiency, verbatim source quotes, exact-highlight deep links, injection resistance, citation validation, and confidence caps. Tabs: **Ask a question**, **Check a symptom** (`?tab=symptoms`), **Conversation** (`?tab=chat`, multi-turn with memory).
 - **Find Care** `/care` — **Find local care** (default): pick a safety flag, get the matching specialty, and search live listings near you. **Who to see** (`?tab=who`): pharmacist-vs-doctor triage with urgency. **Browse nearby** (`?tab=map`): the Leaflet facility directory, lazily loaded so the map bundle only downloads on this tab.
 - **Next Steps** `/appointment-prep` — **Appointment prep** (default): printable handoff and prioritized record-grounded clinician questions. **Action Center** (`?tab=queue`): follow-up queue with browser-only completion state, user-selected reminder dates and `.ics` export. **Preventive** (`?tab=preventive`): screening/immunisation prompts. **Messages** (`?tab=messages`): dated notes for a provider, explicitly not delivered anywhere.
-- **About & Settings** `/about` — **How it works**, **Guidelines** (`?tab=guidelines`, the curated clinical sources and their review status), **Settings** (`?tab=settings`, language, profile, JSON/FHIR export, health passport, workspace name and deletion), **Advanced** (`?tab=advanced`, the AI analysis audit log).
+- **About MediMind** `/about` — the transparency page, kept under its own name in the sidebar because it is what someone evaluating the product looks for: **How it works** (default — architecture, safety intelligence, privacy, interoperability, API), **Guidelines** (`?tab=guidelines`, the curated clinical sources and their review status), **Settings** (`?tab=settings`, language, profile, JSON/FHIR export, health passport, workspace name and deletion), **Advanced** (`?tab=advanced`, the AI analysis audit log).
 
-#### Navigation: eleven destinations, nothing removed
+#### Navigation: ten destinations, nothing removed
 
-The sidebar names the eleven jobs a patient has, not the twenty-odd screens that exist. Sibling screens that answered the same question became tabs, and **every previous URL still resolves** — it redirects onto the tab that now holds that screen, so older links, bookmarks and slides do not 404:
+The sidebar names the ten jobs a patient has, not the twenty-odd screens that exist. Upload is the prominent green button above the list rather than a duplicate row inside it, and Settings sits in the footer strip with the language selector — it is a utility, not one of the ten jobs, and it is also a tab inside About. Sibling screens that answered the same question became tabs, and **every previous URL still resolves** — it redirects onto the tab that now holds that screen, so older links, bookmarks and slides do not 404:
 
 | Old path | Now |
 | --- | --- |

@@ -271,21 +271,29 @@ const tests: Array<[string, () => void]> = [
     },
   ],
   [
-    "About & settings is one of the eleven sidebar destinations",
+    "About MediMind is one of the ten sidebar destinations",
     () => {
       // The IA groups sibling screens into tabbed parents, so the sidebar
-      // lists the jobs a patient has (11) rather than every screen (19).
+      // lists the jobs a patient has (10, plus the Upload button) rather
+      // than every screen (19).
       // About & settings is one of those jobs: it carries How it works,
       // Guidelines, Settings and the analysis audit log as tabs.
       const navArray = layoutSource.slice(
         layoutSource.indexOf("const NAV:"),
         layoutSource.indexOf("const NAV_GROUPS"),
       );
-      assert.ok(navArray.includes('to: "/about"'), "About & settings is a sidebar destination");
+      assert.ok(navArray.includes('to: "/about"'), "About MediMind is a sidebar destination");
+      // Judges look for "About MediMind" by name. It must not be hidden
+      // behind a settings gear or a merged "About & settings" label.
+      assert.ok(
+        navArray.includes('labelKey: "about.nav"'),
+        'the row is labelled "About MediMind", not folded into Settings',
+      );
+      assert.ok(navArray.includes("icon: InfoIcon"), "the About row uses the info icon");
       assert.equal(
         (navArray.match(/to: "/g) || []).length,
-        11,
-        "the sidebar lists exactly 11 destinations",
+        10,
+        "the sidebar lists exactly 10 destinations",
       );
       // Screens that were promoted to tabs must not reappear as nav rows.
       for (const merged of [
@@ -327,8 +335,8 @@ const tests: Array<[string, () => void]> = [
       assert.ok(rowBlock.includes('collapsed && "lg:hidden"'), "label hides when collapsed");
       // Its description is a real i18n key, not an English literal.
       assert.ok(
-        layoutSource.includes('descriptionKey: "nav.descriptions.aboutSettings"'),
-        "About & settings description comes from the dictionary",
+        layoutSource.includes('descriptionKey: "nav.descriptions.about"'),
+        "the About row's description comes from the dictionary",
       );
     },
   ],
