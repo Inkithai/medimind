@@ -283,9 +283,8 @@ def _shape_label(result: Dict[str, Any], ingredient: str) -> Dict[str, Any]:
             sections[section] = text.strip()
     url = ""
     if set_id:
-        url = (
-            "https://dailymed.nlm.nih.gov/dailymed/lookup.cfm?setid="
-            + urllib.parse.quote(str(set_id))
+        url = "https://dailymed.nlm.nih.gov/dailymed/lookup.cfm?setid=" + urllib.parse.quote(
+            str(set_id)
         )
     return {
         "source": "FDA Structured Product Label (SPL)",

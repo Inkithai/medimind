@@ -197,6 +197,35 @@ def test_partial_batch_keeps_good_files_and_reports_failures():
     assert by_file["lab.jpg"]["kind"] == "transient"
 
 
+def test_multipage_file_keeps_medical_pages_and_skips_nonmedical_ones():
+    """A multi-page PDF must not lose its real clinical pages because one
+    page (a cover letter, blank divider, or stray receipt) is non-medical.
+    The good page is kept and the file succeeds; the bad page is skipped."""
+    app, patchers = _make_client(index_chunks=2)
+    try:
+        good = dict(EXTRACTED_DOC)
+        bad = dict(NON_MEDICAL_DOC)
+        api.process_document.side_effect = [{"multi_page": True, "pages": [good, bad]}]
+        with TestClient(app) as client:
+            resp = client.post(
+                "/api/v1/documents",
+                files=[("files", ("multi.pdf", b"%PDF-1.4 fake-multi-page", "application/pdf"))],
+            )
+        assert resp.status_code == 201, resp.text
+        body = resp.json()
+        assert body["documents_added"] == 1
+        # The medical page survived; the non-medical page did not become a
+        # second document. insert_documents is called as (user_id, docs).
+        inserted = api.db.insert_documents.call_args
+        docs = inserted[0][1] if inserted and len(inserted[0]) > 1 else []
+        assert len(docs) == 1
+        assert docs[0]["medications"], docs[0]
+    finally:
+        for p in patchers:
+            p.stop()
+        app.dependency_overrides.clear()
+
+
 def test_all_files_transient_failure_is_502():
     """Provider-side failure on every file -> retryable 502 (not a
     misleading 'not a medical document' 422)."""

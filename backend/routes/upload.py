@@ -636,7 +636,7 @@ async def _execute_upload_pipeline(
                         raise ValueError("model returned an invalid extraction structure")
                     pages = result["pages"] if result.get("multi_page") else [result]
                     kept_pages: List[Dict[str, Any]] = []
-                    rejected = False
+                    skipped_page_reasons: List[str] = []
                     page_degradations: List[Dict[str, Any]] = []
                     for page_num, page in enumerate(pages, start=1):
                         label = (
@@ -662,14 +662,20 @@ async def _execute_upload_pipeline(
                         try:
                             assert_medical_document(page, label)
                         except NonMedicalDocumentError as exc:
+                            # Skip the non-medical page rather than failing the
+                            # whole file: a multi-page PDF with a cover letter,
+                            # blank divider, or stray receipt page must not cost
+                            # the real clinical pages around it. A single-page
+                            # file that fails here ends up with no kept pages
+                            # and is rejected as before.
+                            reason = f"'{label}' {exc.reason}"
+                            skipped_page_reasons.append(reason)
                             logger.warning(
-                                "upload: user=%s rejected '%s': %s",
+                                "upload: user=%s skipped page %s",
                                 user_id,
-                                original_name,
-                                exc.reason,
+                                reason,
                             )
-                            rejected = True
-                            break
+                            continue
                         # Deterministic brand -> generic resolution from the
                         # FDA NDC directory BEFORE language degradation: a
                         # Latin-script brand the model could not map to an
@@ -725,12 +731,20 @@ async def _execute_upload_pipeline(
                             page["_source"]["file"] = original_name
                         kept_pages.append(page)
 
-                    if rejected or not kept_pages:
+                    if not kept_pages:
+                        # Every page was non-medical (or the extractor produced
+                        # no pages at all). Say what actually happened instead
+                        # of guessing a cause: the reasons are per-page, so a
+                        # blank/corrupt file is told apart from a folder of
+                        # placeholders.
+                        detail = "This doesn't appear to contain medical information we can add."
+                        if skipped_page_reasons:
+                            detail += " " + "; ".join(skipped_page_reasons[:3])
                         info = {
                             "file": original_name,
                             "file_id": f"file-{file_index}",
                             "file_index": file_index,
-                            "error": "This doesn't appear to contain medical information we can add.",  # noqa: E501
+                            "error": detail,
                             "kind": "not_medical",
                             "code": "not_medical",
                             "retryable": False,

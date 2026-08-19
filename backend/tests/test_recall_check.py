@@ -14,10 +14,10 @@ from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import recall_check  # noqa: E402
 import alert_management  # noqa: E402
 import consult_triage  # noqa: E402
 import follow_up  # noqa: E402
+import recall_check  # noqa: E402
 
 
 def _recalls():
@@ -79,9 +79,7 @@ def test_check_recalls_never_invents_a_negative():
 def test_check_recalls_is_cache_only_by_default():
     """Without an explicit references dict the check must call the lookup with
     fetch_missing=False — it reads the warm cache, never the network."""
-    with mock.patch(
-        "openfda_reference.lookup_recall_references", return_value={}
-    ) as lookup:
+    with mock.patch("openfda_reference.lookup_recall_references", return_value={}) as lookup:
         assert recall_check.check_recalls(_timeline()) == []
         lookup.assert_called_once()
         assert lookup.call_args.kwargs.get("fetch_missing") is False

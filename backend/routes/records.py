@@ -213,9 +213,7 @@ def _antidote_context(
     return graph_backed_findings_from_antidotes(references), notes
 
 
-def _openfda_reference_context(
-    timeline: Dict[str, Any], user_id: str, operation: str
-) -> None:
+def _openfda_reference_context(timeline: Dict[str, Any], user_id: str, operation: str) -> None:
     """Warm the openFDA caches (labels + recalls) for this record's
     ingredients, BEFORE the safety cross-check runs.
 
@@ -230,8 +228,7 @@ def _openfda_reference_context(
 
     if not openfda_reference.is_configured():
         logger.debug(
-            "%s: user=%s openFDA not configured (OPENFDA_API_KEY unset) — "
-            "skipping reference warm",
+            "%s: user=%s openFDA not configured (OPENFDA_API_KEY unset) — skipping reference warm",
             operation,
             user_id,
         )

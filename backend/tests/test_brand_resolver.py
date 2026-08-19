@@ -72,6 +72,33 @@ def test_existing_ingredient_verified_but_not_overwritten():
     assert "ingredient_source" not in med
 
 
+def test_combination_product_resolves_all_ingredients():
+    """A combo product's active_ingredients must be filled as a list, not
+    crammed into one garbled ingredient string."""
+    doc = {"medications": [{"name": "ComboX", "ingredients": []}]}
+
+    def _lookup(brands, fetch_missing=True):
+        return {
+            "combox": {
+                "brand_name": "ComboX",
+                "generic_name": "ACETAMINOPHEN",
+                "product_ndc": "11111-222-33",
+                "active_ingredients": [
+                    "ACETAMINOPHEN",
+                    "DIPHENHYDRAMINE HYDROCHLORIDE",
+                ],
+            }
+        }
+
+    with mock.patch.object(openfda_reference, "lookup_generic_names", side_effect=_lookup):
+        summary = brand_resolver.resolve_brand_ingredients(doc)
+    assert summary["resolved"] == ["ComboX"]
+    assert doc["medications"][0]["ingredients"] == [
+        "ACETAMINOPHEN",
+        "DIPHENHYDRAMINE HYDROCHLORIDE",
+    ]
+
+
 def test_disagreement_does_not_touch_ingredients():
     """NDC returning a different generic than the extracted one must not
     overwrite the extraction — the record stays honest about what the model

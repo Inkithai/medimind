@@ -165,9 +165,7 @@ def check_recalls(
     return findings
 
 
-def merge_recall_findings(
-    report: Dict[str, Any], findings: List[Dict[str, Any]]
-) -> Dict[str, Any]:
+def merge_recall_findings(report: Dict[str, Any], findings: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Append recall findings to the report, skipping an exact duplicate
     (same ingredient + same recall number)."""
     existing = report.setdefault(LIST_KEY, [])

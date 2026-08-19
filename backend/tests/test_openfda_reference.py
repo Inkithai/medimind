@@ -29,8 +29,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # trigger real network egress in their record/upload paths.
 os.environ["OPENFDA_LABEL_CACHE_TTL"] = "0"
 
-import openfda_reference  # noqa: E402
 import evidence_grading  # noqa: E402
+import openfda_reference  # noqa: E402
 
 
 @contextmanager
@@ -141,8 +141,9 @@ def test_claim_reference_single_drug_never_cited():
 def test_claim_reference_never_fetches_during_grading():
     """With a cold cache, the claim hook must return None without touching the
     network — grading reads only what the record path already warmed."""
-    with _configured(), mock.patch.object(
-        openfda_reference, "_get_json", side_effect=AssertionError("network!")
+    with (
+        _configured(),
+        mock.patch.object(openfda_reference, "_get_json", side_effect=AssertionError("network!")),
     ):
         cite = openfda_reference.openfda_claim_reference(
             {"medications_involved": ["Fluconazole", "Montelukast"]}
@@ -166,8 +167,9 @@ def _mock_fetch_for_fluconazole(url):
 
 
 def test_lookup_label_references_keys_by_base_ingredient():
-    with _configured(), mock.patch.object(
-        openfda_reference, "_get_json", side_effect=_mock_fetch_for_fluconazole
+    with (
+        _configured(),
+        mock.patch.object(openfda_reference, "_get_json", side_effect=_mock_fetch_for_fluconazole),
     ):
         found = openfda_reference.lookup_label_references(["Warfarin sodium", "Fluconazole"])
     # "Warfarin sodium" normalizes to "warfarin" (no US label here -> absent),
@@ -255,7 +257,9 @@ def test_grade_finding_still_accepts_a_single_callable():
 
 def test_grade_cross_check_cites_openfda_and_caps_the_rest():
     labels = {"fluconazole": _shaped_fluconazole()}
-    claim = lambda finding: openfda_reference.openfda_claim_reference(finding, labels=labels)
+
+    def claim(finding):
+        return openfda_reference.openfda_claim_reference(finding, labels=labels)
 
     report = {
         "potential_drug_interactions": [
@@ -301,10 +305,7 @@ def test_unconfigured_adapter_stays_dormant():
         assert openfda_reference.is_configured() is False
         assert openfda_reference.lookup_label_references(["warfarin"]) == {}
         assert (
-            openfda_reference.openfda_claim_reference(
-                {"medications_involved": ["A", "B"]}
-            )
-            is None
+            openfda_reference.openfda_claim_reference({"medications_involved": ["A", "B"]}) is None
         )
 
 

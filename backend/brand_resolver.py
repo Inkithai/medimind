@@ -36,7 +36,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 logger = logging.getLogger("brand_resolver")
 
@@ -59,9 +59,26 @@ def _existing_ingredients(med: Dict[str, Any]) -> List[str]:
     return [str(i).strip() for i in (med.get("ingredients") or []) if str(i).strip()]
 
 
-def resolve_brand_ingredients(
-    doc: Dict[str, Any], fetch_missing: bool = True
-) -> Dict[str, Any]:
+def _entry_ingredients(entry: Dict[str, Any]) -> List[str]:
+    """The INN(s) an NDC entry resolves to, as a list.
+
+    Combination products have several active ingredients, which the directory
+    lists individually; the single `generic_name` field can be a sole INN or
+    (rarely) a separator-joined string. Prefer the per-ingredient list, and
+    fall back to splitting the generic name, so a combo product does not get
+    crammed into one garbled ingredient string.
+    """
+    actives = [str(i).strip() for i in (entry.get("active_ingredients") or []) if str(i).strip()]
+    if actives:
+        return actives
+    generic = str(entry.get("generic_name") or "").strip()
+    if not generic:
+        return []
+    parts = [part.strip() for part in re.split(r"[;/+&]", generic) if part.strip()]
+    return parts or [generic]
+
+
+def resolve_brand_ingredients(doc: Dict[str, Any], fetch_missing: bool = True) -> Dict[str, Any]:
     """Fill empty ingredient lists from the NDC directory, in place.
 
     Returns a summary: ``{"resolved": [...], "verified": [...], "unresolved": [...]}``
@@ -101,16 +118,17 @@ def resolve_brand_ingredients(
         entry = hits.get(name.casefold())
         if not isinstance(entry, dict):
             continue
-        generic = str(entry.get("generic_name") or "").strip()
-        if not generic:
+        resolved = _entry_ingredients(entry)
+        if not resolved:
             continue
+        generic = resolved[0]
         ingredients = _existing_ingredients(med)
         if not ingredients:
-            med["ingredients"] = [generic]
+            med["ingredients"] = resolved
             med["ingredient_source"] = "ndc_directory"
             med["ndc_match"] = {
                 "brand_name": entry.get("brand_name") or name,
-                "generic_name": generic,
+                "generic_name": ", ".join(resolved),
                 "product_ndc": entry.get("product_ndc"),
                 "labeler_name": entry.get("labeler_name"),
             }
@@ -126,7 +144,7 @@ def resolve_brand_ingredients(
                 med["ndc_verified"] = True
                 med["ndc_match"] = {
                     "brand_name": entry.get("brand_name") or name,
-                    "generic_name": generic,
+                    "generic_name": ", ".join(resolved),
                     "product_ndc": entry.get("product_ndc"),
                 }
                 summary["verified"].append(name)
