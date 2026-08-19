@@ -41,9 +41,9 @@ export function RiskTimelinePage() {
         <div>
           <h1 className="page-title">Risk Timeline</h1>
           <p className="secondary-text mt-2 max-w-2xl">
-            When was each safety finding actually live? Two medicines only interact if they
-            were taken at the same time — findings whose courses never overlapped are shown
-            as history, not current risk.
+            When was each safety finding actually live? Two medicines only interact if they were
+            taken at the same time — findings whose courses never overlapped are shown as history,
+            not current risk.
           </p>
         </div>
         <button
@@ -82,8 +82,8 @@ function NotFoundOrError({ error, onRetry }: { error: unknown; onRetry: () => vo
         <CardBody>
           <div className="flex flex-col items-center gap-3 py-10 text-center">
             <p className="text-sm text-slate-600">
-              No records yet — upload a document and MediMind will place every safety
-              finding on a timeline.
+              No records yet — upload a document and MediMind will place every safety finding on a
+              timeline.
             </p>
             <Link
               to="/upload"
@@ -101,9 +101,7 @@ function NotFoundOrError({ error, onRetry }: { error: unknown; onRetry: () => vo
     <Card>
       <CardBody>
         <div className="flex flex-col items-center gap-3 py-10 text-center">
-          <p className="text-sm text-slate-600">
-            The risk timeline could not be loaded right now.
-          </p>
+          <p className="text-sm text-slate-600">The risk timeline could not be loaded right now.</p>
           <button
             onClick={onRetry}
             className="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"

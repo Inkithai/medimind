@@ -19,7 +19,7 @@ import os
 import re
 import uuid
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 import cloudinary
 import cloudinary.uploader
@@ -36,17 +36,21 @@ def _configure() -> None:
     cloud_name = os.environ.get("CLOUDINARY_CLOUD_NAME")
     api_key = os.environ.get("CLOUDINARY_API_KEY")
     api_secret = os.environ.get("CLOUDINARY_API_SECRET")
-    
-    if (not cloud_name or not api_key or not api_secret or
-            cloud_name.strip() in ("", "your-cloudinary-cloud-name") or
-            api_key.strip() in ("", "your-cloudinary-api-key") or
-            api_secret.strip() in ("", "your-cloudinary-api-secret")):
+
+    if (
+        not cloud_name
+        or not api_key
+        or not api_secret
+        or cloud_name.strip() in ("", "your-cloudinary-cloud-name")
+        or api_key.strip() in ("", "your-cloudinary-api-key")
+        or api_secret.strip() in ("", "your-cloudinary-api-secret")
+    ):
         raise RuntimeError(
             "Cloudinary keys must be set and cannot be placeholders — "
             "copy .env.example to .env and add your actual Cloudinary "
             "configuration (cloud name, API key, and API secret)."
         )
-        
+
     cloudinary.config(
         cloud_name=cloud_name,
         api_key=api_key,
@@ -61,22 +65,37 @@ def _sanitize_public_id(filename: str) -> str:
     return f"{stem}_{uuid.uuid4().hex[:8]}"
 
 
-
 def _storage_backend() -> str:
-    return os.environ.get("MEDIMIND_DOCUMENT_STORAGE_BACKEND", os.environ.get("DOCUMENT_STORAGE_BACKEND", "cloudinary")).strip().lower()
+    return (
+        os.environ.get(
+            "MEDIMIND_DOCUMENT_STORAGE_BACKEND",
+            os.environ.get("DOCUMENT_STORAGE_BACKEND", "cloudinary"),
+        )
+        .strip()
+        .lower()
+    )
 
 
 def _supabase_storage_client():
     from supabase import create_client
+
     url = os.environ.get("SUPABASE_URL")
-    key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ.get("SUPABASE_SERVICE_KEY") or os.environ.get("SUPABASE_KEY")
+    key = (
+        os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+        or os.environ.get("SUPABASE_SERVICE_KEY")
+        or os.environ.get("SUPABASE_KEY")
+    )
     if not url or not key:
-        raise RuntimeError("SUPABASE_URL and a server-side Supabase key are required for Supabase document storage.")
+        raise RuntimeError(
+            "SUPABASE_URL and a server-side Supabase key are required for Supabase document storage."  # noqa: E501
+        )
     return create_client(url, key)
 
 
 def _supabase_bucket() -> str:
-    return os.environ.get("SUPABASE_DOCUMENT_BUCKET", os.environ.get("SUPABASE_STORAGE_BUCKET", "medical-documents"))
+    return os.environ.get(
+        "SUPABASE_DOCUMENT_BUCKET", os.environ.get("SUPABASE_STORAGE_BUCKET", "medical-documents")
+    )
 
 
 def _upload_to_supabase(user_id: str, file_path: str, original_filename: str) -> Dict[str, str]:
@@ -92,7 +111,9 @@ def _upload_to_supabase(user_id: str, file_path: str, original_filename: str) ->
             # will produce the actionable provider error if it is truly unusable.
             pass
     suffix = Path(original_filename).suffix.lower() or Path(file_path).suffix.lower()
-    safe_name = _sanitize_public_id(Path(original_filename).stem or Path(original_filename).name) + suffix
+    safe_name = (
+        _sanitize_public_id(Path(original_filename).stem or Path(original_filename).name) + suffix
+    )
     storage_path = f"{user_id}/{uuid.uuid4().hex}/{safe_name}"
     content_type = "application/pdf" if suffix == ".pdf" else "application/octet-stream"
     if suffix in {".jpg", ".jpeg"}:
@@ -114,6 +135,7 @@ def _upload_to_supabase(user_id: str, file_path: str, original_filename: str) ->
         "storage_bucket": bucket,
         "storage_path": storage_path,
     }
+
 
 def upload_patient_document(user_id: str, file_path: str, original_filename: str) -> Dict[str, str]:
     """Uploads one original document.
@@ -163,17 +185,26 @@ def delete_patient_document(public_id: str) -> None:
             outcomes.append(str((result or {}).get("result") or "").lower())
         except Exception as exc:
             errors.append(exc)
-    if "ok" in outcomes or (outcomes and all(value in {"not found", "not_found"} for value in outcomes)):
+    if "ok" in outcomes or (
+        outcomes and all(value in {"not found", "not_found"} for value in outcomes)
+    ):
         return
-    logger.error("storage: deletion failed for public id %s: outcomes=%s errors=%s", public_id, outcomes, errors)
+    logger.error(
+        "storage: deletion failed for public id %s: outcomes=%s errors=%s",
+        public_id,
+        outcomes,
+        errors,
+    )
     raise StorageDeletionError(
-        "The original file could not be removed from secure storage. Nothing was deleted; please try again."
+        "The original file could not be removed from secure storage. Nothing was deleted; please try again."  # noqa: E501
     )
 
 
 def delete_workspace_documents(public_ids: Any) -> None:
     """Remove every distinct original owned by a workspace."""
-    for public_id in sorted({str(value).strip() for value in public_ids if value and str(value).strip()}):
+    for public_id in sorted(
+        {str(value).strip() for value in public_ids if value and str(value).strip()}
+    ):
         delete_patient_document(public_id)
 
 
@@ -202,7 +233,6 @@ def download_document_bytes(doc: Dict[str, Any], timeout: int = 60) -> bytes:
         raise StorageDownloadError(
             "The original file could not be fetched right now. Please try again later."
         ) from exc
-
 
 
 def create_signed_storage_url(doc: Dict[str, Any], expires_in_seconds: int = 900) -> str:
@@ -237,7 +267,9 @@ def download_private_storage_bytes(doc: Dict[str, Any]) -> bytes:
         raise
     except Exception as exc:
         logger.warning("storage: private download failed for %s: %s", doc.get("storage_path"), exc)
-        raise StorageDownloadError("The original file could not be fetched right now. Please try again later.") from exc
+        raise StorageDownloadError(
+            "The original file could not be fetched right now. Please try again later."
+        ) from exc
 
 
 def download_original_bytes(doc: Dict[str, Any], timeout: int = 60) -> bytes:
@@ -256,6 +288,10 @@ def delete_uploaded_document(doc: Dict[str, Any]) -> None:
             client.storage.from_(bucket).remove([str(doc["storage_path"])])
             return
         except Exception as exc:
-            logger.error("storage: private deletion failed for %s: %s", doc.get("storage_path"), exc)
-            raise StorageDeletionError("The original file could not be removed from secure storage. Nothing was deleted; please try again.") from exc
+            logger.error(
+                "storage: private deletion failed for %s: %s", doc.get("storage_path"), exc
+            )
+            raise StorageDeletionError(
+                "The original file could not be removed from secure storage. Nothing was deleted; please try again."  # noqa: E501
+            ) from exc
     delete_patient_document(str(doc.get("cloudinary_public_id") or ""))

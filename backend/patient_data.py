@@ -24,10 +24,32 @@ from typing import Any, Dict, List, Optional
 _lock = threading.RLock()
 _store: Dict[str, List[Dict[str, Any]]] = {}
 
-_VITAL_NAMES = {"blood_pressure", "heart_rate", "pulse", "oxygen_saturation", "spo2",
-                "weight", "temperature", "respiratory_rate", "glucose"}
-_LAB_HINTS = {"creatinine", "egfr", "potassium", "sodium", "hemoglobin", "hba1c",
-              "cholesterol", "ldl", "hdl", "alt", "ast", "inr", "glucose"}
+_VITAL_NAMES = {
+    "blood_pressure",
+    "heart_rate",
+    "pulse",
+    "oxygen_saturation",
+    "spo2",
+    "weight",
+    "temperature",
+    "respiratory_rate",
+    "glucose",
+}
+_LAB_HINTS = {
+    "creatinine",
+    "egfr",
+    "potassium",
+    "sodium",
+    "hemoglobin",
+    "hba1c",
+    "cholesterol",
+    "ldl",
+    "hdl",
+    "alt",
+    "ast",
+    "inr",
+    "glucose",
+}
 
 
 def _now() -> str:
@@ -50,7 +72,12 @@ def record_measurement(
         "value": str(value),
         "unit": (unit or "").strip(),
         "measured_at": measured_at or datetime.now(timezone.utc).date().isoformat(),
-        "kind": kind or ("lab" if any(h in name_norm for h in _LAB_HINTS) and "pressure" not in name_norm else "vital"),
+        "kind": kind
+        or (
+            "lab"
+            if any(h in name_norm for h in _LAB_HINTS) and "pressure" not in name_norm
+            else "vital"
+        ),
         "note": (note or "").strip(),
         "source": "patient_reported",
         "recorded_at": _now(),
@@ -60,7 +87,9 @@ def record_measurement(
     return entry
 
 
-def record_symptom(user_id: str, symptom: str, *, duration: str = "", note: str = "") -> Dict[str, Any]:
+def record_symptom(
+    user_id: str, symptom: str, *, duration: str = "", note: str = ""
+) -> Dict[str, Any]:
     entry = {
         "name": "symptom",
         "value": symptom,
@@ -93,18 +122,29 @@ def augment_timeline(timeline: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     labs = list(out.get("lab_results_timeline") or [])
     for r in list_measurements(user_id):
         if r.get("kind") == "vital":
-            vitals.append({
-                "name": r["name"], "value": r["value"], "unit": r.get("unit") or "",
-                "measured_at": r.get("measured_at"),
-                "_source": {"file": "patient_reported", "method": "manual"},
-                "source_file": "patient_reported",
-            })
+            vitals.append(
+                {
+                    "name": r["name"],
+                    "value": r["value"],
+                    "unit": r.get("unit") or "",
+                    "measured_at": r.get("measured_at"),
+                    "_source": {"file": "patient_reported", "method": "manual"},
+                    "source_file": "patient_reported",
+                }
+            )
         elif r.get("kind") == "lab":
-            labs.append({
-                "test_name": r["name"], "value": r["value"], "unit": r.get("unit") or "",
-                "reference_range": None, "flag": "unknown", "confidence": 0.9,
-                "date": r.get("measured_at"), "source_file": "patient_reported",
-            })
+            labs.append(
+                {
+                    "test_name": r["name"],
+                    "value": r["value"],
+                    "unit": r.get("unit") or "",
+                    "reference_range": None,
+                    "flag": "unknown",
+                    "confidence": 0.9,
+                    "date": r.get("measured_at"),
+                    "source_file": "patient_reported",
+                }
+            )
     out["vital_signs_timeline"] = vitals
     out["lab_results_timeline"] = labs
     return out

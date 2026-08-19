@@ -7,6 +7,7 @@ Each duplicate wrote a redundant jobs-table row (an extra HTTP POST per
 file) and doubled the log noise. process_document() owns the first event;
 api.py must not pre-emit it.
 """
+
 import os
 import sys
 from unittest import mock
@@ -38,8 +39,10 @@ EXTRACTED_DOC = {
 }
 
 EMPTY_CROSS_CHECK = {
-    "potential_drug_interactions": [], "duplicate_prescriptions": [],
-    "conflicting_dosage_instructions": [], "allergy_conflicts": [],
+    "potential_drug_interactions": [],
+    "duplicate_prescriptions": [],
+    "conflicting_dosage_instructions": [],
+    "allergy_conflicts": [],
     "overall_recommendation": "Consult a professional.",
 }
 
@@ -63,17 +66,18 @@ def test_reading_step_emitted_once_per_file():
 
     app.dependency_overrides[api.get_current_user] = override_user
     patchers = [
-        mock.patch.object(api.storage, "upload_patient_document",
-                          return_value={"document_url": "https://cloud/x.jpg",
-                                        "cloudinary_public_id": "x"}),
+        mock.patch.object(
+            api.storage,
+            "upload_patient_document",
+            return_value={"document_url": "https://cloud/x.jpg", "cloudinary_public_id": "x"},
+        ),
         mock.patch.object(api.db, "load_documents", return_value=[]),
         mock.patch.object(api.db, "insert_documents"),
         mock.patch.object(api.db, "save_patient_snapshot"),
         mock.patch.object(api, "process_document", side_effect=fake_process_document),
         mock.patch.object(api, "cross_check_prescriptions", return_value=dict(EMPTY_CROSS_CHECK)),
         mock.patch.object(api, "index_patient_timeline", return_value=2),
-        mock.patch.object(api.jobs, "update_file_progress",
-                          side_effect=spy_update_file_progress),
+        mock.patch.object(api.jobs, "update_file_progress", side_effect=spy_update_file_progress),
     ]
     try:
         for p in patchers:

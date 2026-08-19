@@ -8,7 +8,14 @@ import { useI18n } from "../i18n/I18nContext";
 import { LanguageSelector } from "../components/LanguageSelector";
 
 export function SettingsPage() {
-  const { credentials, isConfigured, isInitializing, initError, createNewWorkspace, clearCredentials } = useAuth();
+  const {
+    credentials,
+    isConfigured,
+    isInitializing,
+    initError,
+    createNewWorkspace,
+    clearCredentials,
+  } = useAuth();
   const { t } = useI18n();
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
@@ -26,7 +33,8 @@ export function SettingsPage() {
     if (!isConfigured) return;
     let cancelled = false;
     setProfileLoading(true);
-    api.getProfile(credentials)
+    api
+      .getProfile(credentials)
       .then((value) => {
         if (!cancelled) setProfile(value);
       })
@@ -36,7 +44,9 @@ export function SettingsPage() {
       .finally(() => {
         if (!cancelled) setProfileLoading(false);
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [credentials, isConfigured]);
 
   useEffect(() => {
@@ -59,8 +69,9 @@ export function SettingsPage() {
       try {
         await api.getTimeline(credentials);
         setTestResult({ ok: true, message: t("settings.connected") });
-      } catch (err: any) {
-        if (err?.status === 404) {
+      } catch (err) {
+        const error = err as { status?: number; message?: string };
+        if (error?.status === 404) {
           setTestResult({
             ok: true,
             message: t("settings.connectedEmpty"),
@@ -70,8 +81,9 @@ export function SettingsPage() {
         }
       }
       void health;
-    } catch (err: any) {
-      setTestResult({ ok: false, message: err?.message || t("errors.server") });
+    } catch (err) {
+      const error = err as { status?: number; message?: string };
+      setTestResult({ ok: false, message: error?.message || t("errors.server") });
     } finally {
       setTesting(false);
     }
@@ -84,18 +96,33 @@ export function SettingsPage() {
         <p className="secondary-text mt-2 max-w-2xl">{t("settings.subtitle")}</p>
       </header>
 
-      <section aria-labelledby="language-settings-title" className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-        <h2 id="language-settings-title" className="card-title">{t("common.language")}</h2>
-        <div className="mt-3 max-w-sm"><LanguageSelector /></div>
+      <section
+        aria-labelledby="language-settings-title"
+        className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"
+      >
+        <h2 id="language-settings-title" className="card-title">
+          {t("common.language")}
+        </h2>
+        <div className="mt-3 max-w-sm">
+          <LanguageSelector />
+        </div>
       </section>
 
-      <section aria-labelledby="profile-settings-title" className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-        <h2 id="profile-settings-title" className="card-title">Patient profile</h2>
+      <section
+        aria-labelledby="profile-settings-title"
+        className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"
+      >
+        <h2 id="profile-settings-title" className="card-title">
+          Patient profile
+        </h2>
         <p className="secondary-text mt-1 max-w-2xl">
-          Optional identity and contact details. Profile identity is used only as an additional mismatch signal and never silently overrides uploaded records.
+          Optional identity and contact details. Profile identity is used only as an additional
+          mismatch signal and never silently overrides uploaded records.
         </p>
         {profileLoading ? (
-          <div className="mt-4 flex items-center gap-2 text-sm text-slate-600"><Spinner className="h-4 w-4" /> Loading profile…</div>
+          <div className="mt-4 flex items-center gap-2 text-sm text-slate-600">
+            <Spinner className="h-4 w-4" /> Loading profile…
+          </div>
         ) : (
           <form
             className="mt-4 grid gap-4 sm:grid-cols-2"
@@ -114,38 +141,82 @@ export function SettingsPage() {
               }
             }}
           >
-            <label className="text-sm font-medium text-slate-700">Legal name
-              <input className="input mt-1 w-full" value={profile.legal_name || ""} onChange={(e) => setProfile({ ...profile, legal_name: e.target.value })} autoComplete="name" />
+            <label className="text-sm font-medium text-slate-700">
+              Legal name
+              <input
+                className="input mt-1 w-full"
+                value={profile.legal_name || ""}
+                onChange={(e) => setProfile({ ...profile, legal_name: e.target.value })}
+                autoComplete="name"
+              />
             </label>
-            <label className="text-sm font-medium text-slate-700">Preferred name
-              <input className="input mt-1 w-full" value={profile.preferred_name || ""} onChange={(e) => setProfile({ ...profile, preferred_name: e.target.value })} />
+            <label className="text-sm font-medium text-slate-700">
+              Preferred name
+              <input
+                className="input mt-1 w-full"
+                value={profile.preferred_name || ""}
+                onChange={(e) => setProfile({ ...profile, preferred_name: e.target.value })}
+              />
             </label>
-            <label className="text-sm font-medium text-slate-700">Date of birth
-              <input type="date" className="input mt-1 w-full" value={profile.date_of_birth || ""} max={new Date().toISOString().slice(0, 10)} onChange={(e) => setProfile({ ...profile, date_of_birth: e.target.value })} />
+            <label className="text-sm font-medium text-slate-700">
+              Date of birth
+              <input
+                type="date"
+                className="input mt-1 w-full"
+                value={profile.date_of_birth || ""}
+                max={new Date().toISOString().slice(0, 10)}
+                onChange={(e) => setProfile({ ...profile, date_of_birth: e.target.value })}
+              />
             </label>
-            <label className="text-sm font-medium text-slate-700">Phone
-              <input type="tel" className="input mt-1 w-full" value={profile.phone || ""} onChange={(e) => setProfile({ ...profile, phone: e.target.value })} autoComplete="tel" />
+            <label className="text-sm font-medium text-slate-700">
+              Phone
+              <input
+                type="tel"
+                className="input mt-1 w-full"
+                value={profile.phone || ""}
+                onChange={(e) => setProfile({ ...profile, phone: e.target.value })}
+                autoComplete="tel"
+              />
             </label>
-            <label className="text-sm font-medium text-slate-700 sm:col-span-2">Emergency contact
-              <input className="input mt-1 w-full" value={profile.emergency_contact || ""} onChange={(e) => setProfile({ ...profile, emergency_contact: e.target.value })} placeholder="Name and contact details" />
+            <label className="text-sm font-medium text-slate-700 sm:col-span-2">
+              Emergency contact
+              <input
+                className="input mt-1 w-full"
+                value={profile.emergency_contact || ""}
+                onChange={(e) => setProfile({ ...profile, emergency_contact: e.target.value })}
+                placeholder="Name and contact details"
+              />
             </label>
             <div className="flex items-center gap-3 sm:col-span-2">
-              <button type="submit" disabled={profileSaving || !isConfigured} className="btn-primary">
+              <button
+                type="submit"
+                disabled={profileSaving || !isConfigured}
+                className="btn-primary"
+              >
                 {profileSaving ? "Saving…" : "Save patient profile"}
               </button>
-              {profileNotice && <p role="status" className="text-sm text-slate-600">{profileNotice}</p>}
+              {profileNotice && (
+                <p role="status" className="text-sm text-slate-600">
+                  {profileNotice}
+                </p>
+              )}
             </div>
           </form>
         )}
       </section>
 
-      <section aria-labelledby="workspace-settings-title" className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+      <section
+        aria-labelledby="workspace-settings-title"
+        className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"
+      >
         <div className="flex items-center gap-3">
           <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-brand-50 text-brand-600">
             <SettingsIcon className="h-6 w-6" />
           </div>
           <div>
-            <h2 id="workspace-settings-title" className="card-title">{t("settings.workspace")}</h2>
+            <h2 id="workspace-settings-title" className="card-title">
+              {t("settings.workspace")}
+            </h2>
             <p className="secondary-text">{t("settings.workspaceBody")}</p>
           </div>
         </div>
@@ -162,12 +233,11 @@ export function SettingsPage() {
           ) : isConfigured ? (
             <>
               <div className="rounded-xl bg-brand-50 p-5 ring-1 ring-brand-100">
-                <p className="text-base font-semibold text-brand-900">
-                  🔒 {t("settings.ready")}
-                </p>
+                <p className="text-base font-semibold text-brand-900">🔒 {t("settings.ready")}</p>
                 <p className="mt-1 text-sm leading-relaxed text-brand-800/80">
-                  MediMind works without an account. This browser stores the anonymous key used to access
-                  records held by MediMind's connected storage services. See About MediMind for the full data model.
+                  MediMind works without an account. This browser stores the anonymous key used to
+                  access records held by MediMind's connected storage services. See About MediMind
+                  for the full data model.
                 </p>
               </div>
 
@@ -178,12 +248,21 @@ export function SettingsPage() {
               )}
 
               <div className="flex flex-wrap gap-3">
-                <button onClick={() => void handleTest()} disabled={testing} className="btn-secondary">
-                  {testing && <Spinner className="h-4 w-4" />} {testing ? t("settings.checking") : t("settings.check")}
+                <button
+                  onClick={() => void handleTest()}
+                  disabled={testing}
+                  className="btn-secondary"
+                >
+                  {testing && <Spinner className="h-4 w-4" />}{" "}
+                  {testing ? t("settings.checking") : t("settings.check")}
                 </button>
                 <button
                   onClick={() => {
-                    if (window.confirm("Start a new workspace? This browser will lose access to the current workspace unless you saved its code. Stored data is not deleted.")) {
+                    if (
+                      window.confirm(
+                        "Start a new workspace? This browser will lose access to the current workspace unless you saved its code. Stored data is not deleted.",
+                      )
+                    ) {
                       void createNewWorkspace();
                     }
                   }}
@@ -202,9 +281,16 @@ export function SettingsPage() {
                 </button>
               </div>
 
-              <section aria-labelledby="delete-workspace-title" className="rounded-xl border border-red-200 bg-red-50/60 p-4">
-                <h3 id="delete-workspace-title" className="text-sm font-bold text-red-900">{t("settings.dangerZone")}</h3>
-                <p className="mt-1 text-sm leading-relaxed text-red-800">{t("settings.deleteDataBody")}</p>
+              <section
+                aria-labelledby="delete-workspace-title"
+                className="rounded-xl border border-red-200 bg-red-50/60 p-4"
+              >
+                <h3 id="delete-workspace-title" className="text-sm font-bold text-red-900">
+                  {t("settings.dangerZone")}
+                </h3>
+                <p className="mt-1 text-sm leading-relaxed text-red-800">
+                  {t("settings.deleteDataBody")}
+                </p>
                 <button
                   ref={deleteTriggerRef}
                   type="button"
@@ -246,7 +332,10 @@ export function SettingsPage() {
       </section>
 
       {deleteOpen && (
-        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/55 p-4" role="presentation">
+        <div
+          className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/55 p-4"
+          role="presentation"
+        >
           <div
             role="dialog"
             aria-modal="true"
@@ -254,9 +343,22 @@ export function SettingsPage() {
             aria-describedby="delete-workspace-dialog-description"
             className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl"
           >
-            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-red-50 text-xl font-bold text-red-700" aria-hidden="true">!</div>
-            <h2 id="delete-workspace-dialog-title" className="mt-4 text-lg font-bold text-slate-900">{t("settings.deleteConfirmTitle")}</h2>
-            <p id="delete-workspace-dialog-description" className="mt-2 text-sm leading-relaxed text-slate-600">
+            <div
+              className="flex h-11 w-11 items-center justify-center rounded-xl bg-red-50 text-xl font-bold text-red-700"
+              aria-hidden="true"
+            >
+              !
+            </div>
+            <h2
+              id="delete-workspace-dialog-title"
+              className="mt-4 text-lg font-bold text-slate-900"
+            >
+              {t("settings.deleteConfirmTitle")}
+            </h2>
+            <p
+              id="delete-workspace-dialog-description"
+              className="mt-2 text-sm leading-relaxed text-slate-600"
+            >
               {t("settings.deleteConfirmBody")}
             </p>
             <label className="mt-4 block text-sm font-semibold text-slate-800">
@@ -271,7 +373,11 @@ export function SettingsPage() {
                 aria-describedby="delete-workspace-dialog-description"
               />
             </label>
-            {deleteError && <p role="alert" className="mt-3 text-sm text-red-700">{deleteError}</p>}
+            {deleteError && (
+              <p role="alert" className="mt-3 text-sm text-red-700">
+                {deleteError}
+              </p>
+            )}
             <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
               <button
                 type="button"

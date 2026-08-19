@@ -9,7 +9,6 @@ translation.
 
 import os
 import sys
-from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -18,8 +17,9 @@ from care.models import Facility, GeoPoint  # noqa: E402
 from care.providers.base import ProviderUnavailableError  # noqa: E402
 from care.providers.osm_directory import OpenStreetMapProvider  # noqa: E402
 
-
-ORIGIN = GeoPoint(latitude=9.80138, longitude=80.1945344, label="Nelliyady", provider="openstreetmap")
+ORIGIN = GeoPoint(
+    latitude=9.80138, longitude=80.1945344, label="Nelliyady", provider="openstreetmap"
+)
 
 
 def _facility(name, lat, lon, kind="hospital", identifier=None):
@@ -65,9 +65,7 @@ def test_coordinate_search_skips_geocoding_and_orders_by_distance():
     fake = FakeOsm([far, near])
     provider = OpenStreetMapProvider(fake)
 
-    results = provider.search(
-        "Nelliyady", "hospital", 5, latitude=9.80138, longitude=80.1945344
-    )
+    results = provider.search("Nelliyady", "hospital", 5, latitude=9.80138, longitude=80.1945344)
 
     assert fake.geocode_calls == [], "coordinates must not trigger a geocode"
     assert [f.name for f in results] == ["Nelliady Base Hospital", "Point Pedro Base Hospital"]

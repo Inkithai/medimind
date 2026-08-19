@@ -23,7 +23,10 @@ export function DocumentsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
   const [selected, setSelected] = useState<Visit | null>(null);
-  const [documentAction, setDocumentAction] = useState<{ id: string; kind: "reprocess" | "delete" } | null>(null);
+  const [documentAction, setDocumentAction] = useState<{
+    id: string;
+    kind: "reprocess" | "delete";
+  } | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -88,17 +91,25 @@ export function DocumentsPage() {
             (timeline.trust_summary?.quarantined_facts || 0) > 0) && (
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
               <span>
-                <strong>{timeline.trust_summary?.unresolved_conflicts || 0}</strong> unresolved conflict(s); quarantined or non-authoritative evidence is excluded from answers and analytics.
+                <strong>{timeline.trust_summary?.unresolved_conflicts || 0}</strong> unresolved
+                conflict(s); quarantined or non-authoritative evidence is excluded from answers and
+                analytics.
               </span>
-              <Link to="/review" className="font-semibold text-amber-900 underline">Review conflicts</Link>
+              <Link to="/review" className="font-semibold text-amber-900 underline">
+                Review conflicts
+              </Link>
             </div>
           )}
           {documentVisits.length === 0 ? (
             <Card>
               <CardBody>
                 <div className="py-12 text-center">
-                  <h2 className="text-sm font-semibold text-slate-800">{t("documentsPage.emptyTitle")}</h2>
-                  <p className="mx-auto mt-1 max-w-md text-sm text-slate-600">{t("documentsPage.emptyBody")}</p>
+                  <h2 className="text-sm font-semibold text-slate-800">
+                    {t("documentsPage.emptyTitle")}
+                  </h2>
+                  <p className="mx-auto mt-1 max-w-md text-sm text-slate-600">
+                    {t("documentsPage.emptyBody")}
+                  </p>
                   <Link
                     to="/upload"
                     className="mt-4 inline-flex items-center gap-2 rounded-xl bg-brand-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-brand-700"
@@ -119,7 +130,10 @@ export function DocumentsPage() {
                 </div>
 
                 {actionError && (
-                  <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+                  <div
+                    role="alert"
+                    className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800"
+                  >
                     Document action failed: {actionError}
                   </div>
                 )}
@@ -146,54 +160,67 @@ export function DocumentsPage() {
                           aria-label={`${visit._source.file} — ${documentTypeLabel(visit.document_type)} — ${formatDate(visit.date)}`}
                           className="w-full px-4 py-3 text-left"
                         >
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="flex items-center gap-2">
-                            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-50 text-slate-500">
-                              <FileIcon className="h-5 w-5" />
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex items-center gap-2">
+                              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-50 text-slate-500">
+                                <FileIcon className="h-5 w-5" />
+                              </div>
+                              <div className="min-w-0">
+                                <p className="truncate text-sm font-semibold text-slate-900">
+                                  {visit._source.file}
+                                </p>
+                                <p className="flex items-center gap-1.5 text-xs text-slate-500">
+                                  <StatusBadge tone="brand">
+                                    {documentTypeLabel(visit.document_type)}
+                                  </StatusBadge>
+                                  {visit._trust?.quarantined && (
+                                    <StatusBadge tone="danger">quarantined</StatusBadge>
+                                  )}
+                                  {visit._corrections?.paths.length ? (
+                                    <StatusBadge tone="success">corrected</StatusBadge>
+                                  ) : null}
+                                  {formatDate(visit.date)} •{" "}
+                                  {visit._source.method === "text_layer"
+                                    ? "Digital PDF"
+                                    : "Scanned or photo"}
+                                </p>
+                              </div>
                             </div>
-                            <div className="min-w-0">
-                              <p className="truncate text-sm font-semibold text-slate-900">{visit._source.file}</p>
-                              <p className="flex items-center gap-1.5 text-xs text-slate-500">
-                                <StatusBadge tone="brand">{documentTypeLabel(visit.document_type)}</StatusBadge>
-                                {visit._trust?.quarantined && <StatusBadge tone="danger">quarantined</StatusBadge>}
-                                {visit._corrections?.paths.length ? <StatusBadge tone="success">corrected</StatusBadge> : null}
-                                {formatDate(visit.date)} • {visit._source.method === "text_layer" ? "Digital PDF" : "Scanned or photo"}
-                              </p>
-                            </div>
+                            {(visit.document_url || visit.storage_path) && (
+                              <span className="inline-flex items-center gap-1 text-xs text-brand-600">
+                                <LinkIcon className="h-3.5 w-3.5" /> source
+                              </span>
+                            )}
                           </div>
-                          {(visit.document_url || visit.storage_path) && (
-                            <span className="inline-flex items-center gap-1 text-xs text-brand-600">
-                              <LinkIcon className="h-3.5 w-3.5" /> source
-                            </span>
-                          )}
-                        </div>
 
-                        <div className="mt-2 flex flex-wrap gap-1.5">
-                          {visit.medications.length > 0 && (
-                            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">
-                              {visit.medications.length} meds
-                            </span>
-                          )}
-                          {visit.lab_results.length > 0 && (
-                            <span className="rounded-full bg-sky-50 px-2 py-0.5 text-[11px] text-sky-700 ring-1 ring-sky-200">
-                              {visit.lab_results.length} labs
-                            </span>
-                          )}
-                          {clinicalCount > 0 && (
-                            <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-[11px] text-indigo-700 ring-1 ring-indigo-200">
-                              {clinicalCount} clinical events
-                            </span>
-                          )}
-                          {visit.allergies_noted.length > 0 && (
-                            <span className="rounded-full bg-red-50 px-2 py-0.5 text-[11px] text-red-700 ring-1 ring-red-200">
-                              {visit.allergies_noted.join(", ")}
-                            </span>
-                          )}
-                        </div>
+                          <div className="mt-2 flex flex-wrap gap-1.5">
+                            {visit.medications.length > 0 && (
+                              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">
+                                {visit.medications.length} meds
+                              </span>
+                            )}
+                            {visit.lab_results.length > 0 && (
+                              <span className="rounded-full bg-sky-50 px-2 py-0.5 text-[11px] text-sky-700 ring-1 ring-sky-200">
+                                {visit.lab_results.length} labs
+                              </span>
+                            )}
+                            {clinicalCount > 0 && (
+                              <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-[11px] text-indigo-700 ring-1 ring-indigo-200">
+                                {clinicalCount} clinical events
+                              </span>
+                            )}
+                            {visit.allergies_noted.length > 0 && (
+                              <span className="rounded-full bg-red-50 px-2 py-0.5 text-[11px] text-red-700 ring-1 ring-red-200">
+                                {visit.allergies_noted.join(", ")}
+                              </span>
+                            )}
+                          </div>
 
-                        {visit.provider_or_doctor && (
-                          <p className="mt-1 truncate text-xs text-slate-400">{visit.provider_or_doctor}</p>
-                        )}
+                          {visit.provider_or_doctor && (
+                            <p className="mt-1 truncate text-xs text-slate-400">
+                              {visit.provider_or_doctor}
+                            </p>
+                          )}
                         </button>
                         <div className="flex flex-wrap items-center gap-2 border-t border-slate-100 bg-slate-50/70 px-3 py-2">
                           <button
@@ -220,18 +247,27 @@ export function DocumentsPage() {
                             }}
                             className="rounded-md px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-white disabled:opacity-50"
                           >
-                            {documentAction?.id === visit._document_id && documentAction.kind === "reprocess" ? "Reprocessing…" : "Reprocess"}
+                            {documentAction?.id === visit._document_id &&
+                            documentAction.kind === "reprocess"
+                              ? "Reprocessing…"
+                              : "Reprocess"}
                           </button>
                           <button
                             type="button"
                             disabled={documentAction !== null}
                             onClick={async () => {
-                              if (!window.confirm(`Permanently delete “${visit._source.file}”? Its facts will be removed and all safety checks rebuilt.`)) return;
+                              if (
+                                !window.confirm(
+                                  `Permanently delete “${visit._source.file}”? Its facts will be removed and all safety checks rebuilt.`,
+                                )
+                              )
+                                return;
                               setDocumentAction({ id: visit._document_id, kind: "delete" });
                               setActionError(null);
                               try {
                                 await api.deleteDocument(credentials, visit._document_id);
-                                if (selected?._document_id === visit._document_id) setSelected(null);
+                                if (selected?._document_id === visit._document_id)
+                                  setSelected(null);
                                 await load();
                               } catch (err) {
                                 setActionError(err instanceof Error ? err.message : String(err));
@@ -241,7 +277,10 @@ export function DocumentsPage() {
                             }}
                             className="ml-auto rounded-md px-2.5 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50"
                           >
-                            {documentAction?.id === visit._document_id && documentAction.kind === "delete" ? "Deleting…" : "Delete"}
+                            {documentAction?.id === visit._document_id &&
+                            documentAction.kind === "delete"
+                              ? "Deleting…"
+                              : "Delete"}
                           </button>
                         </div>
                       </div>
@@ -267,7 +306,10 @@ export function DocumentsPage() {
                     }}
                     onOpenOriginal={async () => {
                       if (selected.document_url) return selected.document_url;
-                      const signed = await api.getDocumentSignedUrl(credentials, selected._document_id);
+                      const signed = await api.getDocumentSignedUrl(
+                        credentials,
+                        selected._document_id,
+                      );
                       return signed.url;
                     }}
                     onProcessText={async () => {
@@ -279,8 +321,12 @@ export function DocumentsPage() {
                 ) : (
                   <Card>
                     <CardBody className="py-16 text-center">
-                      <h2 className="text-base font-medium text-slate-800">{t("documentsPage.select")}</h2>
-                      <p className="secondary-text mx-auto mt-1 max-w-sm">{t("documentsPage.selectBody")}</p>
+                      <h2 className="text-base font-medium text-slate-800">
+                        {t("documentsPage.select")}
+                      </h2>
+                      <p className="secondary-text mx-auto mt-1 max-w-sm">
+                        {t("documentsPage.selectBody")}
+                      </p>
                     </CardBody>
                   </Card>
                 )}

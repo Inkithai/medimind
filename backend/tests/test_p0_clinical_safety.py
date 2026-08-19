@@ -6,23 +6,30 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from clinical_lab_values import latest_lab_value, is_high, is_low  # noqa: E402
+import clinician_feedback as cf  # noqa: E402
+from clinical_lab_values import is_high, latest_lab_value  # noqa: E402
+from condition_contraindications import check_condition_contraindications  # noqa: E402
 from drug_lab_interactions import check_drug_lab_findings, merge_drug_lab_findings  # noqa: E402
 from renal_hepatic_dosing import check_renal_hepatic_findings  # noqa: E402
-from condition_contraindications import check_condition_contraindications  # noqa: E402
-import clinician_feedback as cf  # noqa: E402
-
 
 # ---- helpers --------------------------------------------------------------- #
+
 
 def _med(name, ingredients, date="2024-01-01", source="rx.pdf"):
     return {"name": name, "ingredients": ingredients, "date": date, "source_file": source}
 
 
 def _lab(test_name, value, unit="mmol/L", flag="normal", date="2024-02-01"):
-    return {"test_name": test_name, "value": value, "unit": unit,
-            "reference_range": None, "flag": flag, "confidence": 0.95,
-            "date": date, "source_file": "lab.pdf"}
+    return {
+        "test_name": test_name,
+        "value": value,
+        "unit": unit,
+        "reference_range": None,
+        "flag": flag,
+        "confidence": 0.95,
+        "date": date,
+        "source_file": "lab.pdf",
+    }
 
 
 def _timeline(meds=None, labs=None, diagnoses=None):
@@ -34,18 +41,22 @@ def _timeline(meds=None, labs=None, diagnoses=None):
 
 # ---- clinical_lab_values --------------------------------------------------- #
 
+
 def test_latest_lab_value_picks_most_recent():
-    tl = _timeline(labs=[
-        _lab("Potassium", "4.2", date="2024-01-01"),
-        _lab("Potassium", "5.8", date="2024-03-01"),
-        _lab("Potassium", "4.0", date="2024-02-01"),
-    ])
+    tl = _timeline(
+        labs=[
+            _lab("Potassium", "4.2", date="2024-01-01"),
+            _lab("Potassium", "5.8", date="2024-03-01"),
+            _lab("Potassium", "4.0", date="2024-02-01"),
+        ]
+    )
     lv = latest_lab_value(tl, "potassium")
     assert lv is not None and lv.value == 5.8
 
 
 def test_is_high_requires_known_unit_or_flag():
     from clinical_lab_values import LabValue
+
     assert is_high(LabValue("k", 5.9, "mmol/L", "high"), 5.5, ("mmol",))
     # wrong unit -> not high even if numerically over
     assert not is_high(LabValue("k", 5.9, "mg/dL", None), 5.5, ("mmol",))
@@ -56,6 +67,7 @@ def test_is_high_requires_known_unit_or_flag():
 
 
 # ---- drug-lab -------------------------------------------------------------- #
+
 
 def test_flags_ace_inhibitor_plus_high_potassium():
     tl = _timeline(
@@ -108,16 +120,19 @@ def test_no_finding_without_relevant_drug():
 
 def test_merge_dedups():
     report = {}
-    f = check_drug_lab_findings(_timeline(
-        meds=[_med("Lisinopril", ["lisinopril"])],
-        labs=[_lab("Potassium", "5.8", "mmol/L", "high")],
-    ))
+    f = check_drug_lab_findings(
+        _timeline(
+            meds=[_med("Lisinopril", ["lisinopril"])],
+            labs=[_lab("Potassium", "5.8", "mmol/L", "high")],
+        )
+    )
     merge_drug_lab_findings(report, f)
     merge_drug_lab_findings(report, f)  # identical -> deduped
     assert len(report["drug_lab_findings"]) == 1
 
 
 # ---- renal/hepatic --------------------------------------------------------- #
+
 
 def test_metformin_plus_low_egfr():
     tl = _timeline(
@@ -149,8 +164,7 @@ def test_high_creatinine_umol_triggers():
         labs=[_lab("Creatinine", "160", "µmol/L", "high")],
     )
     findings = check_renal_hepatic_findings(tl)
-    assert any(f["organ"] == "renal" and "Lithium" in f["medications_involved"]
-               for f in findings)
+    assert any(f["organ"] == "renal" and "Lithium" in f["medications_involved"] for f in findings)
 
 
 def test_hepatic_statin_plus_high_alt():
@@ -172,6 +186,7 @@ def test_no_renal_finding_when_function_normal():
 
 
 # ---- condition contraindications ------------------------------------------- #
+
 
 def test_nsaid_plus_peptic_ulcer():
     tl = _timeline(
@@ -218,15 +233,31 @@ def test_no_finding_without_medications():
 
 # ---- clinician feedback ---------------------------------------------------- #
 
+
 def test_feedback_record_and_metrics():
     cf.reset("u1")
-    finding = {"finding_kind": "drug_lab", "rule": "x + high_potassium",
-               "medications_involved": ["Lisinopril"]}
+    finding = {
+        "finding_kind": "drug_lab",
+        "rule": "x + high_potassium",
+        "medications_involved": ["Lisinopril"],
+    }
     fkey = cf.finding_key(finding)
-    cf.record_feedback("u1", fkey, "confirmed", finding_kind="drug_lab",
-                       rule="x + high_potassium", reviewer="pharmacist")
-    cf.record_feedback("u1", fkey, "overridden", reason="already reviewed",
-                       finding_kind="drug_lab", rule="x + high_potassium")
+    cf.record_feedback(
+        "u1",
+        fkey,
+        "confirmed",
+        finding_kind="drug_lab",
+        rule="x + high_potassium",
+        reviewer="pharmacist",
+    )
+    cf.record_feedback(
+        "u1",
+        fkey,
+        "overridden",
+        reason="already reviewed",
+        finding_kind="drug_lab",
+        rule="x + high_potassium",
+    )
     metrics = cf.get_feedback_metrics("u1")
     assert metrics["total"] == 2
     assert metrics["by_verdict"]["overridden"] == 1

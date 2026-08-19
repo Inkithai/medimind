@@ -55,7 +55,7 @@ const tests: Array<[string, () => void]> = [
       const target = visit("Arun (2).jpg");
       const found = findVisitForSource(
         timeline([visit("Arun (1).jpg"), target, visit("Arun (4).jpg")]),
-        source({ source_file: "Arun (2).jpg" })
+        source({ source_file: "Arun (2).jpg" }),
       );
       assert.equal(found, target);
     },
@@ -65,7 +65,7 @@ const tests: Array<[string, () => void]> = [
     () => {
       const found = findVisitForSource(
         timeline([visit("Arun (4).jpg")]),
-        source({ source_file: "Arun (2).jpg" })
+        source({ source_file: "Arun (2).jpg" }),
       );
       assert.equal(found, null, "a near-miss filename must not open another record");
     },
@@ -76,20 +76,24 @@ const tests: Array<[string, () => void]> = [
       assert.equal(
         findVisitForSource(
           timeline([visit("Arun (2).jpg extra.pdf")]),
-          source({ source_file: "Arun (2).jpg" })
+          source({ source_file: "Arun (2).jpg" }),
         ),
-        null
+        null,
       );
     },
   ],
   [
     "page disambiguates a multi-page document",
     () => {
-      const page1 = visit("scan.pdf", { _source: { file: "scan.pdf", method: "text_layer", page: 1 } });
-      const page2 = visit("scan.pdf", { _source: { file: "scan.pdf", method: "text_layer", page: 2 } });
+      const page1 = visit("scan.pdf", {
+        _source: { file: "scan.pdf", method: "text_layer", page: 1 },
+      });
+      const page2 = visit("scan.pdf", {
+        _source: { file: "scan.pdf", method: "text_layer", page: 2 },
+      });
       const found = findVisitForSource(
         timeline([page1, page2]),
-        source({ source_file: "scan.pdf", page: 2 })
+        source({ source_file: "scan.pdf", page: 2 }),
       );
       assert.equal(found, page2);
     },
@@ -101,7 +105,7 @@ const tests: Array<[string, () => void]> = [
       const september = visit("repeat.jpg", { date: "2026-09-02" });
       const found = findVisitForSource(
         timeline([august, september]),
-        source({ source_file: "repeat.jpg", date: "2026-09-02" })
+        source({ source_file: "repeat.jpg", date: "2026-09-02" }),
       );
       assert.equal(found, september);
     },
@@ -109,11 +113,15 @@ const tests: Array<[string, () => void]> = [
   [
     "falls back to the first matching page rather than nothing",
     () => {
-      const first = visit("scan.pdf", { _source: { file: "scan.pdf", method: "text_layer", page: 1 } });
-      const second = visit("scan.pdf", { _source: { file: "scan.pdf", method: "text_layer", page: 2 } });
+      const first = visit("scan.pdf", {
+        _source: { file: "scan.pdf", method: "text_layer", page: 1 },
+      });
+      const second = visit("scan.pdf", {
+        _source: { file: "scan.pdf", method: "text_layer", page: 2 },
+      });
       const found = findVisitForSource(
         timeline([first, second]),
-        source({ source_file: "scan.pdf", page: 99 })
+        source({ source_file: "scan.pdf", page: 99 }),
       );
       assert.equal(found, first);
     },
@@ -124,7 +132,7 @@ const tests: Array<[string, () => void]> = [
       const target = visit("  Arun (2).jpg  ");
       assert.equal(
         findVisitForSource(timeline([target]), source({ source_file: " Arun (2).jpg " })),
-        target
+        target,
       );
     },
   ],
@@ -135,7 +143,10 @@ const tests: Array<[string, () => void]> = [
       assert.equal(findVisitForSource(undefined, source({ source_file: "a.jpg" })), null);
       assert.equal(findVisitForSource(timeline([]), source({ source_file: "a.jpg" })), null);
       assert.equal(findVisitForSource(timeline([visit("a.jpg")]), null), null);
-      assert.equal(findVisitForSource(timeline([visit("a.jpg")]), source({ source_file: "  " })), null);
+      assert.equal(
+        findVisitForSource(timeline([visit("a.jpg")]), source({ source_file: "  " })),
+        null,
+      );
     },
   ],
 ];

@@ -1,12 +1,7 @@
 import { Link } from "react-router-dom";
 import { useI18n } from "../i18n/I18nContext";
 import type { Timeline, Visit } from "../types/api";
-import {
-  classNames,
-  documentTypeLabel,
-  formatConfidence,
-  formatDate,
-} from "../utils/format";
+import { classNames, documentTypeLabel, formatConfidence, formatDate } from "../utils/format";
 import { Card, CardBody, CardHeader } from "./Card";
 import { EmptyState } from "./EmptyState";
 import { BeakerIcon, FileIcon, LinkIcon, PillIcon } from "./icons";
@@ -47,7 +42,11 @@ export function TimelineView({ timeline }: { timeline: Timeline }) {
 
         {!hasVisits ? (
           <EmptyState
-            title={timeline.trust_summary?.unresolved_conflicts ? "Timeline withheld pending source review" : t("history.empty")}
+            title={
+              timeline.trust_summary?.unresolved_conflicts
+                ? "Timeline withheld pending source review"
+                : t("history.empty")
+            }
             description={
               timeline.trust_summary?.unresolved_conflicts
                 ? "Uploaded sources remain available in Medical Records, but conflicting facts are excluded until you confirm the authoritative source."
@@ -74,7 +73,7 @@ function TimelineVisit({ visit }: { visit: Visit }) {
       <span
         className={classNames(
           "absolute -left-[31px] top-1 flex h-5 w-5 items-center justify-center rounded-full ring-4 ring-white",
-          lowConfidence ? "bg-amber-500" : "bg-brand-500"
+          lowConfidence ? "bg-amber-500" : "bg-brand-500",
         )}
       >
         <span className="h-2 w-2 rounded-full bg-white" />
@@ -84,9 +83,7 @@ function TimelineVisit({ visit }: { visit: Visit }) {
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-4 py-3">
           <div className="flex items-center gap-2">
             <StatusBadge tone="brand">{documentTypeLabel(visit.document_type)}</StatusBadge>
-            <span className="text-sm font-semibold text-slate-800">
-              {formatDate(visit.date)}
-            </span>
+            <span className="text-sm font-semibold text-slate-800">{formatDate(visit.date)}</span>
             {visit.provider_or_doctor && (
               <span className="text-sm text-slate-500">· {visit.provider_or_doctor}</span>
             )}
@@ -95,7 +92,7 @@ function TimelineVisit({ visit }: { visit: Visit }) {
             <span
               className={classNames(
                 "text-xs font-medium",
-                lowConfidence ? "text-amber-600" : "text-slate-400"
+                lowConfidence ? "text-amber-600" : "text-slate-400",
               )}
             >
               confidence {formatConfidence(visit.overall_confidence)}
@@ -120,7 +117,8 @@ function TimelineVisit({ visit }: { visit: Visit }) {
             </p>
           )}
 
-          {(visit.overall_confidence < 0.6 || visit.illegible_or_low_confidence_fields.length > 0) && (
+          {(visit.overall_confidence < 0.6 ||
+            visit.illegible_or_low_confidence_fields.length > 0) && (
             <div className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800">
               <p>
                 <span className="font-semibold">{t("common.lowConfidenceExtraction")}:</span>{" "}
@@ -128,7 +126,10 @@ function TimelineVisit({ visit }: { visit: Visit }) {
                   ? visit.illegible_or_low_confidence_fields.join("; ")
                   : "The document could not be read with enough certainty."}
               </p>
-              <Link to="/find-care?from=low-confidence-document" className="mt-1 inline-flex font-semibold text-brand-700 hover:underline">
+              <Link
+                to="/find-care?from=low-confidence-document"
+                className="mt-1 inline-flex font-semibold text-brand-700 hover:underline"
+              >
                 Find a professional to verify this →
               </Link>
             </div>
@@ -150,15 +151,19 @@ function TimelineVisit({ visit }: { visit: Visit }) {
                     <div className="flex items-start justify-between gap-2">
                       <p className="font-medium text-slate-800">{med.name}</p>
                       <StatusBadge
-                        tone={med.confidence >= 0.85 ? "success" : med.confidence >= 0.6 ? "warning" : "danger"}
+                        tone={
+                          med.confidence >= 0.85
+                            ? "success"
+                            : med.confidence >= 0.6
+                              ? "warning"
+                              : "danger"
+                        }
                       >
                         {formatConfidence(med.confidence)}
                       </StatusBadge>
                     </div>
                     {med.ingredients.length > 0 && (
-                      <p className="mt-0.5 text-xs text-slate-500">
-                        {med.ingredients.join(", ")}
-                      </p>
+                      <p className="mt-0.5 text-xs text-slate-500">{med.ingredients.join(", ")}</p>
                     )}
                     <p className="mt-1 text-xs text-slate-600">
                       {[med.dosage, med.frequency, med.duration].filter(Boolean).join(" · ") || "—"}
@@ -176,38 +181,44 @@ function TimelineVisit({ visit }: { visit: Visit }) {
               </SectionLabel>
               <div className="mt-2 overflow-x-auto">
                 <table className="min-w-full text-sm">
-                  <caption className="sr-only">{t("common.labResults")} — {visit._source.file}</caption>
+                  <caption className="sr-only">
+                    {t("common.labResults")} — {visit._source.file}
+                  </caption>
                   <thead>
                     <tr className="text-left text-xs uppercase tracking-wide text-slate-400">
-                      <th scope="col" className="py-1.5 pr-3 font-medium">{t("common.test")}</th>
-                      <th scope="col" className="py-1.5 pr-3 font-medium">{t("common.value")}</th>
-                      <th scope="col" className="py-1.5 pr-3 font-medium">{t("common.range")}</th>
-                      <th scope="col" className="py-1.5 pr-3 font-medium">{t("common.flag")}</th>
+                      <th scope="col" className="py-1.5 pr-3 font-medium">
+                        {t("common.test")}
+                      </th>
+                      <th scope="col" className="py-1.5 pr-3 font-medium">
+                        {t("common.value")}
+                      </th>
+                      <th scope="col" className="py-1.5 pr-3 font-medium">
+                        {t("common.range")}
+                      </th>
+                      <th scope="col" className="py-1.5 pr-3 font-medium">
+                        {t("common.flag")}
+                      </th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {visit.lab_results.map((lab, i) => (
                       <tr key={i}>
-                        <td className="py-1.5 pr-3 font-medium text-slate-700">
-                          {lab.test_name}
-                        </td>
+                        <td className="py-1.5 pr-3 font-medium text-slate-700">{lab.test_name}</td>
                         <td className="py-1.5 pr-3 text-slate-600">
                           {lab.value}
                           {lab.unit ? ` ${lab.unit}` : ""}
                         </td>
-                        <td className="py-1.5 pr-3 text-slate-500">
-                          {lab.reference_range || "—"}
-                        </td>
+                        <td className="py-1.5 pr-3 text-slate-500">{lab.reference_range || "—"}</td>
                         <td className="py-1.5 pr-3">
                           <StatusBadge
                             tone={
                               lab.flag === "normal"
                                 ? "success"
                                 : lab.flag === "high"
-                                ? "danger"
-                                : lab.flag === "low"
-                                ? "info"
-                                : "neutral"
+                                  ? "danger"
+                                  : lab.flag === "low"
+                                    ? "info"
+                                    : "neutral"
                             }
                           >
                             {lab.flag}
@@ -259,7 +270,8 @@ function TimelineVisit({ visit }: { visit: Visit }) {
 
           <p className="flex items-center gap-1.5 text-xs text-slate-400">
             <FileIcon className="h-3.5 w-3.5" />
-            {visit._source.file} · {visit._source.method === "text_layer" ? "Digital PDF" : "Scanned or photo"}
+            {visit._source.file} ·{" "}
+            {visit._source.method === "text_layer" ? "Digital PDF" : "Scanned or photo"}
             {visit._source.page ? ` · page ${visit._source.page}` : ""}
           </p>
         </div>
@@ -274,42 +286,72 @@ function LongitudinalFacts({ visit }: { visit: Visit }) {
   const procedures = visit.procedures || [];
   const vitals = visit.vital_signs || [];
   const imaging = visit.imaging_results || [];
-  if (!diagnoses.length && !symptoms.length && !procedures.length && !vitals.length && !imaging.length) return null;
+  if (
+    !diagnoses.length &&
+    !symptoms.length &&
+    !procedures.length &&
+    !vitals.length &&
+    !imaging.length
+  )
+    return null;
 
   return (
     <div className="space-y-3">
       {diagnoses.length > 0 && (
         <TimelineFactGroup title="Documented diagnoses">
           {diagnoses.map((item, index) => (
-            <TimelineFact key={index} title={item.name} meta={[item.status, item.code, item.onset_date]} />
+            <TimelineFact
+              key={index}
+              title={item.name}
+              meta={[item.status, item.code, item.onset_date]}
+            />
           ))}
         </TimelineFactGroup>
       )}
       {symptoms.length > 0 && (
         <TimelineFactGroup title="Symptoms & signs">
           {symptoms.map((item, index) => (
-            <TimelineFact key={index} title={item.name} meta={[item.severity, item.status, item.onset_date]} />
+            <TimelineFact
+              key={index}
+              title={item.name}
+              meta={[item.severity, item.status, item.onset_date]}
+            />
           ))}
         </TimelineFactGroup>
       )}
       {procedures.length > 0 && (
         <TimelineFactGroup title="Procedures">
           {procedures.map((item, index) => (
-            <TimelineFact key={index} title={item.name} meta={[item.status, item.body_site, item.procedure_date]} detail={item.outcome} />
+            <TimelineFact
+              key={index}
+              title={item.name}
+              meta={[item.status, item.body_site, item.procedure_date]}
+              detail={item.outcome}
+            />
           ))}
         </TimelineFactGroup>
       )}
       {vitals.length > 0 && (
         <TimelineFactGroup title="Vital signs">
           {vitals.map((item, index) => (
-            <TimelineFact key={index} title={item.name} value={`${item.value}${item.unit ? ` ${item.unit}` : ""}`} meta={[item.measured_at]} />
+            <TimelineFact
+              key={index}
+              title={item.name}
+              value={`${item.value}${item.unit ? ` ${item.unit}` : ""}`}
+              meta={[item.measured_at]}
+            />
           ))}
         </TimelineFactGroup>
       )}
       {imaging.length > 0 && (
         <TimelineFactGroup title="Imaging">
           {imaging.map((item, index) => (
-            <TimelineFact key={index} title={item.study_type} meta={[item.body_site, item.study_date]} detail={item.impression || item.findings} />
+            <TimelineFact
+              key={index}
+              title={item.study_type}
+              meta={[item.body_site, item.study_date]}
+              detail={item.impression || item.findings}
+            />
           ))}
         </TimelineFactGroup>
       )}
@@ -344,19 +386,15 @@ function TimelineFact({
         <p className="font-medium text-slate-800">{title}</p>
         {value && <span className="font-semibold text-brand-700">{value}</span>}
       </div>
-      {visibleMeta.length > 0 && <p className="mt-0.5 text-xs capitalize text-slate-500">{visibleMeta.join(" · ")}</p>}
+      {visibleMeta.length > 0 && (
+        <p className="mt-0.5 text-xs capitalize text-slate-500">{visibleMeta.join(" · ")}</p>
+      )}
       {detail && <p className="mt-1 text-xs text-slate-600">{detail}</p>}
     </div>
   );
 }
 
-function SectionLabel({
-  children,
-  icon,
-}: {
-  children: React.ReactNode;
-  icon?: React.ReactNode;
-}) {
+function SectionLabel({ children, icon }: { children: React.ReactNode; icon?: React.ReactNode }) {
   return (
     <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
       {icon}
@@ -367,7 +405,13 @@ function SectionLabel({
 
 function TimelineIconSmall() {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="h-5 w-5">
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      className="h-5 w-5"
+    >
       <circle cx="12" cy="5" r="2" />
       <circle cx="12" cy="19" r="2" />
       <circle cx="5" cy="12" r="2" />

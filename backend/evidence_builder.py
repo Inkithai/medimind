@@ -12,7 +12,6 @@ import re
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 from urllib.parse import urlparse
 
-
 EvidenceItem = Dict[str, Any]
 
 
@@ -61,7 +60,9 @@ def _item(kind: str, label: str, **fields: Any) -> Optional[EvidenceItem]:
     return item
 
 
-def _source_visits(timeline: Dict[str, Any], source_file: Any, date: Any = None) -> List[Dict[str, Any]]:
+def _source_visits(
+    timeline: Dict[str, Any], source_file: Any, date: Any = None
+) -> List[Dict[str, Any]]:
     filename = _text(source_file)
     if not filename:
         return []
@@ -75,7 +76,9 @@ def _source_visits(timeline: Dict[str, Any], source_file: Any, date: Any = None)
     return dated or candidates
 
 
-def _document_fields(timeline: Dict[str, Any], source_file: Any, date: Any = None) -> Dict[str, Any]:
+def _document_fields(
+    timeline: Dict[str, Any], source_file: Any, date: Any = None
+) -> Dict[str, Any]:
     """Return existing source metadata for a timeline file without guessing."""
     fields: Dict[str, Any] = {}
     filename = _text(source_file)
@@ -108,12 +111,16 @@ def _medication_matches(medication: Dict[str, Any], requested_name: Any) -> bool
     return target in names
 
 
-def _medication_item(timeline: Dict[str, Any], medication: Dict[str, Any]) -> Optional[EvidenceItem]:
+def _medication_item(
+    timeline: Dict[str, Any], medication: Dict[str, Any]
+) -> Optional[EvidenceItem]:
     name = _text(medication.get("name"))
     source = _document_fields(timeline, medication.get("source_file"), medication.get("date"))
     confidence = _number(medication.get("confidence"))
     details = " · ".join(
-        part for part in [_text(medication.get("dosage")), _text(medication.get("frequency"))] if part
+        part
+        for part in [_text(medication.get("dosage")), _text(medication.get("frequency"))]
+        if part
     )
     return _item(
         "medication",
@@ -158,8 +165,15 @@ def _allergy_item(timeline: Dict[str, Any], allergy: Any) -> Optional[EvidenceIt
         if not isinstance(visit, dict):
             continue
         if allergy_text in {_text(value) for value in (visit.get("allergies_noted") or [])}:
-            source = _document_fields(timeline, (visit.get("_source") or {}).get("file"), visit.get("date"))
-            return _item("allergy", allergy_text, **source, confidence=_number(visit.get("overall_confidence")))
+            source = _document_fields(
+                timeline, (visit.get("_source") or {}).get("file"), visit.get("date")
+            )
+            return _item(
+                "allergy",
+                allergy_text,
+                **source,
+                confidence=_number(visit.get("overall_confidence")),
+            )
     # The allergy exists in known_allergies but no visit source is available.
     # Keep the real value, but do not invent a filename or link.
     return _item("allergy", allergy_text)
@@ -300,7 +314,9 @@ def _trend_evidence(
         for lab in labs:
             if not isinstance(lab, dict) or _normalise(lab.get("test_name")) != test_name:
                 continue
-            if _text(point.get("source_file")) and _text(lab.get("source_file")) != _text(point.get("source_file")):
+            if _text(point.get("source_file")) and _text(lab.get("source_file")) != _text(
+                point.get("source_file")
+            ):
                 continue
             if _text(point.get("date")) and _text(lab.get("date")) != _text(point.get("date")):
                 continue
@@ -336,15 +352,21 @@ def _conflict_evidence(
             continue
         matched = False
         for medication in timeline.get("medications_timeline") or []:
-            if not isinstance(medication, dict) or not _medication_matches(medication, medication_name):
+            if not isinstance(medication, dict) or not _medication_matches(
+                medication, medication_name
+            ):
                 continue
-            if _text(instruction.get("source_file")) and _text(medication.get("source_file")) != _text(instruction.get("source_file")):
+            if _text(instruction.get("source_file")) and _text(
+                medication.get("source_file")
+            ) != _text(instruction.get("source_file")):
                 continue
             items.append(_medication_item(timeline, medication))
             matched = True
         if not matched:
             details = " · ".join(
-                part for part in [_text(instruction.get("dosage")), _text(instruction.get("frequency"))] if part
+                part
+                for part in [_text(instruction.get("dosage")), _text(instruction.get("frequency"))]
+                if part
             )
             items.append(
                 _cross_check_item(
@@ -356,7 +378,11 @@ def _conflict_evidence(
                     details=details or issue.get("explanation"),
                 )
             )
-    items.append(_cross_check_item("Potential dosage or frequency conflict detected", issue, timeline=timeline))
+    items.append(
+        _cross_check_item(
+            "Potential dosage or frequency conflict detected", issue, timeline=timeline
+        )
+    )
     return _deduplicate(items)
 
 
@@ -395,7 +421,9 @@ def _duplicate_evidence(
                     details=occurrence.get("dosage") or issue.get("explanation"),
                 )
             )
-    items.append(_cross_check_item("Potential duplicate prescription detected", issue, timeline=timeline))
+    items.append(
+        _cross_check_item("Potential duplicate prescription detected", issue, timeline=timeline)
+    )
     return _deduplicate(items)
 
 
@@ -445,27 +473,27 @@ def build_care_route_explanation(flag: Dict[str, Any], evidence: List[EvidenceIt
         return (
             "MediMind identified a potential medication-safety issue"
             f"{records}. Because this concerns medication safety and prescription instructions, "
-            "a pharmacist or prescribing clinician is suggested as the first professional to review it."
+            "a pharmacist or prescribing clinician is suggested as the first professional to review it."  # noqa: E501
         )
     if issue_type == "allergy_conflict":
         return (
             "MediMind identified a potential medication and recorded-allergy conflict. "
-            "A pharmacist or prescribing clinician is suggested to review the record and original documents."
+            "A pharmacist or prescribing clinician is suggested to review the record and original documents."  # noqa: E501
         )
     if issue_type == "low_confidence_medication":
         return (
             "MediMind could not confidently interpret part of a medication record. "
-            "A pharmacist or prescribing clinician can help verify the original prescription and instructions."
+            "A pharmacist or prescribing clinician can help verify the original prescription and instructions."  # noqa: E501
         )
     if issue_type == "low_confidence_dosage":
         return (
             "MediMind found a low-confidence dosage or frequency conflict signal. "
-            "A pharmacist or prescribing clinician can review the original prescription instructions."
+            "A pharmacist or prescribing clinician can review the original prescription instructions."  # noqa: E501
         )
     if issue_type == "low_confidence_lab_trend":
         return (
             "MediMind found a lab trend built from low-confidence source values. "
-            "The original reports may be useful for a clinician to review before interpreting the trend."
+            "The original reports may be useful for a clinician to review before interpreting the trend."  # noqa: E501
         )
     if issue_type == "low_confidence_lab_result":
         return (
@@ -482,7 +510,7 @@ def build_care_route_explanation(flag: Dict[str, Any], evidence: List[EvidenceIt
             "MediMind found a low-confidence duplicate-prescription signal. "
             "A pharmacist or prescribing clinician can review the original medication records."
         )
-    return "MediMind identified an existing record-level flag that may warrant review by an appropriate healthcare professional."
+    return "MediMind identified an existing record-level flag that may warrant review by an appropriate healthcare professional."  # noqa: E501
 
 
 def enrich_care_flag(

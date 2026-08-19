@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import threading
 from datetime import date, datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 DEFAULT_STALENESS_DAYS = 365  # conservative: review each curated source yearly
 
@@ -49,7 +49,7 @@ def _seed() -> None:
         "condition_contraindications": "Curated drug-condition contraindication table",
         "drug_allergy_rules": "Curated medication-allergy rule table",
         "dosage_rules": "Curated adult dosage limits",
-        "reference_library_samhsa": "SAMHSA Overdose Prevention & Response Toolkit (PEP23-03-00-001)",
+        "reference_library_samhsa": "SAMHSA Overdose Prevention & Response Toolkit (PEP23-03-00-001)",  # noqa: E501
         "preventive_care": "General adult preventive-care / screening reminders",
         "who_eml_graph": "WHO Model List of Essential Medicines (EML/EMLc) graph",
     }.items():
@@ -92,11 +92,13 @@ def registry_status(staleness_days: int = DEFAULT_STALENESS_DAYS) -> Dict[str, A
         items = []
         for key, entry in _registry.items():
             age = _days_since(entry.get("reviewed") or "")
-            items.append({
-                **entry,
-                "age_days": age,
-                "stale": age is not None and age > staleness_days,
-            })
+            items.append(
+                {
+                    **entry,
+                    "age_days": age,
+                    "stale": age is not None and age > staleness_days,
+                }
+            )
     items.sort(key=lambda x: (x["age_days"] is None, -(x["age_days"] or 0)))
     stale = [i for i in items if i["stale"]]
     return {
@@ -104,10 +106,12 @@ def registry_status(staleness_days: int = DEFAULT_STALENESS_DAYS) -> Dict[str, A
         "total": len(items),
         "stale_count": len(stale),
         "staleness_threshold_days": staleness_days,
-        "note": ("Each curated clinical source has a review date. A 'stale' source is one whose "
-                 "review date is older than the threshold — it should be checked against the "
-                 "current published guideline. Auto-updating requires a content pipeline and "
-                 "clinical sign-off, which is handled outside this library."),
+        "note": (
+            "Each curated clinical source has a review date. A 'stale' source is one whose "
+            "review date is older than the threshold — it should be checked against the "
+            "current published guideline. Auto-updating requires a content pipeline and "
+            "clinical sign-off, which is handled outside this library."
+        ),
     }
 
 
@@ -120,8 +124,13 @@ def mark_reviewed(key: str, *, version: str, reviewed: Optional[str] = None) -> 
         entry = _registry.get(key)
     if not entry:
         raise KeyError(f"unknown source {key}")
-    return register(key, version=version, reviewed=reviewed,
-                    description=entry.get("description", ""), source_url=entry.get("source_url", ""))
+    return register(
+        key,
+        version=version,
+        reviewed=reviewed,
+        description=entry.get("description", ""),
+        source_url=entry.get("source_url", ""),
+    )
 
 
 def reset() -> None:
@@ -147,6 +156,7 @@ _MANIFEST_TIMEOUT = 8.0
 
 def _manifest_url() -> Optional[str]:
     import os
+
     return os.environ.get("LIVING_GUIDELINES_MANIFEST_URL") or None
 
 
@@ -157,6 +167,7 @@ def _fetch_manifest(url: Optional[str]) -> Optional[Dict[str, Any]]:
     try:
         import json
         import urllib.request
+
         req = urllib.request.Request(url, headers={"User-Agent": "MediMind-living-guidelines/1.0"})
         with urllib.request.urlopen(req, timeout=_MANIFEST_TIMEOUT) as resp:  # nosec - operator-configured URL
             data = resp.read().decode("utf-8", errors="replace")
@@ -187,8 +198,10 @@ def check_for_updates(manifest_url: Optional[str] = None) -> Dict[str, Any]:
     if manifest is None:
         return {
             "checked": False,
-            "reason": ("No manifest configured (set LIVING_GUIDELINES_MANIFEST_URL) or it could "
-                       "not be fetched. Manual review is still required."),
+            "reason": (
+                "No manifest configured (set LIVING_GUIDELINES_MANIFEST_URL) or it could "
+                "not be fetched. Manual review is still required."
+            ),
             "updates_available": [],
         }
     norm = _normalise_manifest(manifest)
@@ -202,14 +215,16 @@ def check_for_updates(manifest_url: Optional[str] = None) -> Dict[str, Any]:
         remote_version = str(remote.get("version") or "").strip()
         local_version = str(entry.get("version") or "").strip()
         if remote_version and remote_version != local_version:
-            updates.append({
-                "key": key,
-                "registered_version": local_version,
-                "latest_version": remote_version,
-                "url": remote.get("url"),
-                "notes": remote.get("notes"),
-                "update_available": True,
-            })
+            updates.append(
+                {
+                    "key": key,
+                    "registered_version": local_version,
+                    "latest_version": remote_version,
+                    "url": remote.get("url"),
+                    "notes": remote.get("notes"),
+                    "update_available": True,
+                }
+            )
     # sources in the manifest but not in the registry (new sources)
     new_sources = [k for k in norm if k not in registry_snapshot]
     return {

@@ -178,7 +178,11 @@ def generate_patient_documents(
     # One series per test, shared across all visits for this patient.
     series_by_test = {
         name: _generate_series(
-            low, high, drift, visits, rng,
+            low,
+            high,
+            drift,
+            visits,
+            rng,
             start_bias=rng.uniform(0.35, 0.65),
             shape=shape,
         )
@@ -194,32 +198,36 @@ def generate_patient_documents(
         lab_results = []
         for test_name, (unit, low, high, _drift) in tests.items():
             value = series_by_test[test_name][visit_index]
-            lab_results.append({
-                "test_name": test_name,
-                "value": _round_display(value),
-                "unit": unit,
-                "reference_range": f"{_round_display(low)}-{_round_display(high)}",
-                "flag": _flag_for(value, low, high),
-                "confidence": round(rng.uniform(0.9, 0.98), 2),
-            })
+            lab_results.append(
+                {
+                    "test_name": test_name,
+                    "value": _round_display(value),
+                    "unit": unit,
+                    "reference_range": f"{_round_display(low)}-{_round_display(high)}",
+                    "flag": _flag_for(value, low, high),
+                    "confidence": round(rng.uniform(0.9, 0.98), 2),
+                }
+            )
 
         filename = f"synthetic_lab_report_{visit_index + 1}.pdf"
-        documents.append({
-            "document_type": "lab_report",
-            "date": date_str,
-            "provider_or_doctor": provider,
-            "patient_name": patient_name,
-            "medications": [],
-            "lab_results": lab_results,
-            "allergies_noted": [],
-            "clinical_notes": None,
-            "illegible_or_low_confidence_fields": [],
-            "overall_confidence": round(rng.uniform(0.9, 0.98), 2),
-            # method="synthetic" is a structural demo marker recognised by
-            # medical_extractor._is_demo_document(), so a fixture can never
-            # be silently ingested as real patient data.
-            "_source": {"file": filename, "method": "synthetic"},
-        })
+        documents.append(
+            {
+                "document_type": "lab_report",
+                "date": date_str,
+                "provider_or_doctor": provider,
+                "patient_name": patient_name,
+                "medications": [],
+                "lab_results": lab_results,
+                "allergies_noted": [],
+                "clinical_notes": None,
+                "illegible_or_low_confidence_fields": [],
+                "overall_confidence": round(rng.uniform(0.9, 0.98), 2),
+                # method="synthetic" is a structural demo marker recognised by
+                # medical_extractor._is_demo_document(), so a fixture can never
+                # be silently ingested as real patient data.
+                "_source": {"file": filename, "method": "synthetic"},
+            }
+        )
 
     return documents
 
@@ -228,16 +236,24 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Generate synthetic, schema-valid lab_report test data (no OCR/LLM calls)."
     )
-    parser.add_argument("--patient", required=True, help="Patient name, e.g. \"jane doe\"")
-    parser.add_argument("--visits", type=int, default=3, help="Number of dated visits to generate (default: 3)")
+    parser.add_argument("--patient", required=True, help='Patient name, e.g. "jane doe"')
+    parser.add_argument(
+        "--visits", type=int, default=3, help="Number of dated visits to generate (default: 3)"
+    )
     parser.add_argument("--out", required=True, help="Output JSON file path")
     parser.add_argument(
-        "--interval-days", type=int, default=30,
+        "--interval-days",
+        type=int,
+        default=30,
         help="Days between consecutive visits (default: 30)",
     )
-    parser.add_argument("--seed", type=int, default=None, help="Random seed for reproducible output")
     parser.add_argument(
-        "--shape", default="random-walk", choices=SERIES_SHAPES,
+        "--seed", type=int, default=None, help="Random seed for reproducible output"
+    )
+    parser.add_argument(
+        "--shape",
+        default="random-walk",
+        choices=SERIES_SHAPES,
         help="Trend trajectory to generate (default: random-walk)",
     )
     args = parser.parse_args()
@@ -255,7 +271,9 @@ def main() -> None:
     with open(out_path, "w") as f:
         json.dump(documents, f, indent=2, ensure_ascii=False)
 
-    print(f"Wrote {len(documents)} synthetic lab_report document(s) for '{args.patient}' to {out_path}")
+    print(
+        f"Wrote {len(documents)} synthetic lab_report document(s) for '{args.patient}' to {out_path}"  # noqa: E501
+    )
 
 
 if __name__ == "__main__":

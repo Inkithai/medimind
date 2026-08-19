@@ -49,8 +49,10 @@ export const en = {
     yesterday: "Yesterday",
     notDiagnosis: "Not a diagnosis",
     medicalDisclaimer: "This is an AI observation, not a medical diagnosis.",
-    aiDisclaimer: "AI-generated from your records—not a diagnosis. Confirm medical decisions with a qualified healthcare professional.",
-    medicationDisclaimer: "Potential concerns are identified from your records. Do not start, stop, or change medication without speaking to a doctor or pharmacist.",
+    aiDisclaimer:
+      "AI-generated from your records—not a diagnosis. Confirm medical decisions with a qualified healthcare professional.",
+    medicationDisclaimer:
+      "Potential concerns are identified from your records. Do not start, stop, or change medication without speaking to a doctor or pharmacist.",
     skipToContent: "Skip to main content",
     opensNewWindow: "opens in a new window",
   },
@@ -111,7 +113,8 @@ export const en = {
       about: "Learn how MediMind works and handles your data.",
     },
     privateTitle: "Private — no account needed",
-    privateBody: "Your anonymous workspace access key stays in this browser. Nothing to sign up for.",
+    privateBody:
+      "Your anonymous workspace access key stays in this browser. Nothing to sign up for.",
     newWorkspace: "New workspace",
     resetData: "Reset data",
     currentPage: "current page",
@@ -127,7 +130,8 @@ export const en = {
   landing: {
     badge: "No sign-up • Anonymous browser-held workspace",
     title: "Understand your medical documents in one place.",
-    intro: "Upload prescriptions, lab reports, and discharge summaries. MediMind finds medicines, test results, allergies, safety issues, and evidence from your own records.",
+    intro:
+      "Upload prescriptions, lab reports, and discharge summaries. MediMind finds medicines, test results, allergies, safety issues, and evidence from your own records.",
     creating: "Creating your private workspace…",
     retry: "Retry creating workspace",
     start: "Start My Health Record",
@@ -190,7 +194,8 @@ export const en = {
     reconnectingTitle: "Your files are safe — reconnecting",
     reconnectingBody:
       "Your documents finished uploading and the server is still processing them. We briefly lost the status connection and are retrying. Please don't upload the same files again.",
-    readingBody: "Scanned pages and photos take longer than digital PDFs. You can leave this page; progress is saved automatically.",
+    readingBody:
+      "Scanned pages and photos take longer than digital PDFs. You can leave this page; progress is saved automatically.",
     success: "All done — your record is up to date",
     partial: "Finished — some files need your attention",
     next: "What would you like to do next?",
@@ -220,7 +225,8 @@ export const en = {
     delete: "Delete",
     deleteTitle: "Delete this document?",
     deleteBody: "“{{file}}” and every extracted page from this upload will be permanently deleted.",
-    deleteImpact: "Information from this document will also be removed from your timeline, medications, lab trends, safety checks, AI answers, saved conversations, and derived history. This cannot be undone.",
+    deleteImpact:
+      "Information from this document will also be removed from your timeline, medications, lab trends, safety checks, AI answers, saved conversations, and derived history. This cannot be undone.",
     deleteConfirm: "Delete permanently",
     deleting: "Deleting…",
     original: "Original",
@@ -251,7 +257,8 @@ export const en = {
     subtitle: "Track values and changes across visits.",
     loading: "Loading lab trends",
     trendsTitle: "Lab result trends",
-    trendsDescription: "How each test moved across visits and whether it approached or crossed its reference range.",
+    trendsDescription:
+      "How each test moved across visits and whether it approached or crossed its reference range.",
     noTrends: "No lab results to trend",
     noTrendsBody: "Upload lab reports to track values across visits.",
     insufficient: "Tests with insufficient data ({{count}})",
@@ -268,13 +275,16 @@ export const en = {
   },
   safety: {
     title: "Safety Alerts",
-    subtitle: "Checks medicines for interactions, duplicates, conflicting instructions, and allergy conflicts.",
+    subtitle:
+      "Checks medicines for interactions, duplicates, conflicting instructions, and allergy conflicts.",
     loading: "Loading safety report",
     recommendation: "Professional recommendation",
     highRisk: "A potential high-risk issue may need professional review.",
-    highRiskBody: "This is an AI safety observation, not a diagnosis. Do not start or stop medication from this alert.",
+    highRiskBody:
+      "This is an AI safety observation, not a diagnosis. Do not start or stop medication from this alert.",
     lowConfidence: "One or more safety findings have low confidence.",
-    lowConfidenceBody: "A doctor or pharmacist can compare the observation with the original documents.",
+    lowConfidenceBody:
+      "A doctor or pharmacist can compare the observation with the original documents.",
     findCare: "Find relevant professional care",
     verify: "Find a professional to verify this",
     noIssues: "No safety issues flagged",
@@ -310,12 +320,14 @@ export const en = {
     readingBody: "Finding relevant passages and preparing a grounded answer.",
     answer: "Answer",
     confidenceWhy: "Why this confidence",
-    lowConfidence: "This answer has low confidence. A healthcare professional can verify it against the original records.",
+    lowConfidence:
+      "This answer has low confidence. A healthcare professional can verify it against the original records.",
     citedSources: "{{count}} source documents",
     citedSourcesOne: "1 source document",
     openSource: "Open {{file}}",
     sourceUnavailable: "That document isn\u2019t available to open",
-    sourceUnavailableBody: "This answer cites {{file}}, but that document isn\u2019t in your records right now.",
+    sourceUnavailableBody:
+      "This answer cites {{file}}, but that document isn\u2019t in your records right now.",
     noSources: "No cited sources",
     consult: "Consult a healthcare professional",
     retrievalQuery: "Retrieval query used",
@@ -339,7 +351,8 @@ export const en = {
     resumePlaceholder: "Paste a session ID",
     resume: "Resume",
     about: "About conversations",
-    aboutBody: "Conversations are forgotten when the app restarts. Uploaded records are not affected.",
+    aboutBody:
+      "Conversations are forgotten when the app restarts. Uploaded records are not affected.",
   },
   history: {
     title: "Timeline",
@@ -371,22 +384,26 @@ export const en = {
     pinSet: "The pin is set. We're updating the place name.",
     coordinates: "Selected coordinates",
     details: "Address details",
-    detailsHelp: "Add a street, building, apartment, or useful dirsupport location access. Search for a place instead.",
+    detailsHelp:
+      "Add a street, building, apartment, or useful dirsupport location access. Search for a place instead.",
     denied: "Location access was blocked. Allow it in browser settings or search for a place.",
     timedOut: "We couldn't get your location in time. Try again or search for a place.",
     failed: "We couldn't find your current location. Search for a place instead.",
     accuracyMetres: "±{{value}} m",
     accuracyKilometres: "±{{value}} km",
     gpsAccuracy: "GPS accuracy: {{accuracy}}",
-    roughAccuracy: "Your device reported a rough position ({{accuracy}}). Drag the pin to your exact spot so distances are correct.",
+    roughAccuracy:
+      "Your device reported a rough position ({{accuracy}}). Drag the pin to your exact spot so distances are correct.",
   },
   care: {
     title: "Find nearby care",
     subtitle: "Choose a location and preferences to search real public healthcare listings.",
     urgentTitle: "Need urgent help?",
-    urgentBody: "For a life-threatening emergency, contact your local emergency service immediately. Verify facility information before travelling.",
+    urgentBody:
+      "For a life-threatening emergency, contact your local emergency service immediately. Verify facility information before travelling.",
     preferences: "Care search preferences",
-    preferencesBody: "Specialty and availability improve directory ranking only. Verify both with the provider.",
+    preferencesBody:
+      "Specialty and availability improve directory ranking only. Verify both with the provider.",
     facilityType: "Facility type",
     specialty: "Specialty",
     specialtyPlaceholder: "For example: cardiology",
@@ -409,7 +426,8 @@ export const en = {
     expand: "Expand search radius",
     broaden: "Broaden specialty search",
     resultCount: "{{count}} care options found",
-    ranked: "Ranked using directory specialty match, distance, listed availability, and rating when available.",
+    ranked:
+      "Ranked using directory specialty match, distance, listed availability, and rating when available.",
     verifySpecialty: "directory search match — verify with provider",
     whyRanked: "Why ranked here",
     viewMap: "View map",
@@ -434,17 +452,21 @@ export const en = {
     all: "All",
     filter: "Filter facilities",
     discussDefault: "Consider discussing this with a healthcare professional.",
-    labReview: "A lab value moved outside, or toward, its reference range. Consider discussing this with a healthcare professional.",
+    labReview:
+      "A lab value moved outside, or toward, its reference range. Consider discussing this with a healthcare professional.",
     findNearby: "Find nearby care",
     optionalNoChoice: "Optional. MediMind will not choose a facility for you.",
     reviewLoading: "Checking your existing care-review flags",
     localTitle: "Find Local Care",
-    localSubtitle: "When MediMind finds an existing high-risk medication-safety signal or a low-confidence record, it can help you search a live provider directory for an appropriate professional near you.",
+    localSubtitle:
+      "When MediMind finds an existing high-risk medication-safety signal or a low-confidence record, it can help you search a live provider directory for an appropriate professional near you.",
     medicalNotice: "Important medical notice",
     noActiveFlag: "No care-search flag is active",
-    noActiveFlagBody: "This feature activates from existing high-risk medication-safety signals or low-confidence extraction or trend results. It does not diagnose a medical condition.",
+    noActiveFlagBody:
+      "This feature activates from existing high-risk medication-safety signals or low-confidence extraction or trend results. It does not diagnose a medical condition.",
     selectFlagTitle: "1. Select the record flag to review",
-    selectFlagBody: "Specialty matching is explained from existing extracted-record evidence, not a diagnosis.",
+    selectFlagBody:
+      "Specialty matching is explained from existing extracted-record evidence, not a diagnosis.",
     highRiskSignal: "high-risk signal",
     lowConfidenceSignal: "low-confidence signal",
     verificationRecommended: "verification recommended",
@@ -453,14 +475,16 @@ export const en = {
     sourceValue: "Source: {{source}}",
     suggestedSearch: "Suggested search: {{specialty}}",
     findProfessional: "Find a local professional",
-    directoryPrivacy: "Your city or area and preference are sent only to the selected live directory search.",
+    directoryPrivacy:
+      "Your city or area and preference are sent only to the selected live directory search.",
     cityArea: "City or area",
     cityPlaceholder: "For example: Negombo",
     consultationPreference: "Consultation preference",
     anyConsultation: "Any consultation time",
     evenings: "Evenings",
     weekends: "Weekends",
-    hoursRankingNotice: "Opening hours are used in ranking only when the live directory returns them. Hours do not confirm appointment availability.",
+    hoursRankingNotice:
+      "Opening hours are used in ranking only when the live directory returns them. Hours do not confirm appointment availability.",
     searchLive: "Search live providers",
     whySuggested: "Why MediMind suggests this care route",
     recordInterpretation: "This is a record-level interpretation, not a diagnosis.",
@@ -478,18 +502,22 @@ export const en = {
     suggestedReviewer: "Suggested first reviewer",
     whyRoute: "Why this route: {{reason}}",
     broaderAlternative: "Broader alternative",
-    broaderAlternativeBody: "A broader route is available if the primary specialty is not accessible or the record does not support a narrower route.",
-    routeDisclaimer: "MediMind identifies potential issues and uncertainty in uploaded records. A care route is intended to help find an appropriate professional to review the original information.",
+    broaderAlternativeBody:
+      "A broader route is available if the primary specialty is not accessible or the record does not support a narrower route.",
+    routeDisclaimer:
+      "MediMind identifies potential issues and uncertainty in uploaded records. A care route is intended to help find an appropriate professional to review the original information.",
     liveResultsFor: "Live directory results for {{specialty}}",
     selectedConcern: "Based on the selected record-level concern: {{concern}}",
     nearArea: "Near {{area}}",
     preferenceValue: "Preference: {{preference}}",
     whyProviders: "Why these providers are shown",
     noLiveResults: "No suitable live results found",
-    noLiveResultsBody: "The live directory did not return suitable providers. Try a broader city or area, or use the broader provider category.",
+    noLiveResultsBody:
+      "The live directory did not return suitable providers. Try a broader city or area, or use the broader provider category.",
     liveProviders: "Live provider recommendations",
     providersTitle: "Providers returned by live directory",
-    resultCountConfirm: "{{count}} result(s) · confirm services and appointment availability directly",
+    resultCountConfirm:
+      "{{count}} result(s) · confirm services and appointment availability directly",
     prepareTitle: "Prepare for your consultation",
     prepareBody: "A source-grounded checklist for discussing this selected record-level concern.",
     documentsToBring: "Relevant documents to bring",
@@ -501,7 +529,8 @@ export const en = {
     important: "Important",
     documentColumn: "Document",
     reportedOpen: "reported open now",
-    directoryScoreTitle: "Directory attributes only — not a measure of clinical quality or provider qualifications.",
+    directoryScoreTitle:
+      "Directory attributes only — not a measure of clinical quality or provider qualifications.",
     directoryMatch: "Directory match {{score}}",
     address: "Address",
     distance: "Distance",
@@ -536,9 +565,11 @@ export const en = {
     removeBrowser: "Remove from this browser",
     dangerZone: "Permanently delete stored data",
     deleteData: "Delete workspace data",
-    deleteDataBody: "Permanently remove uploaded originals, extracted health information, AI search data, corrections, conflicts, and conversation history.",
+    deleteDataBody:
+      "Permanently remove uploaded originals, extracted health information, AI search data, corrections, conflicts, and conversation history.",
     deleteConfirmTitle: "Permanently delete this workspace?",
-    deleteConfirmBody: "All documents and health information in this workspace will be deleted from MediMind's storage. This cannot be undone.",
+    deleteConfirmBody:
+      "All documents and health information in this workspace will be deleted from MediMind's storage. This cannot be undone.",
     deleteConfirm: "Delete all data",
     deletingData: "Deleting data…",
     details: "Advanced · workspace details",
@@ -568,7 +599,8 @@ export const en = {
     directoryUnavailable: "The clinic directory is temporarily unavailable",
     tooManyRequests: "Too many requests",
     tooManyRequestsBody: "You've asked a lot in a short time. Wait a moment, then try again.",
-    answerFailedBody: "MediMind reached your records but couldn't finish the answer. This is usually temporary — please try again.",
+    answerFailedBody:
+      "MediMind reached your records but couldn't finish the answer. This is usually temporary — please try again.",
     offlineBody: "We couldn't reach the server. Check your internet connection, then try again.",
     technicalDetails: "Technical details",
   },
@@ -596,47 +628,61 @@ export const en = {
     overviewTitle: "Overview",
     overviewSubtitle: "What that means in practice",
     p1Title: "It works from your records",
-    p1Body: "MediMind has no medical knowledge base of its own. Everything it shows is extracted from the documents you upload.",
+    p1Body:
+      "MediMind has no medical knowledge base of its own. Everything it shows is extracted from the documents you upload.",
     p2Title: "Answers are grounded",
-    p2Body: "Ask AI answers only from passages retrieved from your own records. When they do not cover a question, it says so instead of guessing.",
+    p2Body:
+      "Ask AI answers only from passages retrieved from your own records. When they do not cover a question, it says so instead of guessing.",
     p3Title: "Every answer shows its evidence",
-    p3Body: "Answers cite the source document and page. Citations are verified on the server, so a filename the model invents is dropped before you see it.",
+    p3Body:
+      "Answers cite the source document and page. Citations are verified on the server, so a filename the model invents is dropped before you see it.",
     p4Title: "It is not a doctor",
-    p4Body: "MediMind does not diagnose, and will not tell you to start, stop, or change a medication. It organises what your records say.",
+    p4Body:
+      "MediMind does not diagnose, and will not tell you to start, stop, or change a medication. It organises what your records say.",
     p5Title: "You stay in control",
-    p5Body: "The anonymous access key is held in your browser — no account needed. Uploaded files and structured records use MediMind's configured server-side storage services.",
+    p5Body:
+      "The anonymous access key is held in your browser — no account needed. Uploaded files and structured records use MediMind's configured server-side storage services.",
     cap1Title: "Understand medical records",
-    cap1Body: "MediMind reads uploaded prescriptions, lab reports and summaries, and turns them into one organised, source-linked record.",
+    cap1Body:
+      "MediMind reads uploaded prescriptions, lab reports and summaries, and turns them into one organised, source-linked record.",
     cap2Title: "Ask evidence-grounded questions",
-    cap2Body: "Ask AI answers from passages retrieved from your own records, and shows the document and page behind every claim.",
+    cap2Body:
+      "Ask AI answers from passages retrieved from your own records, and shows the document and page behind every claim.",
     cap3Title: "Review safety and change signals",
-    cap3Body: "Interactions, dosage conflicts, allergy risks and lab trends are computed from your record and surfaced for review.",
+    cap3Body:
+      "Interactions, dosage conflicts, allergy risks and lab trends are computed from your record and surfaced for review.",
     cap4Title: "Prepare for care and follow-up",
-    cap4Body: "Appointment handoffs, follow-up actions and nearby care options are assembled from what your records actually say.",
+    cap4Body:
+      "Appointment handoffs, follow-up actions and nearby care options are assembled from what your records actually say.",
     featuresTitle: "Features",
-    featuresSubtitle: "Every feature below is implemented and reachable from the sidebar today, grouped by what it helps you do.",
+    featuresSubtitle:
+      "Every feature below is implemented and reachable from the sidebar today, grouped by what it helps you do.",
     fg1Title: "Understand your records",
     fg2Title: "Ask and verify",
     fg3Title: "Prepare and take action",
     howTitle: "How it works",
-    howSubtitle: "From an uploaded document to a validated, cited answer — five steps by default, with the technical detail one click away.",
+    howSubtitle:
+      "From an uploaded document to a validated, cited answer — five steps by default, with the technical detail one click away.",
     howDiagram: "The five steps from an uploaded record to a validated, cited answer",
     hw1Title: "Upload a medical document",
     hw1Body: "A prescription, lab report or discharge summary — as a PDF or a photo.",
     hw2Title: "Extract medical information",
-    hw2Body: "Medications, lab values, allergies and clinical events are read from the file, with a confidence per field.",
+    hw2Body:
+      "Medications, lab values, allergies and clinical events are read from the file, with a confidence per field.",
     hw3Title: "Build a structured record",
     hw3Body: "Documents merge into one chronological timeline that every view reads from.",
     hw4Title: "Retrieve relevant evidence",
     hw4Body: "A question fetches the closest passages from your own record — nothing else.",
     hw5Title: "Generate and validate the answer",
-    hw5Body: "The model answers only from those passages, and its citations are checked before you see them.",
+    hw5Body:
+      "The model answers only from those passages, and its citations are checked before you see them.",
     techDocs: "Document processing and OCR",
     techData: "Clinical data and storage",
     techRet: "Retrieval and embeddings",
     techAns: "Answer and citation validation",
     capabilitiesTitle: "The complete intelligence stack",
-    capabilitiesSubtitle: "A competition-ready view of what happens beyond the dashboard: from raw documents to safe, reviewable action.",
+    capabilitiesSubtitle:
+      "A competition-ready view of what happens beyond the dashboard: from raw documents to safe, reviewable action.",
     cg1Title: "Clinical record intelligence",
     cg1Body: "From source file to longitudinal record",
     c1: "PDF, image, scan and multi-document ingestion",
@@ -664,129 +710,178 @@ export const en = {
     differentiatorEyebrow: "What makes MediMind different",
     differentiatorTitle: "Not just document Q&A — a safety-aware clinical record layer",
     differentiatorBadge: "Evidence first · deterministic where possible",
-    differentiatorBody: "MediMind connects extraction, longitudinal reasoning, medication safety, grounded retrieval, care navigation and interoperability around one source-linked record. It does not silently turn uncertain text into certainty: unresolved facts can be quarantined, unknown lab values stay unknown, and AI claims must survive evidence checks.",
+    differentiatorBody:
+      "MediMind connects extraction, longitudinal reasoning, medication safety, grounded retrieval, care navigation and interoperability around one source-linked record. It does not silently turn uncertain text into certainty: unresolved facts can be quarantined, unknown lab values stay unknown, and AI claims must survive evidence checks.",
     safetyIntelligenceTitle: "Safety intelligence",
-    safetyIntelligenceSubtitle: "The clinical layer that turns documents into reviewable signals without pretending to diagnose.",
-    safetyBoundary: "MediMind organises and explains information from your records. It does not diagnose, prescribe, or tell you to start, stop, or change medication.",
+    safetyIntelligenceSubtitle:
+      "The clinical layer that turns documents into reviewable signals without pretending to diagnose.",
+    safetyBoundary:
+      "MediMind organises and explains information from your records. It does not diagnose, prescribe, or tell you to start, stop, or change medication.",
     sl1Title: "Identity protection",
-    sl1Body: "Fuzzy identity checks compare uploads against document history and hold likely mismatches before storage or merge.",
+    sl1Body:
+      "Fuzzy identity checks compare uploads against document history and hold likely mismatches before storage or merge.",
     sl2Title: "Deterministic medication safety",
-    sl2Body: "Curated interactions, duplicate ingredients and allergy-class rules run alongside the LLM and do not depend on it noticing a risk.",
+    sl2Body:
+      "Curated interactions, duplicate ingredients and allergy-class rules run alongside the LLM and do not depend on it noticing a risk.",
     sl3Title: "Prescription activity",
-    sl3Body: "Ended courses are excluded from active safety analysis but remain visible with reasons; open-ended and uncertain courses fail active.",
+    sl3Body:
+      "Ended courses are excluded from active safety analysis but remain visible with reasons; open-ended and uncertain courses fail active.",
     sl4Title: "Lab intelligence",
-    sl4Body: "Trend direction, boundary approach and crossing points are computed from usable values; censored or ambiguous measurements are not guessed.",
+    sl4Body:
+      "Trend direction, boundary approach and crossing points are computed from usable values; censored or ambiguous measurements are not guessed.",
     sl5Title: "Triage and referral",
-    sl5Body: "Findings route to pharmacist or doctor, map to specialties, and can produce a transparent live-provider referral trail.",
+    sl5Body:
+      "Findings route to pharmacist or doctor, map to specialties, and can produce a transparent live-provider referral trail.",
     sl6Title: "Evidence and audit",
-    sl6Body: "Corrections, conflicts, evidence grades, provenance and audit events preserve why a result was shown.",
+    sl6Body:
+      "Corrections, conflicts, evidence grades, provenance and audit events preserve why a result was shown.",
     safetyBadge1: "Fail-closed evidence",
     safetyBadge2: "No diagnosis claims",
     safetyBadge3: "Confidence-aware",
     safetyBadge4: "Source-linked",
     interoperabilityTitle: "Interoperability by design",
-    interoperabilitySubtitle: "Export the structured clinical record instead of trapping it inside the product.",
+    interoperabilitySubtitle:
+      "Export the structured clinical record instead of trapping it inside the product.",
     fhirTitle: "From patient record to clinical Bundle",
     fhirStatus: "Local structural validation",
     fhirInput: "Structured snapshot",
     fhirBundle: "FHIR Bundle",
     fhirValidation: "Validation report",
-    fhirBody: "The backend exposes a deterministic FHIR-compatible collection export at /api/v1/export?format=fhir and a separate validation report. It maps known laboratory, medication and condition concepts to standard terminology while preserving human-readable text when no safe mapping exists.",
+    fhirBody:
+      "The backend exposes a deterministic FHIR-compatible collection export at /api/v1/export?format=fhir and a separate validation report. It maps known laboratory, medication and condition concepts to standard terminology while preserving human-readable text when no safe mapping exists.",
     terminologyTitle: "Terminology mapping",
     mappedWhenKnown: "mapped when known",
-    terminologyBody: "Mappings are curated and conservative — unknown concepts are never invented. Formal external HL7 validation is not claimed yet.",
+    terminologyBody:
+      "Mappings are curated and conservative — unknown concepts are never invented. Formal external HL7 validation is not claimed yet.",
     viewResources: "View supported resources",
     f1Title: "Medical document intelligence",
-    f1Body: "Upload PDFs and photos. MediMind extracts medications, lab values, allergies, and clinical notes, linking every field back to its source file.",
+    f1Body:
+      "Upload PDFs and photos. MediMind extracts medications, lab values, allergies, and clinical notes, linking every field back to its source file.",
     f2Title: "Medication tracking",
-    f2Body: "Medications across all your documents, grouped by active ingredient so the same drug under two brand names lines up as one entry.",
+    f2Body:
+      "Medications across all your documents, grouped by active ingredient so the same drug under two brand names lines up as one entry.",
     f3Title: "Lab trend analysis",
-    f3Body: "Lab values compared across dates, computed arithmetically from the extracted numbers rather than generated by a model.",
+    f3Body:
+      "Lab values compared across dates, computed arithmetically from the extracted numbers rather than generated by a model.",
     f4Title: "Safety analysis",
-    f4Body: "A cross-check across your medication timeline: potential interactions, duplicate prescriptions, conflicting dosages, and allergy conflicts.",
+    f4Body:
+      "A cross-check across your medication timeline: potential interactions, duplicate prescriptions, conflicting dosages, and allergy conflicts.",
     f5Title: "Grounded Ask AI",
-    f5Body: "Ask questions in plain language. MediMind routes each question to matching record categories, checks evidence sufficiency, and validates the page-aware citations you can open.",
+    f5Body:
+      "Ask questions in plain language. MediMind routes each question to matching record categories, checks evidence sufficiency, and validates the page-aware citations you can open.",
     f6Title: "Find Care",
-    f6Body: "Search nearby hospitals, clinics, pharmacies, laboratories, and doctors around a location you confirm on a map. Directory listings are clearly marked as public data.",
+    f6Body:
+      "Search nearby hospitals, clinics, pharmacies, laboratories, and doctors around a location you confirm on a map. Directory listings are clearly marked as public data.",
     f7Title: "What Changed?",
-    f7Body: "Compare consecutive dated records with before-and-after values and both source documents, without treating an omitted medicine as proof it stopped.",
+    f7Body:
+      "Compare consecutive dated records with before-and-after values and both source documents, without treating an omitted medicine as proof it stopped.",
     f8Title: "Record Integrity",
-    f8Body: "Surface identity, allergy, same-date lab, and medication-instruction discrepancies side by side for verification instead of silently choosing one source.",
+    f8Body:
+      "Surface identity, allergy, same-date lab, and medication-instruction discrepancies side by side for verification instead of silently choosing one source.",
     f9Title: "Appointment Prep",
-    f9Body: "Create a printable clinician handoff, latest documented medication list, record-backed questions, and a practical visit checklist.",
+    f9Body:
+      "Create a printable clinician handoff, latest documented medication list, record-backed questions, and a practical visit checklist.",
     f10Title: "Action Center",
-    f10Body: "Combine grounded findings into a stable follow-up queue with browser-held completion state, user-selected reminder dates, and calendar export.",
+    f10Body:
+      "Combine grounded findings into a stable follow-up queue with browser-held completion state, user-selected reminder dates, and calendar export.",
     archTitle: "Application architecture",
     archSubtitle: "The layers a request passes through, and the technology behind each.",
     archDiagram: "MediMind system architecture, from browser to AI providers",
     l1Name: "Frontend",
-    l1Body: "A single-page app. Find Care is lazy-loaded so its map libraries stay out of the initial bundle. No API keys ever reach the browser.",
+    l1Body:
+      "A single-page app. Find Care is lazy-loaded so its map libraries stay out of the initial bundle. No API keys ever reach the browser.",
     l2Name: "API",
-    l2Body: "One authenticated REST surface. Every route except the health check requires a bearer token and a matching user id. Long-running AI work runs in worker threads so a slow answer never blocks other requests.",
+    l2Body:
+      "One authenticated REST surface. Every route except the health check requires a bearer token and a matching user id. Long-running AI work runs in worker threads so a slow answer never blocks other requests.",
     l3Name: "Document processing",
-    l3Body: "PDFs with a text layer are parsed directly. Scans and photos are rendered to images and read by a vision model. A deterministic filter then rejects non-medical files.",
+    l3Body:
+      "PDFs with a text layer are parsed directly. Scans and photos are rendered to images and read by a vision model. A deterministic filter then rejects non-medical files.",
     l4Name: "Clinical data",
-    l4Body: "Extracted documents and the derived patient snapshot are stored per user. Original files are kept separately so structured data can link back to the source.",
+    l4Body:
+      "Extracted documents and the derived patient snapshot are stored per user. Original files are kept separately so structured data can link back to the source.",
     l5Name: "Retrieval",
-    l5Body: "The timeline is chunked into medication, lab, note, and allergy passages, embedded, and stored per patient. Embeddings run locally by default, so no embedding API key is required.",
+    l5Body:
+      "The timeline is chunked into medication, lab, note, and allergy passages, embedded, and stored per patient. Embeddings run locally by default, so no embedding API key is required.",
     l6Name: "AI generation",
-    l6Body: "Retrieved passages and the question go to a chat model under a strict JSON schema. Keys stay server-side and the provider is swappable through configuration.",
+    l6Body:
+      "Retrieved passages and the question go to a chat model under a strict JSON schema. Keys stay server-side and the provider is swappable through configuration.",
     l7Name: "Evidence",
-    l7Body: "Before an answer is returned, its citations are checked against what was actually retrieved. Unsupported citations are removed and confidence is capped.",
+    l7Body:
+      "Before an answer is returned, its citations are checked against what was actually retrieved. Unsupported citations are removed and confidence is capped.",
     pipeTitle: "AI & RAG pipeline",
     pipeSubtitle: "What happens between uploading a document and reading a cited answer.",
     pipeDiagram: "Retrieval-augmented generation pipeline, from document to cited answer",
     pipeIngest: "Ingestion — runs once per upload",
     pipeAnswer: "Answering — runs on every question",
     s1Title: "Document upload",
-    s1Body: "PDF, PNG, JPG, JPEG or WEBP. Uploads run immediately, or as a background job you can poll.",
+    s1Body:
+      "PDF, PNG, JPG, JPEG or WEBP. Uploads run immediately, or as a background job you can poll.",
     s2Title: "Text extraction / OCR",
-    s2Body: "A PDF with a text layer is parsed directly. Anything else is rendered page by page and read by a vision model.",
+    s2Body:
+      "A PDF with a text layer is parsed directly. Anything else is rendered page by page and read by a vision model.",
     s3Title: "Medical extraction",
-    s3Body: "One model call per document returns structured JSON under a strict schema, with a confidence per field.",
+    s3Body:
+      "One model call per document returns structured JSON under a strict schema, with a confidence per field.",
     s4Title: "Relevance filter",
-    s4Body: "A deterministic check rejects non-medical files before any expensive downstream work. No extra model call.",
+    s4Body:
+      "A deterministic check rejects non-medical files before any expensive downstream work. No extra model call.",
     s5Title: "Structured clinical data",
-    s5Body: "Documents merge into one chronological timeline that the dashboard, labs, and safety views all read from.",
+    s5Body:
+      "Documents merge into one chronological timeline that the dashboard, labs, and safety views all read from.",
     s6Title: "Chunking & embeddings",
-    s6Body: "The timeline becomes one passage per medication, lab result, note, and allergy list, each embedded and stored under your patient key.",
+    s6Body:
+      "The timeline becomes one passage per medication, lab result, note, and allergy list, each embedded and stored under your patient key.",
     s7Title: "Retrieval",
-    s7Body: "Your question is embedded and the closest passages are fetched. In Conversations, an ambiguous follow-up is first rewritten into a self-contained query.",
+    s7Body:
+      "Your question is embedded and the closest passages are fetched. In Conversations, an ambiguous follow-up is first rewritten into a self-contained query.",
     s8Title: "Answer generation",
-    s8Body: "Retrieved passages are fenced as untrusted data and sent with the question. The model must answer only from them.",
+    s8Body:
+      "Retrieved passages are fenced as untrusted data and sent with the question. The model must answer only from them.",
     s9Title: "Citation validation",
-    s9Body: "Citations are checked against what was retrieved. Invented filenames are dropped and confidence is capped when nothing supports the answer.",
+    s9Body:
+      "Citations are checked against what was retrieved. Invented filenames are dropped and confidence is capped when nothing supports the answer.",
     selfHealTitle: "Self-healing index",
-    selfHealBody: "If the vector index is empty but your documents are still on record, MediMind rebuilds the index from them and answers anyway, rather than wrongly reporting that you have no records.",
+    selfHealBody:
+      "If the vector index is empty but your documents are still on record, MediMind rebuilds the index from them and answers anyway, rather than wrongly reporting that you have no records.",
     flowTitle: "Data flow",
     flowSubtitle: "Where your information goes, and what reads it back.",
     flowDiagram: "How a medical record flows from upload through to each feature",
     flowYouTitle: "You upload a record",
     flowYouBody: "A prescription, lab report, or discharge summary — as a PDF or a photo.",
     flowStoreTitle: "It is stored and read",
-    flowStoreBody: "The original file is kept so you can always open it. A structured copy of what it contains is saved to your workspace.",
+    flowStoreBody:
+      "The original file is kept so you can always open it. A structured copy of what it contains is saved to your workspace.",
     flowUseTitle: "Features read that structured copy",
-    flowUseBody: "Nothing re-reads your original files on every visit; each feature works from the extracted record.",
+    flowUseBody:
+      "Nothing re-reads your original files on every visit; each feature works from the extracted record.",
     groundingTitle: "Why Ask AI can only answer from your records",
-    groundingBody: "Ask AI never queries the open internet or a general medical database. Its input is limited to passages from your own records, and its output is checked against them before you see it.",
+    groundingBody:
+      "Ask AI never queries the open internet or a general medical database. Its input is limited to passages from your own records, and its output is checked against them before you see it.",
     secTitle: "Your anonymous workspace",
-    secSubtitle: "MediMind does not require registration. An anonymous workspace is created for this browser, and its access credentials are stored in the browser. Uploaded files and structured records use MediMind's configured server-side storage services.",
+    secSubtitle:
+      "MediMind does not require registration. An anonymous workspace is created for this browser, and its access credentials are stored in the browser. Uploaded files and structured records use MediMind's configured server-side storage services.",
     secImplemented: "Implemented",
     secNotClaimed: "Important limitations",
     secPlanned: "Planned",
     secNotClaimedBody: "Being straight about the boundaries matters more than a longer list:",
     i1Title: "Browser-local workspace",
-    i1Body: "No account, no email, no password. A workspace is created anonymously and its credentials live in your browser.",
+    i1Body:
+      "No account, no email, no password. A workspace is created anonymously and its credentials live in your browser.",
     i2Title: "Signed tokens on every request",
-    i2Body: "Every route except the health check requires a token signed with a server-side secret, verified on each call.",
+    i2Body:
+      "Every route except the health check requires a token signed with a server-side secret, verified on each call.",
     i3Title: "Per-user data isolation",
-    i3Body: "Documents, snapshots, and vector chunks are keyed by user id, and every read is filtered by the id from your verified token.",
+    i3Body:
+      "Documents, snapshots, and vector chunks are keyed by user id, and every read is filtered by the id from your verified token.",
     i4Title: "Server-side credentials",
-    i4Body: "AI, maps, storage, and database keys stay on the server. The browser never receives them.",
+    i4Body:
+      "AI, maps, storage, and database keys stay on the server. The browser never receives them.",
     i5Title: "Prompt-injection resistance",
-    i5Body: "Text from your documents is fenced as untrusted data, so a malicious document cannot redirect the assistant.",
+    i5Body:
+      "Text from your documents is fenced as untrusted data, so a malicious document cannot redirect the assistant.",
     i6Title: "Grounded, non-prescriptive answers",
-    i6Body: "The assistant refuses to diagnose or advise changing a medication, and has its citations validated on the server.",
+    i6Body:
+      "The assistant refuses to diagnose or advise changing a medication, and has its citations validated on the server.",
     n1: "No regulatory compliance certification — MediMind is not HIPAA or GDPR certified.",
     n2: "No application-level encryption of record contents beyond what the hosting providers supply.",
     n3: "Workspace tokens are long-lived and held in browser storage; anyone with access to your browser can reach that workspace.",
@@ -798,7 +893,8 @@ export const en = {
     apiTitle: "API overview",
     apiSubtitle: "The public REST surface. Every route below is authenticated unless noted.",
     apiAuthTitle: "Authentication",
-    apiAuthBody: "Requests carry a bearer token plus a matching user id header. A workspace token is issued by the anonymous session endpoint — no credentials are required from you.",
+    apiAuthBody:
+      "Requests carry a bearer token plus a matching user id header. A workspace token is issued by the anonymous session endpoint — no credentials are required from you.",
     apiDocuments: "Documents",
     apiJobs: "Processing jobs",
     apiClinical: "Clinical analysis",
@@ -826,7 +922,8 @@ export const en = {
     e18: "Printable clinician handoff and record-grounded appointment questions.",
     e19: "Stable follow-up queue assembled without inferred clinical deadlines.",
     disclaimerTitle: "A reminder",
-    disclaimerBody: "MediMind helps you organise and explore your own medical records. It does not diagnose, prescribe, or replace professional medical advice. Always consult a qualified clinician before acting on anything you read here. In an emergency, contact your local emergency service immediately.",
+    disclaimerBody:
+      "MediMind helps you organise and explore your own medical records. It does not diagnose, prescribe, or replace professional medical advice. Always consult a qualified clinician before acting on anything you read here. In an emergency, contact your local emergency service immediately.",
   },
   a11y: {
     status: "Status",
@@ -839,23 +936,28 @@ export const en = {
   },
   clinicalSafety: {
     title: "Clinical Safety",
-    subtitle: "Drug–lab, organ-function, and condition-contraindication findings, with reviewer actions and alert management.",
+    subtitle:
+      "Drug–lab, organ-function, and condition-contraindication findings, with reviewer actions and alert management.",
   },
   vitals: {
     title: "Vitals & Monitoring",
-    subtitle: "Longitudinal vital-sign trends, an early-warning screen, and possible adherence signals. Add your own home readings.",
+    subtitle:
+      "Longitudinal vital-sign trends, an early-warning screen, and possible adherence signals. Add your own home readings.",
   },
   preventive: {
     title: "Preventive Care",
-    subtitle: "Screening and immunisation reminders based on your age, sex, and the conditions on record.",
+    subtitle:
+      "Screening and immunisation reminders based on your age, sex, and the conditions on record.",
   },
   symptoms: {
     title: "Symptom Check",
-    subtitle: "Describe a symptom and cross-reference it against your medications, conditions, and recent labs. Not a diagnosis.",
+    subtitle:
+      "Describe a symptom and cross-reference it against your medications, conditions, and recent labs. Not a diagnosis.",
   },
   guidelines: {
     title: "Guidelines",
-    subtitle: "Version and review status of every curated clinical knowledge source the app relies on.",
+    subtitle:
+      "Version and review status of every curated clinical knowledge source the app relies on.",
   },
   messages: {
     title: "Provider Messages",
@@ -863,9 +965,9 @@ export const en = {
   },
   fhir: {
     title: "Import FHIR Record",
-    subtitle: "Import an existing electronic health record (FHIR R4 Bundle) instead of uploading individual documents. The structured data is read straight into your workspace.",
+    subtitle:
+      "Import an existing electronic health record (FHIR R4 Bundle) instead of uploading individual documents. The structured data is read straight into your workspace.",
   },
-
 } as const;
 
 export type TranslationKey = string;

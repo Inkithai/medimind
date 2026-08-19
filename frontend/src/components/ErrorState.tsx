@@ -1,16 +1,9 @@
 import { useI18n } from "../i18n/I18nContext";
 import { Alert } from "./Alert";
 
-export function ErrorState({
-  error,
-  onRetry,
-}: {
-  error: unknown;
-  onRetry?: () => void;
-}) {
+export function ErrorState({ error, onRetry }: { error: unknown; onRetry?: () => void }) {
   const { t, formatNumber } = useI18n();
-  const message =
-    error instanceof Error ? error.message : t("errors.generic");
+  const message = error instanceof Error ? error.message : t("errors.generic");
   const status =
     error && typeof error === "object" && "status" in error
       ? (error as { status?: number }).status
@@ -110,14 +103,12 @@ export function ErrorState({
       )}
       {retryable !== false && retryAfterSeconds && (
         <p className="mt-2 text-sm font-medium">
-          {t("errors.retryWait", { seconds: formatNumber(Math.max(1, Math.round(retryAfterSeconds))) })}
+          {t("errors.retryWait", {
+            seconds: formatNumber(Math.max(1, Math.round(retryAfterSeconds))),
+          })}
         </p>
       )}
-      {retryable === false && (
-        <p className="mt-2 text-sm font-medium">
-          {t("errors.noRetry")}
-        </p>
-      )}
+      {retryable === false && <p className="mt-2 text-sm font-medium">{t("errors.noRetry")}</p>}
       {code === "job_status_unavailable" && (
         <p className="mt-2 text-sm font-medium">{t("errors.uploadSavedNoProgressBody")}</p>
       )}

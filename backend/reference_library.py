@@ -54,12 +54,12 @@ and stretching a citation to cover something it does not say would defeat the
 purpose of citing it.
 """
 
-from typing import Any, Dict, List, Optional, Sequence, Set
+from typing import Any, Dict, List, Optional, Set
 
 SAMHSA_TOOLKIT = {
     "id": "samhsa_overdose_toolkit_2026",
     "title": "SAMHSA Overdose Prevention and Response Toolkit",
-    "publisher": "Substance Abuse and Mental Health Services Administration (SAMHSA), U.S. Department of Health and Human Services",
+    "publisher": "Substance Abuse and Mental Health Services Administration (SAMHSA), U.S. Department of Health and Human Services",  # noqa: E501
     "publication_no": "PEP23-03-00-001",
     "released": "2026",
     "url": "https://library.samhsa.gov",
@@ -81,26 +81,64 @@ CLASSIFICATION_SOURCE = (
 # Named on page 1 of the toolkit: "morphine, codeine, oxycodone, hydrocodone,
 # fentanyl, and hydromorphone"; methadone and buprenorphine on page 4.
 # The remainder are standard members of the same class.
-OPIOIDS = frozenset({
-    "morphine", "codeine", "oxycodone", "hydrocodone", "fentanyl",
-    "hydromorphone", "methadone", "buprenorphine", "tramadol", "tapentadol",
-    "oxymorphone", "dihydrocodeine", "pethidine", "meperidine", "heroin",
-    "diamorphine", "sufentanil", "alfentanil", "remifentanil", "pholcodine",
-})
+OPIOIDS = frozenset(
+    {
+        "morphine",
+        "codeine",
+        "oxycodone",
+        "hydrocodone",
+        "fentanyl",
+        "hydromorphone",
+        "methadone",
+        "buprenorphine",
+        "tramadol",
+        "tapentadol",
+        "oxymorphone",
+        "dihydrocodeine",
+        "pethidine",
+        "meperidine",
+        "heroin",
+        "diamorphine",
+        "sufentanil",
+        "alfentanil",
+        "remifentanil",
+        "pholcodine",
+    }
+)
 
-BENZODIAZEPINES = frozenset({
-    "diazepam", "lorazepam", "alprazolam", "clonazepam", "midazolam",
-    "temazepam", "nitrazepam", "chlordiazepoxide", "bromazepam", "oxazepam",
-    "clobazam", "flurazepam", "triazolam",
-})
+BENZODIAZEPINES = frozenset(
+    {
+        "diazepam",
+        "lorazepam",
+        "alprazolam",
+        "clonazepam",
+        "midazolam",
+        "temazepam",
+        "nitrazepam",
+        "chlordiazepoxide",
+        "bromazepam",
+        "oxazepam",
+        "clobazam",
+        "flurazepam",
+        "triazolam",
+    }
+)
 
 # "Z-drugs" and barbiturates — sedative-hypnotics, i.e. the "tranquilizers"
 # and "depressant medications" the source groups with benzodiazepines.
-SEDATIVE_HYPNOTICS = frozenset({
-    "zolpidem", "zopiclone", "eszopiclone", "zaleplon",
-    "phenobarbital", "phenobarbitone", "secobarbital", "amobarbital",
-    "sodium oxybate",
-})
+SEDATIVE_HYPNOTICS = frozenset(
+    {
+        "zolpidem",
+        "zopiclone",
+        "eszopiclone",
+        "zaleplon",
+        "phenobarbital",
+        "phenobarbitone",
+        "secobarbital",
+        "amobarbital",
+        "sodium oxybate",
+    }
+)
 
 # Opioid overdose reversal medications, named on pages 5-6.
 REVERSAL_MEDICATIONS = frozenset({"naloxone", "nalmefene"})
@@ -228,6 +266,7 @@ GUIDANCE_BY_ID = {entry["id"]: entry for entry in GUIDANCE}
 # Matching a patient's medications against the library
 # ---------------------------------------------------------------------------
 
+
 def _normalize(name: Any) -> str:
     from document_dedup import _base_ingredient
 
@@ -241,7 +280,8 @@ def classify_drug(name: Any) -> Set[str]:
     if not key:
         return set()
     return {
-        class_name for class_name, members in DRUG_CLASSES.items()
+        class_name
+        for class_name, members in DRUG_CLASSES.items()
         if key in members or any(key == m or key.startswith(m + " ") for m in members)
     }
 
@@ -266,11 +306,14 @@ def classify_timeline(timeline: Dict[str, Any]) -> Dict[str, List[Dict[str, Any]
     return by_class
 
 
-def _from_graph_row(row: Dict[str, Any], by_class: Dict[str, List[Dict[str, Any]]]) -> Dict[str, Any]:
+def _from_graph_row(
+    row: Dict[str, Any], by_class: Dict[str, List[Dict[str, Any]]]
+) -> Dict[str, Any]:
     """Shapes a guidance row returned by the graph into the same dict the
     local constants produce, so callers cannot tell which backed it."""
     triggering = [
-        m for class_name in (row.get("requires_classes") or []) + (row.get("with_classes") or [])
+        m
+        for class_name in (row.get("requires_classes") or []) + (row.get("with_classes") or [])
         for m in by_class.get(class_name, [])
     ]
     return {
@@ -337,8 +380,7 @@ def find_relevant_guidance(
             from guidance_kg import lookup_guidance_for_drugs
 
             names = [
-                m.get("name") for m in timeline.get("medications_timeline") or []
-                if m.get("name")
+                m.get("name") for m in timeline.get("medications_timeline") or [] if m.get("name")
             ]
             rows = lookup_guidance_for_drugs(names)
             if rows:
@@ -364,19 +406,20 @@ def find_relevant_guidance(
                 continue
 
         triggering = [m for c in required for m in by_class.get(c, [])] + companions
-        matched.append({
-            **entry,
-            "citation": cite(entry),
-            "triggered_by": sorted({
-                m.get("name") for m in triggering if m.get("name")
-            }),
-        })
+        matched.append(
+            {
+                **entry,
+                "citation": cite(entry),
+                "triggered_by": sorted({m.get("name") for m in triggering if m.get("name")}),
+            }
+        )
     return matched
 
 
 # ---------------------------------------------------------------------------
 # Evidence grading hook
 # ---------------------------------------------------------------------------
+
 
 def samhsa_claim_reference(finding: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """
@@ -408,6 +451,7 @@ def samhsa_claim_reference(finding: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 # Concurrent-exposure check (uses the treatment windows, so it is dated)
 # ---------------------------------------------------------------------------
 
+
 def find_concurrent_depressant_risk(timeline: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
     Periods where an opioid and a depressant were prescribed AT THE SAME TIME.
@@ -437,23 +481,26 @@ def find_concurrent_depressant_risk(timeline: Dict[str, Any]) -> List[Dict[str, 
             result = overlap_of(opioid, depressant)
             if result["status"] not in (CONCURRENT, POSSIBLE):
                 continue
-            risks.append({
-                "opioid": opioid["name"],
-                "depressant": depressant["name"],
-                "status": result["status"],
-                "window_start": result["start"].isoformat() if result["start"] else None,
-                "window_end": result["end"].isoformat() if result["end"] else None,
-                "overlap_days": result["days"],
-                "severity": entry["severity"],
-                "plain": entry["plain"],
-                "citation": cite(entry),
-            })
+            risks.append(
+                {
+                    "opioid": opioid["name"],
+                    "depressant": depressant["name"],
+                    "status": result["status"],
+                    "window_start": result["start"].isoformat() if result["start"] else None,
+                    "window_end": result["end"].isoformat() if result["end"] else None,
+                    "overlap_days": result["days"],
+                    "severity": entry["severity"],
+                    "plain": entry["plain"],
+                    "citation": cite(entry),
+                }
+            )
     return risks
 
 
 # ---------------------------------------------------------------------------
 # Rendering into Q&A context
 # ---------------------------------------------------------------------------
+
 
 def render_reference_guidance(timeline: Dict[str, Any]) -> str:
     """
@@ -494,10 +541,17 @@ if __name__ == "__main__":
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
     def med(name, ingredient, date="09/11/2025", duration="14 days"):
-        return {"name": name, "ingredients": [ingredient], "date": date,
-                "duration": duration, "dosage_value": 10, "dosage_unit": "mg",
-                "frequency_per_day": 2, "source_file": f"{name}.png",
-                "prescription_group": f"rx-{name}"}
+        return {
+            "name": name,
+            "ingredients": [ingredient],
+            "date": date,
+            "duration": duration,
+            "dosage_value": 10,
+            "dosage_unit": "mg",
+            "frequency_per_day": 2,
+            "source_file": f"{name}.png",
+            "prescription_group": f"rx-{name}",
+        }
 
     # --- Classification -----------------------------------------------------
     assert classify_drug("Oxycodone") == {"opioid"}
@@ -507,23 +561,30 @@ if __name__ == "__main__":
     assert classify_drug("Paracetamol") == set(), "a non-depressant must not be classified"
     assert classify_drug("Cetirizine") == set(), (
         "sedating antihistamines are deliberately NOT in the depressant list — the "
-        "source never names them, and a citation must not be stretched")
+        "source never names them, and a citation must not be stretched"
+    )
     # Salt forms normalize (Oxycodone hydrochloride -> oxycodone).
     assert classify_drug("Oxycodone hydrochloride") == {"opioid"}
 
     # --- The demo record has no opioids: nothing should fire ---------------
-    demo = {"medications_timeline": [
-        med("Paracetamol", "Paracetamol"), med("Omeprazole", "Omeprazole"),
-        med("Cetirizine hydrochloride", "Cetirizine"),
-    ]}
+    demo = {
+        "medications_timeline": [
+            med("Paracetamol", "Paracetamol"),
+            med("Omeprazole", "Omeprazole"),
+            med("Cetirizine hydrochloride", "Cetirizine"),
+        ]
+    }
     assert find_relevant_guidance(demo) == []
     assert render_reference_guidance(demo) == ""
     assert find_concurrent_depressant_risk(demo) == []
 
     # --- An opioid alone triggers the opioid-only guidance ------------------
-    opioid_only = {"medications_timeline": [
-        med("Oxycodone", "Oxycodone"), med("Paracetamol", "Paracetamol"),
-    ]}
+    opioid_only = {
+        "medications_timeline": [
+            med("Oxycodone", "Oxycodone"),
+            med("Paracetamol", "Paracetamol"),
+        ]
+    }
     ids = {e["id"] for e in find_relevant_guidance(opioid_only)}
     assert "carry-reversal-medication" in ids, ids
     assert "overdose-signs" in ids
@@ -531,10 +592,12 @@ if __name__ == "__main__":
     assert "opioid-plus-depressant" not in ids, ids
 
     # --- Opioid + benzodiazepine, concurrent: the real case ----------------
-    combo = {"medications_timeline": [
-        med("Oxycodone", "Oxycodone", "09/11/2025", "14 days"),
-        med("Diazepam", "Diazepam", "12/11/2025", "10 days"),
-    ]}
+    combo = {
+        "medications_timeline": [
+            med("Oxycodone", "Oxycodone", "09/11/2025", "14 days"),
+            med("Diazepam", "Diazepam", "12/11/2025", "10 days"),
+        ]
+    }
     matched = find_relevant_guidance(combo)
     ids = {e["id"] for e in matched}
     assert "opioid-plus-depressant" in ids, ids
@@ -550,25 +613,27 @@ if __name__ == "__main__":
     assert concurrent[0]["citation"]["page"] == 13
 
     # --- Same two drugs, courses a year apart: NOT a live risk -------------
-    apart = {"medications_timeline": [
-        med("Oxycodone", "Oxycodone", "09/11/2024", "14 days"),
-        med("Diazepam", "Diazepam", "12/11/2025", "10 days"),
-    ]}
+    apart = {
+        "medications_timeline": [
+            med("Oxycodone", "Oxycodone", "09/11/2024", "14 days"),
+            med("Diazepam", "Diazepam", "12/11/2025", "10 days"),
+        ]
+    }
     assert find_concurrent_depressant_risk(apart) == [], (
-        "courses a year apart were never a concurrent risk")
+        "courses a year apart were never a concurrent risk"
+    )
     # The general guidance still applies to the record as a whole...
     assert "opioid-plus-depressant" in {e["id"] for e in find_relevant_guidance(apart)}
 
     # --- Evidence grading hook ---------------------------------------------
     backed = samhsa_claim_reference(
-        {"medications_involved": ["Oxycodone", "Diazepam"], "confidence": 0.9})
+        {"medications_involved": ["Oxycodone", "Diazepam"], "confidence": 0.9}
+    )
     assert backed and backed["page"] == 13, backed
     # A pair the document says nothing about stays uncited.
-    assert samhsa_claim_reference(
-        {"medications_involved": ["Fluconazole", "Montelukast"]}) is None
+    assert samhsa_claim_reference({"medications_involved": ["Fluconazole", "Montelukast"]}) is None
     # Two opioids are not an opioid-plus-depressant claim.
-    assert samhsa_claim_reference(
-        {"medications_involved": ["Oxycodone", "Morphine"]}) is None
+    assert samhsa_claim_reference({"medications_involved": ["Oxycodone", "Morphine"]}) is None
     # A single drug cannot match a pairwise claim.
     assert samhsa_claim_reference({"medication": "Oxycodone"}) is None
 
@@ -577,14 +642,21 @@ if __name__ == "__main__":
 
     report = {
         "potential_drug_interactions": [
-            {"medications_involved": ["Oxycodone", "Diazepam"],
-             "explanation": "Combined sedation and respiratory depression.",
-             "severity": "high", "confidence": 0.9},
-            {"medications_involved": ["Fluconazole", "Montelukast"],
-             "explanation": "CYP interaction.", "severity": "moderate",
-             "confidence": 0.9},
+            {
+                "medications_involved": ["Oxycodone", "Diazepam"],
+                "explanation": "Combined sedation and respiratory depression.",
+                "severity": "high",
+                "confidence": 0.9,
+            },
+            {
+                "medications_involved": ["Fluconazole", "Montelukast"],
+                "explanation": "CYP interaction.",
+                "severity": "moderate",
+                "confidence": 0.9,
+            },
         ],
-        "duplicate_prescriptions": [], "conflicting_dosage_instructions": [],
+        "duplicate_prescriptions": [],
+        "conflicting_dosage_instructions": [],
         "allergy_conflicts": [],
     }
     grade_cross_check(report, claim_reference=samhsa_claim_reference)
@@ -621,9 +693,12 @@ if __name__ == "__main__":
     finally:
         builtins.__import__ = real_import
     assert {e["id"] for e in during_outage} == ids, (
-        "an unreachable graph must fall back to the local copy, not return nothing")
-    print(f"Graph unreachable -> fell back to {len(during_outage)} local statement(s), "
-          "citation preserved.\n")
+        "an unreachable graph must fall back to the local copy, not return nothing"
+    )
+    print(
+        f"Graph unreachable -> fell back to {len(during_outage)} local statement(s), "
+        "citation preserved.\n"
+    )
 
     print("Guidance matched for an opioid + benzodiazepine record:")
     for entry in matched:
@@ -631,8 +706,10 @@ if __name__ == "__main__":
     print()
     print("Concurrent exposure found:")
     for risk in concurrent:
-        print(f"  {risk['opioid']} + {risk['depressant']}: "
-              f"{risk['window_start']} to {risk['window_end']} "
-              f"({risk['overlap_days']} days)")
+        print(
+            f"  {risk['opioid']} + {risk['depressant']}: "
+            f"{risk['window_start']} to {risk['window_end']} "
+            f"({risk['overlap_days']} days)"
+        )
     print()
     print("All checks passed.")

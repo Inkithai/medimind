@@ -5,7 +5,7 @@ import type { Coordinates, LocationPlace } from "../types/location";
 // endpoints are configurable so production deployments can use hosted copies.
 const PHOTON_URL = (import.meta.env.VITE_GEOCODING_API_URL || "https://photon.komoot.io").replace(
   /\/$/,
-  ""
+  "",
 );
 const CITY_GEOCODING_URL = (
   import.meta.env.VITE_CITY_GEOCODING_API_URL || "https://geocoding-api.open-meteo.com/v1"
@@ -84,9 +84,17 @@ function normalizePhoton(feature: PhotonFeature): LocationPlace | null {
   if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
 
   const properties = feature.properties || {};
-  const name = first(properties.name, properties.street, properties.city, properties.district) || "Selected location";
-  const locality = first(properties.city, properties.district, properties.locality, properties.county);
-  const area = locality && locality.toLocaleLowerCase() !== name.toLocaleLowerCase() ? locality : undefined;
+  const name =
+    first(properties.name, properties.street, properties.city, properties.district) ||
+    "Selected location";
+  const locality = first(
+    properties.city,
+    properties.district,
+    properties.locality,
+    properties.county,
+  );
+  const area =
+    locality && locality.toLocaleLowerCase() !== name.toLocaleLowerCase() ? locality : undefined;
   const displayName = uniqueParts([
     properties.name,
     properties.housenumber,
@@ -123,7 +131,14 @@ function normalizeCity(city: CityResult): LocationPlace | null {
   return {
     id: `city-${city.id}`,
     name: city.name,
-    displayName: uniqueParts([city.name, city.admin3, city.admin2, city.admin1, city.postcode, city.country]).join(", "),
+    displayName: uniqueParts([
+      city.name,
+      city.admin3,
+      city.admin2,
+      city.admin1,
+      city.postcode,
+      city.country,
+    ]).join(", "),
     region: city.admin1,
     country: city.country,
     countryCode: city.country_code?.toUpperCase(),
@@ -142,7 +157,7 @@ function languageCode(): string {
 async function fetchPhotonSearch(
   query: string,
   options: LocationSearchOptions,
-  requestLimit: number
+  requestLimit: number,
 ): Promise<LocationPlace[]> {
   const params = new URLSearchParams({
     q: query,
@@ -160,13 +175,15 @@ async function fetchPhotonSearch(
   if (!response.ok) throw responseError(response.status);
   const data = (await response.json()) as PhotonResponse;
   if (!Array.isArray(data.features)) return [];
-  return data.features.map(normalizePhoton).filter((place): place is LocationPlace => Boolean(place));
+  return data.features
+    .map(normalizePhoton)
+    .filter((place): place is LocationPlace => Boolean(place));
 }
 
 async function fetchCitySearch(
   query: string,
   options: LocationSearchOptions,
-  requestLimit: number
+  requestLimit: number,
 ): Promise<LocationPlace[]> {
   const params = new URLSearchParams({
     name: query,
@@ -191,7 +208,7 @@ async function fetchCitySearch(
 
 export async function searchLocations(
   query: string,
-  options: LocationSearchOptions = {}
+  options: LocationSearchOptions = {},
 ): Promise<LocationPlace[]> {
   const requestLimit = Math.min(Math.max(options.limit ?? 5, 1), 8);
   const normalizedQuery = query.trim();
@@ -209,7 +226,10 @@ export async function searchLocations(
   const combined = [
     ...(cities.status === "fulfilled" ? cities.value : []),
     ...(landmarks.status === "fulfilled" ? landmarks.value : []),
-  ].filter((place) => !allowedCountries.size || (place.countryCode && allowedCountries.has(place.countryCode)));
+  ].filter(
+    (place) =>
+      !allowedCountries.size || (place.countryCode && allowedCountries.has(place.countryCode)),
+  );
 
   const unique = new Map<string, LocationPlace>();
   for (const place of combined) {
@@ -222,7 +242,7 @@ export async function searchLocations(
 
 export async function reverseGeocode(
   coordinates: Coordinates,
-  signal?: AbortSignal
+  signal?: AbortSignal,
 ): Promise<LocationPlace> {
   const params = new URLSearchParams({
     lat: coordinates.latitude.toFixed(7),
@@ -235,7 +255,9 @@ export async function reverseGeocode(
   });
   if (!response.ok) throw responseError(response.status);
   const data = (await response.json()) as PhotonResponse;
-  const place = data.features?.map(normalizePhoton).find((value): value is LocationPlace => Boolean(value));
+  const place = data.features
+    ?.map(normalizePhoton)
+    .find((value): value is LocationPlace => Boolean(value));
   if (!place) throw new Error("We couldn't find an address for this point.");
   return place;
 }

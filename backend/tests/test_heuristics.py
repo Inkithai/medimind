@@ -1,10 +1,11 @@
 """Regression tests for extraction heuristics that used to drop real records.
 
-  * Filename "cv" substring matched cardiovascular / recovery / coverage.
-  * Hybrid PDFs were classified from the first 3 pages only.
-  * Conversation rewrite/summarize crashed on ProviderRateLimitError
-    instead of falling back as documented.
+* Filename "cv" substring matched cardiovascular / recovery / coverage.
+* Hybrid PDFs were classified from the first 3 pages only.
+* Conversation rewrite/summarize crashed on ProviderRateLimitError
+  instead of falling back as documented.
 """
+
 import os
 import sys
 from unittest import mock

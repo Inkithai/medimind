@@ -36,8 +36,8 @@ import re
 from datetime import date, datetime
 from typing import Any, Dict, List, Optional, Tuple
 
-from reference_intervals import canonical_test, is_main_test, lookup_interval, to_canonical_value
 from date_convention import infer_dayfirst, parse_mixed_datetime
+from reference_intervals import canonical_test, is_main_test, lookup_interval, to_canonical_value
 
 # A value within this fraction of the reference range width, relative to
 # the boundary it's moving toward, counts as "approaching" that boundary
@@ -72,9 +72,9 @@ def _parse_numeric_token(token: str) -> Optional[float]:
     if has_comma and has_dot:
         # Whichever separator appears last is the decimal mark.
         if token.rfind(",") > token.rfind("."):
-            token = token.replace(".", "").replace(",", ".")   # 1.234,56
+            token = token.replace(".", "").replace(",", ".")  # 1.234,56
         else:
-            token = token.replace(",", "")                     # 1,234.56
+            token = token.replace(",", "")  # 1,234.56
     elif has_comma:
         parts = token.lstrip("-").split(",")
         # Thousands grouping iff every group after the first is exactly 3
@@ -132,16 +132,21 @@ def _parse_value(value: Any) -> Optional[float]:
 _UNKNOWN_VALUE_MARKERS = ("<", ">", "≤", "≥", "~", "≈", "±", "+/-")
 
 _APPROXIMATE_VALUE_WORDS = (
-    "approx", "approximately", "about", "around", "circa",
-    "less than", "greater than", "more than", "up to",
+    "approx",
+    "approximately",
+    "about",
+    "around",
+    "circa",
+    "less than",
+    "greater than",
+    "more than",
+    "up to",
 )
 
 # Scientific notation is outside the plain-decimal grammar this parser
 # supports; it is rejected rather than truncated ("1e3" would otherwise
 # parse as 1).
-_SCIENTIFIC_NOTATION_RE = re.compile(
-    r"^[-+]?(?:\d+(?:\.\d+)?|\.\d+)[eE][-+]?\d+$"
-)
+_SCIENTIFIC_NOTATION_RE = re.compile(r"^[-+]?(?:\d+(?:\.\d+)?|\.\d+)[eE][-+]?\d+$")
 
 
 def _parse_trend_value(value: Any) -> Optional[float]:
@@ -240,8 +245,6 @@ def _group_by_test(lab_results_timeline: List[Dict[str, Any]]) -> Dict[str, List
     return {display_names[k]: v for k, v in groups.items()}
 
 
-
-
 def _normalize_sex(value: Any) -> Optional[str]:
     text = str(value or "").strip().lower()
     if text in {"male", "m", "man"}:
@@ -258,7 +261,9 @@ def _derive_patient_context(timeline: Dict[str, Any]) -> Dict[str, Any]:
     if sex or age is absent, sex/age-specific intervals simply decline to
     classify instead of guessing.
     """
-    profile = timeline.get("patient_profile") if isinstance(timeline.get("patient_profile"), dict) else {}
+    profile = (
+        timeline.get("patient_profile") if isinstance(timeline.get("patient_profile"), dict) else {}
+    )
     sex = _normalize_sex(profile.get("sex") or profile.get("gender"))
     age = None
     if isinstance(profile.get("age"), (int, float)):
@@ -267,7 +272,9 @@ def _derive_patient_context(timeline: Dict[str, Any]) -> Dict[str, Any]:
         try:
             born = date.fromisoformat(str(profile["date_of_birth"])[:10])
             today = date.today()
-            age = float(today.year - born.year - ((today.month, today.day) < (born.month, born.day)))
+            age = float(
+                today.year - born.year - ((today.month, today.day) < (born.month, born.day))
+            )
         except Exception:
             age = None
     visits = timeline.get("visits") or []
@@ -315,14 +322,18 @@ def _single_result_explanation(
             f"{test_name} has one usable result ({value_text}), but no safe reference range "
             "was available to classify it. This is not a diagnosis."
         )
-    source_phrase = "the range printed on the report" if source == "printed" else "a general reference interval"
+    source_phrase = (
+        "the range printed on the report" if source == "printed" else "a general reference interval"
+    )
     return (
         f"{test_name} has one usable result ({value_text}), which is {status} compared with "
-        f"{source_phrase}{f' ({range_text})' if range_text else ''}. This is a numeric comparison only, not a diagnosis."
+        f"{source_phrase}{f' ({range_text})' if range_text else ''}. This is a numeric comparison only, not a diagnosis."  # noqa: E501
     )
 
 
-def _assess_single_result(test_name: str, usable: Dict[str, Any], sex: Optional[str], age: Optional[float]) -> Dict[str, Any]:
+def _assess_single_result(
+    test_name: str, usable: Dict[str, Any], sex: Optional[str], age: Optional[float]
+) -> Dict[str, Any]:
     """Classify one lab value using printed range first, then safe general interval."""
     unit = usable.get("unit") or ""
     raw_value = usable.get("value")
@@ -357,7 +368,9 @@ def _assess_single_result(test_name: str, usable: Dict[str, Any], sex: Optional[
                 "source": interval.get("source"),
                 "basis": interval.get("basis"),
             }
-            range_text = _format_bounds(interval.get("low"), interval.get("high"), interval.get("unit") or "")
+            range_text = _format_bounds(
+                interval.get("low"), interval.get("high"), interval.get("unit") or ""
+            )
 
     return {
         "test_name": test_name,
@@ -375,7 +388,9 @@ def _assess_single_result(test_name: str, usable: Dict[str, Any], sex: Optional[
         "source_page": usable.get("source_page"),
         "confidence": usable.get("confidence", 1.0),
         "is_main_test": is_main_test(test_name),
-        "explanation": _single_result_explanation(test_name, raw_value, compared_unit or unit, status, range_text, range_source),
+        "explanation": _single_result_explanation(
+            test_name, raw_value, compared_unit or unit, status, range_text, range_source
+        ),
     }
 
 
@@ -385,7 +400,9 @@ def _flag_sequence_phrase(flags: List[str]) -> str:
 
 def _direction(values: List[float], range_bounds: Optional[Tuple[float, float]]) -> str:
     net_change = values[-1] - values[0]
-    width = (range_bounds[1] - range_bounds[0]) if range_bounds else max(abs(v) for v in values) or 1.0
+    width = (
+        (range_bounds[1] - range_bounds[0]) if range_bounds else max(abs(v) for v in values) or 1.0
+    )
     if width == 0:
         width = 1.0
 
@@ -427,9 +444,8 @@ def _trend_risk(
     must never be presented as a diagnosis or emergency determination.
     """
     latest_flag = points[-1]["flag"]
-    worsening = (
-        (latest_flag == "high" and "increasing" in direction)
-        or (latest_flag == "low" and "decreasing" in direction)
+    worsening = (latest_flag == "high" and "increasing" in direction) or (
+        latest_flag == "low" and "decreasing" in direction
     )
     consecutive_abnormal = 0
     for point in reversed(points):
@@ -449,19 +465,22 @@ def _trend_risk(
     if worsening and (consecutive_abnormal >= 2 or materially_outside):
         return (
             "high",
-            "Repeated abnormal readings are moving farther from the supplied reference range. Prompt professional review is recommended.",
+            "Repeated abnormal readings are moving farther from the supplied reference range. Prompt professional review is recommended.",  # noqa: E501
         )
     if latest_flag in {"high", "low"}:
         return (
             "moderate",
-            "The latest reading is outside the supplied reference range and should be reviewed by a healthcare professional.",
+            "The latest reading is outside the supplied reference range and should be reviewed by a healthcare professional.",  # noqa: E501
         )
     if approaching:
         return (
             "low",
-            "The latest reading remains in range but is trending toward a boundary; routine professional review may be useful.",
+            "The latest reading remains in range but is trending toward a boundary; routine professional review may be useful.",  # noqa: E501
         )
-    return ("none", "No high-risk numeric pattern was detected from the supplied values and ranges.")
+    return (
+        "none",
+        "No high-risk numeric pattern was detected from the supplied values and ranges.",
+    )
 
 
 def _crossing_point(points: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
@@ -501,16 +520,16 @@ def _explain(
     dates = [p.get("date") or "an unspecified date" for p in points]
     trail = " → ".join(f"{v:g} {unit}".strip() + f" ({d})" for v, d in zip(values, dates))
     net_change = values[-1] - values[0]
-    range_phrase = f" (reference range {range_bounds[0]:g}-{range_bounds[1]:g} {unit})" if range_bounds else ""
+    range_phrase = (
+        f" (reference range {range_bounds[0]:g}-{range_bounds[1]:g} {unit})" if range_bounds else ""
+    )
 
     if direction == "stable":
-        base = (
-            f"{test_name} has stayed roughly stable across {len(points)} tests{range_phrase}: {trail}."
-        )
+        base = f"{test_name} has stayed roughly stable across {len(points)} tests{range_phrase}: {trail}."  # noqa: E501
     else:
         verb = "risen" if net_change > 0 else "fallen"
         base = (
-            f"{test_name} has {verb} across {len(points)} tests{range_phrase}, from {values[0]:g} {unit} "
+            f"{test_name} has {verb} across {len(points)} tests{range_phrase}, from {values[0]:g} {unit} "  # noqa: E501
             f"to {values[-1]:g} {unit} ({trail})."
         )
 
@@ -526,10 +545,10 @@ def _explain(
     elif crossing is not None:
         base += (
             f" It moved from within the normal range into the '{crossing['flag']}' range "
-            f"starting with the {crossing.get('date', 'most recent')} test, and has stayed there since."
+            f"starting with the {crossing.get('date', 'most recent')} test, and has stayed there since."  # noqa: E501
         )
     elif points[-1]["flag"] != "normal" and points[0]["flag"] != "normal":
-        base += f" It was already outside the normal range at the earliest available test and has remained '{points[-1]['flag']}'."
+        base += f" It was already outside the normal range at the earliest available test and has remained '{points[-1]['flag']}'."  # noqa: E501
     elif approaching:
         # Use the same substring test as _approaching_boundary() above, NOT
         # direction.startswith("increasing"). _direction() can return
@@ -579,7 +598,7 @@ def track_lab_trends(timeline: Dict[str, Any]) -> Dict[str, Any]:
         "insufficient_data": [{"test_name": str, "reason": str}, ...],
         "note": "... not a diagnosis, consult a clinician/pharmacist ..."
       }
-    """
+    """  # noqa: E501
     lab_results_timeline = timeline.get("lab_results_timeline", [])
     grouped = _group_by_test(lab_results_timeline)
 
@@ -603,16 +622,20 @@ def track_lab_trends(timeline: Dict[str, Any]) -> Dict[str, Any]:
             if dt is None or val is None:
                 dropped += 1
                 continue
-            usable.append({
-                "_dt": dt, "_value": val,
-                "date": e.get("date"), "value": e.get("value"),
-                "flag": e.get("flag") or "unknown",
-                "unit": e.get("unit") or "",
-                "reference_range": e.get("reference_range"),
-                "source_file": e.get("source_file"),
-                "source_page": e.get("source_page"),
-                "confidence": e.get("confidence", 1.0),
-            })
+            usable.append(
+                {
+                    "_dt": dt,
+                    "_value": val,
+                    "date": e.get("date"),
+                    "value": e.get("value"),
+                    "flag": e.get("flag") or "unknown",
+                    "unit": e.get("unit") or "",
+                    "reference_range": e.get("reference_range"),
+                    "source_file": e.get("source_file"),
+                    "source_page": e.get("source_page"),
+                    "confidence": e.get("confidence", 1.0),
+                }
+            )
             if e.get("unit"):
                 units_seen.add(e["unit"])
             if e.get("reference_range"):
@@ -620,22 +643,26 @@ def track_lab_trends(timeline: Dict[str, Any]) -> Dict[str, Any]:
 
         if len(usable) < 2:
             if len(usable) == 1:
-                single_results.append(_assess_single_result(
-                    test_name, usable[0], patient_context.get("sex"), patient_context.get("age")
-                ))
-            insufficient.append({
-                "test_name": test_name,
-                "reason": (
-                    f"only {len(usable)} usable data point(s) with a parseable date and an exact "
-                    f"numeric value (need at least 2 to establish a trend); {dropped} entrie(s) "
-                    f"were excluded (missing date, non-numeric, or censored/approximate value such "
-                    f"as '<5')."
-                    if usable else
-                    f"no entries had both a parseable date and an exact numeric value "
-                    f"({dropped} excluded — missing date, non-numeric, or censored/approximate "
-                    f"value such as '<5')."
-                ),
-            })
+                single_results.append(
+                    _assess_single_result(
+                        test_name, usable[0], patient_context.get("sex"), patient_context.get("age")
+                    )
+                )
+            insufficient.append(
+                {
+                    "test_name": test_name,
+                    "reason": (
+                        f"only {len(usable)} usable data point(s) with a parseable date and an exact "  # noqa: E501
+                        f"numeric value (need at least 2 to establish a trend); {dropped} entrie(s) "  # noqa: E501
+                        f"were excluded (missing date, non-numeric, or censored/approximate value such "  # noqa: E501
+                        f"as '<5')."
+                        if usable
+                        else f"no entries had both a parseable date and an exact numeric value "
+                        f"({dropped} excluded — missing date, non-numeric, or censored/approximate "
+                        f"value such as '<5')."
+                    ),
+                }
+            )
             continue
 
         usable.sort(key=lambda p: p["_dt"])
@@ -651,19 +678,19 @@ def track_lab_trends(timeline: Dict[str, Any]) -> Dict[str, Any]:
         # decline the trend and say why, rather than emit a confident
         # wrong direction. Comparison is case/whitespace-insensitive so
         # "mg/dL" and "mg/dl " don't count as a real disagreement.
-        distinct_units = {
-            re.sub(r"\s+", "", p["unit"]).lower() for p in usable if p.get("unit")
-        }
+        distinct_units = {re.sub(r"\s+", "", p["unit"]).lower() for p in usable if p.get("unit")}
         if len(distinct_units) > 1:
-            insufficient.append({
-                "test_name": test_name,
-                "reason": (
-                    f"readings use {len(distinct_units)} different units "
-                    f"({', '.join(sorted(p['unit'] for p in usable if p.get('unit')))}) — "
-                    "values are not directly comparable, so no trend was computed. "
-                    "Re-check the source reports or record these under separate test names."
-                ),
-            })
+            insufficient.append(
+                {
+                    "test_name": test_name,
+                    "reason": (
+                        f"readings use {len(distinct_units)} different units "
+                        f"({', '.join(sorted(p['unit'] for p in usable if p.get('unit')))}) — "
+                        "values are not directly comparable, so no trend was computed. "
+                        "Re-check the source reports or record these under separate test names."
+                    ),
+                }
+            )
             continue
 
         unit = usable[-1]["unit"]
@@ -671,7 +698,9 @@ def track_lab_trends(timeline: Dict[str, Any]) -> Dict[str, Any]:
 
         direction = _direction([p["_value"] for p in usable], range_bounds)
         crossing = _crossing_point(usable)
-        approaching = _approaching_boundary(usable[-1]["_value"], usable[-1]["flag"], range_bounds, direction)
+        approaching = _approaching_boundary(
+            usable[-1]["_value"], usable[-1]["flag"], range_bounds, direction
+        )
         recovered = _returned_to_normal(usable, crossing)
         risk_level, risk_reason = _trend_risk(usable, direction, range_bounds, approaching)
 
@@ -685,33 +714,37 @@ def track_lab_trends(timeline: Dict[str, Any]) -> Dict[str, Any]:
         if len(units_seen) > 1 or len(ranges_seen) > 1:
             base_confidence *= 0.7
 
-        trends.append({
-            "test_name": test_name,
-            "unit": unit,
-            "reference_range": usable[-1]["reference_range"],
-            "data_points": [
-                {
-                    "date": p["date"],
-                    "value": p["value"],
-                    "flag": p["flag"],
-                    "source_file": p["source_file"],
-                    "source_page": p["source_page"],
-                }
-                for p in usable
-            ],
-            "direction": direction,
-            "flag_sequence": _flag_sequence_phrase([p["flag"] for p in usable]),
-            "crossed_into_abnormal_at": (
-                {"date": crossing["date"], "flag": crossing["flag"]} if crossing else None
-            ),
-            "returned_to_normal": recovered,
-            "approaching_threshold": approaching,
-            "risk_level": risk_level,
-            "risk_reason": risk_reason,
-            "professional_review_recommended": risk_level in {"moderate", "high"},
-            "confidence": round(min(base_confidence, 0.97), 2),
-            "explanation": _explain(test_name, unit, usable, direction, range_bounds, crossing, approaching),
-        })
+        trends.append(
+            {
+                "test_name": test_name,
+                "unit": unit,
+                "reference_range": usable[-1]["reference_range"],
+                "data_points": [
+                    {
+                        "date": p["date"],
+                        "value": p["value"],
+                        "flag": p["flag"],
+                        "source_file": p["source_file"],
+                        "source_page": p["source_page"],
+                    }
+                    for p in usable
+                ],
+                "direction": direction,
+                "flag_sequence": _flag_sequence_phrase([p["flag"] for p in usable]),
+                "crossed_into_abnormal_at": (
+                    {"date": crossing["date"], "flag": crossing["flag"]} if crossing else None
+                ),
+                "returned_to_normal": recovered,
+                "approaching_threshold": approaching,
+                "risk_level": risk_level,
+                "risk_reason": risk_reason,
+                "professional_review_recommended": risk_level in {"moderate", "high"},
+                "confidence": round(min(base_confidence, 0.97), 2),
+                "explanation": _explain(
+                    test_name, unit, usable, direction, range_bounds, crossing, approaching
+                ),
+            }
+        )
 
     return {
         "trends": trends,
@@ -721,7 +754,7 @@ def track_lab_trends(timeline: Dict[str, Any]) -> Dict[str, Any]:
         "note": (
             "This trend analysis is computed directly from the extracted lab values and reference "
             "ranges — it is not a diagnosis and does not account for clinical context beyond the "
-            "numbers shown. Consult the patient's doctor or a pharmacist to interpret what any trend "
+            "numbers shown. Consult the patient's doctor or a pharmacist to interpret what any trend "  # noqa: E501
             "means for their care."
         ),
     }
@@ -734,15 +767,96 @@ if __name__ == "__main__":
     # inside the normal range (approaching the upper boundary).
     demo_timeline = {
         "lab_results_timeline": [
-            {"test_name": "Fasting Glucose", "value": "91", "unit": "mg/dL", "reference_range": "70-99", "flag": "normal", "confidence": 0.95, "date": "05 Jan 2026", "source_file": "John_Lab_Report_1.pdf"},
-            {"test_name": "ALT", "value": "24", "unit": "U/L", "reference_range": "7-56", "flag": "normal", "confidence": 0.95, "date": "05 Jan 2026", "source_file": "John_Lab_Report_1.pdf"},
-            {"test_name": "Creatinine", "value": "0.92", "unit": "mg/dL", "reference_range": "0.74-1.35", "flag": "normal", "confidence": 0.95, "date": "05 Jan 2026", "source_file": "John_Lab_Report_1.pdf"},
-            {"test_name": "Fasting Glucose", "value": "103", "unit": "mg/dL", "reference_range": "70-99", "flag": "high", "confidence": 0.95, "date": "20 Apr 2026", "source_file": "John_Lab_Report_2.pdf"},
-            {"test_name": "ALT", "value": "41", "unit": "U/L", "reference_range": "7-56", "flag": "normal", "confidence": 0.95, "date": "20 Apr 2026", "source_file": "John_Lab_Report_2.pdf"},
-            {"test_name": "Creatinine", "value": "1.08", "unit": "mg/dL", "reference_range": "0.74-1.35", "flag": "normal", "confidence": 0.95, "date": "20 Apr 2026", "source_file": "John_Lab_Report_2.pdf"},
-            {"test_name": "Fasting Glucose", "value": "118", "unit": "mg/dL", "reference_range": "70-99", "flag": "high", "confidence": 0.95, "date": "30 Aug 2026", "source_file": "John_Lab_Report_3.pdf"},
-            {"test_name": "ALT", "value": "82", "unit": "U/L", "reference_range": "7-56", "flag": "high", "confidence": 0.95, "date": "30 Aug 2026", "source_file": "John_Lab_Report_3.pdf"},
-            {"test_name": "Creatinine", "value": "1.32", "unit": "mg/dL", "reference_range": "0.74-1.35", "flag": "normal", "confidence": 0.95, "date": "30 Aug 2026", "source_file": "John_Lab_Report_3.pdf"},
+            {
+                "test_name": "Fasting Glucose",
+                "value": "91",
+                "unit": "mg/dL",
+                "reference_range": "70-99",
+                "flag": "normal",
+                "confidence": 0.95,
+                "date": "05 Jan 2026",
+                "source_file": "John_Lab_Report_1.pdf",
+            },
+            {
+                "test_name": "ALT",
+                "value": "24",
+                "unit": "U/L",
+                "reference_range": "7-56",
+                "flag": "normal",
+                "confidence": 0.95,
+                "date": "05 Jan 2026",
+                "source_file": "John_Lab_Report_1.pdf",
+            },
+            {
+                "test_name": "Creatinine",
+                "value": "0.92",
+                "unit": "mg/dL",
+                "reference_range": "0.74-1.35",
+                "flag": "normal",
+                "confidence": 0.95,
+                "date": "05 Jan 2026",
+                "source_file": "John_Lab_Report_1.pdf",
+            },
+            {
+                "test_name": "Fasting Glucose",
+                "value": "103",
+                "unit": "mg/dL",
+                "reference_range": "70-99",
+                "flag": "high",
+                "confidence": 0.95,
+                "date": "20 Apr 2026",
+                "source_file": "John_Lab_Report_2.pdf",
+            },
+            {
+                "test_name": "ALT",
+                "value": "41",
+                "unit": "U/L",
+                "reference_range": "7-56",
+                "flag": "normal",
+                "confidence": 0.95,
+                "date": "20 Apr 2026",
+                "source_file": "John_Lab_Report_2.pdf",
+            },
+            {
+                "test_name": "Creatinine",
+                "value": "1.08",
+                "unit": "mg/dL",
+                "reference_range": "0.74-1.35",
+                "flag": "normal",
+                "confidence": 0.95,
+                "date": "20 Apr 2026",
+                "source_file": "John_Lab_Report_2.pdf",
+            },
+            {
+                "test_name": "Fasting Glucose",
+                "value": "118",
+                "unit": "mg/dL",
+                "reference_range": "70-99",
+                "flag": "high",
+                "confidence": 0.95,
+                "date": "30 Aug 2026",
+                "source_file": "John_Lab_Report_3.pdf",
+            },
+            {
+                "test_name": "ALT",
+                "value": "82",
+                "unit": "U/L",
+                "reference_range": "7-56",
+                "flag": "high",
+                "confidence": 0.95,
+                "date": "30 Aug 2026",
+                "source_file": "John_Lab_Report_3.pdf",
+            },
+            {
+                "test_name": "Creatinine",
+                "value": "1.32",
+                "unit": "mg/dL",
+                "reference_range": "0.74-1.35",
+                "flag": "normal",
+                "confidence": 0.95,
+                "date": "30 Aug 2026",
+                "source_file": "John_Lab_Report_3.pdf",
+            },
         ]
     }
     result = track_lab_trends(demo_timeline)
@@ -760,7 +874,9 @@ if __name__ == "__main__":
 
     # Regression check for the reference-range parsing bug (hyphen
     # mis-read as a negative sign): must render as "70-99", not "-99-70".
-    assert "70-99 mg/dL" in by_name["Fasting Glucose"]["explanation"], by_name["Fasting Glucose"]["explanation"]
+    assert "70-99 mg/dL" in by_name["Fasting Glucose"]["explanation"], by_name["Fasting Glucose"][
+        "explanation"
+    ]
 
     # Thousand-separated lab values (WBC, platelets) must not be truncated
     # at the first comma: "12,500" used to parse as 12.
@@ -782,7 +898,14 @@ if __name__ == "__main__":
 
     for t in result["trends"]:
         print(f"--- {t['test_name']} ---")
-        print(" direction:", t["direction"], "| flags:", t["flag_sequence"], "| confidence:", t["confidence"])
+        print(
+            " direction:",
+            t["direction"],
+            "| flags:",
+            t["flag_sequence"],
+            "| confidence:",
+            t["confidence"],
+        )
         print(" ", t["explanation"])
         print()
 

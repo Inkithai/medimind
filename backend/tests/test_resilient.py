@@ -8,10 +8,10 @@ These mock the OpenAI/Groq client so no network is involved. They verify:
   4. A non-retryable 400 propagates (with the error detail logged).
   5. max_retries=0 is set on the client (SDK retries disabled).
 """
+
+import json
 import os
 import sys
-import time
-import json
 from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -19,21 +19,24 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ["GROQ_API_KEY"] = "gsk_test_123"
 os.environ.setdefault("GROQ_VISION_MODEL", "qwen/qwen3.6-27b")
 
-import medical_extractor as me
 from openai import APIStatusError
 
-VALID_JSON = json.dumps({
-    "document_type": "prescription",
-    "date": "2024-03-15",
-    "provider_or_doctor": "Dr. Smith",
-    "patient_name": "John Doe",
-    "medications": [],
-    "lab_results": [],
-    "allergies_noted": [],
-    "clinical_notes": None,
-    "illegible_or_low_confidence_fields": [],
-    "overall_confidence": 0.92,
-})
+import medical_extractor as me
+
+VALID_JSON = json.dumps(
+    {
+        "document_type": "prescription",
+        "date": "2024-03-15",
+        "provider_or_doctor": "Dr. Smith",
+        "patient_name": "John Doe",
+        "medications": [],
+        "lab_results": [],
+        "allergies_noted": [],
+        "clinical_notes": None,
+        "illegible_or_low_confidence_fields": [],
+        "overall_confidence": 0.92,
+    }
+)
 
 
 def _resp(content: str):
@@ -64,17 +67,24 @@ def test_think_only_advances_rung():
     def fake_create(**kwargs):
         calls.append(kwargs.get("response_format"))
         if kwargs.get("response_format") == {"type": "json_object"}:
-            return _resp("<think> The user wants me to extract data from a medical lab report...</think>")
+            return _resp(
+                "<think> The user wants me to extract data from a medical lab report...</think>"
+            )
         return _resp("<think>ok</think>\n" + VALID_JSON)
 
-    with mock.patch.object(me.client.chat.completions, "create", fake_create), \
-         mock.patch.dict(os.environ, {"GROQ_DISABLE_REASONING": "false"}), \
-         mock.patch.object(me, "time") as fake_time:
+    with (
+        mock.patch.object(me.client.chat.completions, "create", fake_create),
+        mock.patch.dict(os.environ, {"GROQ_DISABLE_REASONING": "false"}),
+        mock.patch.object(me, "time") as fake_time,
+    ):
         fake_time.sleep = lambda s: None
         raw = me._completion_resilient(
             model="qwen/qwen3.6-27b",
             system_prompt="sys",
-            user_content=[{"type": "text", "text": "t"}, {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,x"}}],
+            user_content=[
+                {"type": "text", "text": "t"},
+                {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,x"}},
+            ],
             strict_format=me.EXTRACTION_RESPONSE_FORMAT,
         )
     # Exactly 2 HTTP calls: 1 json_object + 1 plain text (no doomed retries)
@@ -94,21 +104,30 @@ def test_json_validate_failed_400_advances_rung():
         if kwargs.get("response_format") == {"type": "json_object"}:
             raise _api_error(
                 400,
-                {"error": {"code": "json_validate_failed",
-                           "message": "Failed to validate JSON",
-                           "failed_generation": "<think> The user wants..."}},
+                {
+                    "error": {
+                        "code": "json_validate_failed",
+                        "message": "Failed to validate JSON",
+                        "failed_generation": "<think> The user wants...",
+                    }
+                },
                 code="json_validate_failed",
             )
         return _resp(VALID_JSON)
 
-    with mock.patch.object(me.client.chat.completions, "create", fake_create), \
-         mock.patch.dict(os.environ, {"GROQ_DISABLE_REASONING": "false"}), \
-         mock.patch.object(me, "time") as fake_time:
+    with (
+        mock.patch.object(me.client.chat.completions, "create", fake_create),
+        mock.patch.dict(os.environ, {"GROQ_DISABLE_REASONING": "false"}),
+        mock.patch.object(me, "time") as fake_time,
+    ):
         fake_time.sleep = lambda s: None
         raw = me._completion_resilient(
             model="qwen/qwen3.6-27b",
             system_prompt="sys",
-            user_content=[{"type": "text", "text": "t"}, {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,x"}}],
+            user_content=[
+                {"type": "text", "text": "t"},
+                {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,x"}},
+            ],
             strict_format=me.EXTRACTION_RESPONSE_FORMAT,
         )
     assert len(calls) == 2, calls
@@ -127,14 +146,19 @@ def test_suppression_probe_sent_and_cached():
         # Provider honors enable_thinking=false: no <think>, clean JSON.
         return _resp(VALID_JSON)
 
-    with mock.patch.object(me.client.chat.completions, "create", fake_create), \
-         mock.patch.object(me, "time") as fake_time:
+    with (
+        mock.patch.object(me.client.chat.completions, "create", fake_create),
+        mock.patch.object(me, "time") as fake_time,
+    ):
         fake_time.sleep = lambda s: None
         for _ in range(2):  # second call must reuse the cached probe
             raw = me._completion_resilient(
                 model="qwen/qwen3.6-27b",
                 system_prompt="sys",
-                user_content=[{"type": "text", "text": "t"}, {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,x"}}],
+                user_content=[
+                    {"type": "text", "text": "t"},
+                    {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,x"}},
+                ],
                 strict_format=me.EXTRACTION_RESPONSE_FORMAT,
             )
             assert VALID_JSON in raw
@@ -159,19 +183,24 @@ def test_unsupported_probe_param_crossed_off():
             raise _api_error(400, {"error": {"message": 'Unknown field "chat_template_kwargs"'}})
         return _resp(VALID_JSON)
 
-    with mock.patch.object(me.client.chat.completions, "create", fake_create), \
-         mock.patch.object(me, "time") as fake_time:
+    with (
+        mock.patch.object(me.client.chat.completions, "create", fake_create),
+        mock.patch.object(me, "time") as fake_time,
+    ):
         fake_time.sleep = lambda s: None
         raw = me._completion_resilient(
             model="qwen/qwen3.6-27b",
             system_prompt="sys",
-            user_content=[{"type": "text", "text": "t"}, {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,x"}}],
+            user_content=[
+                {"type": "text", "text": "t"},
+                {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,x"}},
+            ],
             strict_format=me.EXTRACTION_RESPONSE_FORMAT,
         )
     assert VALID_JSON in raw
     assert calls == [
         {"chat_template_kwargs": {"enable_thinking": False}},  # 400 unknown param
-        {"reasoning_format": "hidden"},                        # accepted, clean JSON
+        {"reasoning_format": "hidden"},  # accepted, clean JSON
     ], calls
     state = me._SUPPRESS_STATE["qwen/qwen3.6-27b"]
     assert state["dead"] == {0} and state["good"] == 1, state
@@ -198,13 +227,18 @@ def test_suppression_ignored_falls_through_and_remembers():
             )
         return _resp(VALID_JSON)
 
-    with mock.patch.object(me.client.chat.completions, "create", fake_create), \
-         mock.patch.object(me, "time") as fake_time:
+    with (
+        mock.patch.object(me.client.chat.completions, "create", fake_create),
+        mock.patch.object(me, "time") as fake_time,
+    ):
         fake_time.sleep = lambda s: None
         raw = me._completion_resilient(
             model="qwen/qwen3.6-27b",
             system_prompt="sys",
-            user_content=[{"type": "text", "text": "t"}, {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,x"}}],
+            user_content=[
+                {"type": "text", "text": "t"},
+                {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,x"}},
+            ],
             strict_format=me.EXTRACTION_RESPONSE_FORMAT,
         )
     assert VALID_JSON in raw
@@ -231,18 +265,29 @@ def test_no_fabricated_stub_fallback_on_total_failure():
         called_models.append(kwargs.get("model"))
         raise _api_error(
             400,
-            {"error": {"code": "json_validate_failed", "message": "Failed to validate JSON", "failed_generation": ""}},
+            {
+                "error": {
+                    "code": "json_validate_failed",
+                    "message": "Failed to validate JSON",
+                    "failed_generation": "",
+                }
+            },
             code="json_validate_failed",
         )
 
-    with mock.patch.object(me.client.chat.completions, "create", fake_create), \
-         mock.patch.object(me, "time") as fake_time:
+    with (
+        mock.patch.object(me.client.chat.completions, "create", fake_create),
+        mock.patch.object(me, "time") as fake_time,
+    ):
         fake_time.sleep = lambda s: None
         try:
             me._completion_resilient(
                 model="qwen/qwen3.6-27b",
                 system_prompt="sys",
-                user_content=[{"type": "text", "text": "t"}, {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,x"}}],
+                user_content=[
+                    {"type": "text", "text": "t"},
+                    {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,x"}},
+                ],
                 strict_format=me.EXTRACTION_RESPONSE_FORMAT,
             )
         except RuntimeError as e:
@@ -269,19 +314,30 @@ def test_probe_not_crossed_off_on_ambiguous_validate_failure():
         if kwargs.get("response_format") == {"type": "json_object"}:
             raise _api_error(
                 400,
-                {"error": {"code": "json_validate_failed", "message": "Failed to validate JSON", "failed_generation": ""}},
+                {
+                    "error": {
+                        "code": "json_validate_failed",
+                        "message": "Failed to validate JSON",
+                        "failed_generation": "",
+                    }
+                },
                 code="json_validate_failed",
             )
         return _resp(VALID_JSON)
 
-    with mock.patch.object(me.client.chat.completions, "create", fake_create), \
-         mock.patch.object(me, "time") as fake_time:
+    with (
+        mock.patch.object(me.client.chat.completions, "create", fake_create),
+        mock.patch.object(me, "time") as fake_time,
+    ):
         fake_time.sleep = lambda s: None
         for _ in range(2):  # two independent calls (cold cache), same story
             raw = me._completion_resilient(
                 model="qwen/qwen3.6-27b",
                 system_prompt="sys",
-                user_content=[{"type": "text", "text": "t"}, {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,x"}}],
+                user_content=[
+                    {"type": "text", "text": "t"},
+                    {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,x"}},
+                ],
                 strict_format=me.EXTRACTION_RESPONSE_FORMAT,
             )
             assert VALID_JSON in raw
@@ -302,19 +358,29 @@ def test_probe_crossed_off_only_on_positive_think_evidence():
         if kwargs.get("response_format") == {"type": "json_object"}:
             raise _api_error(
                 400,
-                {"error": {"code": "json_validate_failed", "message": "Failed to validate JSON",
-                           "failed_generation": "<think> The user wants me to extract... truncated\n{broken json"}},
+                {
+                    "error": {
+                        "code": "json_validate_failed",
+                        "message": "Failed to validate JSON",
+                        "failed_generation": "<think> The user wants me to extract... truncated\n{broken json",  # noqa: E501
+                    }
+                },
                 code="json_validate_failed",
             )
         return _resp(VALID_JSON)
 
-    with mock.patch.object(me.client.chat.completions, "create", fake_create), \
-         mock.patch.object(me, "time") as fake_time:
+    with (
+        mock.patch.object(me.client.chat.completions, "create", fake_create),
+        mock.patch.object(me, "time") as fake_time,
+    ):
         fake_time.sleep = lambda s: None
         raw = me._completion_resilient(
             model="qwen/qwen3.6-27b",
             system_prompt="sys",
-            user_content=[{"type": "text", "text": "t"}, {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,x"}}],
+            user_content=[
+                {"type": "text", "text": "t"},
+                {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,x"}},
+            ],
             strict_format=me.EXTRACTION_RESPONSE_FORMAT,
         )
     assert VALID_JSON in raw
@@ -332,16 +398,31 @@ def test_422_body_validation_crosses_probe_off():
         extra = kwargs.get("extra_body")
         calls.append(extra)
         if extra and "chat_template_kwargs" in extra:
-            raise _api_error(422, {"detail": [{"msg": "extra inputs are not permitted", "loc": ["body", "chat_template_kwargs"]}]})
+            raise _api_error(
+                422,
+                {
+                    "detail": [
+                        {
+                            "msg": "extra inputs are not permitted",
+                            "loc": ["body", "chat_template_kwargs"],
+                        }
+                    ]
+                },
+            )
         return _resp(VALID_JSON)
 
-    with mock.patch.object(me.client.chat.completions, "create", fake_create), \
-         mock.patch.object(me, "time") as fake_time:
+    with (
+        mock.patch.object(me.client.chat.completions, "create", fake_create),
+        mock.patch.object(me, "time") as fake_time,
+    ):
         fake_time.sleep = lambda s: None
         raw = me._completion_resilient(
             model="qwen/qwen3.6-27b",
             system_prompt="sys",
-            user_content=[{"type": "text", "text": "t"}, {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,x"}}],
+            user_content=[
+                {"type": "text", "text": "t"},
+                {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,x"}},
+            ],
             strict_format=me.EXTRACTION_RESPONSE_FORMAT,
         )
     assert VALID_JSON in raw
@@ -358,11 +439,15 @@ def test_429_uses_retry_after_then_succeeds():
     def fake_create(**kwargs):
         calls.append(kwargs.get("response_format"))
         if len(calls) <= 2:
-            raise _api_error(429, {"error": {"message": "rate limit"}}, headers={"retry-after": "3"})
+            raise _api_error(
+                429, {"error": {"message": "rate limit"}}, headers={"retry-after": "3"}
+            )
         return _resp(VALID_JSON)
 
-    with mock.patch.object(me.client.chat.completions, "create", fake_create), \
-         mock.patch.object(me, "time") as fake_time:
+    with (
+        mock.patch.object(me.client.chat.completions, "create", fake_create),
+        mock.patch.object(me, "time") as fake_time,
+    ):
         fake_time.sleep = lambda s: sleeps.append(s)
         raw = me._completion_resilient(
             model="openai/gpt-oss-120b",
@@ -406,15 +491,19 @@ def test_hard_daily_quota_fails_after_one_request():
                     "details": [
                         {
                             "@type": "type.googleapis.com/google.rpc.QuotaFailure",
-                            "violations": [{"quotaId": "GenerateRequestsPerDayPerProjectPerModel-FreeTier"}],
+                            "violations": [
+                                {"quotaId": "GenerateRequestsPerDayPerProjectPerModel-FreeTier"}
+                            ],
                         }
                     ],
                 }
             },
         )
 
-    with mock.patch.object(me.client.chat.completions, "create", fake_create), \
-         mock.patch.object(me, "time") as fake_time:
+    with (
+        mock.patch.object(me.client.chat.completions, "create", fake_create),
+        mock.patch.object(me, "time") as fake_time,
+    ):
         fake_time.sleep = lambda seconds: sleeps.append(seconds)
         try:
             me._completion_resilient(
@@ -442,11 +531,14 @@ def test_gemini_default_does_not_use_shutdown_2_0_model():
 
 def test_non_retryable_400_raises():
     """A 400 that is NOT json_validate_failed is permanent — must raise."""
+
     def fake_create(**kwargs):
         raise _api_error(400, {"error": {"message": "unsupported parameter 'foo'"}})
 
-    with mock.patch.object(me.client.chat.completions, "create", fake_create), \
-         mock.patch.object(me, "time") as fake_time:
+    with (
+        mock.patch.object(me.client.chat.completions, "create", fake_create),
+        mock.patch.object(me, "time") as fake_time,
+    ):
         fake_time.sleep = lambda s: None
         try:
             me._completion_resilient(
@@ -464,12 +556,15 @@ def test_non_retryable_400_raises():
 def test_rate_limit_cap_fails_fast():
     """After GROQ_MAX_RATE_LIMIT_RETRIES consecutive 429s, raise a clear
     RuntimeError instead of retrying forever."""
+
     def fake_create(**kwargs):
         raise _api_error(429, {"error": {"message": "rate limit"}}, headers={"retry-after": "1"})
 
-    with mock.patch.object(me.client.chat.completions, "create", fake_create), \
-         mock.patch.object(me, "time") as fake_time, \
-         mock.patch.dict(os.environ, {"GROQ_MAX_RATE_LIMIT_RETRIES": "2"}):
+    with (
+        mock.patch.object(me.client.chat.completions, "create", fake_create),
+        mock.patch.object(me, "time") as fake_time,
+        mock.patch.dict(os.environ, {"GROQ_MAX_RATE_LIMIT_RETRIES": "2"}),
+    ):
         fake_time.sleep = lambda s: None
         try:
             me._completion_resilient(
@@ -492,10 +587,14 @@ def test_parse_think_wrapped_json():
 
 def test_openrouter_fallback_auto_enabled_when_key_and_model_set():
     """Setting OpenRouter API key and model automatically enables fallback."""
-    with mock.patch.dict(os.environ, {
-        "OPENROUTER_API_KEY": "sk-or-test-key",
-        "OPENROUTER_FALLBACK_MODEL": "google/gemma-3-27b-it:free",
-    }, clear=False):
+    with mock.patch.dict(
+        os.environ,
+        {
+            "OPENROUTER_API_KEY": "sk-or-test-key",
+            "OPENROUTER_FALLBACK_MODEL": "google/gemma-3-27b-it:free",
+        },
+        clear=False,
+    ):
         me.openrouter_fallback_client = None
         me._openrouter_fallback_active = False
         client = me._ensure_openrouter_fallback_client()
@@ -509,11 +608,15 @@ def test_openrouter_fallback_auto_enabled_when_key_and_model_set():
 
 def test_openrouter_fallback_explicit_disabled():
     """OPENROUTER_FALLBACK_ENABLED=false prevents enabling even if credentials exist."""
-    with mock.patch.dict(os.environ, {
-        "OPENROUTER_FALLBACK_ENABLED": "false",
-        "OPENROUTER_API_KEY": "sk-or-test-key",
-        "OPENROUTER_FALLBACK_MODEL": "google/gemma-3-27b-it:free",
-    }, clear=False):
+    with mock.patch.dict(
+        os.environ,
+        {
+            "OPENROUTER_FALLBACK_ENABLED": "false",
+            "OPENROUTER_API_KEY": "sk-or-test-key",
+            "OPENROUTER_FALLBACK_MODEL": "google/gemma-3-27b-it:free",
+        },
+        clear=False,
+    ):
         me.openrouter_fallback_client = None
         me._openrouter_fallback_active = False
         client = me._ensure_openrouter_fallback_client()
@@ -524,10 +627,14 @@ def test_openrouter_fallback_explicit_disabled():
 
 def test_openrouter_fallback_alias_env_vars():
     """Alias env vars (OPENROUTER_KEY, OPENROUTER_MODEL) configure OpenRouter fallback."""
-    with mock.patch.dict(os.environ, {
-        "OPENROUTER_KEY": "sk-or-alias-key",
-        "OPENROUTER_MODEL": "google/gemma-3-27b-it:free",
-    }, clear=False):
+    with mock.patch.dict(
+        os.environ,
+        {
+            "OPENROUTER_KEY": "sk-or-alias-key",
+            "OPENROUTER_MODEL": "google/gemma-3-27b-it:free",
+        },
+        clear=False,
+    ):
         me.openrouter_fallback_client = None
         me._openrouter_fallback_active = False
         client = me._ensure_openrouter_fallback_client()
@@ -540,10 +647,14 @@ def test_openrouter_fallback_alias_env_vars():
 
 def test_hard_quota_switches_to_openrouter_fallback():
     """When primary provider fails with hard quota, new requests switch to OpenRouter fallback."""
-    with mock.patch.dict(os.environ, {
-        "OPENROUTER_API_KEY": "sk-or-test-key",
-        "OPENROUTER_FALLBACK_MODEL": "google/gemma-3-27b-it:free",
-    }, clear=False):
+    with mock.patch.dict(
+        os.environ,
+        {
+            "OPENROUTER_API_KEY": "sk-or-test-key",
+            "OPENROUTER_FALLBACK_MODEL": "google/gemma-3-27b-it:free",
+        },
+        clear=False,
+    ):
         me.openrouter_fallback_client = None
         me._openrouter_fallback_active = False
 
@@ -556,12 +667,14 @@ def test_hard_quota_switches_to_openrouter_fallback():
                 429,
                 {
                     "error": {
-                        "message": "Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20",
+                        "message": "Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20",  # noqa: E501
                         "status": "RESOURCE_EXHAUSTED",
                         "details": [
                             {
                                 "@type": "type.googleapis.com/google.rpc.QuotaFailure",
-                                "violations": [{"quotaId": "GenerateRequestsPerDayPerProjectPerModel-FreeTier"}],
+                                "violations": [
+                                    {"quotaId": "GenerateRequestsPerDayPerProjectPerModel-FreeTier"}
+                                ],
                             }
                         ],
                     }
@@ -575,9 +688,15 @@ def test_hard_quota_switches_to_openrouter_fallback():
         fallback_client = me._ensure_openrouter_fallback_client()
         assert fallback_client is not None
 
-        with mock.patch.object(me.client.chat.completions, "create", side_effect=fake_primary_create), \
-             mock.patch.object(fallback_client.chat.completions, "create", side_effect=fake_fallback_create), \
-             mock.patch.object(me, "time") as fake_time:
+        with (
+            mock.patch.object(
+                me.client.chat.completions, "create", side_effect=fake_primary_create
+            ),
+            mock.patch.object(
+                fallback_client.chat.completions, "create", side_effect=fake_fallback_create
+            ),
+            mock.patch.object(me, "time") as fake_time,
+        ):
             fake_time.sleep = lambda seconds: None
             res = me._completion_resilient(
                 model="gemini-3.6-flash",

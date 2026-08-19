@@ -76,9 +76,7 @@ export function GuidelinesPage() {
                   className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-slate-200 p-2 text-sm"
                 >
                   <div className="min-w-0">
-                    <div className="font-medium text-slate-700">
-                      {s.description || s.key}
-                    </div>
+                    <div className="font-medium text-slate-700">{s.description || s.key}</div>
                     <div className="text-xs text-slate-400">
                       version {s.version} · reviewed {s.reviewed}
                       {s.age_days !== null ? ` · ${s.age_days}d ago` : ""}

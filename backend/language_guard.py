@@ -114,9 +114,7 @@ def assert_language_normalized(doc: Dict[str, Any], file_label: str) -> None:
 
     if affected:
         lang_note = (
-            f"This document is in {', '.join(sorted(languages))}, and some"
-            if languages
-            else "Some"
+            f"This document is in {', '.join(sorted(languages))}, and some" if languages else "Some"
         )
         raise LanguageNormalizationError(
             file_label,
@@ -199,11 +197,13 @@ def assess_documents_translation_risk(docs: List[Dict[str, Any]]) -> Dict[str, A
         risk = assess_translation_risk(doc)
         if risk["flag"] != "none":
             source = (doc.get("_source") or {}).get("file") or doc.get("source_file")
-            flagged.append({
-                "source_file": source,
-                "document_language": doc.get("document_language"),
-                **risk,
-            })
+            flagged.append(
+                {
+                    "source_file": source,
+                    "document_language": doc.get("document_language"),
+                    **risk,
+                }
+            )
             if order[risk["flag"]] > order[worst]:
                 worst = risk["flag"]
     return {
@@ -215,6 +215,7 @@ def assess_documents_translation_risk(docs: List[Dict[str, Any]]) -> Dict[str, A
             "was hard to read (fix: a clearer photo); low translation confidence "
             "means converting drug names or dosing phrases into standard English "
             "form was uncertain (fix: a pharmacist can confirm the generic names)."
-            if flagged else None
+            if flagged
+            else None
         ),
     }

@@ -26,6 +26,7 @@ os.environ.setdefault("PRELOAD_EMBEDDING_MODEL", "false")
 
 try:
     from fastapi.testclient import TestClient  # noqa: E402
+
     import api  # noqa: E402
 except ModuleNotFoundError as exc:  # pragma: no cover - local sandbox without FastAPI
     TestClient = None  # type: ignore[misc, assignment]
@@ -128,8 +129,10 @@ def test_get_medication_safety_404_without_snapshot():
 def test_get_medication_safety_returns_dedicated_service_contract():
     if not _require_api():
         return
-    with mock.patch.object(api, "_load_snapshot_or_rebuild", return_value=dict(SNAPSHOT)), \
-         mock.patch.object(api, "_enhanced_cross_check", return_value=dict(CLEAN_REPORT)):
+    with (
+        mock.patch.object(api, "_load_snapshot_or_rebuild", return_value=dict(SNAPSHOT)),
+        mock.patch.object(api, "_enhanced_cross_check", return_value=dict(CLEAN_REPORT)),
+    ):
         with _authed_client() as client:
             response = client.get("/api/v1/medication-safety")
 
@@ -150,9 +153,11 @@ def test_get_medication_safety_computes_dosage_when_snapshot_lacks_it():
     snapshot = dict(SNAPSHOT)
     snapshot.pop("dosage_report", None)
     computed = {"findings": [{"kind": "above_max_single_dose"}], "skipped": []}
-    with mock.patch.object(api, "_load_snapshot_or_rebuild", return_value=snapshot), \
-         mock.patch.object(api, "_enhanced_cross_check", return_value=dict(CLEAN_REPORT)), \
-         mock.patch.object(api, "check_dosages", return_value=computed) as dosage:
+    with (
+        mock.patch.object(api, "_load_snapshot_or_rebuild", return_value=snapshot),
+        mock.patch.object(api, "_enhanced_cross_check", return_value=dict(CLEAN_REPORT)),
+        mock.patch.object(api, "check_dosages", return_value=computed) as dosage,
+    ):
         with _authed_client() as client:
             response = client.get("/api/v1/medication-safety")
 
@@ -164,8 +169,10 @@ def test_get_medication_safety_computes_dosage_when_snapshot_lacks_it():
 def test_reanalyze_404_without_documents():
     if not _require_api():
         return
-    with mock.patch.object(api, "_workspace_has_active_upload", return_value=False), \
-         mock.patch.object(api.db, "load_documents", return_value=[]):
+    with (
+        mock.patch.object(api, "_workspace_has_active_upload", return_value=False),
+        mock.patch.object(api.db, "load_documents", return_value=[]),
+    ):
         with _authed_client() as client:
             response = client.post("/api/v1/medication-safety/reanalyze")
     assert response.status_code == 404
@@ -196,14 +203,26 @@ def test_reanalyze_rebuilds_and_reports_counts():
         "lab_results_timeline": [],
         "known_allergies": [],
     }
-    with mock.patch.object(api, "_workspace_has_active_upload", return_value=False), \
-         mock.patch.object(api.db, "load_documents", return_value=[{"patient_name": "A"}]), \
-         mock.patch.object(api.db, "load_patient_snapshot", return_value={"cross_check_report": old}), \
-         mock.patch.object(api, "_prepare_current_trust_state", return_value=([], [], {}, [])), \
-         mock.patch.object(api, "_derive_record", new=mock.AsyncMock(return_value=(timeline, clean, {"trends": []}))), \
-         mock.patch.object(api.db, "save_patient_snapshot", return_value={"available": True, "tables": {}, "safety_findings": {}}) as save, \
-         mock.patch.object(api, "_replace_index", new=mock.AsyncMock(return_value=(True, None, 2))), \
-         mock.patch.object(api.audit, "record"):
+    with (
+        mock.patch.object(api, "_workspace_has_active_upload", return_value=False),
+        mock.patch.object(api.db, "load_documents", return_value=[{"patient_name": "A"}]),
+        mock.patch.object(
+            api.db, "load_patient_snapshot", return_value={"cross_check_report": old}
+        ),
+        mock.patch.object(api, "_prepare_current_trust_state", return_value=([], [], {}, [])),
+        mock.patch.object(
+            api,
+            "_derive_record",
+            new=mock.AsyncMock(return_value=(timeline, clean, {"trends": []})),
+        ),
+        mock.patch.object(
+            api.db,
+            "save_patient_snapshot",
+            return_value={"available": True, "tables": {}, "safety_findings": {}},
+        ) as save,
+        mock.patch.object(api, "_replace_index", new=mock.AsyncMock(return_value=(True, None, 2))),
+        mock.patch.object(api.audit, "record"),
+    ):
         with _authed_client() as client:
             response = client.post("/api/v1/medication-safety/reanalyze")
 

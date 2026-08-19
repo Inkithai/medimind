@@ -12,9 +12,7 @@ import { classNames } from "../utils/format";
 export function HealthSummaryCard({ timeline }: { timeline: Timeline }) {
   const { t, formatNumber } = useI18n();
   const doctors = new Set(
-    timeline.visits
-      .map((v) => (v.provider_or_doctor || "").trim().toLowerCase())
-      .filter(Boolean)
+    timeline.visits.map((v) => (v.provider_or_doctor || "").trim().toLowerCase()).filter(Boolean),
   ).size;
 
   const stats = [
@@ -73,12 +71,14 @@ export function HealthSummaryCard({ timeline }: { timeline: Timeline }) {
               <span
                 className={classNames(
                   "flex h-9 w-9 items-center justify-center rounded-lg transition group-hover:scale-105",
-                  s.chip
+                  s.chip,
                 )}
               >
                 <Icon className="h-5 w-5" />
               </span>
-              <p className="mt-3 text-2xl font-bold leading-none text-slate-900">{formatNumber(s.value)}</p>
+              <p className="mt-3 text-2xl font-bold leading-none text-slate-900">
+                {formatNumber(s.value)}
+              </p>
               <p className="mt-1 text-sm font-medium text-slate-600">{s.label}</p>
             </Link>
           );
@@ -92,9 +92,7 @@ export function HealthSummaryCard({ timeline }: { timeline: Timeline }) {
             <ChatIcon className="h-5 w-5" />
           </span>
           <p className="mt-3 text-sm font-semibold text-brand-900">{t("ask.title")}</p>
-          <p className="mt-1 text-xs leading-relaxed text-brand-800/80">
-            {t("ask.question")}
-          </p>
+          <p className="mt-1 text-xs leading-relaxed text-brand-800/80">{t("ask.question")}</p>
         </Link>
       </div>
     </div>

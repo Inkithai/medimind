@@ -32,9 +32,7 @@ logger = logging.getLogger("care_finder")
 NOMINATIM_URL = os.environ.get(
     "NOMINATIM_URL", "https://nominatim.openstreetmap.org/search"
 ).rstrip("/")
-OVERPASS_URL = os.environ.get(
-    "OVERPASS_URL", "https://overpass-api.de/api/interpreter"
-).rstrip("/")
+OVERPASS_URL = os.environ.get("OVERPASS_URL", "https://overpass-api.de/api/interpreter").rstrip("/")
 OSM_USER_AGENT = os.environ.get(
     "OSM_USER_AGENT",
     "MediMind/1.0 (healthcare record assistant; https://github.com/Inkithai/medimind)",
@@ -228,9 +226,18 @@ SPECIALTIES: Dict[str, Dict[str, Any]] = {
         "osm": ("endocrinology", "diabetes", "diabetology"),
         "keywords": ("diabetes", "thyroid", "insulin", "hba1c"),
         "medications": (
-            "metformin", "insulin", "glipizide", "gliclazide", "glimepiride",
-            "sitagliptin", "empagliflozin", "dapagliflozin", "liraglutide",
-            "semaglutide", "levothyroxine", "carbimazole",
+            "metformin",
+            "insulin",
+            "glipizide",
+            "gliclazide",
+            "glimepiride",
+            "sitagliptin",
+            "empagliflozin",
+            "dapagliflozin",
+            "liraglutide",
+            "semaglutide",
+            "levothyroxine",
+            "carbimazole",
         ),
         "labs": ("hba1c", "glucose", "fasting glucose", "tsh", "free t4", "free t3"),
     },
@@ -239,10 +246,23 @@ SPECIALTIES: Dict[str, Dict[str, Any]] = {
         "osm": ("cardiology", "cardiac"),
         "keywords": ("heart", "cardiac", "hypertension", "blood pressure", "cholesterol"),
         "medications": (
-            "amlodipine", "lisinopril", "enalapril", "ramipril", "losartan",
-            "atenolol", "metoprolol", "bisoprolol", "atorvastatin", "rosuvastatin",
-            "simvastatin", "clopidogrel", "aspirin", "warfarin", "apixaban",
-            "furosemide", "spironolactone",
+            "amlodipine",
+            "lisinopril",
+            "enalapril",
+            "ramipril",
+            "losartan",
+            "atenolol",
+            "metoprolol",
+            "bisoprolol",
+            "atorvastatin",
+            "rosuvastatin",
+            "simvastatin",
+            "clopidogrel",
+            "aspirin",
+            "warfarin",
+            "apixaban",
+            "furosemide",
+            "spironolactone",
         ),
         "labs": ("ldl", "hdl", "cholesterol", "triglyceride", "troponin", "bnp", "nt-probnp"),
     },
@@ -251,8 +271,14 @@ SPECIALTIES: Dict[str, Dict[str, Any]] = {
         "osm": ("pulmonology", "respiratory", "chest"),
         "keywords": ("asthma", "copd", "inhaler", "wheeze"),
         "medications": (
-            "salbutamol", "albuterol", "budesonide", "fluticasone", "montelukast",
-            "tiotropium", "formoterol", "ipratropium",
+            "salbutamol",
+            "albuterol",
+            "budesonide",
+            "fluticasone",
+            "montelukast",
+            "tiotropium",
+            "formoterol",
+            "ipratropium",
         ),
         "labs": ("spo2", "oxygen saturation"),
     },
@@ -274,7 +300,14 @@ SPECIALTIES: Dict[str, Dict[str, Any]] = {
         "label": "Neurology",
         "osm": ("neurology",),
         "keywords": ("seizure", "migraine", "stroke", "neuropathy", "parkinson"),
-        "medications": ("levetiracetam", "valproate", "carbamazepine", "gabapentin", "pregabalin", "sumatriptan"),
+        "medications": (
+            "levetiracetam",
+            "valproate",
+            "carbamazepine",
+            "gabapentin",
+            "pregabalin",
+            "sumatriptan",
+        ),
         "labs": (),
     },
     "psychiatry": {
@@ -282,8 +315,16 @@ SPECIALTIES: Dict[str, Dict[str, Any]] = {
         "osm": ("psychiatry", "mental_health"),
         "keywords": ("depression", "anxiety", "psychiatric"),
         "medications": (
-            "sertraline", "fluoxetine", "escitalopram", "citalopram", "venlafaxine",
-            "amitriptyline", "mirtazapine", "olanzapine", "quetiapine", "risperidone",
+            "sertraline",
+            "fluoxetine",
+            "escitalopram",
+            "citalopram",
+            "venlafaxine",
+            "amitriptyline",
+            "mirtazapine",
+            "olanzapine",
+            "quetiapine",
+            "risperidone",
         ),
         "labs": (),
     },
@@ -399,7 +440,9 @@ def suggest_specialties(timeline: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     visits = timeline.get("visits") or []
 
     for med in meds:
-        hay = " ".join([_blob(med.get("name")), " ".join(_blob(i) for i in (med.get("ingredients") or []))])
+        hay = " ".join(
+            [_blob(med.get("name")), " ".join(_blob(i) for i in (med.get("ingredients") or []))]
+        )
         for key, spec in SPECIALTIES.items():
             for token in spec["medications"]:
                 if token and token in hay:
@@ -426,7 +469,10 @@ def suggest_specialties(timeline: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     if allergies:
         scores["allergy_immunology"]["score"] += 3 * len(allergies)
         scores["allergy_immunology"]["reasons"].append(
-            "Documented allerg" + ("ies" if len(allergies) != 1 else "y") + ": " + ", ".join(str(a) for a in allergies[:4])
+            "Documented allerg"
+            + ("ies" if len(allergies) != 1 else "y")
+            + ": "
+            + ", ".join(str(a) for a in allergies[:4])
         )
 
     notes = " ".join(_blob(v.get("clinical_notes")) for v in visits)
@@ -473,6 +519,7 @@ def _pack_suggestion(scores: Dict[str, Dict[str, Any]], *, has_records: bool) ->
 # Opening-hours / availability
 # ---------------------------------------------------------------------------
 
+
 def _minutes(hhmm: str) -> Optional[int]:
     match = re.fullmatch(r"(\d{1,2}):(\d{2})", hhmm.strip())
     if not match:
@@ -499,7 +546,9 @@ def _expand_days(token: str) -> List[int]:
     return []
 
 
-def parse_opening_intervals(opening_hours: Optional[str]) -> Optional[Dict[int, List[Tuple[int, int]]]]:
+def parse_opening_intervals(
+    opening_hours: Optional[str],
+) -> Optional[Dict[int, List[Tuple[int, int]]]]:
     """Best-effort OSM opening_hours → {weekday: [(start_min, end_min), ...]}.
 
     Returns None when the string is missing or too exotic to trust.
@@ -586,6 +635,7 @@ def availability_status(
 # HTTP + Nominatim + Overpass
 # ---------------------------------------------------------------------------
 
+
 def _request_json(
     url: str,
     *,
@@ -596,7 +646,9 @@ def _request_json(
         "User-Agent": OSM_USER_AGENT,
         "Accept": "application/json",
     }
-    request = urllib.request.Request(url, data=data, headers=headers, method="POST" if data else "GET")
+    request = urllib.request.Request(
+        url, data=data, headers=headers, method="POST" if data else "GET"
+    )
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             raw = response.read()
@@ -609,7 +661,9 @@ def _request_json(
     try:
         return json.loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise DirectoryUnavailableError("The map directory returned an unreadable response.") from exc
+        raise DirectoryUnavailableError(
+            "The map directory returned an unreadable response."
+        ) from exc
 
 
 def geocode_city(city: str, http_json: Callable[..., Any] = _request_json) -> Dict[str, Any]:
@@ -673,7 +727,9 @@ def fetch_osm_places(
     return elements
 
 
-def geocode_city_geoapify(city: str, http_json: Callable[..., Any] = _request_json) -> Dict[str, Any]:
+def geocode_city_geoapify(
+    city: str, http_json: Callable[..., Any] = _request_json
+) -> Dict[str, Any]:
     """Resolve a city / neighbourhood / postcode via Geoapify Geocoding."""
     query = (city or "").strip()
     if len(query) < 2:
@@ -795,13 +851,14 @@ def _geoapify_match_kind(categories: Sequence[str], name: str, specialty_id: str
 
 
 def _geoapify_contact(props: Dict[str, Any]) -> Tuple[Optional[str], Optional[str], Optional[str]]:
-    raw = ((props.get("datasource") or {}).get("raw") or {}) if isinstance(props.get("datasource"), dict) else {}
+    raw = (
+        ((props.get("datasource") or {}).get("raw") or {})
+        if isinstance(props.get("datasource"), dict)
+        else {}
+    )
     contact = props.get("contact") if isinstance(props.get("contact"), dict) else {}
     phone = (
-        props.get("phone")
-        or contact.get("phone")
-        or raw.get("phone")
-        or raw.get("contact:phone")
+        props.get("phone") or contact.get("phone") or raw.get("phone") or raw.get("contact:phone")
     )
     website = (
         props.get("website")
@@ -861,12 +918,16 @@ def _normalize_geoapify_place(
     props = feature.get("properties") if isinstance(feature.get("properties"), dict) else feature
     if not isinstance(props, dict):
         return None
-    coords = _geoapify_coords(feature if "geometry" in feature or "properties" in feature else {"properties": props})
+    coords = _geoapify_coords(
+        feature if "geometry" in feature or "properties" in feature else {"properties": props}
+    )
     if coords is None:
         return None
     lat, lon = coords
     name = (props.get("name") or props.get("address_line1") or "").strip()
-    categories = _geoapify_categories_of(feature if "properties" in feature else {"properties": props})
+    categories = _geoapify_categories_of(
+        feature if "properties" in feature else {"properties": props}
+    )
     place_type = _geoapify_place_type(categories)
     if not name:
         if place_type == "hospital":
@@ -893,10 +954,12 @@ def _normalize_geoapify_place(
             specialties.append(cat.rsplit(".", 1)[-1].replace("_", " "))
         elif cat.endswith(".hospital"):
             specialties.append("hospital")
-    source_url = (
-        f"https://www.openstreetmap.org/?mlat={lat}&mlon={lon}#map=17/{lat}/{lon}"
+    source_url = f"https://www.openstreetmap.org/?mlat={lat}&mlon={lon}#map=17/{lat}/{lon}"
+    raw = (
+        ((props.get("datasource") or {}).get("raw") or {})
+        if isinstance(props.get("datasource"), dict)
+        else {}
     )
-    raw = ((props.get("datasource") or {}).get("raw") or {}) if isinstance(props.get("datasource"), dict) else {}
     osm_type = raw.get("osm_type") or raw.get("osm_kind")
     osm_id = raw.get("osm_id")
     if osm_type and osm_id:
@@ -1053,14 +1116,24 @@ def _normalize_place(
     match_kind = _match_kind(tags, name, specialty_id)
     osm_type = element.get("type") or "node"
     osm_id = element.get("id")
-    source_url = f"https://www.openstreetmap.org/{osm_type}/{osm_id}" if osm_id else "https://www.openstreetmap.org/"
-    speciality = tags.get("healthcare:speciality") or tags.get("healthcare:specialty") or tags.get("speciality")
+    source_url = (
+        f"https://www.openstreetmap.org/{osm_type}/{osm_id}"
+        if osm_id
+        else "https://www.openstreetmap.org/"
+    )
+    speciality = (
+        tags.get("healthcare:speciality")
+        or tags.get("healthcare:specialty")
+        or tags.get("speciality")
+    )
     return {
         "id": f"{osm_type}/{osm_id}",
         "name": name,
         "place_type": place_type,
         "match_kind": match_kind,
-        "specialties": [part.strip() for part in str(speciality).split(";") if part.strip()] if speciality else [],
+        "specialties": [part.strip() for part in str(speciality).split(";") if part.strip()]
+        if speciality
+        else [],
         "address": _address(tags),
         "phone": tags.get("phone") or tags.get("contact:phone"),
         "website": tags.get("website") or tags.get("contact:website"),
@@ -1097,7 +1170,9 @@ def _pack_search(
     places: List[Dict[str, Any]],
     source: Dict[str, Any],
 ) -> Dict[str, Any]:
-    places = sorted(places, key=lambda item: (-item["score"], item["distance_km"], item["name"]))[:25]
+    places = sorted(places, key=lambda item: (-item["score"], item["distance_km"], item["name"]))[
+        :25
+    ]
     zero_hint = None
     if not places:
         zero_hint = (

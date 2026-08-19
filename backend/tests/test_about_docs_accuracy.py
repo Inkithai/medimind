@@ -28,7 +28,6 @@ os.environ.setdefault("JWT_SECRET", "dummy")
 
 import api  # noqa: E402
 
-
 _ABOUT_COPY_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
     "frontend",
@@ -39,9 +38,7 @@ _ABOUT_COPY_PATH = os.path.join(
 
 # The endpoint table lives in AboutPage.tsx (paths and HTTP verbs are code,
 # not translatable copy); the human descriptions live in the i18n catalogs.
-_ENDPOINT_RE = re.compile(
-    r'\{\s*method:\s*"(?P<method>[A-Z]+)",\s*path:\s*"(?P<path>[^"]+)"'
-)
+_ENDPOINT_RE = re.compile(r'\{\s*method:\s*"(?P<method>[A-Z]+)",\s*path:\s*"(?P<path>[^"]+)"')
 
 
 def _documented_endpoints():
@@ -53,10 +50,33 @@ def _documented_endpoints():
     return found
 
 
+def _iter_route_objects():
+    """Yield the real path-operation route objects served by the app.
+
+    FastAPI >= 0.141 wraps routers mounted with include_router() in a lazy
+    ``_IncludedRouter`` container instead of flattening them into app.routes,
+    so unwrap via ``original_router`` when present.
+    """
+    for route in api.app.routes:
+        original = getattr(route, "original_router", None)
+        if original is not None:
+            yield from original.routes
+        else:
+            yield route
+
+
+def _find_route(method: str, path: str):
+    for route in _iter_route_objects():
+        methods = getattr(route, "methods", set()) or set()
+        if getattr(route, "path", "") == path and method in methods:
+            return route
+    raise KeyError(f"{method} {path}")
+
+
 def _real_routes():
     """(method, path) pairs FastAPI actually serves."""
     routes = set()
-    for route in api.app.routes:
+    for route in _iter_route_objects():
         for method in getattr(route, "methods", set()) or set():
             routes.add((method, getattr(route, "path", "")))
     return routes
@@ -80,10 +100,10 @@ def test_no_secrets_or_credentials_are_published():
 
     # Real key shapes, and any env var being given a value.
     forbidden_patterns = [
-        r"gsk_[A-Za-z0-9]{10,}",          # Groq
-        r"AIza[A-Za-z0-9_\-]{10,}",       # Google
-        r"sk-[A-Za-z0-9]{10,}",           # OpenAI
-        r"eyJ[A-Za-z0-9_\-]{10,}",        # JWT
+        r"gsk_[A-Za-z0-9]{10,}",  # Groq
+        r"AIza[A-Za-z0-9_\-]{10,}",  # Google
+        r"sk-[A-Za-z0-9]{10,}",  # OpenAI
+        r"eyJ[A-Za-z0-9_\-]{10,}",  # JWT
         r"[A-Z_]{4,}_(?:KEY|SECRET|TOKEN|PASSWORD)\s*[:=]\s*[\"'][^\"']+[\"']",
         r"postgres(?:ql)?://",
         r"\.supabase\.co",
@@ -96,13 +116,10 @@ def test_no_secrets_or_credentials_are_published():
 def test_public_routes_really_are_public():
     """The page tells readers these two need no authentication."""
     for path in ("/api/v1/health", "/api/v1/anonymous/session"):
-        route = next(r for r in api.app.routes if getattr(r, "path", "") == path)
+        route = _find_route("GET" if path != "/api/v1/anonymous/session" else "POST", path)
         dependencies = getattr(route, "dependant", None)
         assert dependencies is not None
-        names = {
-            getattr(sub.call, "__name__", "")
-            for sub in dependencies.dependencies
-        }
+        names = {getattr(sub.call, "__name__", "") for sub in dependencies.dependencies}
         assert "get_current_user" not in names, f"{path} is documented as public but requires auth"
 
 
@@ -112,15 +129,8 @@ def test_authenticated_routes_are_actually_protected():
     for method, path in _documented_endpoints():
         if path in public:
             continue
-        route = next(
-            r
-            for r in api.app.routes
-            if getattr(r, "path", "") == path and method in (getattr(r, "methods", set()) or set())
-        )
-        names = {
-            getattr(sub.call, "__name__", "")
-            for sub in route.dependant.dependencies
-        }
+        route = _find_route(method, path)
+        names = {getattr(sub.call, "__name__", "") for sub in route.dependant.dependencies}
         assert "get_current_user" in names, f"{method} {path} is documented but unprotected"
 
 

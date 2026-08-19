@@ -42,7 +42,6 @@ from care.recommendations import (  # noqa: E402
     generate_care_recommendations,
 )
 
-
 # ─── Anjali-style fixture ───────────────────────────────────────────────────
 
 ANJALI_TIMELINE = {
@@ -81,14 +80,27 @@ ANJALI_CROSS_CHECK = {
 }
 ANJALI_LAB_TRENDS = {
     "trends": [
-        {"test_name": "eGFR", "direction": "decreasing", "explanation": "kidney function declining"},
-        {"test_name": "Creatinine", "direction": "increasing", "explanation": "kidney function declining"},
-        {"test_name": "HbA1c", "direction": "decreasing", "explanation": "glucose control improving"},
+        {
+            "test_name": "eGFR",
+            "direction": "decreasing",
+            "explanation": "kidney function declining",
+        },
+        {
+            "test_name": "Creatinine",
+            "direction": "increasing",
+            "explanation": "kidney function declining",
+        },
+        {
+            "test_name": "HbA1c",
+            "direction": "decreasing",
+            "explanation": "glucose control improving",
+        },
     ],
 }
 
 
 # ─── Helpers ────────────────────────────────────────────────────────────────
+
 
 def _assert_basic_shape(recs):
     assert isinstance(recs, list)
@@ -112,14 +124,27 @@ def _assert_basic_shape(recs):
                 assert 0 <= f["points"] <= MAX_FACTOR_POINTS, f"out-of-range factor: {f}"
         # Specialty key must be one of the supported taxonomy
         assert rec["specialty_key"] in {
-            "general_physician", "clinical_pharmacist", "allergist", "endocrinologist",
-            "nephrologist", "cardiologist", "dermatologist", "gastroenterologist",
-            "hematologist", "neurologist", "oncologist", "ophthalmologist",
-            "orthopedic", "psychiatrist", "pulmonologist", "rheumatologist",
+            "general_physician",
+            "clinical_pharmacist",
+            "allergist",
+            "endocrinologist",
+            "nephrologist",
+            "cardiologist",
+            "dermatologist",
+            "gastroenterologist",
+            "hematologist",
+            "neurologist",
+            "oncologist",
+            "ophthalmologist",
+            "orthopedic",
+            "psychiatrist",
+            "pulmonologist",
+            "rheumatologist",
         }, f"unsupported specialty: {rec['specialty_key']}"
 
 
 # ─── Anjali scenario ───────────────────────────────────────────────────────
+
 
 def test_anjali_top_recommendation_is_primary_care_with_safety_flag():
     recs = generate_care_recommendations(ANJALI_TIMELINE, ANJALI_CROSS_CHECK, ANJALI_LAB_TRENDS)
@@ -181,12 +206,15 @@ def test_anjali_allergy_conflict_sets_safety_message():
 
 # ─── Empty records ─────────────────────────────────────────────────────────
 
+
 def test_empty_records_yield_a_single_honest_default_recommendation():
     recs = generate_care_recommendations(
         timeline={"visits": [], "medications_timeline": [], "known_allergies": []},
         cross_check={
-            "allergy_conflicts": [], "potential_drug_interactions": [],
-            "duplicate_prescriptions": [], "conflicting_dosage_instructions": [],
+            "allergy_conflicts": [],
+            "potential_drug_interactions": [],
+            "duplicate_prescriptions": [],
+            "conflicting_dosage_instructions": [],
         },
         lab_trends={"trends": []},
     )
@@ -200,18 +228,21 @@ def test_empty_records_yield_a_single_honest_default_recommendation():
 
 # ─── Drug interaction (no allergy) ─────────────────────────────────────────
 
+
 def test_drug_interaction_drives_safety_floor_for_primary_care():
     recs = generate_care_recommendations(
         timeline={
-            "visits": [{
-                "date": "2024-01-15",
-                "medications": [
-                    {"name": "Warfarin", "dosage": "5mg"},
-                    {"name": "Aspirin", "dosage": "81mg"},
-                ],
-                "lab_results": [],
-                "allergies_noted": [],
-            }],
+            "visits": [
+                {
+                    "date": "2024-01-15",
+                    "medications": [
+                        {"name": "Warfarin", "dosage": "5mg"},
+                        {"name": "Aspirin", "dosage": "81mg"},
+                    ],
+                    "lab_results": [],
+                    "allergies_noted": [],
+                }
+            ],
             "medications_timeline": [
                 {"name": "Warfarin", "dosage": "5mg"},
                 {"name": "Aspirin", "dosage": "81mg"},
@@ -220,10 +251,12 @@ def test_drug_interaction_drives_safety_floor_for_primary_care():
         },
         cross_check={
             "allergy_conflicts": [],
-            "potential_drug_interactions": [{
-                "medications_involved": ["Warfarin", "Aspirin"],
-                "explanation": "increased bleeding risk",
-            }],
+            "potential_drug_interactions": [
+                {
+                    "medications_involved": ["Warfarin", "Aspirin"],
+                    "explanation": "increased bleeding risk",
+                }
+            ],
             "duplicate_prescriptions": [],
             "conflicting_dosage_instructions": [],
         },
@@ -242,6 +275,7 @@ def test_drug_interaction_drives_safety_floor_for_primary_care():
 
 
 # ─── Stable ordering ───────────────────────────────────────────────────────
+
 
 def test_recommendations_are_sorted_by_score_descending():
     recs = generate_care_recommendations(ANJALI_TIMELINE, ANJALI_CROSS_CHECK, ANJALI_LAB_TRENDS)
@@ -343,8 +377,12 @@ def test_gp_safety_message_mentions_allergy_when_both_signals_present():
     gp = next((r for r in recs if r["specialty_key"] == "general_physician"), None)
     assert gp is not None
     assert gp["safety_message"] is not None
-    assert "allergy" in gp["safety_message"].lower(), f"GP safety msg missing allergy: {gp['safety_message']}"
-    assert "drug" in gp["safety_message"].lower(), f"GP safety msg missing drug interaction: {gp['safety_message']}"
+    assert "allergy" in gp["safety_message"].lower(), (
+        f"GP safety msg missing allergy: {gp['safety_message']}"
+    )
+    assert "drug" in gp["safety_message"].lower(), (
+        f"GP safety msg missing drug interaction: {gp['safety_message']}"
+    )
 
 
 if __name__ == "__main__":

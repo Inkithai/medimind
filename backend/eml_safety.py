@@ -10,7 +10,8 @@ def patient_age_from_timeline(timeline: Dict[str, Any]) -> Optional[float]:
     ages = [
         float(visit["patient_age"])
         for visit in timeline.get("visits") or []
-        if isinstance(visit, dict) and isinstance(visit.get("patient_age"), (int, float))
+        if isinstance(visit, dict)
+        and isinstance(visit.get("patient_age"), (int, float))
         and 0 <= float(visit["patient_age"]) <= 130
     ]
     return ages[-1] if ages else None
@@ -34,7 +35,9 @@ def _threshold_years(text: str) -> Optional[tuple[str, float]]:
     return None
 
 
-def evaluate_age_restrictions(age_years: Optional[float], rows: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def evaluate_age_restrictions(
+    age_years: Optional[float], rows: Iterable[Dict[str, Any]]
+) -> List[Dict[str, Any]]:
     """Flag only restrictions whose threshold syntax can be read unambiguously."""
     findings: List[Dict[str, Any]] = []
     if age_years is None:
@@ -48,19 +51,21 @@ def evaluate_age_restrictions(age_years: Optional[float], rows: Iterable[Dict[st
         conflicts = age_years < threshold if kind == "minimum" else age_years > threshold
         if not conflicts:
             continue
-        findings.append({
-            "medication": row.get("display_name") or row.get("wanted"),
-            "patient_age_years": round(age_years, 2),
-            "restriction": restriction,
-            "source_page": row.get("source_page"),
-            "population": row.get("population"),
-            "severity": "high",
-            "confidence": 0.95,
-            "evidence_source": "reference_graph",
-            "grounded": True,
-            "explanation": (
-                f"The published essential-medicines list records this age restriction: "
-                f"{restriction}. Confirm the prescription with a doctor or pharmacist."
-            ),
-        })
+        findings.append(
+            {
+                "medication": row.get("display_name") or row.get("wanted"),
+                "patient_age_years": round(age_years, 2),
+                "restriction": restriction,
+                "source_page": row.get("source_page"),
+                "population": row.get("population"),
+                "severity": "high",
+                "confidence": 0.95,
+                "evidence_source": "reference_graph",
+                "grounded": True,
+                "explanation": (
+                    f"The published essential-medicines list records this age restriction: "
+                    f"{restriction}. Confirm the prescription with a doctor or pharmacist."
+                ),
+            }
+        )
     return findings

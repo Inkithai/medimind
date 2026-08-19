@@ -36,15 +36,18 @@ def _now() -> str:
 def _mirror(msg: Dict[str, Any]) -> None:
     try:
         from db import _get_client  # type: ignore
-        _get_client().table("provider_messages").insert({
-            "user_id": msg["user_id"],
-            "thread_id": msg["thread_id"],
-            "direction": msg["direction"],
-            "provider": msg["provider"],
-            "finding_key": msg.get("finding_key"),
-            "body": msg["body"],
-            "created_at": msg["created_at"],
-        }).execute()
+
+        _get_client().table("provider_messages").insert(
+            {
+                "user_id": msg["user_id"],
+                "thread_id": msg["thread_id"],
+                "direction": msg["direction"],
+                "provider": msg["provider"],
+                "finding_key": msg.get("finding_key"),
+                "body": msg["body"],
+                "created_at": msg["created_at"],
+            }
+        ).execute()
     except Exception:
         return
 
@@ -61,7 +64,9 @@ def send_message(
     body = (body or "").strip()
     if not body:
         raise ValueError("body is required")
-    import hashlib, time as _time
+    import hashlib
+    import time as _time
+
     if thread_id is None:
         thread_id = hashlib.sha1(
             f"{user_id}:{provider or 'default'}:{_time.time()}".encode()
@@ -94,8 +99,15 @@ def list_threads(user_id: str) -> List[Dict[str, Any]]:
     threads: Dict[str, Dict[str, Any]] = {}
     for m in list_messages(user_id):
         tid = m.get("thread_id")
-        t = threads.setdefault(tid, {"thread_id": tid, "provider": m.get("provider"),
-                                     "message_count": 0, "last_at": m.get("created_at")})
+        t = threads.setdefault(
+            tid,
+            {
+                "thread_id": tid,
+                "provider": m.get("provider"),
+                "message_count": 0,
+                "last_at": m.get("created_at"),
+            },
+        )
         t["message_count"] += 1
         if (m.get("created_at") or "") > (t["last_at"] or ""):
             t["last_at"] = m.get("created_at")

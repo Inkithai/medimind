@@ -1,4 +1,5 @@
 """Offline trust-boundary tests: immutable corrections and RAG quarantine."""
+
 import copy
 import os
 import sys
@@ -9,8 +10,8 @@ os.environ["GROQ_API_KEY"] = "gsk_test_123"
 
 from medical_extractor import build_patient_timeline
 from record_trust import (
-    apply_correction_events,
     apply_conflict_quarantine,
+    apply_correction_events,
     build_correction_events,
     detect_conflicts,
     merge_conflict_state,
@@ -37,16 +38,26 @@ def _doc(doc_id, file_name, patient="Jane Doe", date="2025-01-10", meds=None, la
 
 def _lab(value):
     return {
-        "test_name": "HbA1c", "value": value, "unit": "%",
-        "reference_range": "4.0-5.6", "flag": "high", "confidence": 0.9,
+        "test_name": "HbA1c",
+        "value": value,
+        "unit": "%",
+        "reference_range": "4.0-5.6",
+        "flag": "high",
+        "confidence": 0.9,
     }
 
 
 def _med(dose, raw):
     return {
-        "name": "Metformin", "ingredients": ["Metformin"], "dosage": raw,
-        "frequency": "twice daily", "duration": None, "dosage_value": dose,
-        "dosage_unit": "mg", "frequency_per_day": 2, "is_as_needed": False,
+        "name": "Metformin",
+        "ingredients": ["Metformin"],
+        "dosage": raw,
+        "frequency": "twice daily",
+        "duration": None,
+        "dosage_value": dose,
+        "dosage_unit": "mg",
+        "frequency_per_day": 2,
+        "is_as_needed": False,
         "confidence": 0.92,
     }
 
@@ -58,11 +69,13 @@ def test_correction_replay_preserves_original_and_audit_values():
     events = build_correction_events(
         original,
         original,
-        [{
-            "field_path": "/lab_results/0/value",
-            "corrected_value": "6.1",
-            "expected_previous_value": "8.1",
-        }],
+        [
+            {
+                "field_path": "/lab_results/0/value",
+                "corrected_value": "6.1",
+                "expected_previous_value": "8.1",
+            }
+        ],
         user_id="anon-test",
         correction_batch_id=batch,
         reason="Verified against the printed row",
@@ -124,12 +137,14 @@ def test_resolved_conflict_admits_only_authoritative_source():
         _doc("doc-b", "lab-b.pdf", labs=[_lab("8.1")]),
     ]
     detected = detect_conflicts(docs)
-    persisted = [{
-        **detected[0],
-        "status": "resolved",
-        "authoritative_document_id": "doc-a",
-        "resolution_note": "Checked the signed original",
-    }]
+    persisted = [
+        {
+            **detected[0],
+            "status": "resolved",
+            "authoritative_document_id": "doc-a",
+            "resolution_note": "Checked the signed original",
+        }
+    ]
     conflicts = merge_conflict_state(detected, persisted)
     quarantined, summary = apply_conflict_quarantine(docs, conflicts)
     timeline = build_patient_timeline(quarantined)
@@ -152,7 +167,9 @@ def test_identity_conflict_quarantines_whole_workspace_until_reviewed():
     timeline = build_patient_timeline(quarantined)
 
     assert summary["quarantined_documents"] == 2
-    assert timeline["visits"] == [], "quarantined identities must not appear in the clinical timeline"
+    assert timeline["visits"] == [], (
+        "quarantined identities must not appear in the clinical timeline"
+    )
     assert len(timeline["documents"]) == 2, "sources must remain available for correction/audit"
     assert timeline["medications_timeline"] == []
 
@@ -175,16 +192,52 @@ def test_identity_format_variants_do_not_quarantine_the_workspace():
     upload. Honorifics, punctuation, and surname-first printing are not
     identity differences."""
     docs = [
-        _doc("doc-1", "anjali-1.jpg", patient="PERERA, Anjali (Mrs.)", date="2026-06-10",
-             labs=[{"test_name": "Hemoglobin", "value": 10.2, "unit": "g/dL",
-                    "reference_range": "12-16", "flag": "low", "confidence": 0.9}]),
-        _doc("doc-2", "anjali-2.jpg", patient="Anjali Perera", date="2026-03-20",
-             meds=[_med(500, "500 mg")]),
-        _doc("doc-3", "anjali-3.png", patient="Anjali Perera", date="2026-01-15",
-             labs=[{"test_name": "Hemoglobin", "value": 11.0, "unit": "g/dL",
-                    "reference_range": "12-16", "flag": "low", "confidence": 0.88}]),
-        _doc("doc-4", "anjali-4.png", patient="PERERA, Anjali", date="2026-04-02",
-             meds=[_med(850, "850 mg")]),
+        _doc(
+            "doc-1",
+            "anjali-1.jpg",
+            patient="PERERA, Anjali (Mrs.)",
+            date="2026-06-10",
+            labs=[
+                {
+                    "test_name": "Hemoglobin",
+                    "value": 10.2,
+                    "unit": "g/dL",
+                    "reference_range": "12-16",
+                    "flag": "low",
+                    "confidence": 0.9,
+                }
+            ],
+        ),
+        _doc(
+            "doc-2",
+            "anjali-2.jpg",
+            patient="Anjali Perera",
+            date="2026-03-20",
+            meds=[_med(500, "500 mg")],
+        ),
+        _doc(
+            "doc-3",
+            "anjali-3.png",
+            patient="Anjali Perera",
+            date="2026-01-15",
+            labs=[
+                {
+                    "test_name": "Hemoglobin",
+                    "value": 11.0,
+                    "unit": "g/dL",
+                    "reference_range": "12-16",
+                    "flag": "low",
+                    "confidence": 0.88,
+                }
+            ],
+        ),
+        _doc(
+            "doc-4",
+            "anjali-4.png",
+            patient="PERERA, Anjali",
+            date="2026-04-02",
+            meds=[_med(850, "850 mg")],
+        ),
     ]
     conflicts = detect_conflicts(docs)
     assert not [item for item in conflicts if item["kind"] == "identity"], conflicts
@@ -230,9 +283,7 @@ def test_resolved_identity_unquarantines_format_variants():
     ]
     trusted, summary = apply_conflict_quarantine(docs, resolved)
     quarantined_ids = {
-        doc["_document_id"]
-        for doc in trusted
-        if (doc.get("_trust") or {}).get("quarantined")
+        doc["_document_id"] for doc in trusted if (doc.get("_trust") or {}).get("quarantined")
     }
     assert quarantined_ids == {"doc-c"}, quarantined_ids
     timeline = build_patient_timeline(trusted)
@@ -247,12 +298,14 @@ def test_merge_conflict_state_drops_stale_persisted_identity_conflict():
         _doc("doc-a", "a.pdf", patient="PERERA, Anjali (Mrs.)", meds=[_med(500, "500 mg")]),
         _doc("doc-b", "b.pdf", patient="Anjali Perera", meds=[_med(500, "500 mg")]),
     ]
-    stale = [{
-        "conflict_id": "conflict_stale_identity",
-        "kind": "identity",
-        "status": "unresolved",
-        "items": [],
-    }]
+    stale = [
+        {
+            "conflict_id": "conflict_stale_identity",
+            "kind": "identity",
+            "status": "unresolved",
+            "items": [],
+        }
+    ]
     merged = merge_conflict_state(detect_conflicts(docs), stale)
     assert merged == [], merged
     trusted, summary = apply_conflict_quarantine(docs, merged)

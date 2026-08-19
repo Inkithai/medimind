@@ -10,7 +10,6 @@ from __future__ import annotations
 
 from typing import Dict, Tuple
 
-
 # collection -> fields worth using as deterministic PDF-search fallbacks.
 # Keep these conservative: status labels may be model classifications rather
 # than literal source text, so they are not used to locate evidence.
@@ -48,7 +47,9 @@ CLINICAL_EVENT_CORRECTABLE_FIELDS: Dict[str, frozenset[str]] = {
     "symptoms": frozenset({"name", "severity", "status", "onset_date"}),
     "procedures": frozenset({"name", "procedure_date", "body_site", "status", "outcome"}),
     "vital_signs": frozenset({"name", "value", "unit", "measured_at"}),
-    "imaging_results": frozenset({"study_type", "body_site", "study_date", "findings", "impression"}),
+    "imaging_results": frozenset(
+        {"study_type", "body_site", "study_date", "findings", "impression"}
+    ),
 }
 
 CLINICAL_EVENT_COLLECTIONS = tuple(CLINICAL_EVENT_SEARCH_FIELDS)

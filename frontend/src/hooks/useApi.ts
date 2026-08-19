@@ -17,7 +17,7 @@ interface UseApiResult<T, Args extends unknown[]> extends ApiState<T> {
 // (and whenever deps change).
 export function useApi<T, Args extends unknown[] = []>(
   fn: (...args: Args) => Promise<T>,
-  options?: { immediate?: boolean; deps?: unknown[] }
+  options?: { immediate?: boolean; deps?: unknown[] },
 ): UseApiResult<T, Args> {
   const [state, setState] = useState<ApiState<T>>({
     data: null,
@@ -39,19 +39,13 @@ export function useApi<T, Args extends unknown[] = []>(
     }
   }, []);
 
-  const reset = useCallback(
-    () => setState({ data: null, loading: false, error: null }),
-    []
-  );
+  const reset = useCallback(() => setState({ data: null, loading: false, error: null }), []);
 
-  const setData = useCallback(
-    (data: T | null) => setState((s) => ({ ...s, data })),
-    []
-  );
+  const setData = useCallback((data: T | null) => setState((s) => ({ ...s, data })), []);
 
   useEffect(() => {
     if (options?.immediate) {
-      void run(...(([] as unknown[]) as Args));
+      void run(...([] as unknown[] as Args));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, options?.deps ?? []);

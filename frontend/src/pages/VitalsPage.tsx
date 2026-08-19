@@ -151,9 +151,7 @@ export function VitalsPage() {
             <div className="grid gap-2 sm:grid-cols-3">
               {ews.components.map((c) => (
                 <div key={c.signal} className="rounded-md border border-slate-200 p-2 text-xs">
-                  <div className="font-medium text-slate-600">
-                    {c.signal.replace(/_/g, " ")}
-                  </div>
+                  <div className="font-medium text-slate-600">{c.signal.replace(/_/g, " ")}</div>
                   <div className="text-slate-500">
                     {c.value ?? "—"} · {c.points}/{c.max_points} pts
                   </div>
@@ -204,7 +202,10 @@ export function VitalsPage() {
           <CardHeader title="Possible adherence signals" />
           <CardBody className="space-y-2">
             {adh.signals.map((s, i) => (
-              <div key={i} className="rounded-md border border-amber-200 bg-amber-50/50 p-2 text-xs">
+              <div
+                key={i}
+                className="rounded-md border border-amber-200 bg-amber-50/50 p-2 text-xs"
+              >
                 <div className="font-medium text-amber-800">
                   {s.ingredient} — {s.signal.replace(/_/g, " ")}
                 </div>

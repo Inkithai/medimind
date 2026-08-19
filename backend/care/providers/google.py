@@ -19,7 +19,6 @@ from care.errors import CareConfigurationError, CareProviderError
 from care.models import Facility, GeoPoint, RouteEstimate
 from care.providers.base import ProviderNotConfiguredError
 
-
 _GOOGLE_FIELD_MASK = ",".join(
     (
         "places.id",
@@ -80,7 +79,9 @@ class GoogleProvider:
         base_url: Optional[str] = None,
         timeout_seconds: Optional[float] = None,
     ) -> None:
-        key = (api_key if api_key is not None else os.environ.get("GOOGLE_MAPS_API_KEY", "")).strip()
+        key = (
+            api_key if api_key is not None else os.environ.get("GOOGLE_MAPS_API_KEY", "")
+        ).strip()
         if key.lower() in _PLACEHOLDER_KEYS or key.startswith("your-"):
             raise CareConfigurationError(
                 "CARE_PROVIDER=google requires a real GOOGLE_MAPS_API_KEY. "
@@ -108,7 +109,7 @@ class GoogleProvider:
         normalized_kind = (kind or "any").strip().lower()
         if normalized_kind not in _KIND_QUERY:
             raise ValueError(
-                "Unsupported facility type. Use any, hospital, clinic, pharmacy, laboratory, or doctor."
+                "Unsupported facility type. Use any, hospital, clinic, pharmacy, laboratory, or doctor."  # noqa: E501
             )
         try:
             radius_value = float(radius_km)
@@ -161,9 +162,7 @@ class GoogleProvider:
                 availability=normalized_availability,
             )
             if facility is not None and (
-                origin is None
-                or facility.distance_km is None
-                or facility.distance_km <= radius
+                origin is None or facility.distance_km is None or facility.distance_km <= radius
             ):
                 facilities.append(facility)
 
@@ -178,7 +177,9 @@ class GoogleProvider:
                 )
             )
         elif origin is not None:
-            facilities.sort(key=lambda item: item.distance_km if item.distance_km is not None else math.inf)
+            facilities.sort(
+                key=lambda item: item.distance_km if item.distance_km is not None else math.inf
+            )
         return facilities
 
     def geocode(self, query: str) -> Optional[GeoPoint]:
@@ -281,7 +282,9 @@ class GoogleProvider:
             # URLError, socket/TLS/timeout failures all subclass OSError, so a
             # transport problem stays a CareProviderError the caller can fall
             # back from instead of an unexpected 500-class crash.
-            raise CareProviderError(f"Google Places API could not be reached: {type(error).__name__}") from error
+            raise CareProviderError(
+                f"Google Places API could not be reached: {type(error).__name__}"
+            ) from error
 
         try:
             parsed = json.loads(raw.decode("utf-8"))
@@ -342,7 +345,9 @@ class GoogleProvider:
         rating = place.get("rating")
         rating_count = place.get("userRatingCount")
         specialty_match = _specialty_match(place, name, specialty) if specialty else None
-        availability_match = _availability_match(normalized_availability=availability, descriptions=descriptions, open_now=open_now)
+        availability_match = _availability_match(
+            normalized_availability=availability, descriptions=descriptions, open_now=open_now
+        )
         ranking_score, ranking_reason = _ranking_details(
             specialty=specialty,
             specialty_match=specialty_match,
@@ -484,7 +489,9 @@ def _normalized_specialty(value: Optional[str]) -> Optional[str]:
     if value is None or not value.strip():
         return None
     normalized = " ".join(value.strip().replace("_", " ").split())
-    if len(normalized) > 80 or not all(character.isalnum() or character in " -/&" for character in normalized):
+    if len(normalized) > 80 or not all(
+        character.isalnum() or character in " -/&" for character in normalized
+    ):
         raise ValueError("specialty contains unsupported characters or is too long.")
     return normalized
 
@@ -501,14 +508,24 @@ def _normalized_availability(value: Optional[str]) -> Optional[str]:
 def _specialty_match(place: Dict[str, Any], name: str, specialty: str) -> float:
     display_type = place.get("primaryTypeDisplayName") or {}
     display_type_text = display_type.get("text") if isinstance(display_type, dict) else ""
-    searchable = " ".join([
-        name,
-        str(place.get("primaryType") or ""),
-        str(display_type_text or ""),
-        " ".join(str(value) for value in place.get("types", []) or []),
-    ]).lower().replace("_", " ")
+    searchable = (
+        " ".join(
+            [
+                name,
+                str(place.get("primaryType") or ""),
+                str(display_type_text or ""),
+                " ".join(str(value) for value in place.get("types", []) or []),
+            ]
+        )
+        .lower()
+        .replace("_", " ")
+    )
     ignored = {"doctor", "physician", "clinical", "specialist", "or", "and"}
-    tokens = [token.lower() for token in specialty.replace("/", " ").split() if token.lower() not in ignored]
+    tokens = [
+        token.lower()
+        for token in specialty.replace("/", " ").split()
+        if token.lower() not in ignored
+    ]
     direct = sum(1 for token in tokens if token in searchable)
     # Google already returned the place for this specialty text query, so 0.6
     # is a provider relevance match; explicit words in the listing raise it.
@@ -537,9 +554,16 @@ def _availability_match(
         for value in lowered:
             if "24 hours" in value:
                 return True
-            pm_hours = [int(match.group(1)) for match in re.finditer(r"\b(\d{1,2})(?::\d{2})?\s*pm\b", value)]
-            twenty_four_hour = [int(match.group(1)) for match in re.finditer(r"\b([01]?\d|2[0-3]):\d{2}\b", value)]
-            if any(6 <= hour <= 11 for hour in pm_hours) or any(hour >= 18 for hour in twenty_four_hour):
+            pm_hours = [
+                int(match.group(1))
+                for match in re.finditer(r"\b(\d{1,2})(?::\d{2})?\s*pm\b", value)
+            ]
+            twenty_four_hour = [
+                int(match.group(1)) for match in re.finditer(r"\b([01]?\d|2[0-3]):\d{2}\b", value)
+            ]
+            if any(6 <= hour <= 11 for hour in pm_hours) or any(
+                hour >= 18 for hour in twenty_four_hour
+            ):
                 return True
         return False
     return None
@@ -636,9 +660,7 @@ def _distance_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     delta_lon = (lon2 - lon1) * to_radians
     value = (
         math.sin(delta_lat / 2) ** 2
-        + math.cos(lat1 * to_radians)
-        * math.cos(lat2 * to_radians)
-        * math.sin(delta_lon / 2) ** 2
+        + math.cos(lat1 * to_radians) * math.cos(lat2 * to_radians) * math.sin(delta_lon / 2) ** 2
     )
     # Floating-point rounding near antipodal points can put the haversine a
     # few ulps outside [0, 1], which would otherwise raise in sqrt().

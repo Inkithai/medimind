@@ -12,14 +12,13 @@ Usage:
     python inspect_chroma.py "amit sharma" --limit 20    # show more chunks
     python inspect_chroma.py "amit sharma" --type medication   # filter by chunk_type
     VECTOR_STORE=supabase python inspect_chroma.py "amit sharma"  # use Supabase backend
-"""
+"""  # noqa: E501
 
 import argparse
-import os
 from typing import Optional
 
-from retrieval import CHROMA_DIR, _get_chroma_client, _sanitize_collection_name
 import vector_store
+from retrieval import CHROMA_DIR, _get_chroma_client, _sanitize_collection_name
 
 CHUNK_TYPES = ["medication", "lab_result", "clinical_note", "allergy"]
 
@@ -30,11 +29,12 @@ def list_collections() -> None:
         # Supabase: list distinct patient_key
         try:
             from db import _get_client
+
             client = _get_client()
             # Distinct patient_key via query
             res = client.table("chunks").select("patient_key").execute()
             keys = {}
-            for r in (res.data or []):
+            for r in res.data or []:
                 k = r.get("patient_key")
                 if k:
                     keys[k] = keys.get(k, 0) + 1
@@ -67,15 +67,25 @@ def show_patient(patient_key: str, limit: int, chunk_type: Optional[str]) -> Non
     if vector_store.get_store_name() == "supabase":
         try:
             from db import _get_client
+
             client = _get_client()
-            q = client.table("chunks").select("text, metadata").eq("patient_key", patient_key).limit(limit)
-            # Note: filtering by chunk_type requires jsonb -> PostgREST syntax not trivial; filter in Python
+            q = (
+                client.table("chunks")
+                .select("text, metadata")
+                .eq("patient_key", patient_key)
+                .limit(limit)
+            )
+            # Note: filtering by chunk_type requires jsonb -> PostgREST syntax not trivial; filter in Python  # noqa: E501
             res = q.execute()
             rows = res.data or []
             if chunk_type:
-                rows = [r for r in rows if (r.get("metadata") or {}).get("chunk_type") == chunk_type]
+                rows = [
+                    r for r in rows if (r.get("metadata") or {}).get("chunk_type") == chunk_type
+                ]
                 rows = rows[:limit]
-            header = f"Patient '{patient_key}' — {len(rows)} chunk(s) showing up to {limit} (Supabase)"
+            header = (
+                f"Patient '{patient_key}' — {len(rows)} chunk(s) showing up to {limit} (Supabase)"
+            )
             if chunk_type:
                 header += f" (chunk_type={chunk_type})"
             print(header + ":\n")
@@ -118,11 +128,20 @@ def show_patient(patient_key: str, limit: int, chunk_type: Optional[str]) -> Non
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Inspect the local Chroma vector store (read-only).")
-    parser.add_argument("patient_key", nargs="?", help="Patient to inspect (omit to list all collections)")
+    parser = argparse.ArgumentParser(
+        description="Inspect the local Chroma vector store (read-only)."
+    )
+    parser.add_argument(
+        "patient_key", nargs="?", help="Patient to inspect (omit to list all collections)"
+    )
     parser.add_argument("--limit", type=int, default=10, help="Max chunks to show (default: 10)")
-    parser.add_argument("--type", dest="chunk_type", default=None, choices=CHUNK_TYPES,
-                         help="Filter to one chunk_type")
+    parser.add_argument(
+        "--type",
+        dest="chunk_type",
+        default=None,
+        choices=CHUNK_TYPES,
+        help="Filter to one chunk_type",
+    )
     args = parser.parse_args()
 
     if args.patient_key:

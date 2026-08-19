@@ -24,20 +24,76 @@ export interface PrepItem {
 }
 
 export const PREP_CATEGORIES: Array<{ id: PrepCategory; label: string; blurb: string }> = [
-  { id: "product", label: "Product", blurb: "What MediMind is, who it is for, and the one-sentence pitch." },
-  { id: "medical", label: "Medical intelligence", blurb: "Extraction, timeline, labs, and what the system actually computes." },
-  { id: "rag", label: "AI / RAG", blurb: "How Ask AI is grounded, cited, and refused when evidence is missing." },
-  { id: "safety", label: "Safety", blurb: "Interactions, duplicates, dosage, allergies, confidence, and consult cues." },
-  { id: "architecture", label: "Architecture", blurb: "Modules, pipeline, storage split, and why safety is a separate service." },
-  { id: "data", label: "Data / FHIR / guidelines", blurb: "What is stored, FHIR import/export, and living-guideline status." },
-  { id: "clinical", label: "Clinical reasoning", blurb: "What we infer, what we never infer, and how we talk to patients." },
-  { id: "care", label: "Doctor recommendation", blurb: "Final-round flow: flag → specialty → location → live directory." },
-  { id: "differentiation", label: "Differentiation", blurb: "Vs ChatGPT, vs a portal, vs the other YGC repos." },
-  { id: "decisions", label: "Technical decisions", blurb: "Why anonymous, why JSON+vector, why deterministic-first." },
-  { id: "limitations", label: "Limitations", blurb: "Honest gaps. Say these first if a judge probes." },
-  { id: "scale", label: "Reliability / scale", blurb: "Jobs, quotas, restarts, and what survives a redeploy." },
-  { id: "privacy", label: "Privacy / security", blurb: "Anonymous workspace, keys, isolation, and what we do not claim." },
-  { id: "competition", label: "Competition / demo", blurb: "YGC rules, demo path, and questions about scoring." },
+  {
+    id: "product",
+    label: "Product",
+    blurb: "What MediMind is, who it is for, and the one-sentence pitch.",
+  },
+  {
+    id: "medical",
+    label: "Medical intelligence",
+    blurb: "Extraction, timeline, labs, and what the system actually computes.",
+  },
+  {
+    id: "rag",
+    label: "AI / RAG",
+    blurb: "How Ask AI is grounded, cited, and refused when evidence is missing.",
+  },
+  {
+    id: "safety",
+    label: "Safety",
+    blurb: "Interactions, duplicates, dosage, allergies, confidence, and consult cues.",
+  },
+  {
+    id: "architecture",
+    label: "Architecture",
+    blurb: "Modules, pipeline, storage split, and why safety is a separate service.",
+  },
+  {
+    id: "data",
+    label: "Data / FHIR / guidelines",
+    blurb: "What is stored, FHIR import/export, and living-guideline status.",
+  },
+  {
+    id: "clinical",
+    label: "Clinical reasoning",
+    blurb: "What we infer, what we never infer, and how we talk to patients.",
+  },
+  {
+    id: "care",
+    label: "Doctor recommendation",
+    blurb: "Final-round flow: flag → specialty → location → live directory.",
+  },
+  {
+    id: "differentiation",
+    label: "Differentiation",
+    blurb: "Vs ChatGPT, vs a portal, vs the other YGC repos.",
+  },
+  {
+    id: "decisions",
+    label: "Technical decisions",
+    blurb: "Why anonymous, why JSON+vector, why deterministic-first.",
+  },
+  {
+    id: "limitations",
+    label: "Limitations",
+    blurb: "Honest gaps. Say these first if a judge probes.",
+  },
+  {
+    id: "scale",
+    label: "Reliability / scale",
+    blurb: "Jobs, quotas, restarts, and what survives a redeploy.",
+  },
+  {
+    id: "privacy",
+    label: "Privacy / security",
+    blurb: "Anonymous workspace, keys, isolation, and what we do not claim.",
+  },
+  {
+    id: "competition",
+    label: "Competition / demo",
+    blurb: "YGC rules, demo path, and questions about scoring.",
+  },
 ];
 
 export const PREP_ITEMS: PrepItem[] = [

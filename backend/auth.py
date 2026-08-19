@@ -39,7 +39,9 @@ def get_current_user(
     authenticated user_id. Raises 401 for any missing/invalid/mismatched
     credential, 500 if the server itself is missing JWT_SECRET."""
     if not authorization or not authorization.strip().lower().startswith("bearer "):
-        raise HTTPException(401, "Missing or malformed Authorization header (expected 'Bearer <token>').")
+        raise HTTPException(
+            401, "Missing or malformed Authorization header (expected 'Bearer <token>')."
+        )
     if not x_user_id or not x_user_id.strip():
         raise HTTPException(401, "Missing X-User-Id header.")
 

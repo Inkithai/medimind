@@ -55,8 +55,8 @@ export function JudgePrepPage() {
                 Judge Q&amp;A prep
               </h1>
               <p className="mt-1 max-w-2xl text-sm leading-relaxed text-slate-300">
-                Spoken answers for YGC Final Round. Only implemented behaviour.
-                Hard questions are marked. Open a card, say the highlighted line first.
+                Spoken answers for YGC Final Round. Only implemented behaviour. Hard questions are
+                marked. Open a card, say the highlighted line first.
               </p>
             </div>
             <p className="rounded-full border border-white/15 bg-white/5 px-3 py-1 text-xs font-semibold text-slate-200">

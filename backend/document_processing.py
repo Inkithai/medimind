@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 
 def _now_iso() -> str:
@@ -31,12 +31,11 @@ def process_raw_text(file_path: str) -> Dict[str, Any]:
     path = Path(file_path)
     try:
         from medical_extractor import (
-            classify_pdf_pages,
-            extract_text_from_pdf,
-            pdf_pages_to_images,
             _ocr_image_file,
             _ocr_scan_pdf_pages,
             _pdf_page_texts,
+            classify_pdf_pages,
+            extract_text_from_pdf,
         )
 
         suffix = path.suffix.lower()
@@ -72,9 +71,13 @@ def process_raw_text(file_path: str) -> Dict[str, Any]:
                 "page_count": page_count,
                 "extraction_method": method,
                 "has_text": bool(extracted),
-                "confidence": round(sum(confidences) / len(confidences), 2) if confidences else None,
+                "confidence": round(sum(confidences) / len(confidences), 2)
+                if confidences
+                else None,
                 "processed_at": _now_iso(),
-                "error_message": None if extracted else "No raw text layer could be extracted without AI vision.",
+                "error_message": None
+                if extracted
+                else "No raw text layer could be extracted without AI vision.",
             }
 
         if suffix in {".png", ".jpg", ".jpeg", ".webp"}:
@@ -88,7 +91,9 @@ def process_raw_text(file_path: str) -> Dict[str, Any]:
                 "has_text": bool(text),
                 "confidence": ocr_conf,
                 "processed_at": _now_iso(),
-                "error_message": None if text else "No OCR text could be extracted without AI vision.",
+                "error_message": None
+                if text
+                else "No OCR text could be extracted without AI vision.",
             }
 
         return {

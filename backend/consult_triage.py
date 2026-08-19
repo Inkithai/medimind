@@ -108,12 +108,36 @@ _LAB_SPECIALTY_MAP: List[Dict[str, str]] = [
     {"keyword": "egfr", "key": "nephrologist", "specialty": "Nephrologist"},
     {"keyword": "urea", "key": "nephrologist", "specialty": "Nephrologist"},
     {"keyword": "albumin/creatinine", "key": "nephrologist", "specialty": "Nephrologist"},
-    {"keyword": "alt", "key": "gastroenterologist", "specialty": "Gastroenterologist / Hepatologist"},
-    {"keyword": "ast", "key": "gastroenterologist", "specialty": "Gastroenterologist / Hepatologist"},
-    {"keyword": "alp", "key": "gastroenterologist", "specialty": "Gastroenterologist / Hepatologist"},
-    {"keyword": "alkaline phosphatase", "key": "gastroenterologist", "specialty": "Gastroenterologist / Hepatologist"},
-    {"keyword": "bilirubin", "key": "gastroenterologist", "specialty": "Gastroenterologist / Hepatologist"},
-    {"keyword": "ggt", "key": "gastroenterologist", "specialty": "Gastroenterologist / Hepatologist"},
+    {
+        "keyword": "alt",
+        "key": "gastroenterologist",
+        "specialty": "Gastroenterologist / Hepatologist",
+    },
+    {
+        "keyword": "ast",
+        "key": "gastroenterologist",
+        "specialty": "Gastroenterologist / Hepatologist",
+    },
+    {
+        "keyword": "alp",
+        "key": "gastroenterologist",
+        "specialty": "Gastroenterologist / Hepatologist",
+    },
+    {
+        "keyword": "alkaline phosphatase",
+        "key": "gastroenterologist",
+        "specialty": "Gastroenterologist / Hepatologist",
+    },
+    {
+        "keyword": "bilirubin",
+        "key": "gastroenterologist",
+        "specialty": "Gastroenterologist / Hepatologist",
+    },
+    {
+        "keyword": "ggt",
+        "key": "gastroenterologist",
+        "specialty": "Gastroenterologist / Hepatologist",
+    },
     {"keyword": "cholesterol", "key": "cardiologist", "specialty": "Cardiologist"},
     {"keyword": "lipid", "key": "cardiologist", "specialty": "Cardiologist"},
     {"keyword": "ldl", "key": "cardiologist", "specialty": "Cardiologist"},
@@ -181,10 +205,15 @@ def _assign_model_specialties(items: List[Dict[str, Any]]) -> None:
     match. Failure leaves the safe GP fallback untouched. Enable with
     MEDIMIND_MODEL_SPECIALTY_SELECTION=true.
     """
-    if os.environ.get("MEDIMIND_MODEL_SPECIALTY_SELECTION", "false").lower() not in {"1", "true", "yes"}:
+    if os.environ.get("MEDIMIND_MODEL_SPECIALTY_SELECTION", "false").lower() not in {
+        "1",
+        "true",
+        "yes",
+    }:
         return
     candidates = [
-        (index, item) for index, item in enumerate(items)
+        (index, item)
+        for index, item in enumerate(items)
         if item.get("route") == "doctor"
         and (item.get("specialty") or {}).get("key") == "general_physician"
         and item.get("trigger") != "lab_approaching_boundary"
@@ -220,16 +249,22 @@ def _assign_model_specialties(items: List[Dict[str, Any]]) -> None:
         },
     }
     payload = [
-        {"id": index, "trigger": item.get("trigger"), "subject": item.get("subject"), "detail": item.get("detail")}
+        {
+            "id": index,
+            "trigger": item.get("trigger"),
+            "subject": item.get("subject"),
+            "detail": item.get("detail"),
+        }
         for index, item in candidates
     ]
     try:
         from medical_extractor import MODEL, _completion_resilient, _parse_json_object
+
         raw = _completion_resilient(
             model=MODEL,
             system_prompt=(
                 "Assign one appropriate medical specialty to each already doctor-routed finding. "
-                "Do not diagnose or alter urgency. Use a patient-friendly label; choose 'General practitioner' "
+                "Do not diagnose or alter urgency. Use a patient-friendly label; choose 'General practitioner' "  # noqa: E501
                 "when no specialist is clearly justified."
             ),
             user_content=json.dumps(payload),
@@ -334,80 +369,96 @@ def generate_consult_triage(
     # --- Cross-check findings ---------------------------------------------
     for conflict in cross_check.get("allergy_conflicts") or []:
         subject = f"{conflict.get('medication')} vs allergy '{conflict.get('allergy')}'"
-        items.append(_item(
-            trigger="allergy_conflict",
-            subject=subject,
-            detail=conflict.get("explanation") or "",
-            route="doctor",
-            urgency="urgent",
-            why_this_route=(
-                "A medication on file conflicts with an allergy recorded in these "
-                "same documents. Resolving it means changing or substituting the "
-                "prescription, which is a prescribing decision."
-            ),
-            confidence=conflict.get("confidence"),
-        ))
+        items.append(
+            _item(
+                trigger="allergy_conflict",
+                subject=subject,
+                detail=conflict.get("explanation") or "",
+                route="doctor",
+                urgency="urgent",
+                why_this_route=(
+                    "A medication on file conflicts with an allergy recorded in these "
+                    "same documents. Resolving it means changing or substituting the "
+                    "prescription, which is a prescribing decision."
+                ),
+                confidence=conflict.get("confidence"),
+            )
+        )
 
     for interaction in cross_check.get("potential_drug_interactions") or []:
         meds = interaction.get("medications_involved") or []
         subject = " + ".join(str(m) for m in meds) or "drug interaction"
         severity = str(interaction.get("severity") or "moderate").lower()
         if severity == "high":
-            items.append(_apply_timing(_item(
-                trigger="drug_interaction_high",
-                subject=subject,
-                detail=interaction.get("explanation") or "",
-                route="doctor",
-                urgency="urgent",
-                why_this_route=(
-                    "A high-severity interaction means the combination itself needs "
-                    "reconsidering — a prescribing decision."
-                ),
-                confidence=interaction.get("confidence"),
-            ), interaction))
+            items.append(
+                _apply_timing(
+                    _item(
+                        trigger="drug_interaction_high",
+                        subject=subject,
+                        detail=interaction.get("explanation") or "",
+                        route="doctor",
+                        urgency="urgent",
+                        why_this_route=(
+                            "A high-severity interaction means the combination itself needs "
+                            "reconsidering — a prescribing decision."
+                        ),
+                        confidence=interaction.get("confidence"),
+                    ),
+                    interaction,
+                )
+            )
         else:
-            items.append(_apply_timing(_item(
-                trigger=f"drug_interaction_{severity}",
-                subject=subject,
-                detail=interaction.get("explanation") or "",
-                route="pharmacist",
-                urgency="soon" if severity == "moderate" else "routine",
-                why_this_route=(
-                    "Lower-severity interactions are typically managed by timing, "
-                    "spacing, or monitoring — a pharmacist can advise without an "
-                    "appointment."
-                ),
-                confidence=interaction.get("confidence"),
-            ), interaction))
+            items.append(
+                _apply_timing(
+                    _item(
+                        trigger=f"drug_interaction_{severity}",
+                        subject=subject,
+                        detail=interaction.get("explanation") or "",
+                        route="pharmacist",
+                        urgency="soon" if severity == "moderate" else "routine",
+                        why_this_route=(
+                            "Lower-severity interactions are typically managed by timing, "
+                            "spacing, or monitoring — a pharmacist can advise without an "
+                            "appointment."
+                        ),
+                        confidence=interaction.get("confidence"),
+                    ),
+                    interaction,
+                )
+            )
 
     for duplicate in cross_check.get("duplicate_prescriptions") or []:
-        items.append(_item(
-            trigger="duplicate_prescription",
-            subject=str(duplicate.get("medication") or "duplicate prescription"),
-            detail=duplicate.get("explanation") or "",
-            route="pharmacist",
-            urgency="soon",
-            why_this_route=(
-                "Medication reconciliation — confirming what should actually be "
-                "taken when the same drug appears twice — is a pharmacist's core "
-                "competency."
-            ),
-            confidence=duplicate.get("confidence"),
-        ))
+        items.append(
+            _item(
+                trigger="duplicate_prescription",
+                subject=str(duplicate.get("medication") or "duplicate prescription"),
+                detail=duplicate.get("explanation") or "",
+                route="pharmacist",
+                urgency="soon",
+                why_this_route=(
+                    "Medication reconciliation — confirming what should actually be "
+                    "taken when the same drug appears twice — is a pharmacist's core "
+                    "competency."
+                ),
+                confidence=duplicate.get("confidence"),
+            )
+        )
 
     for conflict in cross_check.get("conflicting_dosage_instructions") or []:
-        items.append(_item(
-            trigger="conflicting_dosage_instructions",
-            subject=str(conflict.get("medication") or "conflicting instructions"),
-            detail=conflict.get("explanation") or "",
-            route="pharmacist",
-            urgency="soon",
-            why_this_route=(
-                "The pharmacist holds the dispensing record and can check which "
-                "instruction stands."
-            ),
-            confidence=conflict.get("confidence"),
-        ))
+        items.append(
+            _item(
+                trigger="conflicting_dosage_instructions",
+                subject=str(conflict.get("medication") or "conflicting instructions"),
+                detail=conflict.get("explanation") or "",
+                route="pharmacist",
+                urgency="soon",
+                why_this_route=(
+                    "The pharmacist holds the dispensing record and can check which "
+                    "instruction stands."
+                ),
+                confidence=conflict.get("confidence"),
+            )
+        )
 
     # Published full-list age restrictions that deterministically conflict
     # with the patient age printed in the record.
@@ -415,10 +466,12 @@ def generate_consult_triage(
         item = _item(
             trigger="essential_medicine_age_restriction",
             subject=str(conflict.get("medication") or "medication age restriction"),
-            detail=conflict.get("explanation") or conflict.get("restriction") or "Published age restriction.",
+            detail=conflict.get("explanation")
+            or conflict.get("restriction")
+            or "Published age restriction.",
             route="doctor",
             urgency="urgent",
-            why_this_route="The published age restriction may require changing the prescription, which is a prescriber decision.",
+            why_this_route="The published age restriction may require changing the prescription, which is a prescriber decision.",  # noqa: E501
             confidence=conflict.get("confidence"),
         )
         item["reference"] = {
@@ -434,8 +487,10 @@ def generate_consult_triage(
         citation = combination.get("citation") or {}
         item = _item(
             trigger="guideline_flagged_combination",
-            subject=f"{combination.get('opioid') or 'opioid'} + {combination.get('depressant') or 'sedative'}",
-            detail=combination.get("plain") or combination.get("quote") or "Published guidance flags this combination.",
+            subject=f"{combination.get('opioid') or 'opioid'} + {combination.get('depressant') or 'sedative'}",  # noqa: E501
+            detail=combination.get("plain")
+            or combination.get("quote")
+            or "Published guidance flags this combination.",
             route="doctor",
             urgency="urgent",
             why_this_route=(
@@ -458,7 +513,7 @@ def generate_consult_triage(
     for exposure in cross_check.get("concurrent_exposure") or []:
         detail = exposure.get("note") or "Two active prescriptions supplied the same ingredient."
         if exposure.get("cumulative_daily_dose") is not None and exposure.get("dosage_unit"):
-            detail += f" Combined daily dose: {exposure['cumulative_daily_dose']} {exposure['dosage_unit']}."
+            detail += f" Combined daily dose: {exposure['cumulative_daily_dose']} {exposure['dosage_unit']}."  # noqa: E501
         item = _item(
             trigger="concurrent_duplicate_ingredient",
             subject=str(exposure.get("ingredient") or "duplicate ingredient"),
@@ -482,32 +537,36 @@ def generate_consult_triage(
     for finding in dosage_report.get("findings") or []:
         kind = finding.get("kind")
         if kind in ("above_max_single_dose", "above_max_daily_dose", "above_max_frequency"):
-            items.append(_item(
-                trigger=f"dosage_{kind}",
-                subject=str(finding.get("medication") or finding.get("ingredient") or "dosage"),
-                detail=finding.get("explanation") or "",
-                route="doctor",
-                urgency="urgent",
-                why_this_route=(
-                    "A dose above a published adult ceiling can only be changed by "
-                    "the prescriber — a prescribing decision."
-                ),
-                confidence=finding.get("confidence"),
-            ))
+            items.append(
+                _item(
+                    trigger=f"dosage_{kind}",
+                    subject=str(finding.get("medication") or finding.get("ingredient") or "dosage"),
+                    detail=finding.get("explanation") or "",
+                    route="doctor",
+                    urgency="urgent",
+                    why_this_route=(
+                        "A dose above a published adult ceiling can only be changed by "
+                        "the prescriber — a prescribing decision."
+                    ),
+                    confidence=finding.get("confidence"),
+                )
+            )
         elif kind == "below_min_single_dose":
-            items.append(_item(
-                trigger="dosage_below_min_single_dose",
-                subject=str(finding.get("medication") or finding.get("ingredient") or "dosage"),
-                detail=finding.get("explanation") or "",
-                route="pharmacist",
-                urgency="routine",
-                why_this_route=(
-                    "An unusually low printed dose is most often a reading or "
-                    "transcription issue — the pharmacist can confirm it against "
-                    "the dispensing record."
-                ),
-                confidence=finding.get("confidence"),
-            ))
+            items.append(
+                _item(
+                    trigger="dosage_below_min_single_dose",
+                    subject=str(finding.get("medication") or finding.get("ingredient") or "dosage"),
+                    detail=finding.get("explanation") or "",
+                    route="pharmacist",
+                    urgency="routine",
+                    why_this_route=(
+                        "An unusually low printed dose is most often a reading or "
+                        "transcription issue — the pharmacist can confirm it against "
+                        "the dispensing record."
+                    ),
+                    confidence=finding.get("confidence"),
+                )
+            )
 
     # --- Drug-lab / renal-hepatic / condition-contraindication findings -----
     # These are newer deterministic layers (drug_lab_interactions.py,
@@ -525,18 +584,20 @@ def generate_consult_triage(
             subj = " / ".join(finding.get("medications_involved") or []) or str(
                 finding.get("rule") or "medication"
             )
-            items.append(_item(
-                trigger=_trigger,
-                subject=subj,
-                detail=finding.get("explanation") or "",
-                route="doctor",
-                urgency=urgency,
-                why_this_route=(
-                    "Reviewing or changing a medicine because of this patient's own "
-                    "lab results or conditions is a prescribing decision."
-                ),
-                confidence=finding.get("confidence"),
-            ))
+            items.append(
+                _item(
+                    trigger=_trigger,
+                    subject=subj,
+                    detail=finding.get("explanation") or "",
+                    route="doctor",
+                    urgency=urgency,
+                    why_this_route=(
+                        "Reviewing or changing a medicine because of this patient's own "
+                        "lab results or conditions is a prescribing decision."
+                    ),
+                    confidence=finding.get("confidence"),
+                )
+            )
 
     # --- Lab trend findings -------------------------------------------------
     for trend in lab_trends.get("trends") or []:
@@ -544,78 +605,88 @@ def generate_consult_triage(
         specialty = _specialty_for_lab(test_name)
         if trend.get("crossed_into_abnormal_at"):
             crossing = trend["crossed_into_abnormal_at"]
-            items.append(_item(
-                trigger="lab_crossed_out_of_range",
-                subject=test_name,
-                detail=(
-                    f"{test_name} moved outside its normal range at the "
-                    f"{crossing.get('date')} test ({crossing.get('flag')})."
-                ),
-                route="doctor",
-                urgency="soon",
-                why_this_route=(
-                    "Interpreting a result that has left its normal range is a "
-                    "diagnostic act only a doctor can perform."
-                ),
-                confidence=trend.get("confidence"),
-                specialty=specialty,
-            ))
+            items.append(
+                _item(
+                    trigger="lab_crossed_out_of_range",
+                    subject=test_name,
+                    detail=(
+                        f"{test_name} moved outside its normal range at the "
+                        f"{crossing.get('date')} test ({crossing.get('flag')})."
+                    ),
+                    route="doctor",
+                    urgency="soon",
+                    why_this_route=(
+                        "Interpreting a result that has left its normal range is a "
+                        "diagnostic act only a doctor can perform."
+                    ),
+                    confidence=trend.get("confidence"),
+                    specialty=specialty,
+                )
+            )
         elif (
             (trend.get("data_points") or [])
-            and str((trend.get("data_points") or [])[0].get("flag") or "").lower() in {"high", "low"}
-            and str((trend.get("data_points") or [])[-1].get("flag") or "").lower() in {"high", "low"}
+            and str((trend.get("data_points") or [])[0].get("flag") or "").lower()
+            in {"high", "low"}
+            and str((trend.get("data_points") or [])[-1].get("flag") or "").lower()
+            in {"high", "low"}
         ):
-            items.append(_item(
-                trigger="lab_persistently_abnormal",
-                subject=test_name,
-                detail=trend.get("explanation") or (
-                    f"{test_name} is outside the supplied reference range at both the "
-                    "earliest and latest available readings."
-                ),
-                route="doctor",
-                urgency="soon",
-                why_this_route=(
-                    "A persistently out-of-range series needs interpretation in clinical "
-                    "context, even when there is no normal-to-abnormal crossing."
-                ),
-                confidence=trend.get("confidence"),
-                specialty=specialty,
-            ))
+            items.append(
+                _item(
+                    trigger="lab_persistently_abnormal",
+                    subject=test_name,
+                    detail=trend.get("explanation")
+                    or (
+                        f"{test_name} is outside the supplied reference range at both the "
+                        "earliest and latest available readings."
+                    ),
+                    route="doctor",
+                    urgency="soon",
+                    why_this_route=(
+                        "A persistently out-of-range series needs interpretation in clinical "
+                        "context, even when there is no normal-to-abnormal crossing."
+                    ),
+                    confidence=trend.get("confidence"),
+                    specialty=specialty,
+                )
+            )
         elif trend.get("approaching_threshold"):
-            items.append(_item(
-                trigger="lab_approaching_boundary",
-                subject=test_name,
-                detail=(
-                    f"{test_name} is still within its normal range but has been "
-                    "drifting toward the boundary across visits."
-                ),
-                route="doctor",
-                urgency="routine",
-                why_this_route=(
-                    "Nothing is abnormal yet — this is worth raising at the next "
-                    "planned appointment rather than making a special one."
-                ),
-                confidence=trend.get("confidence"),
-                specialty=specialty,
-            ))
+            items.append(
+                _item(
+                    trigger="lab_approaching_boundary",
+                    subject=test_name,
+                    detail=(
+                        f"{test_name} is still within its normal range but has been "
+                        "drifting toward the boundary across visits."
+                    ),
+                    route="doctor",
+                    urgency="routine",
+                    why_this_route=(
+                        "Nothing is abnormal yet — this is worth raising at the next "
+                        "planned appointment rather than making a special one."
+                    ),
+                    confidence=trend.get("confidence"),
+                    specialty=specialty,
+                )
+            )
 
     # --- Extraction/translation quality referrals --------------------------
     from language_guard import assess_translation_risk
+
     for visit in timeline.get("visits") or []:
         source = ((visit.get("_source") or {}).get("file")) or "uploaded document"
         language_risk = assess_translation_risk(visit)
         if language_risk.get("flag") in {"review", "high"}:
             ocr = language_risk.get("ocr_confidence")
             translation = language_risk.get("translation_confidence")
-            translation_is_dominant = (
-                isinstance(translation, (int, float))
-                and (not isinstance(ocr, (int, float)) or translation < ocr)
+            translation_is_dominant = isinstance(translation, (int, float)) and (
+                not isinstance(ocr, (int, float)) or translation < ocr
             )
             if translation_is_dominant:
                 translation_item = _item(
                     trigger="translation_uncertain",
                     subject=source,
-                    detail=language_risk.get("advice") or "Medication-name translation should be verified.",
+                    detail=language_risk.get("advice")
+                    or "Medication-name translation should be verified.",
                     route="pharmacist",
                     urgency="soon",
                     why_this_route=(
@@ -653,10 +724,10 @@ def generate_consult_triage(
             quality_item = _item(
                 trigger="low_extraction_confidence",
                 subject=source,
-                detail=f"Fields needing verification: {', '.join(str(value) for value in illegible)}.",
+                detail=f"Fields needing verification: {', '.join(str(value) for value in illegible)}.",  # noqa: E501
                 route="pharmacist",
                 urgency="routine",
-                why_this_route="The extracted fields should be checked against the original or dispensing record.",
+                why_this_route="The extracted fields should be checked against the original or dispensing record.",  # noqa: E501
                 confidence=overall if isinstance(overall, (int, float)) else None,
             )
             quality_item["category"] = "data_quality"
@@ -699,15 +770,17 @@ def generate_consult_triage(
                     existing["triggered_by"].append(item["subject"])
             continue
         seen_keys.add(key)
-        recommended_specialties.append({
-            "specialty": spec["specialty"],
-            "key": key,
-            "reason": spec["reason"],
-            "basis": spec.get("basis", "default"),
-            "urgency": item["urgency"],
-            "confidence": item.get("confidence"),
-            "triggered_by": [item["subject"]],
-        })
+        recommended_specialties.append(
+            {
+                "specialty": spec["specialty"],
+                "key": key,
+                "reason": spec["reason"],
+                "basis": spec.get("basis", "default"),
+                "urgency": item["urgency"],
+                "confidence": item.get("confidence"),
+                "triggered_by": [item["subject"]],
+            }
+        )
     recommended_specialties.sort(
         key=lambda s: (URGENCY_ORDER[s["urgency"]], s["key"] != "general_physician"),
         reverse=True,
@@ -717,7 +790,7 @@ def generate_consult_triage(
         summary = (
             f"A {consult_type} should be consulted — "
             f"{URGENCY_MEANING[overall_urgency]}. "
-            f"{len(clinical_items)} clinical finding(s) were routed: {len(doctor_actions)} to a doctor, "
+            f"{len(clinical_items)} clinical finding(s) were routed: {len(doctor_actions)} to a doctor, "  # noqa: E501
             f"{len(pharmacist_actions)} to a pharmacist. This is a routing "
             "suggestion, not a diagnosis."
         )
@@ -735,15 +808,18 @@ def generate_consult_triage(
         "consult_type": consult_type,
         "urgency": overall_urgency,
         "urgency_meaning": URGENCY_MEANING.get(overall_urgency) if overall_urgency else None,
-        "confidence": max((i["confidence"] or 0.0) for i in clinical_items) if clinical_items else None,
+        "confidence": max((i["confidence"] or 0.0) for i in clinical_items)
+        if clinical_items
+        else None,
         "recommended_specialties": recommended_specialties,
         "pharmacist_actions": pharmacist_actions,
         "doctor_actions": doctor_actions,
         "referral_items": clinical_items,
         "document_quality_notices": quality_items,
         "document_quality_note": (
-            f"{len(quality_items)} uploaded document(s) need source verification before relying on all extracted details."
-            if quality_items else None
+            f"{len(quality_items)} uploaded document(s) need source verification before relying on all extracted details."  # noqa: E501
+            if quality_items
+            else None
         ),
         "summary": summary,
         "emergency_advice": EMERGENCY_ADVICE,

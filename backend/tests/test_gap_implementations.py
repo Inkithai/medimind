@@ -12,7 +12,6 @@ from drug_interactions import check_known_interactions
 from medical_extractor import _normalize_extraction_result
 from reference_library import find_concurrent_depressant_risk, find_relevant_guidance
 
-
 EMPTY = {
     "potential_drug_interactions": [],
     "duplicate_prescriptions": [],
@@ -35,12 +34,14 @@ def test_date_admission_rejects_partial_placeholders_and_keeps_complete_dates():
 
 
 def test_date_admission_is_applied_recursively_to_extracted_entities():
-    result = _normalize_extraction_result({
-        "date": "2026-08",
-        "medications": [{"start_date": "2026-08-15", "end_date": "20XX-08-20"}],
-        "lab_results": [{"result_date": "15 Aug 2026"}],
-        "diagnoses": [{"onset_date": "unknown"}],
-    })
+    result = _normalize_extraction_result(
+        {
+            "date": "2026-08",
+            "medications": [{"start_date": "2026-08-15", "end_date": "20XX-08-20"}],
+            "lab_results": [{"result_date": "15 Aug 2026"}],
+            "diagnoses": [{"onset_date": "unknown"}],
+        }
+    )
     assert result["date"] is None
     assert result["medications"][0] == {"start_date": "2026-08-15", "end_date": None}
     assert result["lab_results"][0]["result_date"] == "15 Aug 2026"
@@ -69,9 +70,9 @@ def test_new_deterministic_interaction_pairs_are_guaranteed():
         ("Amlodipine", "amlodipine", "Simvastatin", "simvastatin"),
     ]
     for a_name, a, b_name, b in pairs:
-        findings = check_known_interactions(_timeline(
-            _med(a_name, a, source="a.pdf"), _med(b_name, b, source="b.pdf")
-        ))
+        findings = check_known_interactions(
+            _timeline(_med(a_name, a, source="a.pdf"), _med(b_name, b, source="b.pdf"))
+        )
         assert findings, (a, b)
         assert findings[0]["source"] == "curated_knowledge_base"
 
@@ -95,33 +96,41 @@ def test_published_guidance_is_selected_and_only_flags_overlapping_courses():
 
 
 def test_triage_deescalates_nonconcurrent_history_without_hiding_it():
-    report = generate_consult_triage({
-        **EMPTY,
-        "potential_drug_interactions": [{
-            "medications_involved": ["A", "B"],
-            "severity": "high",
-            "confidence": 0.9,
-            "explanation": "interaction",
-            "timing": {"status": "not_concurrent", "gap_days": 100},
-        }],
-    })
+    report = generate_consult_triage(
+        {
+            **EMPTY,
+            "potential_drug_interactions": [
+                {
+                    "medications_involved": ["A", "B"],
+                    "severity": "high",
+                    "confidence": 0.9,
+                    "explanation": "interaction",
+                    "timing": {"status": "not_concurrent", "gap_days": 100},
+                }
+            ],
+        }
+    )
     item = report["referral_items"][0]
     assert item["urgency"] == "routine"
     assert item["is_historical"] is True
 
 
 def test_triage_escalates_concurrent_duplicate_ingredient():
-    report = generate_consult_triage({
-        **EMPTY,
-        "concurrent_exposure": [{
-            "ingredient": "paracetamol",
-            "status": "concurrent",
-            "window_start": "2026-08-01",
-            "window_end": "2026-08-10",
-            "cumulative_daily_dose": 5000,
-            "dosage_unit": "mg",
-        }],
-    })
+    report = generate_consult_triage(
+        {
+            **EMPTY,
+            "concurrent_exposure": [
+                {
+                    "ingredient": "paracetamol",
+                    "status": "concurrent",
+                    "window_start": "2026-08-01",
+                    "window_end": "2026-08-10",
+                    "cumulative_daily_dose": 5000,
+                    "dosage_unit": "mg",
+                }
+            ],
+        }
+    )
     item = report["referral_items"][0]
     assert item["trigger"] == "concurrent_duplicate_ingredient"
     assert item["route"] == "pharmacist"
@@ -129,22 +138,30 @@ def test_triage_escalates_concurrent_duplicate_ingredient():
 
 
 def test_triage_routes_persistent_abnormal_series_and_translation_risk():
-    labs = {"trends": [{
-        "test_name": "Creatinine",
-        "confidence": 0.9,
-        "data_points": [{"flag": "high"}, {"flag": "high"}],
-        "crossed_into_abnormal_at": None,
-        "approaching_threshold": False,
-        "explanation": "Remained high.",
-    }]}
-    timeline = {"visits": [{
-        "_source": {"file": "foreign-rx.jpg"},
-        "document_language": "Sinhala",
-        "ocr_confidence": 0.95,
-        "translation_confidence": 0.5,
-        "overall_confidence": 0.8,
-        "illegible_or_low_confidence_fields": [],
-    }]}
+    labs = {
+        "trends": [
+            {
+                "test_name": "Creatinine",
+                "confidence": 0.9,
+                "data_points": [{"flag": "high"}, {"flag": "high"}],
+                "crossed_into_abnormal_at": None,
+                "approaching_threshold": False,
+                "explanation": "Remained high.",
+            }
+        ]
+    }
+    timeline = {
+        "visits": [
+            {
+                "_source": {"file": "foreign-rx.jpg"},
+                "document_language": "Sinhala",
+                "ocr_confidence": 0.95,
+                "translation_confidence": 0.5,
+                "overall_confidence": 0.8,
+                "illegible_or_low_confidence_fields": [],
+            }
+        ]
+    }
     report = generate_consult_triage(EMPTY, labs, {"findings": []}, timeline)
     triggers = {item["trigger"] for item in report["referral_items"]}
     assert "lab_persistently_abnormal" in triggers

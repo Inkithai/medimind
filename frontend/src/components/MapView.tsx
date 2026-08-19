@@ -29,7 +29,12 @@ export function MapView({
         {originLabel ? `Near ${originLabel}` : "Selected facility"}
         {selected.distance_km != null ? ` · ${selected.distance_km} km` : ""}
       </p>
-      <a href={osm} target="_blank" rel="noreferrer" className="mt-3 inline-flex text-sm font-medium text-brand-600 hover:text-brand-700">
+      <a
+        href={osm}
+        target="_blank"
+        rel="noreferrer"
+        className="mt-3 inline-flex text-sm font-medium text-brand-600 hover:text-brand-700"
+      >
         Open in external map →
       </a>
       <p className="mt-3 text-xs text-slate-400">

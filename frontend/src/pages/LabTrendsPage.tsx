@@ -58,19 +58,14 @@ export function LabTrendsPage() {
       {loading && <LoadingState label={t("labs.loading")} />}
 
       {!loading && error !== null && (
-        <NotFoundOrError
-          error={error}
-          onRetry={() => setReloadKey((k) => k + 1)}
-        />
+        <NotFoundOrError error={error} onRetry={() => setReloadKey((k) => k + 1)} />
       )}
 
       {!loading && report && (
         <>
           <LabTrendsView report={report} />
           <MedicalDisclaimer />
-          {worthDiscussing(report) && (
-            <ConsiderProfessionalCare message={t("care.labReview")} />
-          )}
+          {worthDiscussing(report) && <ConsiderProfessionalCare message={t("care.labReview")} />}
         </>
       )}
     </div>
@@ -100,12 +95,8 @@ function NotFoundOrError({ error, onRetry }: { error: unknown; onRetry: () => vo
       <Card>
         <CardBody>
           <div className="flex flex-col items-center gap-3 py-10 text-center">
-            <p className="text-sm font-semibold text-slate-700">
-              {t("labs.noTrends")}
-            </p>
-            <p className="max-w-md text-sm text-slate-500">
-              {t("labs.noTrendsBody")}
-            </p>
+            <p className="text-sm font-semibold text-slate-700">{t("labs.noTrends")}</p>
+            <p className="max-w-md text-sm text-slate-500">{t("labs.noTrendsBody")}</p>
             <Link
               to="/upload"
               className="inline-flex items-center gap-2 rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700"

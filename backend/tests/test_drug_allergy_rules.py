@@ -145,10 +145,12 @@ def test_merge_skips_pairs_the_llm_already_flagged():
             },
         ],
     }
-    kb = check_allergy_conflicts(_timeline(
-        meds=[_med("Amoxicillin 500mg", ["amoxicillin"])],
-        allergies=["Penicillin"],
-    ))
+    kb = check_allergy_conflicts(
+        _timeline(
+            meds=[_med("Amoxicillin 500mg", ["amoxicillin"])],
+            allergies=["Penicillin"],
+        )
+    )
     merge_allergy_findings(report, kb)
     assert len(report["allergy_conflicts"]) == 1
     assert report["allergy_conflicts"][0]["explanation"] == "LLM found it"
@@ -156,10 +158,12 @@ def test_merge_skips_pairs_the_llm_already_flagged():
 
 def test_merge_adds_pairs_the_llm_missed():
     report = {"allergy_conflicts": []}
-    kb = check_allergy_conflicts(_timeline(
-        meds=[_med("Amoxicillin", ["amoxicillin"])],
-        allergies=["Penicillin"],
-    ))
+    kb = check_allergy_conflicts(
+        _timeline(
+            meds=[_med("Amoxicillin", ["amoxicillin"])],
+            allergies=["Penicillin"],
+        )
+    )
     merge_allergy_findings(report, kb)
     assert len(report["allergy_conflicts"]) == 1
     assert report["allergy_conflicts"][0]["source"] == "curated_knowledge_base"
@@ -182,6 +186,7 @@ def test_drug_names_containing_negative_marker_substrings_are_not_misread():
     # statement. The resolver must classify it as an unknown substance
     # (no classes, not negative) so the direct-ingredient match still works.
     from drug_allergy_rules import _resolve_allergy_classes
+
     assert _resolve_allergy_classes("sulfanilamide") == set()
     timeline = _timeline(
         meds=[_med("Sulfanilamide", ["sulfanilamide"], source="a.pdf")],

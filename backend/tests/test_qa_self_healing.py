@@ -21,9 +21,10 @@ Fixes under test:
   - A missing Supabase `chunks` table raises an actionable
     VectorStoreSchemaError instead of silently returning "no records".
 """
+
+import json
 import os
 import sys
-import json
 import types
 from unittest import mock
 
@@ -34,37 +35,55 @@ os.environ["SUPABASE_URL"] = "https://dummy.supabase.co"
 os.environ["SUPABASE_SERVICE_ROLE_KEY"] = "dummy-service-role-key"
 os.environ.pop("VECTOR_STORE", None)  # default = chroma
 
-import vector_store
 import retrieval
+import vector_store
 
 # One extracted document as persisted in the `documents` table (same shape
 # the upload pipeline stores: flat page dict with medications/lab/allergies).
-PERSISTED_DOCS = [{
-    "document_type": "prescription",
-    "date": "2024-03-15",
-    "provider_or_doctor": "Dr. Smith",
-    "medications": [{
-        "name": "Paracetamol", "ingredients": ["Paracetamol"], "dosage": "500 mg",
-        "frequency": "3x daily", "duration": "5 days", "dosage_value": 500,
-        "dosage_unit": "mg", "frequency_per_day": 3, "is_as_needed": False,
-        "confidence": 0.95,
-    }],
-    "lab_results": [{
-        "test_name": "HbA1c", "value": "6.1", "unit": "%", "reference_range": "<5.7",
-        "flag": "high", "confidence": 0.9,
-    }],
-    "allergies_noted": ["Penicillin"],
-    "clinical_notes": None,
-    "overall_confidence": 0.92,
-    "_source": {"file": "rx.pdf"},
-}]
+PERSISTED_DOCS = [
+    {
+        "document_type": "prescription",
+        "date": "2024-03-15",
+        "provider_or_doctor": "Dr. Smith",
+        "medications": [
+            {
+                "name": "Paracetamol",
+                "ingredients": ["Paracetamol"],
+                "dosage": "500 mg",
+                "frequency": "3x daily",
+                "duration": "5 days",
+                "dosage_value": 500,
+                "dosage_unit": "mg",
+                "frequency_per_day": 3,
+                "is_as_needed": False,
+                "confidence": 0.95,
+            }
+        ],
+        "lab_results": [
+            {
+                "test_name": "HbA1c",
+                "value": "6.1",
+                "unit": "%",
+                "reference_range": "<5.7",
+                "flag": "high",
+                "confidence": 0.9,
+            }
+        ],
+        "allergies_noted": ["Penicillin"],
+        "clinical_notes": None,
+        "overall_confidence": 0.92,
+        "_source": {"file": "rx.pdf"},
+    }
+]
 
-ANSWER_JSON = json.dumps({
-    "answer": "You are taking Paracetamol 500 mg three times daily.",
-    "confidence": 0.95,
-    "sources": [{"date": "2024-03-15", "source_file": "rx.pdf", "page": 1}],
-    "recommend_professional_consult": False,
-})
+ANSWER_JSON = json.dumps(
+    {
+        "answer": "You are taking Paracetamol 500 mg three times daily.",
+        "confidence": 0.95,
+        "sources": [{"date": "2024-03-15", "source_file": "rx.pdf", "page": 1}],
+        "recommend_professional_consult": False,
+    }
+)
 
 
 def _make_fake_chromadb():
@@ -131,10 +150,13 @@ def test_index_lost_but_documents_exist_self_heals_and_answers():
     index from persisted documents and answer, not claim 'no records'."""
     fake, state, saved = _install_fake_chromadb()
     try:
-        with mock.patch.object(retrieval, "embed_texts",
-                               side_effect=lambda texts: [[0.1] * 384 for _ in texts]), \
-             mock.patch.object(retrieval, "_completion_resilient", return_value=ANSWER_JSON), \
-             mock.patch("db.load_documents", return_value=list(PERSISTED_DOCS)):
+        with (
+            mock.patch.object(
+                retrieval, "embed_texts", side_effect=lambda texts: [[0.1] * 384 for _ in texts]
+            ),
+            mock.patch.object(retrieval, "_completion_resilient", return_value=ANSWER_JSON),
+            mock.patch("db.load_documents", return_value=list(PERSISTED_DOCS)),
+        ):
             out = retrieval.answer_question("anon_self_heal", "what medication am I on?")
 
         assert "Paracetamol" in out["answer"], out
@@ -186,13 +208,21 @@ def test_documents_without_indexable_content_get_truthful_message():
     allergies -> truthful 'no indexable content', NOT 'no indexed records'."""
     fake, state, saved = _install_fake_chromadb()
     try:
-        with mock.patch("db.load_documents", return_value=[{
-            "document_type": "other",
-            "date": "2024-03-15",
-            "medications": [], "lab_results": [], "allergies_noted": [],
-            "clinical_notes": None, "overall_confidence": 0.0,
-            "_source": {"file": "misc.pdf"},
-        }]):
+        with mock.patch(
+            "db.load_documents",
+            return_value=[
+                {
+                    "document_type": "other",
+                    "date": "2024-03-15",
+                    "medications": [],
+                    "lab_results": [],
+                    "allergies_noted": [],
+                    "clinical_notes": None,
+                    "overall_confidence": 0.0,
+                    "_source": {"file": "misc.pdf"},
+                }
+            ],
+        ):
             out = retrieval.answer_question("anon_empty_docs", "what medication am I on?")
         assert "don't have enough information" in out["answer"]
         assert "no medications, lab results, clinical notes" in out["answer"], out["answer"]
@@ -208,12 +238,15 @@ def test_missing_supabase_chunks_table_raises_actionable_error():
     'no indexed records'."""
     os.environ["VECTOR_STORE"] = "supabase"
     import importlib
+
     importlib.reload(vector_store)  # VECTOR_STORE is read at import time
     retrieval.vector_store = vector_store  # keep retrieval pointing at it
 
     class FakeTable:
         def select(self, *cols, **kw):
-            raise RuntimeError("PGRST205: Could not find the table 'public.chunks' in the schema cache")
+            raise RuntimeError(
+                "PGRST205: Could not find the table 'public.chunks' in the schema cache"
+            )
 
     try:
         with mock.patch("db._get_client", lambda: mock.Mock(table=lambda name: FakeTable())):
@@ -233,21 +266,24 @@ def test_supabase_upsert_handles_numpy_arrays():
     """Ensure numpy ndarray embeddings do not cause TypeError when upserting to Supabase."""
     os.environ["VECTOR_STORE"] = "supabase"
     import importlib
+
     importlib.reload(vector_store)
-    
+
     import numpy as np
-    
+
     class FakeSupabaseTable:
         def __init__(self):
             self.rows = {}
+
         def upsert(self, row, on_conflict=None):
             self.rows[row["id"]] = row
             return self
+
         def execute(self):
             return types.SimpleNamespace(data=list(self.rows.values()), count=len(self.rows))
 
     fake_table = FakeSupabaseTable()
-    
+
     try:
         with mock.patch("db._get_client", lambda: mock.Mock(table=lambda name: fake_table)):
             emb_array = np.array([0.1, 0.2, 0.3])
@@ -256,7 +292,7 @@ def test_supabase_upsert_handles_numpy_arrays():
                 ids=["id1"],
                 embeddings=[emb_array],
                 documents=["some doc"],
-                metadatas=[{"source": "test"}]
+                metadatas=[{"source": "test"}],
             )
         assert fake_table.rows["id1"]["embedding"] == [0.1, 0.2, 0.3]
     finally:

@@ -99,11 +99,37 @@ def parse_fhir_bundle(bundle: Any, *, document_id: str = "fhir_import") -> Dict[
     encounters: List[Dict[str, Any]] = []
     report_date: Optional[str] = None
 
-    _VITAL_KEYWORDS = ("blood pressure", "pulse", "heart rate", "oxygen", "spo2",
-                       "respiratory rate", "temperature", "weight", "height", "bmi")
-    _LAB_KEYWORDS = ("glucose", "creatinine", "sodium", "potassium", "hemoglobin",
-                     "haemoglobin", "cholesterol", "alt", "ast", "hba1c", "inr",
-                     "platelet", "urea", "egfr", "bilirubin", "albumin", "calcium")
+    _VITAL_KEYWORDS = (
+        "blood pressure",
+        "pulse",
+        "heart rate",
+        "oxygen",
+        "spo2",
+        "respiratory rate",
+        "temperature",
+        "weight",
+        "height",
+        "bmi",
+    )
+    _LAB_KEYWORDS = (
+        "glucose",
+        "creatinine",
+        "sodium",
+        "potassium",
+        "hemoglobin",
+        "haemoglobin",
+        "cholesterol",
+        "alt",
+        "ast",
+        "hba1c",
+        "inr",
+        "platelet",
+        "urea",
+        "egfr",
+        "bilirubin",
+        "albumin",
+        "calcium",
+    )
 
     for e in entries:
         res = e.get("resource") or {}
@@ -115,14 +141,19 @@ def parse_fhir_bundle(bundle: Any, *, document_id: str = "fhir_import") -> Dict[
             family = n0.get("family") or ""
             patient_name = f"{given} {family}".strip()
         elif rtype in ("MedicationStatement", "MedicationRequest"):
-            med_name = _code(res, "medicationCodeableConcept") or \
-                _text((res.get("medicationReference") or {}))
+            med_name = _code(res, "medicationCodeableConcept") or _text(
+                (res.get("medicationReference") or {})
+            )
             if med_name:
-                meds.append({
-                    "name": med_name,
-                    "ingredients": [med_name.split()[0].lower()] if med_name else [],
-                    "dosage": "", "frequency": "", "duration": "",
-                })
+                meds.append(
+                    {
+                        "name": med_name,
+                        "ingredients": [med_name.split()[0].lower()] if med_name else [],
+                        "dosage": "",
+                        "frequency": "",
+                        "duration": "",
+                    }
+                )
         elif rtype == "Observation":
             code = _code(res, "code").lower()
             val = _value(res)
@@ -137,7 +168,9 @@ def parse_fhir_bundle(bundle: Any, *, document_id: str = "fhir_import") -> Dict[
                 "confidence": 0.99,
             }
             if any(k in code for k in _VITAL_KEYWORDS):
-                vitals.append({"name": entry["test_name"], "value": entry["value"], "unit": entry["unit"]})
+                vitals.append(
+                    {"name": entry["test_name"], "value": entry["value"], "unit": entry["unit"]}
+                )
             elif any(k in code for k in _LAB_KEYWORDS):
                 labs.append(entry)
             else:
@@ -163,7 +196,9 @@ def parse_fhir_bundle(bundle: Any, *, document_id: str = "fhir_import") -> Dict[
             ignored.append(rtype or "Unknown")
 
     doc = {
-        "document_type": "lab_report" if (labs or vitals) else ("prescription" if meds else "discharge_summary"),
+        "document_type": "lab_report"
+        if (labs or vitals)
+        else ("prescription" if meds else "discharge_summary"),
         "date": report_date or "",
         "provider_or_doctor": "",
         "patient_name": patient_name,
@@ -180,7 +215,11 @@ def parse_fhir_bundle(bundle: Any, *, document_id: str = "fhir_import") -> Dict[
         "field_evidence": {},
         "illegible_or_low_confidence_fields": [],
         "overall_confidence": 0.99,
-        "_source": {"file": document_id, "method": "fhir_import", "fhir_resource_count": len(entries)},
+        "_source": {
+            "file": document_id,
+            "method": "fhir_import",
+            "fhir_resource_count": len(entries),
+        },
     }
     docs.append(doc)
 
@@ -188,12 +227,17 @@ def parse_fhir_bundle(bundle: Any, *, document_id: str = "fhir_import") -> Dict[
         "patient_name": patient_name,
         "documents": docs,
         "imported": {
-            "medications": len(meds), "lab_results": len(labs),
-            "vital_signs": len(vitals), "conditions": len(conditions),
-            "allergies": len(allergies), "encounters": len(encounters),
+            "medications": len(meds),
+            "lab_results": len(labs),
+            "vital_signs": len(vitals),
+            "conditions": len(conditions),
+            "allergies": len(allergies),
+            "encounters": len(encounters),
         },
         "ignored_resource_types": sorted(set(ignored)),
-        "note": ("Structured FHIR data was mapped into MediMind's extraction schema. Rich FHIR "
-                 "fields the pipeline does not model were dropped (see ignored_resource_types) "
-                 "rather than guessed. Ingest as you would any upload to rebuild the timeline."),
+        "note": (
+            "Structured FHIR data was mapped into MediMind's extraction schema. Rich FHIR "
+            "fields the pipeline does not model were dropped (see ignored_resource_types) "
+            "rather than guessed. Ingest as you would any upload to rebuild the timeline."
+        ),
     }

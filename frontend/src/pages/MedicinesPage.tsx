@@ -90,7 +90,7 @@ export function MedicinesPage() {
   const mostRecentOf = (entries: (typeof filtered)[0][]) =>
     entries.reduce(
       (latest, cur) => (compareDates(cur.date, latest.date) > 0 ? cur : latest),
-      entries[0]
+      entries[0],
     );
 
   const sortedIngredients = Array.from(byIngredient.entries()).sort((a, b) => {
@@ -112,7 +112,9 @@ export function MedicinesPage() {
               <p className="text-xs text-slate-600">{t("medicines.description")}</p>
             </div>
           </div>
-          <label htmlFor="medicine-search" className="sr-only">{t("medicines.searchLabel")}</label>
+          <label htmlFor="medicine-search" className="sr-only">
+            {t("medicines.searchLabel")}
+          </label>
           <input
             id="medicine-search"
             type="search"
@@ -128,7 +130,9 @@ export function MedicinesPage() {
         <Card>
           <CardBody className="py-12 text-center">
             <p className="text-sm font-semibold text-slate-700">
-              {timeline.medications_timeline.length === 0 ? t("medicines.noMedicines") : t("medicines.noMatches")}
+              {timeline.medications_timeline.length === 0
+                ? t("medicines.noMedicines")
+                : t("medicines.noMatches")}
             </p>
             <p className="mt-1 text-xs text-slate-500">
               {timeline.medications_timeline.length === 0
@@ -153,28 +157,39 @@ export function MedicinesPage() {
                 const mostRecent = mostRecentOf(entries);
                 const historyCount = entries.length;
                 return (
-                  <div key={ingredient} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <div
+                    key={ingredient}
+                    className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm"
+                  >
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <p className="text-sm font-semibold text-slate-900">{mostRecent.name}</p>
-                        <p className="mt-0.5 text-xs text-slate-500">{mostRecent.ingredients.join(", ")}</p>
+                        <p className="mt-0.5 text-xs text-slate-500">
+                          {mostRecent.ingredients.join(", ")}
+                        </p>
                       </div>
                       <StatusBadge tone="brand">{historyCount} ×</StatusBadge>
                     </div>
                     <div className="mt-2 space-y-1 text-xs text-slate-600">
                       <p>
-                        {[mostRecent.dosage, mostRecent.frequency, mostRecent.duration].filter(Boolean).join(" • ") || "—"}
+                        {[mostRecent.dosage, mostRecent.frequency, mostRecent.duration]
+                          .filter(Boolean)
+                          .join(" • ") || "—"}
                       </p>
                       <p className="text-slate-500">
-                        Source: {mostRecent.source_file || "unknown"} • {formatDate(mostRecent.date)}
+                        Source: {mostRecent.source_file || "unknown"} •{" "}
+                        {formatDate(mostRecent.date)}
                       </p>
-                      {(mostRecent.dosage_value != null || mostRecent.frequency_per_day != null) && (
+                      {(mostRecent.dosage_value != null ||
+                        mostRecent.frequency_per_day != null) && (
                         <p className="text-[11px] text-slate-400">
                           Standard dose:{" "}
                           {mostRecent.dosage_value != null && mostRecent.dosage_unit
                             ? `${mostRecent.dosage_value} ${mostRecent.dosage_unit}`
                             : "—"}
-                          {mostRecent.frequency_per_day != null ? ` • ${mostRecent.frequency_per_day}×/day` : ""}
+                          {mostRecent.frequency_per_day != null
+                            ? ` • ${mostRecent.frequency_per_day}×/day`
+                            : ""}
                           {mostRecent.is_as_needed ? " • PRN" : ""}
                         </p>
                       )}
@@ -190,9 +205,13 @@ export function MedicinesPage() {
                             .slice()
                             .sort((a, b) => compareDates(a.date, b.date))
                             .map((e, i) => (
-                              <li key={i} className="flex items-center gap-2 text-xs text-slate-500">
+                              <li
+                                key={i}
+                                className="flex items-center gap-2 text-xs text-slate-500"
+                              >
                                 <span className="h-1 w-1 rounded-full bg-slate-400" />
-                                {formatDate(e.date)} • {e.source_file || "unknown"} • {e.dosage} {e.frequency}
+                                {formatDate(e.date)} • {e.source_file || "unknown"} • {e.dosage}{" "}
+                                {e.frequency}
                               </li>
                             ))}
                         </ul>
@@ -210,10 +229,18 @@ export function MedicinesPage() {
                 <caption className="sr-only">{t("medicines.fullHistory")}</caption>
                 <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
                   <tr>
-                    <th scope="col" className="px-4 py-2.5 font-medium">{t("common.date")}</th>
-                    <th scope="col" className="px-4 py-2.5 font-medium">{t("medicines.medicine")}</th>
-                    <th scope="col" className="px-4 py-2.5 font-medium">{t("medicines.dose")}</th>
-                    <th scope="col" className="px-4 py-2.5 font-medium">{t("common.source")}</th>
+                    <th scope="col" className="px-4 py-2.5 font-medium">
+                      {t("common.date")}
+                    </th>
+                    <th scope="col" className="px-4 py-2.5 font-medium">
+                      {t("medicines.medicine")}
+                    </th>
+                    <th scope="col" className="px-4 py-2.5 font-medium">
+                      {t("medicines.dose")}
+                    </th>
+                    <th scope="col" className="px-4 py-2.5 font-medium">
+                      {t("common.source")}
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -230,7 +257,9 @@ export function MedicinesPage() {
                         <td className="px-4 py-2 text-xs text-slate-600">
                           {[med.dosage, med.frequency].filter(Boolean).join(" • ")}
                         </td>
-                        <td className="px-4 py-2 text-xs text-slate-500">{med.source_file || "—"}</td>
+                        <td className="px-4 py-2 text-xs text-slate-500">
+                          {med.source_file || "—"}
+                        </td>
                       </tr>
                     ))}
                 </tbody>

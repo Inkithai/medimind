@@ -25,10 +25,10 @@ from __future__ import annotations
 
 import threading
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set
 
-from clinician_feedback import finding_key
 from alert_management import FINDING_LISTS
+from clinician_feedback import finding_key
 
 _lock = threading.RLock()
 # user_id -> list of snapshots (append-only, newest last)
@@ -45,7 +45,7 @@ def _now() -> str:
 def _collect_finding_keys(report: Dict[str, Any]) -> Set[str]:
     keys: Set[str] = set()
     for list_key in FINDING_LISTS:
-        for finding in (report.get(list_key) or []):
+        for finding in report.get(list_key) or []:
             try:
                 keys.add(finding_key(finding))
             except Exception:
@@ -57,18 +57,20 @@ def _collect_findings(report: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Flatten the report's finding lists into [{key, kind, list, severity, rule}]."""
     flat: List[Dict[str, Any]] = []
     for list_key in FINDING_LISTS:
-        for finding in (report.get(list_key) or []):
+        for finding in report.get(list_key) or []:
             try:
-                flat.append({
-                    "key": finding_key(finding),
-                    "kind": finding.get("finding_kind") or list_key,
-                    "list": list_key,
-                    "severity": finding.get("severity"),
-                    "rule": finding.get("rule"),
-                    "subject": (finding.get("medications_involved") or [None])[0]
+                flat.append(
+                    {
+                        "key": finding_key(finding),
+                        "kind": finding.get("finding_kind") or list_key,
+                        "list": list_key,
+                        "severity": finding.get("severity"),
+                        "rule": finding.get("rule"),
+                        "subject": (finding.get("medications_involved") or [None])[0]
                         if isinstance(finding.get("medications_involved"), list)
                         else finding.get("condition") or finding.get("organ"),
-                })
+                    }
+                )
             except Exception:
                 continue
     return flat
@@ -77,23 +79,28 @@ def _collect_findings(report: Dict[str, Any]) -> List[Dict[str, Any]]:
 def _mirror(snapshot: Dict[str, Any]) -> None:
     try:
         from db import _get_client  # type: ignore
+
         client = _get_client()
         for f in snapshot["findings"]:
-            client.table("finding_history").insert({
-                "user_id": snapshot["user_id"],
-                "run_id": snapshot["run_id"],
-                "captured_at": snapshot["captured_at"],
-                "finding_key": f["key"],
-                "finding_kind": f.get("kind"),
-                "list": f.get("list"),
-                "severity": f.get("severity"),
-                "rule": f.get("rule"),
-            }).execute()
+            client.table("finding_history").insert(
+                {
+                    "user_id": snapshot["user_id"],
+                    "run_id": snapshot["run_id"],
+                    "captured_at": snapshot["captured_at"],
+                    "finding_key": f["key"],
+                    "finding_kind": f.get("kind"),
+                    "list": f.get("list"),
+                    "severity": f.get("severity"),
+                    "rule": f.get("rule"),
+                }
+            ).execute()
     except Exception:
         return
 
 
-def snapshot_findings(user_id: str, report: Dict[str, Any], *, run_id: Optional[str] = None) -> Dict[str, Any]:
+def snapshot_findings(
+    user_id: str, report: Dict[str, Any], *, run_id: Optional[str] = None
+) -> Dict[str, Any]:
     """Record the findings present in `report` right now, and return the diff
     against the previous snapshot (or 'initial' if this is the first)."""
     flattened = _collect_findings(report)
@@ -124,13 +131,18 @@ def snapshot_findings(user_id: str, report: Dict[str, Any], *, run_id: Optional[
     # operator-visible audit trail
     try:
         import audit  # type: ignore
-        audit.record(user_id, "finding_history.snapshot", {
-            "run_id": run_id,
-            "total": len(current_keys),
-            "new": len(diff["new"]),
-            "resolved": len(diff["resolved"]),
-            "persisted": len(diff["persisted"]),
-        })
+
+        audit.record(
+            user_id,
+            "finding_history.snapshot",
+            {
+                "run_id": run_id,
+                "total": len(current_keys),
+                "new": len(diff["new"]),
+                "resolved": len(diff["resolved"]),
+                "persisted": len(diff["persisted"]),
+            },
+        )
     except Exception:
         pass
 
@@ -159,13 +171,20 @@ def finding_change_log(user_id: str) -> Dict[str, Any]:
     for snap in snaps:
         present = {f["key"] for f in snap["findings"]}
         for f in snap["findings"]:
-            entry = per_key.setdefault(f["key"], {
-                "finding_key": f["key"], "kind": f.get("kind"),
-                "severity": f.get("severity"), "rule": f.get("rule"),
-                "subject": f.get("subject"),
-                "first_seen": snap["captured_at"], "last_seen": snap["captured_at"],
-                "seen_in_runs": 0, "absent_then_recurred": False,
-            })
+            entry = per_key.setdefault(
+                f["key"],
+                {
+                    "finding_key": f["key"],
+                    "kind": f.get("kind"),
+                    "severity": f.get("severity"),
+                    "rule": f.get("rule"),
+                    "subject": f.get("subject"),
+                    "first_seen": snap["captured_at"],
+                    "last_seen": snap["captured_at"],
+                    "seen_in_runs": 0,
+                    "absent_then_recurred": False,
+                },
+            )
             entry["last_seen"] = snap["captured_at"]
             entry["seen_in_runs"] += 1
         # detect recurrence: a key present earlier, absent now would be handled

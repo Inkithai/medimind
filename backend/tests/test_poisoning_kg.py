@@ -81,7 +81,10 @@ def test_extracts_adult_eml_entries_with_subsection_and_list_type(tmp_path):
     assert section["population"] == "adult"
     by_name = {e["name"]: e for e in section["entries"]}
     assert set(by_name) == {
-        "charcoal, activated", "naloxone", "acetylcysteine", "atropine",
+        "charcoal, activated",
+        "naloxone",
+        "acetylcysteine",
+        "atropine",
     }
     assert by_name["naloxone"]["subsection"] == "non_specific"
     assert by_name["naloxone"]["list_type"] == "core"
@@ -110,11 +113,15 @@ def test_deterministic_extraction_is_verbatim():
     """Every field is copied from a table cell — nothing is inferred or
     synthesized, which is the whole point of a deterministic reference
     loader (nothing to hallucinate)."""
-    import pdfplumber
 
     entries = [
-        {"name": "naloxone", "dosage_form": "Injection: 400 micrograms/mL",
-         "subsection": "non_specific", "list_type": "core", "source_page": 1},
+        {
+            "name": "naloxone",
+            "dosage_form": "Injection: 400 micrograms/mL",
+            "subsection": "non_specific",
+            "list_type": "core",
+            "source_page": 1,
+        },
     ]
     section = {"population": "adult", "entries": entries}
     # verify the ingested row shape matches the extraction shape exactly
@@ -145,12 +152,24 @@ def test_lookup_returns_listings_per_original_spelling(monkeypatch):
         captured["cypher"] = cypher
         captured["params"] = params
         return [
-            {"wanted": "Naloxone", "display_name": "naloxone", "category": "specific",
-             "dosage_form": "Injection", "list_type": "core",
-             "source_document": "who_eml.pdf", "population": "adult"},
-            {"wanted": "Naloxone", "display_name": "naloxone", "category": "specific",
-             "dosage_form": "Injection", "list_type": "core",
-             "source_document": "who_emlc.pdf", "population": "children"},
+            {
+                "wanted": "Naloxone",
+                "display_name": "naloxone",
+                "category": "specific",
+                "dosage_form": "Injection",
+                "list_type": "core",
+                "source_document": "who_eml.pdf",
+                "population": "adult",
+            },
+            {
+                "wanted": "Naloxone",
+                "display_name": "naloxone",
+                "category": "specific",
+                "dosage_form": "Injection",
+                "list_type": "core",
+                "source_document": "who_emlc.pdf",
+                "population": "children",
+            },
         ]
 
     monkeypatch.setattr(poisoning_kg, "session_scope", _fake_session_scope)
@@ -186,7 +205,8 @@ def test_lookup_with_no_names_sends_no_query(monkeypatch):
 
 def test_lookup_single_drug_wrapper(monkeypatch):
     monkeypatch.setattr(
-        poisoning_kg, "lookup_antidote_references",
+        poisoning_kg,
+        "lookup_antidote_references",
         lambda names: {"naloxone": {"display_name": "naloxone"}},
     )
     assert poisoning_kg.lookup_antidote_reference("naloxone") == {"display_name": "naloxone"}
@@ -201,7 +221,9 @@ def test_lookup_single_drug_wrapper(monkeypatch):
 def _fake_summary(nodes=0, rels=0, props=0):
     return types.SimpleNamespace(
         counters=types.SimpleNamespace(
-            nodes_created=nodes, relationships_created=rels, properties_set=props,
+            nodes_created=nodes,
+            relationships_created=rels,
+            properties_set=props,
         )
     )
 
@@ -220,10 +242,20 @@ def test_ingest_writes_rows_with_population_and_source(monkeypatch):
     section = {
         "population": "children",
         "entries": [
-            {"name": "naloxone", "dosage_form": "Injection", "subsection": "specific",
-             "list_type": "core", "source_page": 1},
-            {"name": "charcoal, activated", "dosage_form": "Powder",
-             "subsection": "non_specific", "list_type": "core", "source_page": 1},
+            {
+                "name": "naloxone",
+                "dosage_form": "Injection",
+                "subsection": "specific",
+                "list_type": "core",
+                "source_page": 1,
+            },
+            {
+                "name": "charcoal, activated",
+                "dosage_form": "Powder",
+                "subsection": "non_specific",
+                "list_type": "core",
+                "source_page": 1,
+            },
         ],
     }
     count = poisoning_kg.ingest_antidote_entries(section, source_document="who_emlc.pdf")
@@ -247,9 +279,13 @@ def test_ingest_with_no_entries_skips_write_entirely(monkeypatch):
 
     monkeypatch.setattr(poisoning_kg, "session_scope", _fake_session_scope)
     monkeypatch.setattr(poisoning_kg, "run_write", _fake_run_write)
-    assert poisoning_kg.ingest_antidote_entries(
-        {"population": "adult", "entries": []}, source_document="empty.pdf",
-    ) == 0
+    assert (
+        poisoning_kg.ingest_antidote_entries(
+            {"population": "adult", "entries": []},
+            source_document="empty.pdf",
+        )
+        == 0
+    )
     assert called == []
 
 

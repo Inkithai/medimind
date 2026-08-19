@@ -326,7 +326,13 @@ Vision+text use the same Gemini model; Groq needs two. All three are OpenAI-comp
 Prerequisite: Python 3.10+, Node 18+.
 
 ```bash
-pip install openai pdfplumber pymupdf pillow chromadb python-dotenv python-dateutil fastapi "uvicorn[standard]" python-multipart supabase cloudinary pyjwt
+# reproducible install (recommended — pinned versions)
+cd backend
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements-lock.txt
+# or, to float on the latest compatible versions:
+pip install -r requirements.txt
+cd ..
 ```
 
 Copy env template (gitignored — holds secrets):
@@ -396,6 +402,37 @@ uvicorn api:app --reload
 ```
 
 Base URL `http://127.0.0.1:8000`, all routes under `/api/v1/`.
+
+### Running the tests
+
+```bash
+cd backend
+pip install -r requirements.txt -r requirements-dev.txt
+python -m pytest tests/          # backend regression suite
+```
+
+Linting / formatting (see `backend/pyproject.toml`):
+
+```bash
+cd backend && ruff check .       # must exit 0
+cd backend && ruff format .      # auto-format
+```
+
+### Docker — one-command startup
+
+`docker-compose.yml` at the repository root starts the FastAPI backend with
+its backing services configured:
+
+```bash
+cp backend/.env.example backend/.env   # fill in secrets first
+docker compose up --build
+# backend at http://localhost:8000, docs at http://localhost:8000/docs
+```
+
+The compose file defaults to `VECTOR_STORE=supabase` (no local volume needed)
+and mounts named volumes for `CHROMA_DIR` and the ONNX model cache when you
+switch `VECTOR_STORE=chroma`. Health check: `curl http://localhost:8000/health`
+returns `{"status": "ok", "service": "MediMind", "version": "1.0.0"}`.
 
 ## Frontend — MediMind workspace
 

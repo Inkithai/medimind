@@ -13,6 +13,7 @@ Two guarantees are covered here.
    MediMind" first-run empty state — i.e. a user with six saved documents
    was told they had no records at all.
 """
+
 import os
 import sys
 from unittest import mock
@@ -31,22 +32,34 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 import api  # noqa: E402
 
-
 PERSISTED_DOC = {
     "document_type": "prescription",
     "date": "2024-03-15",
     "provider_or_doctor": "Dr. Smith",
     "patient_name": "John Doe",
-    "medications": [{
-        "name": "Paracetamol", "ingredients": ["Paracetamol"], "dosage": "500 mg",
-        "frequency": "3x daily", "duration": "5 days", "dosage_value": 500,
-        "dosage_unit": "mg", "frequency_per_day": 3, "is_as_needed": False,
-        "confidence": 0.95,
-    }],
-    "lab_results": [{
-        "test_name": "Hemoglobin", "value": 13.2, "unit": "g/dL",
-        "reference_range": "13.0-17.0", "flag": "normal",
-    }],
+    "medications": [
+        {
+            "name": "Paracetamol",
+            "ingredients": ["Paracetamol"],
+            "dosage": "500 mg",
+            "frequency": "3x daily",
+            "duration": "5 days",
+            "dosage_value": 500,
+            "dosage_unit": "mg",
+            "frequency_per_day": 3,
+            "is_as_needed": False,
+            "confidence": 0.95,
+        }
+    ],
+    "lab_results": [
+        {
+            "test_name": "Hemoglobin",
+            "value": 13.2,
+            "unit": "g/dL",
+            "reference_range": "13.0-17.0",
+            "flag": "normal",
+        }
+    ],
     "allergies_noted": ["Penicillin"],
     "clinical_notes": "Follow up in two weeks.",
     "overall_confidence": 0.92,
@@ -163,13 +176,19 @@ def test_user_with_no_documents_still_gets_404():
 
 def test_cached_snapshot_is_replayed_against_durable_documents_before_use():
     snapshot = {
-        "patient_timeline": {"visits": [], "medications_timeline": [],
-                             "lab_results_timeline": [], "known_allergies": []},
-        "cross_check_report": {"potential_drug_interactions": [],
-                               "duplicate_prescriptions": [],
-                               "conflicting_dosage_instructions": [],
-                               "allergy_conflicts": [],
-                               "overall_recommendation": "All good."},
+        "patient_timeline": {
+            "visits": [],
+            "medications_timeline": [],
+            "lab_results_timeline": [],
+            "known_allergies": [],
+        },
+        "cross_check_report": {
+            "potential_drug_interactions": [],
+            "duplicate_prescriptions": [],
+            "conflicting_dosage_instructions": [],
+            "allergy_conflicts": [],
+            "overall_recommendation": "All good.",
+        },
         "lab_trends": {"trends": [], "insufficient_data": []},
         "updated_at": "2024-03-15T00:00:00Z",
     }
@@ -180,8 +199,10 @@ def test_cached_snapshot_is_replayed_against_durable_documents_before_use():
         return "anon_test_user"
 
     app.dependency_overrides[api.get_current_user] = override_user
-    with mock.patch.object(api.db, "load_patient_snapshot", return_value=snapshot), \
-         mock.patch.object(api.db, "load_documents", load_documents):
+    with (
+        mock.patch.object(api.db, "load_patient_snapshot", return_value=snapshot),
+        mock.patch.object(api.db, "load_documents", load_documents),
+    ):
         try:
             with TestClient(app) as client:
                 resp = client.get("/api/v1/patient-snapshot")

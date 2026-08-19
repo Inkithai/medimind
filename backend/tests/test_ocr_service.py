@@ -23,9 +23,16 @@ MINIMAL_EXTRACTION = {
     "provider_or_doctor": "Dr. Smith",
     "patient_name": "Test Patient",
     "medications": [
-        {"name": "Amoxicillin 500mg", "ingredients": ["amoxicillin"],
-         "dosage": "500 mg", "frequency": "3x daily", "dosage_value": 500,
-         "dosage_unit": "mg", "frequency_per_day": 3, "confidence": 0.9},
+        {
+            "name": "Amoxicillin 500mg",
+            "ingredients": ["amoxicillin"],
+            "dosage": "500 mg",
+            "frequency": "3x daily",
+            "dosage_value": 500,
+            "dosage_unit": "mg",
+            "frequency_per_day": 3,
+            "confidence": 0.9,
+        },
     ],
     "lab_results": [],
     "allergies_noted": [],
@@ -97,11 +104,18 @@ def test_confident_ocr_takes_text_path(tmp_path, monkeypatch):
 
     monkeypatch.setattr(medical_extractor, "is_tesseract_available", lambda: True)
     monkeypatch.setattr(
-        medical_extractor, "ocr_pdf_pages",
-        lambda path, indices: [ocr_service.OCRPageResult(page=1, text=MEDICAL_OCR_TEXT, confidence=93.0)],
+        medical_extractor,
+        "ocr_pdf_pages",
+        lambda path, indices: [
+            ocr_service.OCRPageResult(page=1, text=MEDICAL_OCR_TEXT, confidence=93.0)
+        ],
     )
-    with mock.patch.object(medical_extractor, "extract_from_text", return_value=dict(MINIMAL_EXTRACTION)) as text_mock, \
-         mock.patch.object(medical_extractor, "extract_from_image") as vision_mock:
+    with (
+        mock.patch.object(
+            medical_extractor, "extract_from_text", return_value=dict(MINIMAL_EXTRACTION)
+        ) as text_mock,
+        mock.patch.object(medical_extractor, "extract_from_image") as vision_mock,
+    ):
         result = medical_extractor.process_document(str(pdf))
 
     assert vision_mock.call_count == 0  # vision never consulted
@@ -116,11 +130,14 @@ def test_unavailable_ocr_keeps_vision_path(tmp_path, monkeypatch):
     _blank_pdf(str(pdf))
 
     monkeypatch.setattr(medical_extractor, "is_tesseract_available", lambda: False)
-    with mock.patch.object(medical_extractor, "extract_from_text") as text_mock, \
-         mock.patch.object(
-             medical_extractor, "extract_from_image",
-             return_value=dict(MINIMAL_EXTRACTION),
-         ) as vision_mock:
+    with (
+        mock.patch.object(medical_extractor, "extract_from_text") as text_mock,
+        mock.patch.object(
+            medical_extractor,
+            "extract_from_image",
+            return_value=dict(MINIMAL_EXTRACTION),
+        ) as vision_mock,
+    ):
         result = medical_extractor.process_document(str(pdf))
 
     assert text_mock.call_count == 0
@@ -135,14 +152,20 @@ def test_low_confidence_ocr_keeps_vision_path(tmp_path, monkeypatch):
 
     monkeypatch.setattr(medical_extractor, "is_tesseract_available", lambda: True)
     monkeypatch.setattr(
-        medical_extractor, "ocr_pdf_pages",
-        lambda path, indices: [ocr_service.OCRPageResult(page=1, text=MEDICAL_OCR_TEXT, confidence=25.0)],
+        medical_extractor,
+        "ocr_pdf_pages",
+        lambda path, indices: [
+            ocr_service.OCRPageResult(page=1, text=MEDICAL_OCR_TEXT, confidence=25.0)
+        ],
     )
-    with mock.patch.object(medical_extractor, "extract_from_text") as text_mock, \
-         mock.patch.object(
-             medical_extractor, "extract_from_image",
-             return_value=dict(MINIMAL_EXTRACTION),
-         ):
+    with (
+        mock.patch.object(medical_extractor, "extract_from_text") as text_mock,
+        mock.patch.object(
+            medical_extractor,
+            "extract_from_image",
+            return_value=dict(MINIMAL_EXTRACTION),
+        ),
+    ):
         result = medical_extractor.process_document(str(pdf))
 
     assert text_mock.call_count == 0
@@ -156,18 +179,24 @@ def test_non_medical_ocr_text_keeps_vision_path(tmp_path, monkeypatch):
 
     monkeypatch.setattr(medical_extractor, "is_tesseract_available", lambda: True)
     monkeypatch.setattr(
-        medical_extractor, "ocr_pdf_pages",
-        lambda path, indices: [ocr_service.OCRPageResult(
-            page=1,
-            text="Curriculum vitae\nEducation\nWork Experience\nSkills\nReferences",
-            confidence=96.0,
-        )],
+        medical_extractor,
+        "ocr_pdf_pages",
+        lambda path, indices: [
+            ocr_service.OCRPageResult(
+                page=1,
+                text="Curriculum vitae\nEducation\nWork Experience\nSkills\nReferences",
+                confidence=96.0,
+            )
+        ],
     )
-    with mock.patch.object(medical_extractor, "extract_from_text") as text_mock, \
-         mock.patch.object(
-             medical_extractor, "extract_from_image",
-             return_value=dict(MINIMAL_EXTRACTION),
-         ):
+    with (
+        mock.patch.object(medical_extractor, "extract_from_text") as text_mock,
+        mock.patch.object(
+            medical_extractor,
+            "extract_from_image",
+            return_value=dict(MINIMAL_EXTRACTION),
+        ),
+    ):
         result = medical_extractor.process_document(str(pdf))
 
     assert text_mock.call_count == 0  # never accepts a non-medical OCR read
@@ -182,7 +211,8 @@ def test_ocr_failure_never_blocks_extraction(tmp_path, monkeypatch):
 
     monkeypatch.setattr(medical_extractor, "is_tesseract_available", lambda: True)
     monkeypatch.setattr(
-        medical_extractor, "ocr_pdf_pages",
+        medical_extractor,
+        "ocr_pdf_pages",
         lambda path, indices: (_ for _ in ()).throw(ocr_service.InvalidPDFError("bad pdf")),
     )
     with mock.patch.object(
@@ -204,14 +234,13 @@ def test_malformed_tesseract_rows_do_not_crash_ocr_image(monkeypatch):
             return {
                 "text": ["word1", "word2"],
                 "conf": ["96", "-1"],
-                "block_num": ["1", ""],   # blank where an int is expected
+                "block_num": ["1", ""],  # blank where an int is expected
                 "par_num": ["1", "1"],
                 "line_num": ["1", "1"],
             }
 
     monkeypatch.setattr(ocr_service.shutil, "which", lambda name: "/usr/bin/tesseract")
     monkeypatch.setattr(ocr_service, "_require_tesseract", lambda: FakePytesseract())
-    import io as _io
     from PIL import Image
 
     img = Image.new("RGB", (40, 40), "white")
@@ -237,7 +266,11 @@ def test_ocr_evidence_quotes_are_attributed_to_their_page():
                 {"quote": "Dr. Smith", "page": 1, "locator": "page_quote"},
             ],
             "clinical_notes": [
-                {"quote": "Amoxicillin 500 mg three times daily", "page": 1, "locator": "page_quote"},
+                {
+                    "quote": "Amoxicillin 500 mg three times daily",
+                    "page": 1,
+                    "locator": "page_quote",
+                },
             ],
         },
         "medications": [],
@@ -276,9 +309,7 @@ def test_ocr_quote_search_tolerates_ocr_line_breaks():
     """A quote split across OCR lines must still be located."""
     from evidence import locate_ocr_text_evidence
 
-    ocr_text = (
-        "--- Page 1 ---\nAmoxicillin 500 mg three times\ndaily for 7 days.\n"
-    )
+    ocr_text = "--- Page 1 ---\nAmoxicillin 500 mg three times\ndaily for 7 days.\n"
     document = {
         "field_evidence": {
             "clinical_notes": [

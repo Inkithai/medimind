@@ -36,53 +36,119 @@ except Exception:  # pragma: no cover
 
 # Beta-blockers are not in the drug_interactions class table; define locally.
 BETA_BLOCKERS: Set[str] = {
-    "propranolol", "atenolol", "metoprolol", "bisoprolol", "carvedilol",
-    "nebivolol", "sotalol", "esmolol", "celiprolol", "labetalol",
-    "timolol", "pindolol",
+    "propranolol",
+    "atenolol",
+    "metoprolol",
+    "bisoprolol",
+    "carvedilol",
+    "nebivolol",
+    "sotalol",
+    "esmolol",
+    "celiprolol",
+    "labetalol",
+    "timolol",
+    "pindolol",
 }
 STATINS: Set[str] = {
-    "simvastatin", "atorvastatin", "lovastatin", "rosuvastatin", "fluvastatin",
-    "pravastatin", "pitavastatin",
+    "simvastatin",
+    "atorvastatin",
+    "lovastatin",
+    "rosuvastatin",
+    "fluvastatin",
+    "pravastatin",
+    "pitavastatin",
 }
 THIAZIDES: Set[str] = {
-    "hydrochlorothiazide", "bendroflumethiazide", "chlorthalidone", "indapamide",
-    "metolazone", "hydrochlorot", "hctz",
+    "hydrochlorothiazide",
+    "bendroflumethiazide",
+    "chlorthalidone",
+    "indapamide",
+    "metolazone",
+    "hydrochlorot",
+    "hctz",
 }
 ANTICHOLINERGICS: Set[str] = {
-    "oxybutynin", "solifenacin", "tolterodine", "darifenacin", "fesoterodine",
-    "hyoscine", "scopolamine", "atropine", "ipratropium", "tiotropium",
-    "trihexyphenidyl", "procyclidine", "orphenadrine", "cyclobenzaprine",
-    "amitriptyline", "nortriptyline", "imipramine", "oxybutynin",
-    "dimenhydrinate", "cyclizine", "promethazine", "chlorpheniramine",
-    "diphenhydramine", "trihexyphenidyl",
+    "oxybutynin",
+    "solifenacin",
+    "tolterodine",
+    "darifenacin",
+    "fesoterodine",
+    "hyoscine",
+    "scopolamine",
+    "atropine",
+    "ipratropium",
+    "tiotropium",
+    "trihexyphenidyl",
+    "procyclidine",
+    "orphenadrine",
+    "cyclobenzaprine",
+    "amitriptyline",
+    "nortriptyline",
+    "imipramine",
+    "oxybutynin",
+    "dimenhydrinate",
+    "cyclizine",
+    "promethazine",
+    "chlorpheniramine",
+    "diphenhydramine",
+    "trihexyphenidyl",
 }
 SULFA_DRUGS: Set[str] = {
-    "sulfamethoxazole", "co-trimoxazole", "cotrimoxazole", "trimethoprim-sulfamethoxazole",
-    "sulfasalazine", "sulfadiazine", "sulfisoxazole",
+    "sulfamethoxazole",
+    "co-trimoxazole",
+    "cotrimoxazole",
+    "trimethoprim-sulfamethoxazole",
+    "sulfasalazine",
+    "sulfadiazine",
+    "sulfisoxazole",
 }
 GLITAZONES: Set[str] = {"pioglitazone", "rosiglitazone"}
-SEIZURE_THRESHOLD_LOWERING: Set[str] = {"bupropion", "tramadol", "theophylline", "chloroquine", "mefloquine"}
+SEIZURE_THRESHOLD_LOWERING: Set[str] = {
+    "bupropion",
+    "tramadol",
+    "theophylline",
+    "chloroquine",
+    "mefloquine",
+}
 
 
 # Condition -> keyword phrases (lowercase substrings / token phrases).
 # Phrases of <=4 chars use token-boundary matching to avoid false hits.
 _CONDITIONS: Dict[str, Tuple[str, ...]] = {
     "peptic_ulcer_or_gi_bleed": (
-        "peptic ulcer", "gastric ulcer", "duodenal ulcer", "gi bleed",
-        "gastrointestinal bleed", "gastrointestinal bleeding", "bleeding ulcer",
-        "upper gi bleed", "haemorrhage", "hemorrhage",
+        "peptic ulcer",
+        "gastric ulcer",
+        "duodenal ulcer",
+        "gi bleed",
+        "gastrointestinal bleed",
+        "gastrointestinal bleeding",
+        "bleeding ulcer",
+        "upper gi bleed",
+        "haemorrhage",
+        "hemorrhage",
     ),
     "heart_failure": ("heart failure", "cardiac failure", "congestive heart failure"),
     "chronic_kidney_disease": (
-        "chronic kidney", "chronic renal", "ckd", "renal failure",
-        "renal impairment", "kidney disease", "kidney failure", "esrd",
+        "chronic kidney",
+        "chronic renal",
+        "ckd",
+        "renal failure",
+        "renal impairment",
+        "kidney disease",
+        "kidney failure",
+        "esrd",
     ),
     "asthma": ("asthma",),
     "copd": ("copd", "chronic obstructive pulmonary", "chronic obstructive airway"),
     "pregnancy": ("pregnancy", "pregnant", "antenatal", "gravid", "expecting"),
     "active_bleeding": ("active bleeding", "bleeding disorder", "recent bleed"),
-    "liver_disease": ("cirrhosis", "liver disease", "hepatic failure", "hepatic impairment",
-                       "chronic hepatitis"),
+    "liver_disease": (
+        "cirrhosis",
+        "liver disease",
+        "hepatic failure",
+        "hepatic impairment",
+        "chronic hepatitis",
+    ),
     "gout": ("gout", "hyperuricemia", "hyperuricaemia", "high uric acid"),
     "epilepsy": ("epilepsy", "seizure", "convulsion", "epileptic"),
     "dementia": ("dementia", "alzheimer", "cognitive impairment", "cognitive decline"),
@@ -99,10 +165,10 @@ _CONDITIONS: Dict[str, Tuple[str, ...]] = {
 def _conditions_present(timeline: Dict[str, Any]) -> Set[str]:
     """Return the set of condition keys the patient's record actually states."""
     raw_names: List[str] = []
-    for entry in (timeline.get("diagnoses_timeline") or []):
+    for entry in timeline.get("diagnoses_timeline") or []:
         if isinstance(entry, dict) and not (entry.get("_trust") or {}).get("quarantined"):
             raw_names.append(str(entry.get("name") or ""))
-    for value in (timeline.get("diagnoses_or_conditions") or []):
+    for value in timeline.get("diagnoses_or_conditions") or []:
         if isinstance(value, str):
             raw_names.append(value)
     present: Set[str] = set()
@@ -143,120 +209,212 @@ def _rules_for_condition(cond: str) -> List[Tuple[Tuple[str, ...], Set[str], str
     nsaid_cls = ("nsaid",)
     if cond == "peptic_ulcer_or_gi_bleed":
         return [
-            (nsaid_cls, set(), "high",
-             "NSAIDs (such as ibuprofen or naproxen) carry a well-known risk of stomach irritation "
-             "and bleeding, which is heightened when a peptic ulcer or gastrointestinal bleed is "
-             "already on record. Ask your doctor whether a different painkiller is safer for you."),
-            (("ssri",), set(), "moderate",
-             "SSRIs impair platelet function and add to bleeding risk; with a gastrointestinal "
-             "bleed or ulcer on record, ask your doctor whether this should be reviewed."),
+            (
+                nsaid_cls,
+                set(),
+                "high",
+                "NSAIDs (such as ibuprofen or naproxen) carry a well-known risk of stomach irritation "  # noqa: E501
+                "and bleeding, which is heightened when a peptic ulcer or gastrointestinal bleed is "  # noqa: E501
+                "already on record. Ask your doctor whether a different painkiller is safer for you.",  # noqa: E501
+            ),
+            (
+                ("ssri",),
+                set(),
+                "moderate",
+                "SSRIs impair platelet function and add to bleeding risk; with a gastrointestinal "
+                "bleed or ulcer on record, ask your doctor whether this should be reviewed.",
+            ),
         ]
     if cond == "heart_failure":
         return [
-            (nsaid_cls, set(), "moderate",
-             "NSAIDs can cause fluid retention and can worsen heart failure. Ask your doctor "
-             "whether they should be avoided or limited."),
-            ((), GLITAZONES, "high",
-             "Pioglitazone and rosiglitazone (glitazones) cause fluid retention and can worsen "
-             "heart failure. With heart failure on record, ask your doctor whether this should be "
-             "stopped."),
+            (
+                nsaid_cls,
+                set(),
+                "moderate",
+                "NSAIDs can cause fluid retention and can worsen heart failure. Ask your doctor "
+                "whether they should be avoided or limited.",
+            ),
+            (
+                (),
+                GLITAZONES,
+                "high",
+                "Pioglitazone and rosiglitazone (glitazones) cause fluid retention and can worsen "
+                "heart failure. With heart failure on record, ask your doctor whether this should be "  # noqa: E501
+                "stopped.",
+            ),
         ]
     if cond == "chronic_kidney_disease":
         return [
-            (nsaid_cls, set(), "moderate",
-             "NSAIDs can further reduce kidney function. With chronic kidney disease on record, "
-             "ask your doctor whether they should be avoided."),
+            (
+                nsaid_cls,
+                set(),
+                "moderate",
+                "NSAIDs can further reduce kidney function. With chronic kidney disease on record, "
+                "ask your doctor whether they should be avoided.",
+            ),
         ]
     if cond == "asthma":
         return [
-            (nsaid_cls, set(), "moderate",
-             "Some people with asthma get worse breathing symptoms (NSAID-exacerbated respiratory "
-             "disease) from NSAIDs. Ask your doctor whether NSAIDs are safe for you."),
-            ((), BETA_BLOCKERS, "moderate",
-             "Beta-blockers can narrow the airways and may worsen asthma. Ask your doctor whether "
-             "a beta-blocker is appropriate or whether an alternative is preferred."),
+            (
+                nsaid_cls,
+                set(),
+                "moderate",
+                "Some people with asthma get worse breathing symptoms (NSAID-exacerbated respiratory "  # noqa: E501
+                "disease) from NSAIDs. Ask your doctor whether NSAIDs are safe for you.",
+            ),
+            (
+                (),
+                BETA_BLOCKERS,
+                "moderate",
+                "Beta-blockers can narrow the airways and may worsen asthma. Ask your doctor whether "  # noqa: E501
+                "a beta-blocker is appropriate or whether an alternative is preferred.",
+            ),
         ]
     if cond == "copd":
         return [
-            ((), BETA_BLOCKERS, "moderate",
-             "Beta-blockers can narrow the airways and may worsen COPD. Ask your doctor whether "
-             "a beta-blocker is appropriate or whether an alternative is preferred."),
+            (
+                (),
+                BETA_BLOCKERS,
+                "moderate",
+                "Beta-blockers can narrow the airways and may worsen COPD. Ask your doctor whether "
+                "a beta-blocker is appropriate or whether an alternative is preferred.",
+            ),
         ]
     if cond == "pregnancy":
         return [
-            (("ace_inhibitor", "arb"), set(), "high",
-             "ACE inhibitors and ARBs can harm the unborn baby, especially after the first "
-             "trimester. Pregnancy is on record, so ask your doctor whether this medicine should "
-             "be changed."),
-            (("anticoagulant",), {"warfarin"}, "high",
-             "Warfarin can harm the unborn baby. Pregnancy is on record, so ask your doctor "
-             "whether a different blood thinner is needed."),
-            (nsaid_cls, set(), "moderate",
-             "NSAIDs are generally avoided, especially later in pregnancy. Pregnancy is on record, "
-             "so ask your doctor whether they are safe for you."),
-            ((), STATINS, "moderate",
-             "Statins are generally avoided in pregnancy. Pregnancy is on record, so ask your "
-             "doctor whether this should be reviewed."),
+            (
+                ("ace_inhibitor", "arb"),
+                set(),
+                "high",
+                "ACE inhibitors and ARBs can harm the unborn baby, especially after the first "
+                "trimester. Pregnancy is on record, so ask your doctor whether this medicine should "  # noqa: E501
+                "be changed.",
+            ),
+            (
+                ("anticoagulant",),
+                {"warfarin"},
+                "high",
+                "Warfarin can harm the unborn baby. Pregnancy is on record, so ask your doctor "
+                "whether a different blood thinner is needed.",
+            ),
+            (
+                nsaid_cls,
+                set(),
+                "moderate",
+                "NSAIDs are generally avoided, especially later in pregnancy. Pregnancy is on record, "  # noqa: E501
+                "so ask your doctor whether they are safe for you.",
+            ),
+            (
+                (),
+                STATINS,
+                "moderate",
+                "Statins are generally avoided in pregnancy. Pregnancy is on record, so ask your "
+                "doctor whether this should be reviewed.",
+            ),
         ]
     if cond == "active_bleeding":
         return [
-            (("anticoagulant",), set(), "high",
-             "You are on a blood thinner and active bleeding is on record, which raises the risk "
-             "of serious bleeding. Seek medical advice promptly."),
-            (nsaid_cls, set(), "moderate",
-             "NSAIDs increase bleeding risk, and active bleeding is on record. Ask your doctor "
-             "whether they should be stopped."),
+            (
+                ("anticoagulant",),
+                set(),
+                "high",
+                "You are on a blood thinner and active bleeding is on record, which raises the risk "  # noqa: E501
+                "of serious bleeding. Seek medical advice promptly.",
+            ),
+            (
+                nsaid_cls,
+                set(),
+                "moderate",
+                "NSAIDs increase bleeding risk, and active bleeding is on record. Ask your doctor "
+                "whether they should be stopped.",
+            ),
         ]
     if cond == "liver_disease":
         return [
-            ((), STATINS, "moderate",
-             "Statins can affect the liver; with liver disease on record, ask your doctor whether "
-             "this medicine should be reviewed."),
-            (("nsaid",), set(), "moderate",
-             "NSAIDs can be harder for a damaged liver to handle and can affect clotting; with "
-             "liver disease on record, ask your doctor whether they should be avoided."),
+            (
+                (),
+                STATINS,
+                "moderate",
+                "Statins can affect the liver; with liver disease on record, ask your doctor whether "  # noqa: E501
+                "this medicine should be reviewed.",
+            ),
+            (
+                ("nsaid",),
+                set(),
+                "moderate",
+                "NSAIDs can be harder for a damaged liver to handle and can affect clotting; with "
+                "liver disease on record, ask your doctor whether they should be avoided.",
+            ),
         ]
     if cond == "gout":
         return [
-            ((), THIAZIDES, "moderate",
-             "Thiazide diuretics can raise uric acid and can trigger or worsen gout. Ask your "
-             "doctor whether a different blood-pressure medicine is preferred."),
+            (
+                (),
+                THIAZIDES,
+                "moderate",
+                "Thiazide diuretics can raise uric acid and can trigger or worsen gout. Ask your "
+                "doctor whether a different blood-pressure medicine is preferred.",
+            ),
         ]
     if cond == "epilepsy":
         return [
-            ((), SEIZURE_THRESHOLD_LOWERING, "moderate",
-             "Some medicines (e.g. bupropion, tramadol) can lower the seizure threshold. With "
-             "epilepsy on record, ask your doctor whether this is appropriate."),
+            (
+                (),
+                SEIZURE_THRESHOLD_LOWERING,
+                "moderate",
+                "Some medicines (e.g. bupropion, tramadol) can lower the seizure threshold. With "
+                "epilepsy on record, ask your doctor whether this is appropriate.",
+            ),
         ]
     if cond == "dementia":
         return [
-            ((), ANTICHOLINERGICS, "moderate",
-             "Anticholinergic medicines can worsen thinking and memory and are usually avoided in "
-             "dementia. Ask your doctor whether a non-anticholinergic alternative is preferred."),
+            (
+                (),
+                ANTICHOLINERGICS,
+                "moderate",
+                "Anticholinergic medicines can worsen thinking and memory and are usually avoided in "  # noqa: E501
+                "dementia. Ask your doctor whether a non-anticholinergic alternative is preferred.",
+            ),
         ]
     if cond == "g6pd_deficiency":
         return [
-            ((), SULFA_DRUGS, "moderate",
-             "People with G6PD deficiency can react to sulfa medicines (and some others). Ask your "
-             "doctor whether this medicine is safe for you."),
+            (
+                (),
+                SULFA_DRUGS,
+                "moderate",
+                "People with G6PD deficiency can react to sulfa medicines (and some others). Ask your "  # noqa: E501
+                "doctor whether this medicine is safe for you.",
+            ),
         ]
     if cond == "glaucoma":
         return [
-            ((), ANTICHOLINERGICS, "moderate",
-             "Anticholinergic medicines can raise eye pressure and can be risky in certain types of "
-             "glaucoma. Ask your eye doctor whether this is safe for you."),
+            (
+                (),
+                ANTICHOLINERGICS,
+                "moderate",
+                "Anticholinergic medicines can raise eye pressure and can be risky in certain types of "  # noqa: E501
+                "glaucoma. Ask your eye doctor whether this is safe for you.",
+            ),
         ]
     if cond == "bph":
         return [
-            ((), ANTICHOLINERGICS, "moderate",
-             "Anticholinergic medicines can worsen urinary symptoms in an enlarged prostate. Ask "
-             "your doctor whether an alternative is preferred."),
+            (
+                (),
+                ANTICHOLINERGICS,
+                "moderate",
+                "Anticholinergic medicines can worsen urinary symptoms in an enlarged prostate. Ask "  # noqa: E501
+                "your doctor whether an alternative is preferred.",
+            ),
         ]
     if cond == "falls_elderly":
         return [
-            ((), ANTICHOLINERGICS, "moderate",
-             "Medicines that cause drowsiness or dizziness (including anticholinergics) raise fall "
-             "risk. With falls on record, ask your doctor whether this medicine is still needed."),
+            (
+                (),
+                ANTICHOLINERGICS,
+                "moderate",
+                "Medicines that cause drowsiness or dizziness (including anticholinergics) raise fall "  # noqa: E501
+                "risk. With falls on record, ask your doctor whether this medicine is still needed.",  # noqa: E501
+            ),
         ]
     return []
 
@@ -283,16 +441,18 @@ def check_condition_contraindications(timeline: Dict[str, Any]) -> List[Dict[str
                 if key in seen:
                     continue
                 seen.add(key)
-                findings.append({
-                    "medications_involved": [disp],
-                    "condition": cond,
-                    "explanation": explanation,
-                    "severity": severity,
-                    "confidence": 0.85,
-                    "source": "curated_knowledge_base",
-                    "rule": f"condition:{cond}",
-                    "finding_kind": "condition_contraindication",
-                })
+                findings.append(
+                    {
+                        "medications_involved": [disp],
+                        "condition": cond,
+                        "explanation": explanation,
+                        "severity": severity,
+                        "confidence": 0.85,
+                        "source": "curated_knowledge_base",
+                        "rule": f"condition:{cond}",
+                        "finding_kind": "condition_contraindication",
+                    }
+                )
     return findings
 
 
@@ -303,10 +463,7 @@ def merge_condition_contraindications(
     report: Dict[str, Any], findings: List[Dict[str, Any]]
 ) -> Dict[str, Any]:
     existing = report.setdefault(_LIST_KEY, [])
-    sigs = {
-        (f.get("condition"), tuple(f.get("medications_involved") or []))
-        for f in existing
-    }
+    sigs = {(f.get("condition"), tuple(f.get("medications_involved") or [])) for f in existing}
     for finding in findings:
         sig = (finding.get("condition"), tuple(finding.get("medications_involved") or []))
         if sig in sigs:

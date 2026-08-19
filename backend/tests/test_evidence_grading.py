@@ -6,6 +6,7 @@ while findings computed deterministically from the patient's own records
 keep their score. Verifies the cross-check integration too:
 cross_check_prescriptions() output arrives already graded and timed.
 """
+
 import os
 import sys
 from unittest import mock
@@ -21,24 +22,48 @@ import medical_extractor  # noqa: E402
 def _sample_report():
     return {
         "potential_drug_interactions": [
-            {"medications_involved": ["Fluconazole", "Montelukast"],
-             "explanation": "CYP inhibition.", "severity": "moderate", "confidence": 0.65},
-            {"medications_involved": ["Cetirizine", "Chlorpheniramine"],
-             "explanation": "Additive sedation.", "severity": "moderate", "confidence": 0.95},
-            {"medications_involved": ["Fluconazole", "Omeprazole"],
-             "explanation": "Usually small impact.", "severity": "low", "confidence": 0.45},
+            {
+                "medications_involved": ["Fluconazole", "Montelukast"],
+                "explanation": "CYP inhibition.",
+                "severity": "moderate",
+                "confidence": 0.65,
+            },
+            {
+                "medications_involved": ["Cetirizine", "Chlorpheniramine"],
+                "explanation": "Additive sedation.",
+                "severity": "moderate",
+                "confidence": 0.95,
+            },
+            {
+                "medications_involved": ["Fluconazole", "Omeprazole"],
+                "explanation": "Usually small impact.",
+                "severity": "low",
+                "confidence": 0.45,
+            },
         ],
         "duplicate_prescriptions": [
-            {"medication": "Cetirizine", "occurrences": [], "confidence": 0.95,
-             "explanation": "Deterministic check...",
-             "evidence_source": evidence_grading.DETERMINISTIC},
-            {"medication": "Paracetamol", "occurrences": [], "confidence": 0.9,
-             "explanation": "Model spotted these look similar."},
+            {
+                "medication": "Cetirizine",
+                "occurrences": [],
+                "confidence": 0.95,
+                "explanation": "Deterministic check...",
+                "evidence_source": evidence_grading.DETERMINISTIC,
+            },
+            {
+                "medication": "Paracetamol",
+                "occurrences": [],
+                "confidence": 0.9,
+                "explanation": "Model spotted these look similar.",
+            },
         ],
         "conflicting_dosage_instructions": [],
         "allergy_conflicts": [
-            {"medication": "Amoxicillin", "allergy": "Penicillin",
-             "explanation": "Penicillin-class antibiotic.", "confidence": 0.93},
+            {
+                "medication": "Amoxicillin",
+                "allergy": "Penicillin",
+                "explanation": "Penicillin-class antibiotic.",
+                "confidence": 0.93,
+            },
         ],
     }
 
@@ -92,8 +117,12 @@ def test_missing_confidence_defaults_to_ceiling():
 
 def test_reference_graph_hook_uncapped():
     backed = {"naloxone": {"source": "WHO EML", "display_name": "naloxone", "listings": []}}
-    finding = {"medications_involved": ["Naloxone", "Morphine"],
-               "explanation": "Reversal.", "severity": "high", "confidence": 0.9}
+    finding = {
+        "medications_involved": ["Naloxone", "Morphine"],
+        "explanation": "Reversal.",
+        "severity": "high",
+        "confidence": 0.9,
+    }
     evidence_grading.grade_finding(finding, backed)
     assert finding["evidence_source"] == evidence_grading.REFERENCE_GRAPH
     assert finding["grounded"] is True
@@ -109,15 +138,21 @@ def test_graph_backed_findings_from_antidotes_adapter():
         "Naloxone": {
             "display_name": "naloxone",
             "category": "specific",
-            "listings": [{
-                "population": "adult", "source_document": "who_eml.pdf",
-                "list_type": "core", "dosage_form": "Injection",
-            }],
+            "listings": [
+                {
+                    "population": "adult",
+                    "source_document": "who_eml.pdf",
+                    "list_type": "core",
+                    "dosage_form": "Injection",
+                }
+            ],
         },
     }
     backed = adapter(refs)
     assert set(backed) == {"naloxone"}
-    assert backed["naloxone"]["source"] == "WHO Model List of Essential Medicines (antidotes section)"
+    assert (
+        backed["naloxone"]["source"] == "WHO Model List of Essential Medicines (antidotes section)"
+    )
     assert backed["naloxone"]["display_name"] == "naloxone"
     assert backed["naloxone"]["listings"][0]["source_document"] == "who_eml.pdf"
     assert adapter({}) == {}
@@ -135,9 +170,14 @@ def test_evidence_summary_counts():
 
 
 def test_empty_report_grades_cleanly():
-    empty = evidence_grading.grade_cross_check({
-        "potential_drug_interactions": [], "duplicate_prescriptions": [],
-        "conflicting_dosage_instructions": [], "allergy_conflicts": []})
+    empty = evidence_grading.grade_cross_check(
+        {
+            "potential_drug_interactions": [],
+            "duplicate_prescriptions": [],
+            "conflicting_dosage_instructions": [],
+            "allergy_conflicts": [],
+        }
+    )
     assert empty["evidence_summary"]["total_findings"] == 0
     assert "nothing to grade" in empty["evidence_summary"]["note"]
 
@@ -150,14 +190,28 @@ def test_cross_check_prescriptions_returns_graded_and_timed():
         "medications_timeline": [
             # Open-ended courses (no duration) stay active at any reference
             # date, keeping this test independent of the day it runs on.
-            {"name": "Paracetamol", "ingredients": ["Paracetamol"],
-             "dosage_value": 500, "dosage_unit": "mg", "frequency_per_day": 3,
-             "is_as_needed": False, "date": "2026-01-01", "source_file": "a.pdf",
-             "prescription_group": "rx-0"},
-            {"name": "Paracetamol", "ingredients": ["Paracetamol"],
-             "dosage_value": 500, "dosage_unit": "mg", "frequency_per_day": 3,
-             "is_as_needed": False, "date": "2026-04-01", "source_file": "b.pdf",
-             "prescription_group": "rx-1"},
+            {
+                "name": "Paracetamol",
+                "ingredients": ["Paracetamol"],
+                "dosage_value": 500,
+                "dosage_unit": "mg",
+                "frequency_per_day": 3,
+                "is_as_needed": False,
+                "date": "2026-01-01",
+                "source_file": "a.pdf",
+                "prescription_group": "rx-0",
+            },
+            {
+                "name": "Paracetamol",
+                "ingredients": ["Paracetamol"],
+                "dosage_value": 500,
+                "dosage_unit": "mg",
+                "frequency_per_day": 3,
+                "is_as_needed": False,
+                "date": "2026-04-01",
+                "source_file": "b.pdf",
+                "prescription_group": "rx-1",
+            },
         ],
         "lab_results_timeline": [],
         "known_allergies": [],

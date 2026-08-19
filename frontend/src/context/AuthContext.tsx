@@ -58,8 +58,7 @@ function loadStored(): StoredSession {
           apiBase: typeof parsed.apiBase === "string" ? parsed.apiBase : "",
           token: parsed.token,
           userId: parsed.userId,
-          createdAt:
-            typeof parsed.createdAt === "string" ? parsed.createdAt : undefined,
+          createdAt: typeof parsed.createdAt === "string" ? parsed.createdAt : undefined,
         };
       }
     } catch {
@@ -79,7 +78,7 @@ function persist(state: StoredSession) {
         token: state.token,
         userId: state.userId,
         createdAt: state.createdAt || new Date().toISOString(),
-      })
+      }),
     );
   } else {
     localStorage.removeItem(STORAGE_KEY);
@@ -149,8 +148,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await createAnonymous(apiBase);
       } catch (err) {
         if (providerMounted.current) {
-          const msg =
-            err instanceof Error ? err.message : "Failed to create workspace";
+          const msg = err instanceof Error ? err.message : "Failed to create workspace";
           setInitError(msg);
         }
       } finally {
@@ -219,7 +217,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       refreshSession,
       createNewWorkspace,
     }),
-    [state, initializing, initError, saveCredentials, clearCredentials, refreshSession, createNewWorkspace]
+    [
+      state,
+      initializing,
+      initError,
+      saveCredentials,
+      clearCredentials,
+      refreshSession,
+      createNewWorkspace,
+    ],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

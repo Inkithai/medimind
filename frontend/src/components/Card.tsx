@@ -1,18 +1,12 @@
 import type { ReactNode } from "react";
 import { classNames } from "../utils/format";
 
-export function Card({
-  children,
-  className,
-}: {
-  children: ReactNode;
-  className?: string;
-}) {
+export function Card({ children, className }: { children: ReactNode; className?: string }) {
   return (
     <div
       className={classNames(
         "min-w-0 rounded-xl border border-slate-200 bg-white shadow-sm",
-        className
+        className,
       )}
     >
       {children}
@@ -41,9 +35,7 @@ export function CardHeader({
         )}
         <div className="min-w-0">
           <h2 className="text-base font-semibold text-slate-900">{title}</h2>
-          {description && (
-            <p className="mt-0.5 text-sm text-slate-500">{description}</p>
-          )}
+          {description && <p className="mt-0.5 text-sm text-slate-500">{description}</p>}
         </div>
       </div>
       {action && <div className="max-w-full shrink-0">{action}</div>}
@@ -51,12 +43,6 @@ export function CardHeader({
   );
 }
 
-export function CardBody({
-  children,
-  className,
-}: {
-  children: ReactNode;
-  className?: string;
-}) {
+export function CardBody({ children, className }: { children: ReactNode; className?: string }) {
   return <div className={classNames("min-w-0 px-4 py-4 sm:px-5", className)}>{children}</div>;
 }

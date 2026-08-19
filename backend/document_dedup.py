@@ -34,7 +34,7 @@ merging two genuinely separate prescriptions would hide a real duplicate.
 """
 
 import re
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Sequence, Tuple
 
 # Salt / ester suffixes stripped before comparing ingredients. The same
 # prescription re-extracted from a different photo legitimately comes back as
@@ -47,13 +47,37 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 # match. Two genuinely different prescriptions that differ only by salt form
 # is not a real scenario. Never reuse this for interaction checking, where
 # "fluticasone propionate" vs "fluticasone furoate" is a real distinction.
-SALT_SUFFIXES = frozenset({
-    "sodium", "potassium", "calcium", "magnesium", "hydrochloride", "hcl",
-    "sulfate", "sulphate", "maleate", "tartrate", "besylate", "mesylate",
-    "citrate", "acetate", "phosphate", "nitrate", "succinate", "fumarate",
-    "propionate", "furoate", "valerate", "dipropionate", "monohydrate",
-    "trihydrate", "anhydrous", "micronized", "micronised",
-})
+SALT_SUFFIXES = frozenset(
+    {
+        "sodium",
+        "potassium",
+        "calcium",
+        "magnesium",
+        "hydrochloride",
+        "hcl",
+        "sulfate",
+        "sulphate",
+        "maleate",
+        "tartrate",
+        "besylate",
+        "mesylate",
+        "citrate",
+        "acetate",
+        "phosphate",
+        "nitrate",
+        "succinate",
+        "fumarate",
+        "propionate",
+        "furoate",
+        "valerate",
+        "dipropionate",
+        "monohydrate",
+        "trihydrate",
+        "anhydrous",
+        "micronized",
+        "micronised",
+    }
+)
 
 # Parenthetical form notes ("(topical gel)", "(oral)") that the extractor
 # sometimes folds into the printed name.
@@ -100,6 +124,7 @@ def plausible_dates(raw: Any) -> frozenset:
         return frozenset()
     text = raw.strip()
     from date_convention import is_iso_date, parse_mixed_date
+
     if is_iso_date(text):
         iso = parse_mixed_date(text, dayfirst=False)
         return frozenset({iso}) if iso else frozenset()
@@ -125,9 +150,9 @@ def dates_compatible(a: Any, b: Any) -> bool:
 
 def _medication_key(med: Dict[str, Any]) -> Tuple:
     """One medication reduced to what identifies it on a prescription."""
-    ingredients = tuple(sorted(
-        _base_ingredient(i) for i in (med.get("ingredients") or []) if i and i.strip()
-    ))
+    ingredients = tuple(
+        sorted(_base_ingredient(i) for i in (med.get("ingredients") or []) if i and i.strip())
+    )
     if not ingredients:
         ingredients = (_base_ingredient(med.get("name") or "unknown"),)
     return (
@@ -148,9 +173,7 @@ def prescription_fingerprint(doc: Dict[str, Any]) -> Tuple:
     separately via dates_compatible(), because the same date reaches this
     code in several irreconcilable formats.
     """
-    medications = tuple(sorted(
-        _medication_key(m) for m in (doc.get("medications") or [])
-    ))
+    medications = tuple(sorted(_medication_key(m) for m in (doc.get("medications") or [])))
     return (
         _normalize_text(doc.get("patient_name")),
         _normalize_text(doc.get("provider_or_doctor")),
@@ -233,25 +256,30 @@ def find_duplicate_document_groups(
         if len(members) < 2:
             continue
         hashes = {m.get("content_sha256") for m in members}
-        duplicates.append({
-            "prescription_group": group_id,
-            "identical_files": len(hashes) == 1 and None not in hashes,
-            "medications": sorted({
-                (m.get("name") or "unnamed")
-                for doc in members for m in (doc.get("medications") or [])
-            }),
-            "documents": [
-                {
-                    "source_file": (m.get("_source") or {}).get("file"),
-                    "date": m.get("date"),
-                    "uploaded_at": m.get("uploaded_at"),
-                    "document_url": m.get("document_url"),
-                    "cloudinary_public_id": m.get("cloudinary_public_id"),
-                    "content_sha256": m.get("content_sha256"),
-                }
-                for m in members
-            ],
-        })
+        duplicates.append(
+            {
+                "prescription_group": group_id,
+                "identical_files": len(hashes) == 1 and None not in hashes,
+                "medications": sorted(
+                    {
+                        (m.get("name") or "unnamed")
+                        for doc in members
+                        for m in (doc.get("medications") or [])
+                    }
+                ),
+                "documents": [
+                    {
+                        "source_file": (m.get("_source") or {}).get("file"),
+                        "date": m.get("date"),
+                        "uploaded_at": m.get("uploaded_at"),
+                        "document_url": m.get("document_url"),
+                        "cloudinary_public_id": m.get("cloudinary_public_id"),
+                        "content_sha256": m.get("content_sha256"),
+                    }
+                    for m in members
+                ],
+            }
+        )
     return duplicates
 
 
@@ -289,38 +317,73 @@ if __name__ == "__main__":
             "patient_name": "RAMESH",
             "provider_or_doctor": "Dr. K. Jayasuriya",
             "medications": [
-                {"name": "Paracetamol", "ingredients": ["Paracetamol"],
-                 "dosage_value": 1000, "dosage_unit": "mg", "frequency_per_day": 3,
-                 "is_as_needed": False},
-                {"name": "Diclofenac sodium (topical gel)",
-                 "ingredients": [diclofenac_ingredient],
-                 "dosage_value": None, "dosage_unit": None, "frequency_per_day": 2,
-                 "is_as_needed": False},
-                {"name": "Omeprazole", "ingredients": ["Omeprazole"],
-                 "dosage_value": 20, "dosage_unit": "mg", "frequency_per_day": 1,
-                 "is_as_needed": False},
-                {"name": glucosamine_name, "ingredients": ["Glucosamine sulfate"],
-                 "dosage_value": 500, "dosage_unit": "mg", "frequency_per_day": 2,
-                 "is_as_needed": False},
+                {
+                    "name": "Paracetamol",
+                    "ingredients": ["Paracetamol"],
+                    "dosage_value": 1000,
+                    "dosage_unit": "mg",
+                    "frequency_per_day": 3,
+                    "is_as_needed": False,
+                },
+                {
+                    "name": "Diclofenac sodium (topical gel)",
+                    "ingredients": [diclofenac_ingredient],
+                    "dosage_value": None,
+                    "dosage_unit": None,
+                    "frequency_per_day": 2,
+                    "is_as_needed": False,
+                },
+                {
+                    "name": "Omeprazole",
+                    "ingredients": ["Omeprazole"],
+                    "dosage_value": 20,
+                    "dosage_unit": "mg",
+                    "frequency_per_day": 1,
+                    "is_as_needed": False,
+                },
+                {
+                    "name": glucosamine_name,
+                    "ingredients": ["Glucosamine sulfate"],
+                    "dosage_value": 500,
+                    "dosage_unit": "mg",
+                    "frequency_per_day": 2,
+                    "is_as_needed": False,
+                },
             ],
             "_source": {"file": source},
         }
 
-    osteo_png = rx("08_09-11-2025_osteoarthritis.png", "09 / 11 / 2025",
-                   "Diclofenac", "Glucosamine sulphate")
-    whatsapp_1 = rx("WhatsApp Image 2026-08-16 at 12.11.14.jpeg", "09/11/2025",
-                    "Diclofenac", "Glucosamine sulphate")
-    whatsapp_2 = rx("WhatsApp Image 2026-08-16 at 12.11.14.jpeg", "2025-11-09",
-                    "Diclofenac sodium", "Glucosamine sulfate")
+    osteo_png = rx(
+        "08_09-11-2025_osteoarthritis.png", "09 / 11 / 2025", "Diclofenac", "Glucosamine sulphate"
+    )
+    whatsapp_1 = rx(
+        "WhatsApp Image 2026-08-16 at 12.11.14.jpeg",
+        "09/11/2025",
+        "Diclofenac",
+        "Glucosamine sulphate",
+    )
+    whatsapp_2 = rx(
+        "WhatsApp Image 2026-08-16 at 12.11.14.jpeg",
+        "2025-11-09",
+        "Diclofenac sodium",
+        "Glucosamine sulfate",
+    )
 
     # A genuinely different prescription, 2 years earlier.
     pharyngitis = {
-        "document_type": "prescription", "date": "14/10/2023",
-        "patient_name": "RAMESH", "provider_or_doctor": "Dr. N. K. Wijesinghe",
+        "document_type": "prescription",
+        "date": "14/10/2023",
+        "patient_name": "RAMESH",
+        "provider_or_doctor": "Dr. N. K. Wijesinghe",
         "medications": [
-            {"name": "Amoxicillin", "ingredients": ["Amoxicillin"],
-             "dosage_value": 500, "dosage_unit": "mg", "frequency_per_day": 3,
-             "is_as_needed": False},
+            {
+                "name": "Amoxicillin",
+                "ingredients": ["Amoxicillin"],
+                "dosage_value": 500,
+                "dosage_unit": "mg",
+                "frequency_per_day": 3,
+                "is_as_needed": False,
+            },
         ],
         "_source": {"file": "01_14-10-2023_acute_bacterial_pharyngitis.png"},
     }
@@ -329,11 +392,15 @@ if __name__ == "__main__":
     annotate_prescription_groups(docs)
 
     assert osteo_png["prescription_group"] == whatsapp_1["prescription_group"], (
-        osteo_png["prescription_group"], whatsapp_1["prescription_group"])
+        osteo_png["prescription_group"],
+        whatsapp_1["prescription_group"],
+    )
     assert osteo_png["prescription_group"] == whatsapp_2["prescription_group"], (
-        "salt-form and date-format differences must not split one prescription")
+        "salt-form and date-format differences must not split one prescription"
+    )
     assert pharyngitis["prescription_group"] != osteo_png["prescription_group"], (
-        "a genuinely different prescription must keep its own group")
+        "a genuinely different prescription must keep its own group"
+    )
 
     groups = find_duplicate_document_groups(docs)
     assert len(groups) == 1, groups
@@ -349,27 +416,37 @@ if __name__ == "__main__":
         d.pop("prescription_group", None)
     annotate_prescription_groups(docs2)
     assert docs2[0]["prescription_group"] != docs2[1]["prescription_group"], (
-        "a repeat prescription on a different date is not a duplicate file")
+        "a repeat prescription on a different date is not a duplicate file"
+    )
 
     # --- Different patients never merge ------------------------------------
-    other_patient = rx("someone_else.png", "09/11/2025", "Diclofenac",
-                       "Glucosamine sulphate")
+    other_patient = rx("someone_else.png", "09/11/2025", "Diclofenac", "Glucosamine sulphate")
     other_patient["patient_name"] = "SURESH"
-    docs3 = [rx("a.png", "09/11/2025", "Diclofenac", "Glucosamine sulphate"),
-             other_patient]
+    docs3 = [rx("a.png", "09/11/2025", "Diclofenac", "Glucosamine sulphate"), other_patient]
     annotate_prescription_groups(docs3)
     assert docs3[0]["prescription_group"] != docs3[1]["prescription_group"]
 
     # --- Documents with no medications each stand alone --------------------
     labs = [
-        {"document_type": "lab_report", "date": "01/01/2026", "patient_name": "RAMESH",
-         "medications": [], "_source": {"file": "lab1.pdf"}},
-        {"document_type": "lab_report", "date": "01/06/2026", "patient_name": "RAMESH",
-         "medications": [], "_source": {"file": "lab2.pdf"}},
+        {
+            "document_type": "lab_report",
+            "date": "01/01/2026",
+            "patient_name": "RAMESH",
+            "medications": [],
+            "_source": {"file": "lab1.pdf"},
+        },
+        {
+            "document_type": "lab_report",
+            "date": "01/06/2026",
+            "patient_name": "RAMESH",
+            "medications": [],
+            "_source": {"file": "lab2.pdf"},
+        },
     ]
     annotate_prescription_groups(labs)
     assert labs[0]["prescription_group"] != labs[1]["prescription_group"], (
-        "two lab reports share an empty medication set but are not one prescription")
+        "two lab reports share an empty medication set but are not one prescription"
+    )
     assert not find_duplicate_document_groups(labs)
 
     print("One prescription across 3 files -> group:", osteo_png["prescription_group"])

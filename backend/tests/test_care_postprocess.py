@@ -27,10 +27,10 @@ def _facility(id, name, lat, lon, distance_km=None, **extra):
 
 def test_radius_5km_excludes_everything_farther():
     facilities = [
-        _facility("a", "Near Clinic", 9.8180, 80.2340),       # ~0.2 km
-        _facility("b", "Mid Clinic", 9.85, 80.25),            # ~4 km
-        _facility("c", "Far Hospital", 9.66, 80.02),          # ~29 km
-        _facility("d", "Very Far Lab", 9.30, 80.40),          # ~60 km
+        _facility("a", "Near Clinic", 9.8180, 80.2340),  # ~0.2 km
+        _facility("b", "Mid Clinic", 9.85, 80.25),  # ~4 km
+        _facility("c", "Far Hospital", 9.66, 80.02),  # ~29 km
+        _facility("d", "Very Far Lab", 9.30, 80.40),  # ~60 km
     ]
     result = finalize(facilities, radius_km=5, latitude=ORIGIN[0], longitude=ORIGIN[1])
     names = [f.name for f in result]
@@ -41,7 +41,7 @@ def test_radius_5km_excludes_everything_farther():
 def test_radius_20km_excludes_results_beyond_20km():
     facilities = [
         _facility("a", "Near Clinic", 9.8180, 80.2340),
-        _facility("c", "Far Hospital", 9.66, 80.02),          # ~29 km
+        _facility("c", "Far Hospital", 9.66, 80.02),  # ~29 km
     ]
     result = finalize(facilities, radius_km=20, latitude=ORIGIN[0], longitude=ORIGIN[1])
     assert [f.name for f in result] == ["Near Clinic"]
@@ -72,6 +72,7 @@ def test_provider_distances_are_recomputed_when_missing():
 
 # -- Deduplication ------------------------------------------------------------
 
+
 def test_same_source_id_is_deduplicated():
     facilities = [
         _facility("osm:node/1", "Sivasakthi Clinic", 9.8180, 80.2340),
@@ -92,7 +93,14 @@ def test_same_name_at_same_place_is_deduplicated():
 def test_dedupe_keeps_the_richer_listing():
     facilities = [
         _facility("osm:node/1", "CeyMed Lab", 9.8180, 80.2340),
-        _facility("osm:way/2", "CeyMed Lab", 9.8180, 80.2341, address="Main St, Point Pedro", phone="+94 21 000 0000"),
+        _facility(
+            "osm:way/2",
+            "CeyMed Lab",
+            9.8180,
+            80.2341,
+            address="Main St, Point Pedro",
+            phone="+94 21 000 0000",
+        ),
     ]
     result = dedupe(facilities)
     assert len(result) == 1
@@ -121,9 +129,7 @@ def test_lab_alias_is_enforced_as_laboratory():
         _facility("a", "CeyMed Lab", 9.8181, 80.2341, kind="laboratory"),
         _facility("b", "Town Clinic", 9.8182, 80.2342, kind="clinic"),
     ]
-    result = finalize(
-        facilities, radius_km=5, latitude=ORIGIN[0], longitude=ORIGIN[1], kind="lab"
-    )
+    result = finalize(facilities, radius_km=5, latitude=ORIGIN[0], longitude=ORIGIN[1], kind="lab")
     assert [f.kind for f in result] == ["laboratory"]
 
 

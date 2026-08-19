@@ -82,8 +82,13 @@ def test_reexport_from_extractor_is_the_same_function():
         return
     import medication_safety
 
-    assert medical_extractor.cross_check_prescriptions is medication_safety.cross_check_prescriptions
-    assert medical_extractor.detect_exact_duplicate_medications is medication_safety.detect_exact_duplicate_medications
+    assert (
+        medical_extractor.cross_check_prescriptions is medication_safety.cross_check_prescriptions
+    )
+    assert (
+        medical_extractor.detect_exact_duplicate_medications
+        is medication_safety.detect_exact_duplicate_medications
+    )
 
 
 def test_deterministic_interaction_kb_flags_anticoagulant_plus_nsaid():
@@ -127,7 +132,13 @@ def test_document_dedup_collapses_same_prescription_across_files():
             "document_type": "prescription",
             "date": "2026-01-01",
             "medications": [
-                {"name": "Atorvastatin", "ingredients": ["atorvastatin"], "dosage": "20 mg", "dosage_value": 20, "dosage_unit": "mg"}
+                {
+                    "name": "Atorvastatin",
+                    "ingredients": ["atorvastatin"],
+                    "dosage": "20 mg",
+                    "dosage_value": 20,
+                    "dosage_unit": "mg",
+                }
             ],
             "_source": {"file": "scan.pdf"},
         },
@@ -135,7 +146,13 @@ def test_document_dedup_collapses_same_prescription_across_files():
             "document_type": "prescription",
             "date": "01 Jan 2026",
             "medications": [
-                {"name": "Atorvastatin", "ingredients": ["atorvastatin"], "dosage": "20 mg", "dosage_value": 20, "dosage_unit": "mg"}
+                {
+                    "name": "Atorvastatin",
+                    "ingredients": ["atorvastatin"],
+                    "dosage": "20 mg",
+                    "dosage_value": 20,
+                    "dosage_unit": "mg",
+                }
             ],
             "_source": {"file": "photo.jpg"},
         },
@@ -146,8 +163,18 @@ def test_document_dedup_collapses_same_prescription_across_files():
 
     timeline = {
         "medications_timeline": [
-            {**docs[0]["medications"][0], "date": "2026-01-01", "source_file": "scan.pdf", "prescription_group": docs[0]["prescription_group"]},
-            {**docs[1]["medications"][0], "date": "01 Jan 2026", "source_file": "photo.jpg", "prescription_group": docs[1]["prescription_group"]},
+            {
+                **docs[0]["medications"][0],
+                "date": "2026-01-01",
+                "source_file": "scan.pdf",
+                "prescription_group": docs[0]["prescription_group"],
+            },
+            {
+                **docs[1]["medications"][0],
+                "date": "01 Jan 2026",
+                "source_file": "photo.jpg",
+                "prescription_group": docs[1]["prescription_group"],
+            },
         ]
     }
     assert detect_exact_duplicate_medications(timeline) == []
@@ -197,13 +224,16 @@ def test_specialty_mapping_routes_drug_interaction_to_pharmacist():
 
 def test_care_recommendations_search_is_live_not_mocked():
     import inspect
+
     import provider_sources
 
     source = inspect.getsource(provider_sources)
     assert "places.googleapis.com" in source
     assert "nominatim.openstreetmap.org" in source
     assert "overpass" in source.lower()
-    assert "never substitute mock data" in source.lower() or "never substitute mock" in source.lower()
+    assert (
+        "never substitute mock data" in source.lower() or "never substitute mock" in source.lower()
+    )
 
 
 def test_medication_safety_http_routes_exist():
@@ -213,9 +243,19 @@ def test_medication_safety_http_routes_exist():
         print(f"SKIP test_medication_safety_http_routes_exist ({exc})")
         return
 
+    def iter_routes():
+        # FastAPI >= 0.141 wraps include_router() mounts in lazy
+        # _IncludedRouter containers; unwrap via original_router.
+        for route in api.app.routes:
+            original = getattr(route, "original_router", None)
+            if original is not None:
+                yield from original.routes
+            else:
+                yield route
+
     routes = {
         (method, getattr(route, "path", ""))
-        for route in api.app.routes
+        for route in iter_routes()
         for method in (getattr(route, "methods", set()) or set())
     }
     assert ("GET", "/api/v1/medication-safety") in routes
@@ -230,7 +270,10 @@ def test_analyze_medication_safety_runs_without_llm_when_no_active_meds():
 
     report = analyze_medication_safety({"medications_timeline": [], "known_allergies": []})
     assert report["potential_drug_interactions"] == []
-    assert "consult" in report["overall_recommendation"].lower() or "no medication" in report["overall_recommendation"].lower()
+    assert (
+        "consult" in report["overall_recommendation"].lower()
+        or "no medication" in report["overall_recommendation"].lower()
+    )
 
 
 if __name__ == "__main__":

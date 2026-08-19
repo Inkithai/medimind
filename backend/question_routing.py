@@ -10,7 +10,6 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List, Sequence, Tuple
 
-
 INTENTS: Dict[str, Dict[str, Any]] = {
     "medication_safety": {
         "label": "Medication safety",
@@ -54,16 +53,32 @@ INTENTS: Dict[str, Dict[str, Any]] = {
     },
 }
 
-_SAFETY = re.compile(r"\b(safe|safety|interact(?:ion|s)?|contraindicat\w*|conflict|duplicate|overdose|allergic reaction|risk)\b", re.I)
-_TREND = re.compile(r"\b(trend|over time|changed?|changing|improv\w*|wors\w*|increas\w*|decreas\w*|risen|rose|fallen|since|progress\w*)\b", re.I)
-_LAB = re.compile(
-    r"\b(lab|laboratory|test result|blood test|glucose|hba1c|a1c|hemoglobin|haemoglobin|cholesterol|ldl|hdl|triglyceride|creatinine|egfr|platelet|wbc|rbc|tsh|alt|ast|bilirubin)\b",
+_SAFETY = re.compile(
+    r"\b(safe|safety|interact(?:ion|s)?|contraindicat\w*|conflict|duplicate|overdose|allergic reaction|risk)\b",  # noqa: E501
     re.I,
 )
-_MEDICATION = re.compile(r"\b(medication\w*|medicine\w*|drug\w*|prescri\w*|tablet\w*|capsule\w*|dose|dosage|taking|take|pharmac\w*)\b", re.I)
-_ALLERGY = re.compile(r"\b(allerg\w*|anaphyl\w*|sensitive to|reaction to|nkda|no known allergies)\b", re.I)
-_TIMELINE = re.compile(r"\b(timeline|history|visit|appointment|doctor note|clinical note|last report|latest report|discharge)\b", re.I)
-_CHANGE = re.compile(r"\b(what changed|since my last|different from|new since|recent change)\b", re.I)
+_TREND = re.compile(
+    r"\b(trend|over time|changed?|changing|improv\w*|wors\w*|increas\w*|decreas\w*|risen|rose|fallen|since|progress\w*)\b",  # noqa: E501
+    re.I,
+)
+_LAB = re.compile(
+    r"\b(lab|laboratory|test result|blood test|glucose|hba1c|a1c|hemoglobin|haemoglobin|cholesterol|ldl|hdl|triglyceride|creatinine|egfr|platelet|wbc|rbc|tsh|alt|ast|bilirubin)\b",  # noqa: E501
+    re.I,
+)
+_MEDICATION = re.compile(
+    r"\b(medication\w*|medicine\w*|drug\w*|prescri\w*|tablet\w*|capsule\w*|dose|dosage|taking|take|pharmac\w*)\b",
+    re.I,
+)
+_ALLERGY = re.compile(
+    r"\b(allerg\w*|anaphyl\w*|sensitive to|reaction to|nkda|no known allergies)\b", re.I
+)
+_TIMELINE = re.compile(
+    r"\b(timeline|history|visit|appointment|doctor note|clinical note|last report|latest report|discharge)\b",  # noqa: E501
+    re.I,
+)
+_CHANGE = re.compile(
+    r"\b(what changed|since my last|different from|new since|recent change)\b", re.I
+)
 
 
 def classify_question(question: str) -> Dict[str, Any]:
@@ -118,7 +133,7 @@ def route_chunks(
         for document, metadata in zip(documents, metadatas)
         if metadata.get("chunk_type") in allowed
     ]
-    routed = routed[:max(1, limit)]
+    routed = routed[: max(1, limit)]
     return [item[0] for item in routed], [item[1] for item in routed]
 
 
@@ -126,26 +141,27 @@ def assess_evidence(intent: Dict[str, Any], metadatas: Sequence[Dict[str, Any]])
     """Describe structured evidence coverage, not clinical certainty."""
     expected = int(intent.get("minimum_evidence", 1))
     count = len(metadatas)
-    source_count = len({
-        (metadata.get("source_file") or "", metadata.get("date") or "")
-        for metadata in metadatas
-    })
-    types = sorted({metadata.get("chunk_type") for metadata in metadatas if metadata.get("chunk_type")})
+    source_count = len(
+        {(metadata.get("source_file") or "", metadata.get("date") or "") for metadata in metadatas}
+    )
+    types = sorted(
+        {metadata.get("chunk_type") for metadata in metadatas if metadata.get("chunk_type")}
+    )
 
     comparative = intent.get("key") in {"lab_trend", "record_change"}
     coverage_count = source_count if comparative else count
     if count == 0:
         level = "insufficient"
-        reason = f"No {intent.get('label', 'relevant').lower()} evidence was retrieved from the uploaded records."
+        reason = f"No {intent.get('label', 'relevant').lower()} evidence was retrieved from the uploaded records."  # noqa: E501
     elif coverage_count < expected:
         level = "limited"
         if comparative:
-            reason = f"Only {source_count} distinct dated source entry was found; this comparison needs at least {expected}."
+            reason = f"Only {source_count} distinct dated source entry was found; this comparison needs at least {expected}."  # noqa: E501
         else:
-            reason = f"Only {count} relevant record item was found; this question usually needs at least {expected}."
+            reason = f"Only {count} relevant record item was found; this question usually needs at least {expected}."  # noqa: E501
     else:
         level = "sufficient"
-        reason = f"Retrieved {count} relevant record item{'s' if count != 1 else ''} from {source_count} dated source entr{'ies' if source_count != 1 else 'y'}."
+        reason = f"Retrieved {count} relevant record item{'s' if count != 1 else ''} from {source_count} dated source entr{'ies' if source_count != 1 else 'y'}."  # noqa: E501
 
     return {
         "level": level,

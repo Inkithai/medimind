@@ -9,6 +9,7 @@ fell through and told the patient a rising value was heading for the
 BOTTOM of the range. Medically inverted, silent, HTTP 200, and only on the
 approaching_threshold early-warning path.
 """
+
 import os
 import sys
 
@@ -88,10 +89,10 @@ class TestFluctuatingBoundaryWording:
     @pytest.mark.parametrize(
         "values,expected_word",
         [
-            ([75, 98, 97], "upper"),   # fluctuating (net increasing)
-            ([95, 72, 73], "lower"),   # fluctuating (net decreasing)
-            ([75, 85, 97], "upper"),   # increasing
-            ([95, 85, 72], "lower"),   # decreasing
+            ([75, 98, 97], "upper"),  # fluctuating (net increasing)
+            ([95, 72, 73], "lower"),  # fluctuating (net decreasing)
+            ([75, 85, 97], "upper"),  # increasing
+            ([95, 85, 72], "lower"),  # decreasing
         ],
     )
     def test_boundary_word_matches_net_direction(self, values, expected_word):
@@ -125,15 +126,11 @@ class TestDirectionClassification:
         assert "No concerning drift observed." in trend["explanation"]
 
     def test_crossing_into_high_is_reported(self):
-        trend = _only_trend(
-            _series("Glucose", [80, 95, 110], flags=["normal", "normal", "high"])
-        )
+        trend = _only_trend(_series("Glucose", [80, 95, 110], flags=["normal", "normal", "high"]))
         assert "into the 'high' range" in trend["explanation"], trend["explanation"]
 
     def test_already_abnormal_at_first_reading(self):
-        trend = _only_trend(
-            _series("Glucose", [110, 115, 120], flags=["high", "high", "high"])
-        )
+        trend = _only_trend(_series("Glucose", [110, 115, 120], flags=["high", "high", "high"]))
         assert "already outside the normal range" in trend["explanation"], trend["explanation"]
 
     def test_reference_range_renders_without_sign_confusion(self):
@@ -184,61 +181,76 @@ class TestValueParsing:
     150 — a ~1000x understatement that reads as critical thrombocytopenia
     and inverts the trend direction."""
 
-    @pytest.mark.parametrize("raw,expected", [
-        ("150,000", 150000.0),
-        ("1,234", 1234.0),
-        ("1,234,567", 1234567.0),
-        ("450,000", 450000.0),
-        ("5.3", 5.3),
-        ("95", 95.0),
-        ("<5", 5.0),
-        ("1.5 mg", 1.5),
-        ("1.234,56", 1234.56),   # European: dot thousands, comma decimal
-        ("5,3", 5.3),            # comma decimal, no 3-digit group
-    ])
+    @pytest.mark.parametrize(
+        "raw,expected",
+        [
+            ("150,000", 150000.0),
+            ("1,234", 1234.0),
+            ("1,234,567", 1234567.0),
+            ("450,000", 450000.0),
+            ("5.3", 5.3),
+            ("95", 95.0),
+            ("<5", 5.0),
+            ("1.5 mg", 1.5),
+            ("1.234,56", 1234.56),  # European: dot thousands, comma decimal
+            ("5,3", 5.3),  # comma decimal, no 3-digit group
+        ],
+    )
     def test_numeric_values_parse_at_full_magnitude(self, raw, expected):
         from lab_trends import _parse_value
+
         assert _parse_value(raw) == pytest.approx(expected)
 
     @pytest.mark.parametrize("raw", ["", "   ", None, "no digits here", True, False])
     def test_non_numeric_values_rejected(self, raw):
         from lab_trends import _parse_value
+
         assert _parse_value(raw) is None
 
     def test_platelet_count_trend_uses_real_magnitude(self):
-        trend = _only_trend(_series(
-            "Platelets", ["150,000", "300,000", "450,000"],
-            reference_range="150,000-450,000", unit="/uL",
-        ))
+        trend = _only_trend(
+            _series(
+                "Platelets",
+                ["150,000", "300,000", "450,000"],
+                reference_range="150,000-450,000",
+                unit="/uL",
+            )
+        )
         values = [p["value"] for p in trend["data_points"]]
         assert values == ["150,000", "300,000", "450,000"]
         assert trend["direction"] == "increasing"
 
 
 class TestReferenceRangeParsing:
-    @pytest.mark.parametrize("raw,expected", [
-        ("70-99", (70.0, 99.0)),
-        ("70 - 99 mg/dL", (70.0, 99.0)),
-        ("0.74-1.35 mg/dL", (0.74, 1.35)),
-        ("Reference: 7-56 U/L", (7.0, 56.0)),
-        ("70 to 99", (70.0, 99.0)),          # word separator
-        ("70\u201399", (70.0, 99.0)),        # en dash
-        ("-2 - 2", (-2.0, 2.0)),             # genuinely negative lower bound
-        ("150,000-450,000", (150000.0, 450000.0)),
-        ("5-10 x10^9/L", (5.0, 10.0)),
-    ])
+    @pytest.mark.parametrize(
+        "raw,expected",
+        [
+            ("70-99", (70.0, 99.0)),
+            ("70 - 99 mg/dL", (70.0, 99.0)),
+            ("0.74-1.35 mg/dL", (0.74, 1.35)),
+            ("Reference: 7-56 U/L", (7.0, 56.0)),
+            ("70 to 99", (70.0, 99.0)),  # word separator
+            ("70\u201399", (70.0, 99.0)),  # en dash
+            ("-2 - 2", (-2.0, 2.0)),  # genuinely negative lower bound
+            ("150,000-450,000", (150000.0, 450000.0)),
+            ("5-10 x10^9/L", (5.0, 10.0)),
+        ],
+    )
     def test_ranges_parse(self, raw, expected):
         from lab_trends import _parse_range
+
         low, high = _parse_range(raw)
         assert (low, high) == pytest.approx(expected)
 
     @pytest.mark.parametrize("raw", ["<5", ">10", "", None, "negative", "up to"])
     def test_unparseable_ranges_return_none_rather_than_guessing(self, raw):
         from lab_trends import _parse_range
+
         assert _parse_range(raw) is None
 
     def test_low_and_high_never_inverted(self):
         from lab_trends import _parse_range
+
         for raw in ["70-99", "99-70"]:
             low, high = _parse_range(raw)
             assert low <= high
@@ -250,39 +262,59 @@ class TestRecoveryWording:
     reporting a resolved excursion as ongoing."""
 
     def test_returned_to_normal_is_not_described_as_ongoing(self):
-        trend = _only_trend(_series(
-            "Glucose", [91, 130, 88], reference_range="70-99",
-            flags=["normal", "high", "normal"],
-        ))
+        trend = _only_trend(
+            _series(
+                "Glucose",
+                [91, 130, 88],
+                reference_range="70-99",
+                flags=["normal", "high", "normal"],
+            )
+        )
         explanation = trend["explanation"]
         assert "stayed there since" not in explanation
         assert "back within the normal range" in explanation
 
     def test_still_abnormal_still_says_stayed_there(self):
-        trend = _only_trend(_series(
-            "Glucose", [91, 103, 118], reference_range="70-99",
-            flags=["normal", "high", "high"],
-        ))
+        trend = _only_trend(
+            _series(
+                "Glucose",
+                [91, 103, 118],
+                reference_range="70-99",
+                flags=["normal", "high", "high"],
+            )
+        )
         assert "stayed there since" in trend["explanation"]
 
     def test_returned_to_normal_is_a_first_class_field(self):
-        recovered = _only_trend(_series(
-            "Glucose", [91, 130, 88], reference_range="70-99",
-            flags=["normal", "high", "normal"],
-        ))
-        still_high = _only_trend(_series(
-            "Glucose", [91, 103, 118], reference_range="70-99",
-            flags=["normal", "high", "high"],
-        ))
+        recovered = _only_trend(
+            _series(
+                "Glucose",
+                [91, 130, 88],
+                reference_range="70-99",
+                flags=["normal", "high", "normal"],
+            )
+        )
+        still_high = _only_trend(
+            _series(
+                "Glucose",
+                [91, 103, 118],
+                reference_range="70-99",
+                flags=["normal", "high", "high"],
+            )
+        )
         assert recovered["returned_to_normal"] is True
         assert still_high["returned_to_normal"] is False
 
     def test_crossing_point_still_recorded_after_recovery(self):
         """The excursion happened; only the wording changes."""
-        trend = _only_trend(_series(
-            "Glucose", [91, 130, 88], reference_range="70-99",
-            flags=["normal", "high", "normal"],
-        ))
+        trend = _only_trend(
+            _series(
+                "Glucose",
+                [91, 130, 88],
+                reference_range="70-99",
+                flags=["normal", "high", "normal"],
+            )
+        )
         assert trend["crossed_into_abnormal_at"] is not None
         assert trend["crossed_into_abnormal_at"]["flag"] == "high"
 
@@ -292,10 +324,14 @@ class TestRecoveryWording:
             ["normal", "low", "normal"],
             ["normal", "high", "low", "normal"],
         ):
-            trend = _only_trend(_series(
-                "Marker", list(range(80, 80 + len(flags))),
-                reference_range="70-99", flags=flags,
-            ))
+            trend = _only_trend(
+                _series(
+                    "Marker",
+                    list(range(80, 80 + len(flags))),
+                    reference_range="70-99",
+                    flags=flags,
+                )
+            )
             if trend["crossed_into_abnormal_at"]:
                 assert "stayed there since" not in trend["explanation"], flags
 
@@ -306,14 +342,30 @@ class TestUnitMismatch:
     with the last visit's unit ('from 95 mmol/L') — a fabricated number."""
 
     def _mixed_units(self):
-        return {"lab_results_timeline": [
-            {"test_name": "Glucose", "value": "95", "unit": "mg/dL",
-             "reference_range": "70-99", "flag": "normal", "confidence": 0.95,
-             "date": "2026-01-01", "source_file": "a.pdf"},
-            {"test_name": "Glucose", "value": "5.3", "unit": "mmol/L",
-             "reference_range": "3.9-5.5", "flag": "normal", "confidence": 0.95,
-             "date": "2026-04-01", "source_file": "b.pdf"},
-        ]}
+        return {
+            "lab_results_timeline": [
+                {
+                    "test_name": "Glucose",
+                    "value": "95",
+                    "unit": "mg/dL",
+                    "reference_range": "70-99",
+                    "flag": "normal",
+                    "confidence": 0.95,
+                    "date": "2026-01-01",
+                    "source_file": "a.pdf",
+                },
+                {
+                    "test_name": "Glucose",
+                    "value": "5.3",
+                    "unit": "mmol/L",
+                    "reference_range": "3.9-5.5",
+                    "flag": "normal",
+                    "confidence": 0.95,
+                    "date": "2026-04-01",
+                    "source_file": "b.pdf",
+                },
+            ]
+        }
 
     def test_incompatible_units_produce_no_trend(self):
         result = track_lab_trends(self._mixed_units())
@@ -336,27 +388,63 @@ class TestUnitMismatch:
     @pytest.mark.parametrize("second_unit", ["mg/dl", "mg/dL ", " MG/DL", "mg/dL"])
     def test_cosmetic_unit_variation_still_trends(self, second_unit):
         """Case and whitespace differences are not real disagreements."""
-        result = track_lab_trends({"lab_results_timeline": [
-            {"test_name": "Glucose", "value": "75", "unit": "mg/dL",
-             "reference_range": "70-99", "flag": "normal", "confidence": 0.95,
-             "date": "2026-01-01", "source_file": "a.pdf"},
-            {"test_name": "Glucose", "value": "95", "unit": second_unit,
-             "reference_range": "70-99", "flag": "normal", "confidence": 0.95,
-             "date": "2026-04-01", "source_file": "b.pdf"},
-        ]})
+        result = track_lab_trends(
+            {
+                "lab_results_timeline": [
+                    {
+                        "test_name": "Glucose",
+                        "value": "75",
+                        "unit": "mg/dL",
+                        "reference_range": "70-99",
+                        "flag": "normal",
+                        "confidence": 0.95,
+                        "date": "2026-01-01",
+                        "source_file": "a.pdf",
+                    },
+                    {
+                        "test_name": "Glucose",
+                        "value": "95",
+                        "unit": second_unit,
+                        "reference_range": "70-99",
+                        "flag": "normal",
+                        "confidence": 0.95,
+                        "date": "2026-04-01",
+                        "source_file": "b.pdf",
+                    },
+                ]
+            }
+        )
         assert len(result["trends"]) == 1
         assert result["trends"][0]["direction"] == "increasing"
 
     def test_missing_units_do_not_block_trending(self):
         """Absent units are unknown, not conflicting."""
-        result = track_lab_trends({"lab_results_timeline": [
-            {"test_name": "Glucose", "value": "75", "unit": "",
-             "reference_range": "70-99", "flag": "normal", "confidence": 0.95,
-             "date": "2026-01-01", "source_file": "a.pdf"},
-            {"test_name": "Glucose", "value": "95", "unit": "mg/dL",
-             "reference_range": "70-99", "flag": "normal", "confidence": 0.95,
-             "date": "2026-04-01", "source_file": "b.pdf"},
-        ]})
+        result = track_lab_trends(
+            {
+                "lab_results_timeline": [
+                    {
+                        "test_name": "Glucose",
+                        "value": "75",
+                        "unit": "",
+                        "reference_range": "70-99",
+                        "flag": "normal",
+                        "confidence": 0.95,
+                        "date": "2026-01-01",
+                        "source_file": "a.pdf",
+                    },
+                    {
+                        "test_name": "Glucose",
+                        "value": "95",
+                        "unit": "mg/dL",
+                        "reference_range": "70-99",
+                        "flag": "normal",
+                        "confidence": 0.95,
+                        "date": "2026-04-01",
+                        "source_file": "b.pdf",
+                    },
+                ]
+            }
+        )
         assert len(result["trends"]) == 1
 
 
@@ -365,33 +453,56 @@ class TestStrictTrendValueClassification:
     magnitudes — trending "<5" as 5 invents a precision the laboratory
     declined to report and can silently invert a direction."""
 
-    @pytest.mark.parametrize("raw", [
-        "<5", ">1000", "≤0.5", "≥120", "~5", "≈5", "approx 5",
-        "around 100", "5 ± 1", "5 +/- 1", "1e3", "5.2E-3",
-        "3.5 - 5.5", "72-106", "Grade 2 at 5.2", "10^3/uL",
-        "less than 0.01", "up to 40",
-    ])
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            "<5",
+            ">1000",
+            "≤0.5",
+            "≥120",
+            "~5",
+            "≈5",
+            "approx 5",
+            "around 100",
+            "5 ± 1",
+            "5 +/- 1",
+            "1e3",
+            "5.2E-3",
+            "3.5 - 5.5",
+            "72-106",
+            "Grade 2 at 5.2",
+            "10^3/uL",
+            "less than 0.01",
+            "up to 40",
+        ],
+    )
     def test_censored_or_ambiguous_values_are_excluded(self, raw):
         from lab_trends import _parse_trend_value
+
         assert _parse_trend_value(raw) is None
 
-    @pytest.mark.parametrize("raw,expected", [
-        ("150,000", 150000.0),
-        ("1,234", 1234.0),
-        ("1,234,567", 1234567.0),
-        ("5.3", 5.3),
-        ("95", 95.0),
-        ("1.5 mg", 1.5),
-        ("1.234,56", 1234.56),
-        ("5,3", 5.3),
-        ("-5", -5.0),
-    ])
+    @pytest.mark.parametrize(
+        "raw,expected",
+        [
+            ("150,000", 150000.0),
+            ("1,234", 1234.0),
+            ("1,234,567", 1234567.0),
+            ("5.3", 5.3),
+            ("95", 95.0),
+            ("1.5 mg", 1.5),
+            ("1.234,56", 1234.56),
+            ("5,3", 5.3),
+            ("-5", -5.0),
+        ],
+    )
     def test_exact_values_parse_at_full_magnitude(self, raw, expected):
         from lab_trends import _parse_trend_value
+
         assert _parse_trend_value(raw) == pytest.approx(expected)
 
     def test_numeric_input_passes_through(self):
         from lab_trends import _parse_trend_value
+
         assert _parse_trend_value(5) == 5.0
         assert _parse_trend_value(5.7) == 5.7
 
@@ -399,8 +510,10 @@ class TestStrictTrendValueClassification:
         """Two exact readings still trend; the censored one contributes no
         magnitude and is counted as dropped (lowering confidence)."""
         timeline = _series(
-            "TSH", ["1.2", "<0.01", "1.8"],
-            reference_range="0.4-4.5", unit="mIU/L",
+            "TSH",
+            ["1.2", "<0.01", "1.8"],
+            reference_range="0.4-4.5",
+            unit="mIU/L",
             flags=["normal", "low", "normal"],
         )
         trend = _only_trend(timeline)
@@ -410,8 +523,10 @@ class TestStrictTrendValueClassification:
 
     def test_all_censored_readings_yield_insufficient_data_not_a_trend(self):
         timeline = _series(
-            "TSH", ["<0.01", "<0.01", "<0.01"],
-            reference_range="0.4-4.5", unit="mIU/L",
+            "TSH",
+            ["<0.01", "<0.01", "<0.01"],
+            reference_range="0.4-4.5",
+            unit="mIU/L",
             flags=["low", "low", "low"],
         )
         result = track_lab_trends(timeline)

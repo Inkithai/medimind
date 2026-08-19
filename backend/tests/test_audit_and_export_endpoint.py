@@ -19,13 +19,17 @@ from fastapi.testclient import TestClient  # noqa: E402
 import api  # noqa: E402
 import audit  # noqa: E402
 
-
 SNAPSHOT = {
     "patient_timeline": {
         "visits": [],
         "medications_timeline": [
-            {"name": "Metformin", "ingredients": ["metformin"], "dosage": "500 mg",
-             "date": "2024-03-15", "source_file": "rx.pdf"},
+            {
+                "name": "Metformin",
+                "ingredients": ["metformin"],
+                "dosage": "500 mg",
+                "date": "2024-03-15",
+                "source_file": "rx.pdf",
+            },
         ],
         "lab_results_timeline": [],
         "known_allergies": [],
@@ -49,9 +53,11 @@ def teardown_function():
 
 
 def test_export_json_returns_native_envelope_and_audits():
-    with mock.patch.object(api.db, "load_patient_snapshot", return_value=dict(SNAPSHOT)), \
-         mock.patch.object(api.db, "load_documents", return_value=[]), \
-         mock.patch.object(api.audit, "record") as rec:
+    with (
+        mock.patch.object(api.db, "load_patient_snapshot", return_value=dict(SNAPSHOT)),
+        mock.patch.object(api.db, "load_documents", return_value=[]),
+        mock.patch.object(api.audit, "record") as rec,
+    ):
         with _client() as client:
             resp = client.get("/api/v1/export?format=json")
         assert resp.status_code == 200, resp.text
@@ -62,8 +68,10 @@ def test_export_json_returns_native_envelope_and_audits():
 
 
 def test_export_fhir_returns_bundle():
-    with mock.patch.object(api.db, "load_patient_snapshot", return_value=dict(SNAPSHOT)), \
-         mock.patch.object(api.db, "load_documents", return_value=[]):
+    with (
+        mock.patch.object(api.db, "load_patient_snapshot", return_value=dict(SNAPSHOT)),
+        mock.patch.object(api.db, "load_documents", return_value=[]),
+    ):
         with _client() as client:
             resp = client.get("/api/v1/export?format=fhir")
         assert resp.status_code == 200, resp.text
@@ -74,16 +82,20 @@ def test_export_fhir_returns_bundle():
 
 
 def test_export_unknown_format_is_400():
-    with mock.patch.object(api.db, "load_patient_snapshot", return_value=dict(SNAPSHOT)), \
-         mock.patch.object(api.db, "load_documents", return_value=[]):
+    with (
+        mock.patch.object(api.db, "load_patient_snapshot", return_value=dict(SNAPSHOT)),
+        mock.patch.object(api.db, "load_documents", return_value=[]),
+    ):
         with _client() as client:
             resp = client.get("/api/v1/export?format=csv")
         assert resp.status_code == 400
 
 
 def test_export_without_record_is_404():
-    with mock.patch.object(api.db, "load_patient_snapshot", return_value=None), \
-         mock.patch.object(api.db, "load_documents", return_value=[]):
+    with (
+        mock.patch.object(api.db, "load_patient_snapshot", return_value=None),
+        mock.patch.object(api.db, "load_documents", return_value=[]),
+    ):
         with _client() as client:
             resp = client.get("/api/v1/export?format=json")
         assert resp.status_code == 404
@@ -109,7 +121,6 @@ def test_audit_record_inserts_event():
 
 
 def test_audit_disabled_is_noop():
-    with mock.patch.object(audit, "AUDIT_ENABLED", False), \
-         mock.patch("db._get_client") as client:
+    with mock.patch.object(audit, "AUDIT_ENABLED", False), mock.patch("db._get_client") as client:
         audit.record("u", "qa.ask", {})
         client.assert_not_called()

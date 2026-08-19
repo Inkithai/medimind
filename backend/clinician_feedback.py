@@ -57,6 +57,7 @@ def _now_iso() -> str:
 # Deterministic finding fingerprint
 # --------------------------------------------------------------------------- #
 
+
 def _sig_components(finding: Dict[str, Any]) -> List[str]:
     kind = str(finding.get("finding_kind") or finding.get("kind") or "finding")
     rule = str(finding.get("rule") or "").strip().lower()
@@ -74,7 +75,7 @@ def _sig_components(finding: Dict[str, Any]) -> List[str]:
     if organ:
         parts.append(organ)
     if lab and isinstance(lab, dict):
-        parts.append(f"{lab.get('test','')}:{lab.get('value','')}")
+        parts.append(f"{lab.get('test', '')}:{lab.get('value', '')}")
     return parts
 
 
@@ -107,34 +108,40 @@ def finding_key_from(
         )
     ):
         return ""
-    return finding_key({
-        "finding_kind": finding_kind,
-        "rule": rule,
-        "medications_involved": meds,
-        "condition": condition,
-        "organ": organ,
-    })
+    return finding_key(
+        {
+            "finding_kind": finding_kind,
+            "rule": rule,
+            "medications_involved": meds,
+            "condition": condition,
+            "organ": organ,
+        }
+    )
 
 
 # --------------------------------------------------------------------------- #
 # Best-effort Supabase mirror (optional)
 # --------------------------------------------------------------------------- #
 
+
 def _mirror_save(entry: Dict[str, Any]) -> None:
     try:
         from db import _get_client  # type: ignore
+
         client = _get_client()
-        client.table("finding_feedback").insert({
-            "user_id": entry["user_id"],
-            "finding_key": entry["finding_key"],
-            "finding_kind": entry.get("finding_kind"),
-            "rule": entry.get("rule"),
-            "verdict": entry["verdict"],
-            "reason": entry.get("reason"),
-            "note": entry.get("note"),
-            "reviewer": entry.get("reviewer"),
-            "created_at": entry["created_at"],
-        }).execute()
+        client.table("finding_feedback").insert(
+            {
+                "user_id": entry["user_id"],
+                "finding_key": entry["finding_key"],
+                "finding_kind": entry.get("finding_kind"),
+                "rule": entry.get("rule"),
+                "verdict": entry["verdict"],
+                "reason": entry.get("reason"),
+                "note": entry.get("note"),
+                "reviewer": entry.get("reviewer"),
+                "created_at": entry["created_at"],
+            }
+        ).execute()
     except Exception:
         # Table missing / DB unreachable — in-memory store still holds it.
         return
@@ -143,6 +150,7 @@ def _mirror_save(entry: Dict[str, Any]) -> None:
 def _mirror_load(user_id: str) -> Optional[List[Dict[str, Any]]]:
     try:
         from db import _get_client  # type: ignore
+
         client = _get_client()
         resp = (
             client.table("finding_feedback")
@@ -162,6 +170,7 @@ def _mirror_load(user_id: str) -> Optional[List[Dict[str, Any]]]:
 # --------------------------------------------------------------------------- #
 # Public API
 # --------------------------------------------------------------------------- #
+
 
 def record_feedback(
     user_id: str,
@@ -252,9 +261,12 @@ def get_feedback_metrics(user_id: str) -> Dict[str, Any]:
     # noisiest rules = highest override count (alert-fatigue signal)
     noisiest = sorted(
         (
-            {"rule": r, "total": sum(c.values()),
-             "overrides": c.get("overridden", 0),
-             "false_positives": c.get("false_positive", 0)}
+            {
+                "rule": r,
+                "total": sum(c.values()),
+                "overrides": c.get("overridden", 0),
+                "false_positives": c.get("false_positive", 0),
+            }
             for r, c in by_rule.items()
         ),
         key=lambda x: (x["overrides"] + x["false_positives"], x["total"]),

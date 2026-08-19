@@ -41,13 +41,18 @@ NEW_EXTRACTION = {
 }
 
 CROSS_CHECK = {
-    "potential_drug_interactions": [], "duplicate_prescriptions": [],
-    "conflicting_dosage_instructions": [], "allergy_conflicts": [],
+    "potential_drug_interactions": [],
+    "duplicate_prescriptions": [],
+    "conflicting_dosage_instructions": [],
+    "allergy_conflicts": [],
     "overall_recommendation": "Consult a professional.",
     "reference_date": "2026-08-17",
     "medication_activity": {
-        "reference_date": "2026-08-17", "active_medications": [],
-        "inactive_medications": [], "active_count": 0, "inactive_count": 0,
+        "reference_date": "2026-08-17",
+        "active_medications": [],
+        "inactive_medications": [],
+        "active_count": 0,
+        "inactive_count": 0,
     },
     "antidote_reference_notes": [],
 }
@@ -67,7 +72,9 @@ def teardown_function():
 def _pipeline_patchers():
     patchers = [
         mock.patch.object(api.db, "load_documents", return_value=[dict(STORED_DOC)]),
-        mock.patch.object(api.storage, "download_document_bytes", return_value=b"%PDF-1.4 original"),
+        mock.patch.object(
+            api.storage, "download_document_bytes", return_value=b"%PDF-1.4 original"
+        ),
         mock.patch.object(api, "process_document", return_value=dict(NEW_EXTRACTION)),
         mock.patch.object(api.db, "replace_document_group", return_value=1),
         mock.patch.object(api, "_prepare_current_trust_state", return_value=([], [], {}, [])),
@@ -123,8 +130,11 @@ def test_reprocess_download_failure_502(monkeypatch):
     _auth_override()
     monkeypatch.setattr(api.db, "load_documents", lambda uid: [dict(STORED_DOC)])
     monkeypatch.setattr(
-        api.storage, "download_document_bytes",
-        lambda doc: (_ for _ in ()).throw(api.storage.StorageDownloadError("fetch failed")),
+        api.storage,
+        "download_document_bytes",
+        lambda doc, **_kwargs: (_ for _ in ()).throw(
+            api.storage.StorageDownloadError("fetch failed")
+        ),
     )
     with TestClient(api.app) as client:
         resp = _reprocess(client)
@@ -134,7 +144,9 @@ def test_reprocess_download_failure_502(monkeypatch):
 def test_reprocess_invalid_content_422(monkeypatch):
     _auth_override()
     monkeypatch.setattr(api.db, "load_documents", lambda uid: [dict(STORED_DOC)])
-    monkeypatch.setattr(api.storage, "download_document_bytes", lambda doc: b"not a document")
+    monkeypatch.setattr(
+        api.storage, "download_document_bytes", lambda doc, **_kwargs: b"not a document"
+    )
     with TestClient(api.app) as client:
         resp = _reprocess(client)
     assert resp.status_code == 422
@@ -147,9 +159,12 @@ def test_reprocess_extraction_failure_502(monkeypatch):
     for p in patchers:
         p.stop()
     monkeypatch.setattr(api.db, "load_documents", lambda uid: [dict(STORED_DOC)])
-    monkeypatch.setattr(api.storage, "download_document_bytes", lambda doc: b"%PDF-1.4 original")
     monkeypatch.setattr(
-        api, "process_document",
+        api.storage, "download_document_bytes", lambda doc, **_kwargs: b"%PDF-1.4 original"
+    )
+    monkeypatch.setattr(
+        api,
+        "process_document",
         lambda path: (_ for _ in ()).throw(RuntimeError("boom")),
     )
     with TestClient(api.app) as client:

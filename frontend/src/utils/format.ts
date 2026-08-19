@@ -44,10 +44,8 @@ export function flagTone(flag: string): string {
 }
 
 export function directionTone(direction: string): string {
-  if (direction.startsWith("increasing"))
-    return "bg-red-50 text-red-700 ring-1 ring-red-200";
-  if (direction.startsWith("decreasing"))
-    return "bg-blue-50 text-blue-700 ring-1 ring-blue-200";
+  if (direction.startsWith("increasing")) return "bg-red-50 text-red-700 ring-1 ring-red-200";
+  if (direction.startsWith("decreasing")) return "bg-blue-50 text-blue-700 ring-1 ring-blue-200";
   if (direction === "stable") return "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200";
   return "bg-amber-50 text-amber-700 ring-1 ring-amber-200";
 }

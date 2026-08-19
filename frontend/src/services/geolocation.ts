@@ -41,9 +41,7 @@ const DEFAULT_TIMEOUT_MS = 15_000;
  *
  * `maximumAge: 0` is deliberate: a cached fix may predate the user moving.
  */
-export function getAccuratePosition(
-  options: AccuratePositionOptions = {}
-): Promise<PositionFix> {
+export function getAccuratePosition(options: AccuratePositionOptions = {}): Promise<PositionFix> {
   const desiredAccuracy = options.desiredAccuracyMetres ?? DEFAULT_DESIRED_ACCURACY_M;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
@@ -52,8 +50,8 @@ export function getAccuratePosition(
       reject(
         new GeolocationFailure(
           "unsupported",
-          "Your browser doesn't support location access. Search for a place instead."
-        )
+          "Your browser doesn't support location access. Search for a place instead.",
+        ),
       );
       return;
     }
@@ -121,26 +119,26 @@ export function getAccuratePosition(
           fail(
             new GeolocationFailure(
               "denied",
-              "Location access was blocked. Allow it in your browser settings, or search for a place instead."
-            )
+              "Location access was blocked. Allow it in your browser settings, or search for a place instead.",
+            ),
           );
         } else if (error.code === error.TIMEOUT) {
           fail(
             new GeolocationFailure(
               "timeout",
-              "We couldn't get your location in time. Try again or search for a place."
-            )
+              "We couldn't get your location in time. Try again or search for a place.",
+            ),
           );
         } else {
           fail(
             new GeolocationFailure(
               "unavailable",
-              "We couldn't find your current location. Search for a place instead."
-            )
+              "We couldn't find your current location. Search for a place instead.",
+            ),
           );
         }
       },
-      { enableHighAccuracy: true, timeout: timeoutMs, maximumAge: 0 }
+      { enableHighAccuracy: true, timeout: timeoutMs, maximumAge: 0 },
     );
 
     timer = window.setTimeout(() => {
@@ -151,8 +149,8 @@ export function getAccuratePosition(
       fail(
         new GeolocationFailure(
           "timeout",
-          "We couldn't get your location in time. Try again or search for a place."
-        )
+          "We couldn't get your location in time. Try again or search for a place.",
+        ),
       );
     }, timeoutMs);
   });

@@ -126,7 +126,11 @@ async function test_keeps_refining_past_a_coarse_first_reading() {
     watch().success(coords(9.80138, 80.19453, 8));
     const fix = await pending;
     assert.equal(fix.accuracyMetres, 8);
-    assert.equal(fix.latitude, 9.80138, "must return the refined GPS point, not the first estimate");
+    assert.equal(
+      fix.latitude,
+      9.80138,
+      "must return the refined GPS point, not the first estimate",
+    );
   });
 }
 
@@ -134,7 +138,7 @@ async function test_never_downgrades_to_a_worse_later_reading() {
   await withFakeGeolocation(async (watch) => {
     const pending = getAccuratePosition({ desiredAccuracyMetres: 5 });
     watch().success(coords(9.80138, 80.19453, 20));
-    watch().success(coords(9.60000, 80.00000, 1800));
+    watch().success(coords(9.6, 80.0, 1800));
     fireTimers();
     const fix = await pending;
     assert.equal(fix.accuracyMetres, 20);

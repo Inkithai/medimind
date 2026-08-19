@@ -34,13 +34,17 @@ import { Spinner } from "./components/Spinner";
 import { useI18n } from "./i18n/I18nContext";
 
 const FindCarePage = lazy(() =>
-  import("./pages/FindCarePage").then((module) => ({ default: module.FindCarePage }))
+  import("./pages/FindCarePage").then((module) => ({ default: module.FindCarePage })),
 );
 
 function FindCareLoading() {
   const { t } = useI18n();
   return (
-    <div role="status" aria-live="polite" className="flex min-h-[50vh] items-center justify-center gap-3 text-sm font-medium text-slate-700">
+    <div
+      role="status"
+      aria-live="polite"
+      className="flex min-h-[50vh] items-center justify-center gap-3 text-sm font-medium text-slate-700"
+    >
       <Spinner className="h-5 w-5 text-brand-600" /> {t("care.finding")}
     </div>
   );
@@ -63,9 +67,7 @@ function RequireAuth({ children }: { children: JSX.Element }) {
       <div className="mx-auto max-w-md rounded-2xl border border-red-200 bg-red-50 p-6 text-center">
         <p className="text-base font-semibold text-red-900">{t("auth.failedTitle")}</p>
         <p className="mt-1 text-sm text-red-700">{initError}</p>
-        <p className="mt-3 text-sm text-slate-600">
-          {t("auth.checkConnection")}
-        </p>
+        <p className="mt-3 text-sm text-slate-600">{t("auth.checkConnection")}</p>
       </div>
     );
   }

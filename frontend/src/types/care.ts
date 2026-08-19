@@ -18,13 +18,7 @@ export interface SpecialtyRecommendation extends SpecialtyRoute {
 }
 
 export type CareEvidenceKind =
-  | "medication"
-  | "allergy"
-  | "lab_result"
-  | "lab_trend"
-  | "visit"
-  | "document"
-  | "cross_check";
+  "medication" | "allergy" | "lab_result" | "lab_trend" | "visit" | "document" | "cross_check";
 
 export interface CarePathwayEvidence {
   kind: CareEvidenceKind;

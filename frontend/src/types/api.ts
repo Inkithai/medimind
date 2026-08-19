@@ -556,7 +556,13 @@ export interface SingleLabResult {
   unit_assumed?: boolean;
   reference_range?: string | null;
   range_source?: "printed" | "general" | null | string;
-  range_bounds?: { low?: number | null; high?: number | null; unit?: string | null; source?: string | null; basis?: Record<string, unknown> | null } | null;
+  range_bounds?: {
+    low?: number | null;
+    high?: number | null;
+    unit?: string | null;
+    source?: string | null;
+    basis?: Record<string, unknown> | null;
+  } | null;
   status: "normal" | "high" | "low" | "unknown" | string;
   source_file: string | null;
   source_page?: number | null;
@@ -583,7 +589,12 @@ export interface ChangeEvidence {
 
 export interface RecordChange {
   category: "lab" | "medication" | "allergy";
-  kind: "status_changed" | "value_changed" | "newly_measured" | "instruction_changed" | "newly_documented";
+  kind:
+    | "status_changed"
+    | "value_changed"
+    | "newly_measured"
+    | "instruction_changed"
+    | "newly_documented";
   importance: "attention" | "review" | "info";
   title: string;
   description: string;
@@ -902,7 +913,6 @@ export interface PatientSnapshot {
   rebuilt_from_documents?: boolean;
 }
 
-
 // ---- AI analysis logs -----------------------------------------------------
 
 export interface AnalysisLogRecord {
@@ -1091,7 +1101,12 @@ export interface ClinicalFinding {
   condition?: string;
   organ?: string;
   lab?: { test: string; value: number | string | null; unit: string | null; flag?: string | null };
-  lab_markers?: Array<{ test: string; value: number | null; unit: string | null; flag?: string | null }>;
+  lab_markers?: Array<{
+    test: string;
+    value: number | null;
+    unit: string | null;
+    flag?: string | null;
+  }>;
   explanation: string;
   severity: Severity;
   confidence?: number;
@@ -1222,11 +1237,16 @@ export interface FeedbackMetrics {
   false_positive_rate: number | null;
   override_rate: number | null;
   by_finding_kind: Record<string, Record<string, number>>;
-  noisiest_rules: Array<{ rule: string; total: number; overrides: number; false_positives: number }>;
+  noisiest_rules: Array<{
+    rule: string;
+    total: number;
+    overrides: number;
+    false_positives: number;
+  }>;
 }
 
 export type FindingLifecycleState =
-  | "new" | "active" | "reviewed" | "confirmed" | "dismissed" | "resolved" | "reopened";
+  "new" | "active" | "reviewed" | "confirmed" | "dismissed" | "resolved" | "reopened";
 export interface FindingLifecycleInput {
   finding_kind?: string;
   rule?: string;
@@ -1245,11 +1265,13 @@ export interface FindingLifecycleResult {
   unchanged?: boolean;
 }
 export interface FindingLifecycleOverview {
-  findings: Array<Record<string, unknown> & {
-    finding_key: string;
-    lifecycle_state: FindingLifecycleState;
-    is_open: boolean;
-  }>;
+  findings: Array<
+    Record<string, unknown> & {
+      finding_key: string;
+      lifecycle_state: FindingLifecycleState;
+      is_open: boolean;
+    }
+  >;
   open_count: number;
   closed_count: number;
   by_state: Record<string, number>;

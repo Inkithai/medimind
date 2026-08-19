@@ -64,6 +64,7 @@ def test_unsupported_extension_rejected():
 # Upload pipeline: one bad file is rejected per-file, the batch continues
 # ---------------------------------------------------------------------------
 
+
 def test_pipeline_rejects_mismatched_content_per_file():
     import os as _os
     from unittest import mock
@@ -81,15 +82,21 @@ def test_pipeline_rejects_mismatched_content_per_file():
     import api
 
     EXTRACTED = {
-        "document_type": "prescription", "date": "2026-08-01",
-        "provider_or_doctor": "Dr. Smith", "patient_name": "Test Patient",
-        "medications": [], "lab_results": [], "allergies_noted": [],
+        "document_type": "prescription",
+        "date": "2026-08-01",
+        "provider_or_doctor": "Dr. Smith",
+        "patient_name": "Test Patient",
+        "medications": [],
+        "lab_results": [],
+        "allergies_noted": [],
         "overall_confidence": 0.9,
         "_source": {"file": "good.pdf", "method": "text_layer", "page": 1},
     }
     CLEAN = {
-        "potential_drug_interactions": [], "duplicate_prescriptions": [],
-        "conflicting_dosage_instructions": [], "allergy_conflicts": [],
+        "potential_drug_interactions": [],
+        "duplicate_prescriptions": [],
+        "conflicting_dosage_instructions": [],
+        "allergy_conflicts": [],
         "overall_recommendation": "Consult a professional.",
     }
 
@@ -98,9 +105,11 @@ def test_pipeline_rejects_mismatched_content_per_file():
 
     api.app.dependency_overrides[api.get_current_user] = override_user
     patchers = [
-        mock.patch.object(api.storage, "upload_patient_document",
-                          return_value={"document_url": "https://cloud/x.pdf",
-                                        "cloudinary_public_id": "x"}),
+        mock.patch.object(
+            api.storage,
+            "upload_patient_document",
+            return_value={"document_url": "https://cloud/x.pdf", "cloudinary_public_id": "x"},
+        ),
         mock.patch.object(api.db, "load_documents", return_value=[]),
         mock.patch.object(api.db, "insert_documents"),
         mock.patch.object(api.db, "save_patient_snapshot"),

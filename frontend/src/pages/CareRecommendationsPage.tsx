@@ -76,7 +76,8 @@ export function CareRecommendationsPage() {
   }
 
   if (loading) return <LoadingState label={t("care.reviewLoading")} />;
-  if (error && !context) return <ErrorState error={error} onRetry={() => setReloadKey((value) => value + 1)} />;
+  if (error && !context)
+    return <ErrorState error={error} onRetry={() => setReloadKey((value) => value + 1)} />;
   if (!context) return null;
 
   const selectedFlag = context.flags.find((flag) => flag.id === selectedFlagId) || null;
@@ -85,9 +86,7 @@ export function CareRecommendationsPage() {
     <div className="space-y-6">
       <header>
         <h1 className="page-title">{t("care.localTitle")}</h1>
-        <p className="secondary-text mt-2 max-w-3xl">
-          {t("care.localSubtitle")}
-        </p>
+        <p className="secondary-text mt-2 max-w-3xl">{t("care.localSubtitle")}</p>
       </header>
 
       <Alert variant="info" title={t("care.medicalNotice")}>
@@ -99,20 +98,17 @@ export function CareRecommendationsPage() {
           <CardBody>
             <div className="py-8 text-center">
               <p className="text-base font-semibold text-slate-800">{t("care.noActiveFlag")}</p>
-              <p className="mx-auto mt-2 max-w-xl text-sm leading-relaxed text-slate-600">{context.message}</p>
-              <p className="mt-3 text-xs text-slate-500">
-                {t("care.noActiveFlagBody")}
+              <p className="mx-auto mt-2 max-w-xl text-sm leading-relaxed text-slate-600">
+                {context.message}
               </p>
+              <p className="mt-3 text-xs text-slate-500">{t("care.noActiveFlagBody")}</p>
             </div>
           </CardBody>
         </Card>
       ) : (
         <>
           <Card>
-            <CardHeader
-              title={t("care.selectFlagTitle")}
-              description={t("care.selectFlagBody")}
-            />
+            <CardHeader title={t("care.selectFlagTitle")} description={t("care.selectFlagBody")} />
             <fieldset className="space-y-3 px-5 py-4">
               <legend className="sr-only">{t("care.selectFlagTitle")}</legend>
               {context.flags.map((flag) => {
@@ -121,7 +117,9 @@ export function CareRecommendationsPage() {
                   <label
                     key={flag.id}
                     className={`block cursor-pointer rounded-xl border p-4 transition focus-within:outline-none focus-within:ring-4 focus-within:ring-brand-200 ${
-                      selected ? "border-brand-300 bg-brand-50/50 ring-2 ring-brand-100" : "border-slate-200 bg-white hover:border-slate-300"
+                      selected
+                        ? "border-brand-300 bg-brand-50/50 ring-2 ring-brand-100"
+                        : "border-slate-200 bg-white hover:border-slate-300"
                     }`}
                   >
                     <input
@@ -139,20 +137,32 @@ export function CareRecommendationsPage() {
                         <div className="flex flex-wrap items-center gap-2">
                           <p className="font-semibold text-slate-900">{flag.title}</p>
                           <StatusBadge tone={flag.trigger === "high_risk" ? "danger" : "warning"}>
-                            {flag.trigger === "high_risk" ? t("care.highRiskSignal") : t("care.lowConfidenceSignal")}
+                            {flag.trigger === "high_risk"
+                              ? t("care.highRiskSignal")
+                              : t("care.lowConfidenceSignal")}
                           </StatusBadge>
                           {typeof flag.confidence === "number" && (
-                            <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${confidenceTone(flag.confidence)}`}>
-                              {t("care.confidenceValue", { value: formatConfidence(flag.confidence) })}
+                            <span
+                              className={`rounded-full px-2 py-0.5 text-xs font-medium ${confidenceTone(flag.confidence)}`}
+                            >
+                              {t("care.confidenceValue", {
+                                value: formatConfidence(flag.confidence),
+                              })}
                             </span>
                           )}
                         </div>
                         <p className="mt-2 text-sm text-slate-600">{flag.evidence}</p>
-                        <p className="mt-2 text-xs text-slate-500">{t("care.sourceValue", { source: flag.source })}</p>
+                        <p className="mt-2 text-xs text-slate-500">
+                          {t("care.sourceValue", { source: flag.source })}
+                        </p>
                       </div>
                       <div className="max-w-xs rounded-lg bg-white px-3 py-2 text-xs ring-1 ring-slate-200">
-                        <p className="font-semibold text-slate-700">{t("care.suggestedSearch", { specialty: flag.specialty.label })}</p>
-                        <p className="mt-1 leading-relaxed text-slate-500">{flag.specialty.reason}</p>
+                        <p className="font-semibold text-slate-700">
+                          {t("care.suggestedSearch", { specialty: flag.specialty.label })}
+                        </p>
+                        <p className="mt-1 leading-relaxed text-slate-500">
+                          {flag.specialty.reason}
+                        </p>
                       </div>
                     </div>
                   </label>
@@ -164,7 +174,10 @@ export function CareRecommendationsPage() {
           {selectedFlag && <CareEvidencePanel flag={selectedFlag} />}
 
           <Card>
-            <CardHeader title={t("care.findProfessional")} description={t("care.directoryPrivacy")} />
+            <CardHeader
+              title={t("care.findProfessional")}
+              description={t("care.directoryPrivacy")}
+            />
             <CardBody>
               <form
                 className="grid gap-4 sm:grid-cols-2"
@@ -188,15 +201,21 @@ export function CareRecommendationsPage() {
                   />
                 </label>
                 <label className="block">
-                  <span className="text-sm font-medium text-slate-700">{t("care.consultationPreference")}</span>
+                  <span className="text-sm font-medium text-slate-700">
+                    {t("care.consultationPreference")}
+                  </span>
                   <select
                     value={availability}
-                    onChange={(event) => setAvailability(event.target.value as AvailabilityPreference)}
+                    onChange={(event) =>
+                      setAvailability(event.target.value as AvailabilityPreference)
+                    }
                     className="mt-1.5 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
                     disabled={searching}
                   >
                     {availabilityOptions.map((option) => (
-                      <option key={option.value} value={option.value}>{option.label}</option>
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
                     ))}
                   </select>
                 </label>
@@ -204,7 +223,11 @@ export function CareRecommendationsPage() {
                   <p className="max-w-2xl text-xs leading-relaxed text-slate-500">
                     {t("care.hoursRankingNotice")}
                   </p>
-                  <button type="submit" disabled={searching || location.trim().length < 2 || !selectedFlagId} className="btn-primary">
+                  <button
+                    type="submit"
+                    disabled={searching || location.trim().length < 2 || !selectedFlagId}
+                    className="btn-primary"
+                  >
                     {searching && <Spinner className="h-4 w-4" />}
                     {searching ? t("care.finding") : t("care.searchLive")}
                   </button>

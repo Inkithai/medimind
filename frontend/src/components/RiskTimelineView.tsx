@@ -36,7 +36,7 @@ function EvidenceBadge({ source }: { source?: string | null }) {
     <span
       className={classNames(
         "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium",
-        verified ? "bg-emerald-50 text-emerald-700" : "bg-violet-50 text-violet-600"
+        verified ? "bg-emerald-50 text-emerald-700" : "bg-violet-50 text-violet-600",
       )}
       title={
         verified
@@ -60,8 +60,8 @@ export function RiskTimelineView({ report }: { report: RiskTimelineReport }) {
       <Card>
         <CardBody>
           <p className="py-6 text-center text-sm text-slate-500">
-            No safety findings to place in time. This is not a clean bill of health —
-            it only means the automated checks found nothing in the documents provided.
+            No safety findings to place in time. This is not a clean bill of health — it only means
+            the automated checks found nothing in the documents provided.
           </p>
         </CardBody>
       </Card>
@@ -76,9 +76,7 @@ export function RiskTimelineView({ report }: { report: RiskTimelineReport }) {
         </Alert>
       )}
 
-      {timing && timing.note && (
-        <p className="text-sm text-slate-600">{timing.note}</p>
-      )}
+      {timing && timing.note && <p className="text-sm text-slate-600">{timing.note}</p>}
 
       {exposures.length > 0 && (
         <Card>
@@ -96,7 +94,7 @@ export function RiskTimelineView({ report }: { report: RiskTimelineReport }) {
                   <span
                     className={classNames(
                       "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium",
-                      STATUS_STYLES[exposure.status] ?? STATUS_STYLES.unknown
+                      STATUS_STYLES[exposure.status] ?? STATUS_STYLES.unknown,
                     )}
                   >
                     {STATUS_LABELS[exposure.status] ?? exposure.status}
@@ -138,7 +136,7 @@ export function RiskTimelineView({ report }: { report: RiskTimelineReport }) {
                     <span
                       className={classNames(
                         "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium",
-                        STATUS_STYLES[risk.status] ?? STATUS_STYLES.unknown
+                        STATUS_STYLES[risk.status] ?? STATUS_STYLES.unknown,
                       )}
                     >
                       {STATUS_LABELS[risk.status] ?? risk.status}

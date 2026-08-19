@@ -34,17 +34,17 @@ AUDIT_ENABLED = os.environ.get("AUDIT_LOG", "true").lower() in ("true", "1", "ye
 # Action vocabulary — keep this list in sync with call sites in api.py so
 # downstream consumers can rely on a closed set of action names.
 ACTIONS = (
-    "documents.upload",         # files received for processing (sync or async)
+    "documents.upload",  # files received for processing (sync or async)
     "documents.upload_result",  # pipeline finished (counts, indexed flag)
-    "documents.delete",         # one physical upload permanently removed
-    "records.read",             # timeline / cross-check / lab-trends / snapshot read
-    "records.export",           # full-record export generated
-    "qa.ask",                   # single-shot QA question answered
-    "session.create",           # conversation session created
-    "session.message",          # conversational turn answered
-    "session.read",             # transcript read
-    "session.delete",           # transcript deleted
-    "care.read",                # care recommendations / facilities read
+    "documents.delete",  # one physical upload permanently removed
+    "records.read",  # timeline / cross-check / lab-trends / snapshot read
+    "records.export",  # full-record export generated
+    "qa.ask",  # single-shot QA question answered
+    "session.create",  # conversation session created
+    "session.message",  # conversational turn answered
+    "session.read",  # transcript read
+    "session.delete",  # transcript deleted
+    "care.read",  # care recommendations / facilities read
 )
 
 
@@ -67,9 +67,13 @@ def record(user_id: str, action: str, detail: Optional[Dict[str, Any]] = None) -
     }
     try:
         from db import _get_client
+
         _get_client().table("audit_log").insert(event).execute()
     except Exception as e:
         logger.warning(
             "audit fallback (table unavailable): user=%s action=%s detail=%s error=%s",
-            user_id, action, detail, e,
+            user_id,
+            action,
+            detail,
+            e,
         )

@@ -108,16 +108,18 @@ def analyze_medication_activity(
             active.append(display)
             continue
 
-        inactive.append({
-            "medication": display,
-            "date": med.get("date"),
-            "duration": med.get("duration"),
-            "end": end.isoformat(),
-            "reason": (
-                f"course ended on {end.isoformat()} "
-                f"(duration '{med.get('duration')}') — before the reference date"
-            ),
-        })
+        inactive.append(
+            {
+                "medication": display,
+                "date": med.get("date"),
+                "duration": med.get("duration"),
+                "end": end.isoformat(),
+                "reason": (
+                    f"course ended on {end.isoformat()} "
+                    f"(duration '{med.get('duration')}') — before the reference date"
+                ),
+            }
+        )
 
     return {
         "reference_date": ref.isoformat(),

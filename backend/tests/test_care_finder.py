@@ -1,5 +1,6 @@
 """Offline tests for specialty suggestion, opening-hours matching, ranking,
 geocode/directory failures, Geoapify primary, and OSM fallback."""
+
 import os
 import sys
 from unittest import mock
@@ -7,7 +8,6 @@ from unittest import mock
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import care_finder as cf
-
 
 DIABETES_TIMELINE = {
     "medications_timeline": [
@@ -77,7 +77,12 @@ def test_directory_outage_is_retryable():
 
 
 def _osm_geocode(city):
-    return {"lat": 7.29, "lon": 80.63, "label": "Kandy, Sri Lanka", "source": "OpenStreetMap Nominatim"}
+    return {
+        "lat": 7.29,
+        "lon": 80.63,
+        "label": "Kandy, Sri Lanka",
+        "source": "OpenStreetMap Nominatim",
+    }
 
 
 def _osm_places(lat, lon, radius_m):
@@ -183,26 +188,33 @@ def test_geoapify_is_primary_when_configured():
         wanted_days=["mon"],
         tod="morning",
         radius_km_used=8.0,
-        location={"lat": 7.29, "lon": 80.63, "label": "Kandy, Sri Lanka", "source": "Geoapify Geocoding"},
-        suggestion=cf.suggest_specialties(None),
-        places=[{
-            "id": "geoapify/abc",
-            "name": "Kandy Endocrine Centre",
-            "place_type": "clinic",
-            "match_kind": "specialty",
-            "specialties": ["endocrinology"],
-            "address": "Kandy",
-            "phone": "+94 81 111",
-            "website": None,
-            "opening_hours": "Mo-Fr 08:00-16:00",
-            "availability": "open",
+        location={
             "lat": 7.29,
             "lon": 80.63,
-            "distance_km": 0.2,
-            "score": 170,
-            "source": "Geoapify",
-            "source_url": "https://www.openstreetmap.org/?mlat=7.29&mlon=80.63",
-        }],
+            "label": "Kandy, Sri Lanka",
+            "source": "Geoapify Geocoding",
+        },
+        suggestion=cf.suggest_specialties(None),
+        places=[
+            {
+                "id": "geoapify/abc",
+                "name": "Kandy Endocrine Centre",
+                "place_type": "clinic",
+                "match_kind": "specialty",
+                "specialties": ["endocrinology"],
+                "address": "Kandy",
+                "phone": "+94 81 111",
+                "website": None,
+                "opening_hours": "Mo-Fr 08:00-16:00",
+                "availability": "open",
+                "lat": 7.29,
+                "lon": 80.63,
+                "distance_km": 0.2,
+                "score": 170,
+                "source": "Geoapify",
+                "source_url": "https://www.openstreetmap.org/?mlat=7.29&mlon=80.63",
+            }
+        ],
         source=cf.SOURCE_GEOAPIFY,
     )
     try:
@@ -220,9 +232,13 @@ def test_geoapify_is_primary_when_configured():
 def test_osm_used_when_geoapify_unavailable_or_empty():
     os.environ["GEOAPIFY_API_KEY"] = "abc123realkey"
     try:
-        with mock.patch.object(cf, "_search_geoapify", side_effect=cf.DirectoryUnavailableError("quota")), \
-             mock.patch.object(cf, "geocode_city", _osm_geocode), \
-             mock.patch.object(cf, "fetch_osm_places", _osm_places):
+        with (
+            mock.patch.object(
+                cf, "_search_geoapify", side_effect=cf.DirectoryUnavailableError("quota")
+            ),
+            mock.patch.object(cf, "geocode_city", _osm_geocode),
+            mock.patch.object(cf, "fetch_osm_places", _osm_places),
+        ):
             cascaded = cf.search_care(city="Kandy", specialty_id="endocrinology")
         assert cascaded["results"][0]["name"] == "Kandy Diabetes Clinic"
         assert cascaded["source"]["name"] == "OpenStreetMap"
@@ -242,9 +258,11 @@ def test_osm_used_when_geoapify_unavailable_or_empty():
             places=[],
             source=cf.SOURCE_GEOAPIFY,
         )
-        with mock.patch.object(cf, "_search_geoapify", return_value=empty_geo), \
-             mock.patch.object(cf, "geocode_city", _osm_geocode), \
-             mock.patch.object(cf, "fetch_osm_places", _osm_places):
+        with (
+            mock.patch.object(cf, "_search_geoapify", return_value=empty_geo),
+            mock.patch.object(cf, "geocode_city", _osm_geocode),
+            mock.patch.object(cf, "fetch_osm_places", _osm_places),
+        ):
             after_zero = cf.search_care(city="Kandy", specialty_id="endocrinology")
         assert after_zero["source"]["name"] == "OpenStreetMap"
         assert after_zero["results"][0]["name"] == "Kandy Diabetes Clinic"

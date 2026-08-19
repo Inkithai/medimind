@@ -10,10 +10,14 @@ from dosage_rules import check_dosages  # noqa: E402
 
 def _med(name, ingredients, dosage_value, dosage_unit, frequency=None, as_needed=False):
     return {
-        "name": name, "ingredients": ingredients,
-        "dosage_value": dosage_value, "dosage_unit": dosage_unit,
-        "frequency_per_day": frequency, "is_as_needed": as_needed,
-        "date": "2024-01-01", "source_file": "rx.pdf",
+        "name": name,
+        "ingredients": ingredients,
+        "dosage_value": dosage_value,
+        "dosage_unit": dosage_unit,
+        "frequency_per_day": frequency,
+        "is_as_needed": as_needed,
+        "date": "2024-01-01",
+        "source_file": "rx.pdf",
     }
 
 
@@ -54,9 +58,13 @@ def test_gram_doses_are_converted_to_mg():
 
 def test_prn_medication_not_checked_against_daily_ceiling():
     # As-needed: no frequency -> no daily total; single-dose limit still applies.
-    ok = check_dosages(_timeline([_med("Ibuprofen", ["ibuprofen"], 400, "mg", None, as_needed=True)]))
+    ok = check_dosages(
+        _timeline([_med("Ibuprofen", ["ibuprofen"], 400, "mg", None, as_needed=True)])
+    )
     assert ok["findings"] == []
-    too_big = check_dosages(_timeline([_med("Ibuprofen", ["ibuprofen"], 1200, "mg", None, as_needed=True)]))
+    too_big = check_dosages(
+        _timeline([_med("Ibuprofen", ["ibuprofen"], 1200, "mg", None, as_needed=True)])
+    )
     assert _kinds(too_big) == ["above_max_single_dose"]
 
 
@@ -75,9 +83,13 @@ def test_unknown_ingredient_is_skipped_with_reason():
 
 
 def test_combination_product_is_skipped_not_guessed():
-    report = check_dosages(_timeline([
-        _med("Co-codamol", ["paracetamol", "codeine"], 500, "mg", 8),
-    ]))
+    report = check_dosages(
+        _timeline(
+            [
+                _med("Co-codamol", ["paracetamol", "codeine"], 500, "mg", 8),
+            ]
+        )
+    )
     assert report["findings"] == []
     assert "combination product" in report["skipped"][0]["reason"]
 
@@ -106,12 +118,15 @@ def test_every_finding_carries_consult_framing_and_source():
         assert "Consult a doctor or pharmacist" in finding["explanation"]
         assert finding["source"] == "dosage_rules"
         assert finding["source_file"] == "rx.pdf"
-    assert "not mean a dose is safe" in report["note"].replace("does NOT mean a dose is safe", "not mean a dose is safe")
+    assert "not mean a dose is safe" in report["note"].replace(
+        "does NOT mean a dose is safe", "not mean a dose is safe"
+    )
 
 
 # ---------------------------------------------------------------------------
 # Unit normalization beyond mg (§1.4)
 # ---------------------------------------------------------------------------
+
 
 def test_tablet_doses_converted_via_standard_strength():
     # 3 tablets x 4/day, assuming 500 mg tablets -> 1500 mg single (above
@@ -165,6 +180,7 @@ def test_direct_mg_findings_keep_full_confidence_and_no_assumption():
 # ---------------------------------------------------------------------------
 # Activity scoping (§1.2)
 # ---------------------------------------------------------------------------
+
 
 def test_expired_course_excluded_from_dosage_checks():
     from datetime import date, timedelta

@@ -79,6 +79,7 @@ def _duration_days(med: Dict[str, Any]) -> Optional[int]:
         return int(d)
     if isinstance(d, str):
         import re
+
         m = re.search(r"\d+", d)
         if m:
             return int(m.group())
@@ -94,7 +95,7 @@ def analyse_adherence(timeline: Dict[str, Any], reference_date: Any = None) -> D
     # group prescription lines by normalized ingredient
     groups: Dict[str, List[Dict[str, Any]]] = {}
     for med in meds:
-        for ing in (med.get("ingredients") or [med.get("name")]):
+        for ing in med.get("ingredients") or [med.get("name")]:
             key = str(ing or "").strip().lower()
             if key:
                 groups.setdefault(key, []).append(med)
@@ -118,35 +119,39 @@ def analyse_adherence(timeline: Dict[str, Any], reference_date: Any = None) -> D
             gap_days = (cur_date - prev_date).days - prev_dur
             if gap_days > 7:  # tolerated overlap/slack of a week
                 sig = "refill_gap" if gap_days <= prev_dur else "late_refill"
-                signals.append({
-                    "ingredient": key,
-                    "signal": sig,
-                    "gap_days": gap_days,
-                    "between": [str(prev_date), str(cur_date)],
-                    "detail": (
-                        f"There is a ~{gap_days}-day gap between consecutive supplies of "
-                        f"'{key}' (after the previous ~{prev_dur}-day course would have "
-                        "run out). This may mean the medicine lapsed — ask whether it was "
-                        "taken continuously."
-                    ),
-                })
+                signals.append(
+                    {
+                        "ingredient": key,
+                        "signal": sig,
+                        "gap_days": gap_days,
+                        "between": [str(prev_date), str(cur_date)],
+                        "detail": (
+                            f"There is a ~{gap_days}-day gap between consecutive supplies of "
+                            f"'{key}' (after the previous ~{prev_dur}-day course would have "
+                            "run out). This may mean the medicine lapsed — ask whether it was "
+                            "taken continuously."
+                        ),
+                    }
+                )
 
         # apparent stop: last supply's course ended well before reference, no re-supply
         last_date, last_med = dated[-1]
         last_dur = _duration_days(last_med) or 30
         end = last_date + timedelta(days=last_dur)
         if len(dated) >= 1 and end < ref - timedelta(days=last_dur):
-            signals.append({
-                "ingredient": key,
-                "signal": "apparent_stop",
-                "last_supply": str(last_date),
-                "estimated_end": str(end),
-                "detail": (
-                    f"'{key}' was last supplied around {last_date}; the course would have "
-                    f"ended ~{end}, and nothing later is in the record. Check whether this "
-                    "medicine was stopped deliberately or has lapsed."
-                ),
-            })
+            signals.append(
+                {
+                    "ingredient": key,
+                    "signal": "apparent_stop",
+                    "last_supply": str(last_date),
+                    "estimated_end": str(end),
+                    "detail": (
+                        f"'{key}' was last supplied around {last_date}; the course would have "
+                        f"ended ~{end}, and nothing later is in the record. Check whether this "
+                        "medicine was stopped deliberately or has lapsed."
+                    ),
+                }
+            )
 
     return {
         "reference_date": str(ref),

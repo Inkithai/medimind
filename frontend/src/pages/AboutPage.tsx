@@ -40,7 +40,11 @@ export function AboutPage() {
     { id: "overview", title: t("about.overviewTitle"), nav: t("about.navOverview") },
     { id: "features", title: t("about.featuresTitle"), nav: t("about.navFeatures") },
     { id: "how-it-works", title: t("about.howTitle"), nav: t("about.navHow") },
-    { id: "safety-intelligence", title: t("about.safetyIntelligenceTitle"), nav: t("about.navSafety") },
+    {
+      id: "safety-intelligence",
+      title: t("about.safetyIntelligenceTitle"),
+      nav: t("about.navSafety"),
+    },
     { id: "security", title: t("about.secTitle"), nav: t("about.navPrivacy") },
     { id: "interoperability", title: t("about.interoperabilityTitle"), nav: t("about.navInterop") },
     { id: "api", title: t("about.apiTitle"), nav: t("about.navApi") },
@@ -102,7 +106,9 @@ function PageHeader() {
           className="btn-secondary mt-5 inline-flex focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
         >
           {t("about.seeHowItWorks")}
-          <span aria-hidden="true" className="text-slate-400">↓</span>
+          <span aria-hidden="true" className="text-slate-400">
+            ↓
+          </span>
         </a>
       </div>
 
@@ -143,7 +149,7 @@ function useActiveSection(ids: string[]): string | null {
       },
       // The sticky section bar (~72px) sits above the content; sections are
       // considered "current" only once they reach the top third of the view.
-      { rootMargin: "-96px 0px -70% 0px", threshold: 0 }
+      { rootMargin: "-96px 0px -70% 0px", threshold: 0 },
     );
     for (const id of idsRef.current) {
       const element = document.getElementById(id);
@@ -186,7 +192,7 @@ function SectionNavBar({
                   "flex min-h-[44px] items-center whitespace-nowrap border-b-2 px-3 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-400",
                   active
                     ? "border-brand-600 font-semibold text-brand-800"
-                    : "border-transparent text-slate-600 hover:border-brand-300 hover:text-slate-900"
+                    : "border-transparent text-slate-600 hover:border-brand-300 hover:text-slate-900",
                 )}
               >
                 {section.nav}
@@ -236,7 +242,9 @@ function Section({
       <h2 id={`${id}-heading`} className="section-title">
         {title}
       </h2>
-      {subtitle && <p className="mt-1.5 max-w-3xl text-sm leading-relaxed text-slate-500">{subtitle}</p>}
+      {subtitle && (
+        <p className="mt-1.5 max-w-3xl text-sm leading-relaxed text-slate-500">{subtitle}</p>
+      )}
       <div className="mt-6">{children}</div>
     </section>
   );
@@ -247,7 +255,7 @@ function Panel({ children, className }: { children: ReactNode; className?: strin
     <div
       className={classNames(
         "rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6",
-        className
+        className,
       )}
     >
       {children}
@@ -324,13 +332,20 @@ function Overview() {
               className="flex flex-col rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
             >
               <span
-                className={classNames("flex h-10 w-10 items-center justify-center rounded-xl", tone)}
+                className={classNames(
+                  "flex h-10 w-10 items-center justify-center rounded-xl",
+                  tone,
+                )}
                 aria-hidden="true"
               >
                 <Icon className="h-5 w-5" />
               </span>
-              <h3 className="mt-3.5 text-base font-bold text-slate-900">{t(`about.${key}Title`)}</h3>
-              <p className="mt-1.5 text-sm leading-relaxed text-slate-600">{t(`about.${key}Body`)}</p>
+              <h3 className="mt-3.5 text-base font-bold text-slate-900">
+                {t(`about.${key}Title`)}
+              </h3>
+              <p className="mt-1.5 text-sm leading-relaxed text-slate-600">
+                {t(`about.${key}Body`)}
+              </p>
             </article>
           ))}
         </div>
@@ -391,13 +406,20 @@ function Features() {
                   className="flex flex-col rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
                 >
                   <span
-                    className={classNames("flex h-10 w-10 items-center justify-center rounded-xl", tone)}
+                    className={classNames(
+                      "flex h-10 w-10 items-center justify-center rounded-xl",
+                      tone,
+                    )}
                     aria-hidden="true"
                   >
                     <Icon className="h-5 w-5" />
                   </span>
-                  <h4 className="mt-3.5 text-base font-bold text-slate-900">{t(`about.${key}Title`)}</h4>
-                  <p className="mt-1.5 text-sm leading-relaxed text-slate-600">{t(`about.${key}Body`)}</p>
+                  <h4 className="mt-3.5 text-base font-bold text-slate-900">
+                    {t(`about.${key}Title`)}
+                  </h4>
+                  <p className="mt-1.5 text-sm leading-relaxed text-slate-600">
+                    {t(`about.${key}Body`)}
+                  </p>
                 </article>
               ))}
             </div>
@@ -459,7 +481,11 @@ function HowItWorks() {
           <ArchitectureDetail />
         </TechDetails>
         <TechDetails summary={t("about.techDocs")}>
-          <PipelineDetail title={t("about.pipeIngest")} keys={["s1", "s2", "s3", "s4"]} tone="sky" />
+          <PipelineDetail
+            title={t("about.pipeIngest")}
+            keys={["s1", "s2", "s3", "s4"]}
+            tone="sky"
+          />
         </TechDetails>
         <TechDetails summary={t("about.techData")}>
           <DataFlowDetail />
@@ -504,12 +530,17 @@ function ArchitectureDetail() {
     <Figure label={t("about.archDiagram")}>
       <Flow>
         {LAYERS.map((layer) => (
-          <div key={layer.key} className={classNames("rounded-xl border p-4", TONE_CLASSES[layer.tone])}>
+          <div
+            key={layer.key}
+            className={classNames("rounded-xl border p-4", TONE_CLASSES[layer.tone])}
+          >
             <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
               <p className="text-sm font-bold">{t(`about.${layer.key}Name`)}</p>
               <p className="font-mono text-[11px] leading-relaxed opacity-75">{layer.tech}</p>
             </div>
-            <p className="mt-1.5 text-sm leading-relaxed opacity-90">{t(`about.${layer.key}Body`)}</p>
+            <p className="mt-1.5 text-sm leading-relaxed opacity-90">
+              {t(`about.${layer.key}Body`)}
+            </p>
           </div>
         ))}
       </Flow>
@@ -532,7 +563,7 @@ function PipelineDetail({
       <h4
         className={classNames(
           "mb-3 inline-block rounded-full px-2.5 py-1 text-xs font-bold uppercase tracking-wider",
-          tone === "sky" ? "bg-sky-100 text-sky-800" : "bg-brand-100 text-brand-800"
+          tone === "sky" ? "bg-sky-100 text-sky-800" : "bg-brand-100 text-brand-800",
         )}
       >
         {title}
@@ -613,10 +644,30 @@ function RetrievalDetail() {
 }
 
 const CAPABILITY_GROUPS = [
-  { key: "cg1", tone: "border-brand-200 bg-brand-50", badge: "bg-brand-600", items: ["c1", "c2", "c3", "c4"] },
-  { key: "cg2", tone: "border-emerald-200 bg-emerald-50", badge: "bg-emerald-600", items: ["c5", "c6", "c7", "c8"] },
-  { key: "cg3", tone: "border-violet-200 bg-violet-50", badge: "bg-violet-600", items: ["c9", "c10", "c11", "c12"] },
-  { key: "cg4", tone: "border-amber-200 bg-amber-50", badge: "bg-amber-600", items: ["c13", "c14", "c15", "c16"] },
+  {
+    key: "cg1",
+    tone: "border-brand-200 bg-brand-50",
+    badge: "bg-brand-600",
+    items: ["c1", "c2", "c3", "c4"],
+  },
+  {
+    key: "cg2",
+    tone: "border-emerald-200 bg-emerald-50",
+    badge: "bg-emerald-600",
+    items: ["c5", "c6", "c7", "c8"],
+  },
+  {
+    key: "cg3",
+    tone: "border-violet-200 bg-violet-50",
+    badge: "bg-violet-600",
+    items: ["c9", "c10", "c11", "c12"],
+  },
+  {
+    key: "cg4",
+    tone: "border-amber-200 bg-amber-50",
+    badge: "bg-amber-600",
+    items: ["c13", "c14", "c15", "c16"],
+  },
 ] as const;
 
 function CapabilityStackDetail() {
@@ -626,18 +677,23 @@ function CapabilityStackDetail() {
       <p className="text-sm leading-relaxed text-slate-600">{t("about.capabilitiesSubtitle")}</p>
       <div className="mt-4 grid gap-4 sm:grid-cols-2">
         {CAPABILITY_GROUPS.map((group) => (
-          <article key={group.key} className={classNames("rounded-2xl border p-5 shadow-sm", group.tone)}>
+          <article
+            key={group.key}
+            className={classNames("rounded-2xl border p-5 shadow-sm", group.tone)}
+          >
             <div className="flex items-center gap-3">
               <span
                 className={classNames(
                   "flex h-9 w-9 items-center justify-center rounded-xl text-sm font-black text-white",
-                  group.badge
+                  group.badge,
                 )}
               >
                 ✓
               </span>
               <div>
-                <h4 className="text-base font-bold text-slate-900">{t(`about.${group.key}Title`)}</h4>
+                <h4 className="text-base font-bold text-slate-900">
+                  {t(`about.${group.key}Title`)}
+                </h4>
                 <p className="text-xs font-medium text-slate-600">{t(`about.${group.key}Body`)}</p>
               </div>
             </div>
@@ -676,18 +732,23 @@ function SafetyIntelligence() {
             <li key={key} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
               <span className="text-xs font-black text-brand-700">0{index + 1}</span>
               <h3 className="mt-2 text-sm font-bold text-slate-900">{t(`about.${key}Title`)}</h3>
-              <p className="mt-1.5 text-sm leading-relaxed text-slate-700">{t(`about.${key}Body`)}</p>
+              <p className="mt-1.5 text-sm leading-relaxed text-slate-700">
+                {t(`about.${key}Body`)}
+              </p>
             </li>
           ))}
         </ol>
         <ul className="mt-5 flex flex-wrap gap-2 border-t border-slate-100 pt-4 text-xs font-semibold text-slate-600">
-          {["about.safetyBadge1", "about.safetyBadge2", "about.safetyBadge3", "about.safetyBadge4"].map(
-            (key) => (
-              <li key={key} className="rounded-full bg-slate-100 px-3 py-1.5">
-                {t(key)}
-              </li>
-            )
-          )}
+          {[
+            "about.safetyBadge1",
+            "about.safetyBadge2",
+            "about.safetyBadge3",
+            "about.safetyBadge4",
+          ].map((key) => (
+            <li key={key} className="rounded-full bg-slate-100 px-3 py-1.5">
+              {t(key)}
+            </li>
+          ))}
         </ul>
       </Panel>
 
@@ -749,7 +810,10 @@ function Security() {
           <ul className="mt-3 space-y-2">
             {limitations.map((key) => (
               <li key={key} className="flex gap-2.5 text-sm leading-relaxed text-amber-900/90">
-                <span className="mt-2 h-1 w-1 shrink-0 rounded-full bg-amber-400" aria-hidden="true" />
+                <span
+                  className="mt-2 h-1 w-1 shrink-0 rounded-full bg-amber-400"
+                  aria-hidden="true"
+                />
                 <span className="min-w-0">{t(`about.${key}`)}</span>
               </li>
             ))}
@@ -780,7 +844,16 @@ function Security() {
 /* 6. Interoperability — two columns; details behind one click.        */
 /* ------------------------------------------------------------------ */
 
-const INTEROP_RESOURCES = ["Patient", "MedicationStatement", "MedicationRequest", "Observation", "AllergyIntolerance", "Condition", "Encounter", "Provenance"];
+const INTEROP_RESOURCES = [
+  "Patient",
+  "MedicationStatement",
+  "MedicationRequest",
+  "Observation",
+  "AllergyIntolerance",
+  "Condition",
+  "Encounter",
+  "Provenance",
+];
 
 function Interoperability() {
   const { t } = useI18n();
@@ -807,11 +880,15 @@ function Interoperability() {
             <span className="rounded-lg bg-white px-3 py-2 shadow-sm ring-1 ring-slate-200">
               {t("about.fhirInput")}
             </span>
-            <span aria-hidden="true" className="text-sky-500">→</span>
+            <span aria-hidden="true" className="text-sky-500">
+              →
+            </span>
             <span className="rounded-lg bg-white px-3 py-2 shadow-sm ring-1 ring-slate-200">
               {t("about.fhirBundle")}
             </span>
-            <span aria-hidden="true" className="text-sky-500">→</span>
+            <span aria-hidden="true" className="text-sky-500">
+              →
+            </span>
             <span className="rounded-lg bg-emerald-100 px-3 py-2 text-emerald-800">
               {t("about.fhirValidation")}
             </span>
@@ -820,7 +897,12 @@ function Interoperability() {
           <details className="group mt-4 rounded-xl border border-slate-200 bg-white/80">
             <summary className="flex min-h-[44px] cursor-pointer list-none items-center justify-between gap-3 px-4 py-2.5 text-sm font-semibold text-sky-800 transition hover:text-sky-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-400 [&::-webkit-details-marker]:hidden">
               {t("about.viewResources")}
-              <span aria-hidden="true" className="text-slate-400 transition-transform group-open:rotate-180">▾</span>
+              <span
+                aria-hidden="true"
+                className="text-slate-400 transition-transform group-open:rotate-180"
+              >
+                ▾
+              </span>
             </summary>
             <div className="flex flex-wrap gap-2 px-4 pb-4">
               {INTEROP_RESOURCES.map((resource) => (
@@ -840,13 +922,20 @@ function Interoperability() {
           </h3>
           <div className="mt-4 space-y-3">
             {["LOINC", "SNOMED CT", "RxNorm", "ICD-10-CM"].map((code) => (
-              <div key={code} className="flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2.5">
+              <div
+                key={code}
+                className="flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2.5"
+              >
                 <span className="font-mono text-sm font-bold text-slate-800">{code}</span>
-                <span className="text-xs font-semibold text-emerald-700">{t("about.mappedWhenKnown")}</span>
+                <span className="text-xs font-semibold text-emerald-700">
+                  {t("about.mappedWhenKnown")}
+                </span>
               </div>
             ))}
           </div>
-          <p className="mt-4 text-xs leading-relaxed text-slate-500">{t("about.terminologyBody")}</p>
+          <p className="mt-4 text-xs leading-relaxed text-slate-500">
+            {t("about.terminologyBody")}
+          </p>
         </Panel>
       </div>
     </Section>
@@ -961,7 +1050,7 @@ function ApiOverview() {
                     <span
                       className={classNames(
                         "rounded-md px-2 py-0.5 font-mono text-[11px] font-bold",
-                        METHOD_TONES[endpoint.method] || "bg-slate-100 text-slate-700"
+                        METHOD_TONES[endpoint.method] || "bg-slate-100 text-slate-700",
                       )}
                     >
                       {endpoint.method}

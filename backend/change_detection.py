@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 try:
     from dateutil import parser as date_parser  # noqa: F401  (presence check only)
+
     from date_convention import infer_dayfirst, parse_mixed_datetime
 except ImportError:  # pragma: no cover - production requirements include dateutil
     date_parser = None
@@ -103,19 +104,21 @@ def _medication_changes(before: Dict[str, Any], after: Dict[str, Any]) -> List[D
     for key, med in new_meds.items():
         if key not in old_meds:
             name = med.get("name") or key
-            changes.append({
-                "category": "medication",
-                "kind": "newly_documented",
-                "importance": "review",
-                "title": f"{name} appears in the newer medication list",
-                "description": (
-                    "This medicine was not listed in the preceding comparable record. "
-                    "That supports ‘newly documented’, but does not prove when it was started."
-                ),
-                "before": None,
-                "after": med.get("dosage") or med.get("frequency") or "Listed",
-                "evidence": _evidence(before, after),
-            })
+            changes.append(
+                {
+                    "category": "medication",
+                    "kind": "newly_documented",
+                    "importance": "review",
+                    "title": f"{name} appears in the newer medication list",
+                    "description": (
+                        "This medicine was not listed in the preceding comparable record. "
+                        "That supports ‘newly documented’, but does not prove when it was started."
+                    ),
+                    "before": None,
+                    "after": med.get("dosage") or med.get("frequency") or "Listed",
+                    "evidence": _evidence(before, after),
+                }
+            )
             continue
 
         old = old_meds[key]
@@ -123,25 +126,41 @@ def _medication_changes(before: Dict[str, Any], after: Dict[str, Any]) -> List[D
         modified = [field for field in fields if _key(old.get(field)) != _key(med.get(field))]
         if modified:
             name = med.get("name") or old.get("name") or key
-            old_instruction = ", ".join(str(old.get(f)) for f in fields if old.get(f)) or "No instruction extracted"
-            new_instruction = ", ".join(str(med.get(f)) for f in fields if med.get(f)) or "No instruction extracted"
-            changes.append({
-                "category": "medication",
-                "kind": "instruction_changed",
-                "importance": "attention",
-                "title": f"Instructions changed for {name}",
-                "description": f"The extracted {', '.join(modified)} differs between these records.",
-                "before": old_instruction,
-                "after": new_instruction,
-                "evidence": _evidence(before, after),
-            })
+            old_instruction = (
+                ", ".join(str(old.get(f)) for f in fields if old.get(f))
+                or "No instruction extracted"
+            )
+            new_instruction = (
+                ", ".join(str(med.get(f)) for f in fields if med.get(f))
+                or "No instruction extracted"
+            )
+            changes.append(
+                {
+                    "category": "medication",
+                    "kind": "instruction_changed",
+                    "importance": "attention",
+                    "title": f"Instructions changed for {name}",
+                    "description": f"The extracted {', '.join(modified)} differs between these records.",  # noqa: E501
+                    "before": old_instruction,
+                    "after": new_instruction,
+                    "evidence": _evidence(before, after),
+                }
+            )
 
     return changes
 
 
 def _lab_changes(before: Dict[str, Any], after: Dict[str, Any]) -> List[Dict[str, Any]]:
-    old_labs = {_key(lab.get("test_name")): lab for lab in before.get("lab_results", []) if _key(lab.get("test_name"))}
-    new_labs = {_key(lab.get("test_name")): lab for lab in after.get("lab_results", []) if _key(lab.get("test_name"))}
+    old_labs = {
+        _key(lab.get("test_name")): lab
+        for lab in before.get("lab_results", [])
+        if _key(lab.get("test_name"))
+    }
+    new_labs = {
+        _key(lab.get("test_name")): lab
+        for lab in after.get("lab_results", [])
+        if _key(lab.get("test_name"))
+    }
     changes: List[Dict[str, Any]] = []
 
     if not old_labs or not new_labs:
@@ -150,16 +169,18 @@ def _lab_changes(before: Dict[str, Any], after: Dict[str, Any]) -> List[Dict[str
     for key, lab in new_labs.items():
         old = old_labs.get(key)
         if old is None:
-            changes.append({
-                "category": "lab",
-                "kind": "newly_measured",
-                "importance": "info",
-                "title": f"{lab.get('test_name') or key} is newly shown",
-                "description": "This test appears in the newer report but not the preceding lab report.",
-                "before": None,
-                "after": f"{lab.get('value', 'Unknown')} {lab.get('unit') or ''}".strip(),
-                "evidence": _evidence(before, after),
-            })
+            changes.append(
+                {
+                    "category": "lab",
+                    "kind": "newly_measured",
+                    "importance": "info",
+                    "title": f"{lab.get('test_name') or key} is newly shown",
+                    "description": "This test appears in the newer report but not the preceding lab report.",  # noqa: E501
+                    "before": None,
+                    "after": f"{lab.get('value', 'Unknown')} {lab.get('unit') or ''}".strip(),
+                    "evidence": _evidence(before, after),
+                }
+            )
             continue
 
         old_value = _number(old.get("value"))
@@ -175,34 +196,43 @@ def _lab_changes(before: Dict[str, Any], after: Dict[str, Any]) -> List[Dict[str
 
         if old_flag != new_flag:
             important = new_flag in {"high", "low"} and old_flag == "normal"
-            changes.append({
-                "category": "lab",
-                "kind": "status_changed",
-                "importance": "attention" if important else "review",
-                "title": f"{name} changed from {old_flag} to {new_flag}",
-                "description": "The status is taken from each report’s extracted reference-range flag.",
-                "before": f"{old.get('value', 'Unknown')} {unit} ({old_flag})".strip(),
-                "after": f"{lab.get('value', 'Unknown')} {unit} ({new_flag})".strip(),
-                "evidence": _evidence(before, after),
-            })
-        elif units_comparable and old_value is not None and new_value is not None and old_value != new_value:
+            changes.append(
+                {
+                    "category": "lab",
+                    "kind": "status_changed",
+                    "importance": "attention" if important else "review",
+                    "title": f"{name} changed from {old_flag} to {new_flag}",
+                    "description": "The status is taken from each report’s extracted reference-range flag.",  # noqa: E501
+                    "before": f"{old.get('value', 'Unknown')} {unit} ({old_flag})".strip(),
+                    "after": f"{lab.get('value', 'Unknown')} {unit} ({new_flag})".strip(),
+                    "evidence": _evidence(before, after),
+                }
+            )
+        elif (
+            units_comparable
+            and old_value is not None
+            and new_value is not None
+            and old_value != new_value
+        ):
             delta = new_value - old_value
             percent = (delta / abs(old_value) * 100) if old_value else None
             direction = "increased" if delta > 0 else "decreased"
             percent_text = f" ({abs(percent):.1f}%)" if percent is not None else ""
-            changes.append({
-                "category": "lab",
-                "kind": "value_changed",
-                "importance": "review" if old_flag in {"high", "low"} else "info",
-                "title": f"{name} {direction}{percent_text}",
-                "description": (
-                    f"A change of {_display_number(abs(delta))} {unit}".strip()
-                    + ". Clinical meaning depends on context and the laboratory’s reference range."
-                ),
-                "before": f"{_display_number(old_value)} {unit}".strip(),
-                "after": f"{_display_number(new_value)} {unit}".strip(),
-                "evidence": _evidence(before, after),
-            })
+            changes.append(
+                {
+                    "category": "lab",
+                    "kind": "value_changed",
+                    "importance": "review" if old_flag in {"high", "low"} else "info",
+                    "title": f"{name} {direction}{percent_text}",
+                    "description": (
+                        f"A change of {_display_number(abs(delta))} {unit}".strip()
+                        + ". Clinical meaning depends on context and the laboratory’s reference range."  # noqa: E501
+                    ),
+                    "before": f"{_display_number(old_value)} {unit}".strip(),
+                    "after": f"{_display_number(new_value)} {unit}".strip(),
+                    "evidence": _evidence(before, after),
+                }
+            )
 
     return changes
 
@@ -212,16 +242,18 @@ def _allergy_changes(before: Dict[str, Any], after: Dict[str, Any]) -> List[Dict
     changes = []
     for allergy in after.get("allergies_noted") or []:
         if _key(allergy) and _key(allergy) not in old:
-            changes.append({
-                "category": "allergy",
-                "kind": "newly_documented",
-                "importance": "attention",
-                "title": f"Allergy newly documented: {allergy}",
-                "description": "This allergy appears in the newer record and was not extracted from the preceding record.",
-                "before": None,
-                "after": allergy,
-                "evidence": _evidence(before, after),
-            })
+            changes.append(
+                {
+                    "category": "allergy",
+                    "kind": "newly_documented",
+                    "importance": "attention",
+                    "title": f"Allergy newly documented: {allergy}",
+                    "description": "This allergy appears in the newer record and was not extracted from the preceding record.",  # noqa: E501
+                    "before": None,
+                    "after": allergy,
+                    "evidence": _evidence(before, after),
+                }
+            )
     return changes
 
 
@@ -232,7 +264,9 @@ def _compare(before: Dict[str, Any], after: Dict[str, Any]) -> Dict[str, Any]:
         + _allergy_changes(before, after)
     )
     order = {"attention": 0, "review": 1, "info": 2}
-    changes.sort(key=lambda item: (order.get(item["importance"], 9), item["category"], item["title"]))
+    changes.sort(
+        key=lambda item: (order.get(item["importance"], 9), item["category"], item["title"])
+    )
     return {
         "from_date": before.get("date"),
         "to_date": after.get("date"),
@@ -258,7 +292,9 @@ def detect_record_changes(timeline: Dict[str, Any]) -> Dict[str, Any]:
     comparisons.reverse()
     total = sum(item["change_count"] for item in comparisons)
     attention = sum(
-        1 for comparison in comparisons for change in comparison["changes"]
+        1
+        for comparison in comparisons
+        for change in comparison["changes"]
         if change["importance"] == "attention"
     )
 
@@ -273,7 +309,7 @@ def detect_record_changes(timeline: Dict[str, Any]) -> Dict[str, Any]:
         },
         "method": "Deterministic comparison of structured fields; no generative model is used.",
         "note": (
-            "A record may be incomplete. ‘Newly documented’ does not prove a medicine was started on that date, "
-            "and an omitted medicine is never treated as stopped. Do not change treatment without a clinician."
+            "A record may be incomplete. ‘Newly documented’ does not prove a medicine was started on that date, "  # noqa: E501
+            "and an omitted medicine is never treated as stopped. Do not change treatment without a clinician."  # noqa: E501
         ),
     }

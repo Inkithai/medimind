@@ -18,6 +18,7 @@
    "clinical_notes" makes json.loads (and every repair path) fail even
    though the JSON is otherwise complete.
 """
+
 import json
 import os
 import sys
@@ -30,15 +31,17 @@ os.environ.setdefault("GROQ_VISION_MODEL", "qwen/qwen3.6-27b")
 
 import medical_extractor as me
 
-VALID_JSON = json.dumps({
-    "document_type": "lab_report",
-    "date": "2026-06-10",
-    "provider_or_doctor": "Dr. Rohan Silva",
-    "patient_name": "PERERA, Anjali (Mrs.)",
-    "medications": [],
-    "lab_results": [{"test": "Hemoglobin", "value": 10.2, "unit": "g/dL"}],
-    "overall_confidence": 0.9,
-})
+VALID_JSON = json.dumps(
+    {
+        "document_type": "lab_report",
+        "date": "2026-06-10",
+        "provider_or_doctor": "Dr. Rohan Silva",
+        "patient_name": "PERERA, Anjali (Mrs.)",
+        "medications": [],
+        "lab_results": [{"test": "Hemoglobin", "value": 10.2, "unit": "g/dL"}],
+        "overall_confidence": 0.9,
+    }
+)
 
 VISION_CONTENT = [
     {"type": "text", "text": "t"},
@@ -54,9 +57,11 @@ def _resp(content: str, finish_reason: str = "stop"):
 
 def _run_ladder(fake_create, env=None):
     me._SUPPRESS_STATE.clear()
-    with mock.patch.object(me.client.chat.completions, "create", fake_create), \
-         mock.patch.dict(os.environ, env or {"GROQ_DISABLE_REASONING": "false"}), \
-         mock.patch.object(me, "time") as fake_time:
+    with (
+        mock.patch.object(me.client.chat.completions, "create", fake_create),
+        mock.patch.dict(os.environ, env or {"GROQ_DISABLE_REASONING": "false"}),
+        mock.patch.object(me, "time") as fake_time,
+    ):
         fake_time.sleep = lambda s: None
         return me._completion_resilient(
             model="qwen/qwen3.6-27b",

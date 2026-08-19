@@ -11,7 +11,8 @@ interface CareMapProps {
 }
 
 const TILE_URL = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
-const TILE_ATTR = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
+const TILE_ATTR =
+  '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
 
 export function CareMap({ center, places, selectedId, onSelect }: CareMapProps) {
   const { t, formatNumber } = useI18n();
@@ -29,7 +30,10 @@ export function CareMap({ center, places, selectedId, onSelect }: CareMapProps) 
 
     void import("leaflet").then((L) => {
       if (cancelled || !hostRef.current) return;
-      const map = L.map(hostRef.current, { scrollWheelZoom: false }).setView([center.lat, center.lon], 13);
+      const map = L.map(hostRef.current, { scrollWheelZoom: false }).setView(
+        [center.lat, center.lon],
+        13,
+      );
       L.tileLayer(TILE_URL, { attribution: TILE_ATTR, maxZoom: 19 }).addTo(map);
       mapRef.current = map;
       setMapReady((n) => n + 1);
@@ -54,7 +58,11 @@ export function CareMap({ center, places, selectedId, onSelect }: CareMapProps) 
       markersRef.current = places.map((place) => {
         const selected = place.id === selectedId;
         const color =
-          place.match_kind === "specialty" ? "#0f766e" : place.place_type === "hospital" ? "#b45309" : "#334155";
+          place.match_kind === "specialty"
+            ? "#0f766e"
+            : place.place_type === "hospital"
+              ? "#b45309"
+              : "#334155";
         const marker = L.circleMarker([place.lat, place.lon], {
           radius: selected ? 10 : 7,
           color,
@@ -63,7 +71,9 @@ export function CareMap({ center, places, selectedId, onSelect }: CareMapProps) 
           fillOpacity: selected ? 0.95 : 0.7,
         })
           .addTo(map)
-          .bindPopup(`<strong>${escapeHtml(place.name)}</strong><br/>${escapeHtml(formatNumber(place.distance_km, { maximumFractionDigits: 1 }))} km`)
+          .bindPopup(
+            `<strong>${escapeHtml(place.name)}</strong><br/>${escapeHtml(formatNumber(place.distance_km, { maximumFractionDigits: 1 }))} km`,
+          )
           .on("click", () => onSelectRef.current(place.id));
         return marker;
       });

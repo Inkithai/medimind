@@ -190,7 +190,7 @@ export class ApiError extends Error {
     status: number,
     message: string,
     detail?: unknown,
-    metadata?: { code?: string; retryable?: boolean; retryAfterSeconds?: number | null }
+    metadata?: { code?: string; retryable?: boolean; retryAfterSeconds?: number | null },
   ) {
     super(message);
     this.name = "ApiError";
@@ -233,7 +233,7 @@ function apiErrorMetadata(data: unknown) {
 async function publicRequest<T>(
   apiBase: string,
   path: string,
-  options: RequestOptions = {}
+  options: RequestOptions = {},
 ): Promise<T> {
   let response: Response;
   try {
@@ -247,7 +247,7 @@ async function publicRequest<T>(
     throw new ApiError(
       0,
       `Could not reach the API at ${apiBase || "(same origin)"}. Check that the backend is running.`,
-      err
+      err,
     );
   }
 
@@ -282,7 +282,9 @@ function safeExternalUrl(value: string | null): string | undefined {
   if (!value) return undefined;
   try {
     const parsed = new URL(value);
-    return parsed.protocol === "https:" || parsed.protocol === "http:" ? parsed.toString() : undefined;
+    return parsed.protocol === "https:" || parsed.protocol === "http:"
+      ? parsed.toString()
+      : undefined;
   } catch {
     return undefined;
   }
@@ -320,7 +322,7 @@ function normalizeCareFacility(facility: CareFacilityResponse): CareFacility {
 async function request<T>(
   credentials: Credentials,
   path: string,
-  options: RequestOptions = {}
+  options: RequestOptions = {},
 ): Promise<T> {
   const headers: Record<string, string> = {
     Authorization: `Bearer ${credentials.token}`,
@@ -340,7 +342,7 @@ async function request<T>(
     throw new ApiError(
       0,
       `Could not reach the API at ${credentials.apiBase || "(same origin)"}. Check that the backend is running.`,
-      err
+      err,
     );
   }
 
@@ -403,16 +405,20 @@ export const api = {
   // Use when USE_BACKGROUND_JOBS=true or for large scans
   uploadDocumentsAsync(
     credentials: Credentials,
-    files: File[]
+    files: File[],
   ): Promise<{ job_id: string; status: string; file_count?: number; worker_limit?: number }> {
     const form = new FormData();
     for (const file of files) form.append("files", file);
     // Prefer header and query param both trigger background on server
-    return request<{ job_id: string; status: string; file_count?: number; worker_limit?: number }>(credentials, "/api/v1/documents?async=true", {
-      method: "POST",
-      headers: { Prefer: "respond-async" },
-      body: form,
-    });
+    return request<{ job_id: string; status: string; file_count?: number; worker_limit?: number }>(
+      credentials,
+      "/api/v1/documents?async=true",
+      {
+        method: "POST",
+        headers: { Prefer: "respond-async" },
+        body: form,
+      },
+    );
   },
 
   getJob(credentials: Credentials, jobId: string): Promise<Job> {
@@ -441,7 +447,7 @@ export const api = {
       onUnreachable?: (info: { consecutiveFailures: number; error: ApiError }) => void;
       onReconnected?: () => void;
       unreachableGraceMs?: number;
-    } = {}
+    } = {},
   ): Promise<Job> {
     const start = Date.now();
     const graceMs = options.unreachableGraceMs ?? 90 * 1000;
@@ -489,7 +495,7 @@ export const api = {
             apiError.status,
             "Your files finished uploading, but the server stopped responding while we were tracking progress. Your records are saved — reopen this page in a moment to see them.",
             apiError.detail,
-            { code: "job_status_unavailable", retryable: true }
+            { code: "job_status_unavailable", retryable: true },
           );
         }
       }
@@ -499,7 +505,7 @@ export const api = {
       408,
       "The browser stopped waiting, but the server may still be processing this upload. Do not upload the same files again yet; check back shortly.",
       undefined,
-      { code: "job_poll_timeout", retryable: false }
+      { code: "job_poll_timeout", retryable: false },
     );
   },
 
@@ -514,7 +520,7 @@ export const api = {
     return request<DeleteDocumentResponse>(
       credentials,
       `/api/v1/documents/${encodeURIComponent(documentId)}`,
-      { method: "DELETE" }
+      { method: "DELETE" },
     );
   },
 
@@ -538,23 +544,26 @@ export const api = {
 
   // Re-runs the full per-document pipeline for one stored document (fetches
   // the original from storage, re-extracts, rebuilds timeline/safety/index).
-  reprocessDocument(credentials: Credentials, documentId: string): Promise<ReprocessDocumentResponse> {
+  reprocessDocument(
+    credentials: Credentials,
+    documentId: string,
+  ): Promise<ReprocessDocumentResponse> {
     return request<ReprocessDocumentResponse>(
       credentials,
       `/api/v1/documents/${encodeURIComponent(documentId)}/reprocess`,
-      { method: "POST" }
+      { method: "POST" },
     );
   },
 
   getDocumentSignedUrl(
     credentials: Credentials,
     documentId: string,
-    expiresInSeconds = 900
+    expiresInSeconds = 900,
   ): Promise<DocumentSignedUrlResponse> {
     return request<DocumentSignedUrlResponse>(
       credentials,
       `/api/v1/documents/${encodeURIComponent(documentId)}/signed-url?expires_in_seconds=${encodeURIComponent(String(expiresInSeconds))}`,
-      { method: "POST" }
+      { method: "POST" },
     );
   },
 
@@ -562,7 +571,7 @@ export const api = {
     return request<ProcessTextResponse>(
       credentials,
       `/api/v1/documents/${encodeURIComponent(documentId)}/process-text`,
-      { method: "POST" }
+      { method: "POST" },
     );
   },
 
@@ -579,19 +588,23 @@ export const api = {
 
   getDocumentCorrections(
     credentials: Credentials,
-    documentId: string
+    documentId: string,
   ): Promise<DocumentCorrectionsResponse> {
     return request<DocumentCorrectionsResponse>(
       credentials,
-      `/api/v1/documents/${encodeURIComponent(documentId)}/corrections`
+      `/api/v1/documents/${encodeURIComponent(documentId)}/corrections`,
     );
   },
 
   correctDocument(
     credentials: Credentials,
     documentId: string,
-    changes: Array<{ field_path: string; corrected_value: unknown; expected_previous_value?: unknown }>,
-    reason: string
+    changes: Array<{
+      field_path: string;
+      corrected_value: unknown;
+      expected_previous_value?: unknown;
+    }>,
+    reason: string,
   ): Promise<RecordRebuildResponse> {
     return request<RecordRebuildResponse>(
       credentials,
@@ -600,14 +613,14 @@ export const api = {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ changes, reason }),
-      }
+      },
     );
   },
 
   getConflicts(credentials: Credentials, includeInactive = false): Promise<ConflictsResponse> {
     return request<ConflictsResponse>(
       credentials,
-      `/api/v1/conflicts?include_inactive=${includeInactive ? "true" : "false"}`
+      `/api/v1/conflicts?include_inactive=${includeInactive ? "true" : "false"}`,
     );
   },
 
@@ -615,7 +628,7 @@ export const api = {
     credentials: Credentials,
     conflictId: string,
     authoritativeDocumentId: string,
-    note?: string
+    note?: string,
   ): Promise<RecordRebuildResponse> {
     return request<RecordRebuildResponse>(
       credentials,
@@ -627,14 +640,14 @@ export const api = {
           authoritative_document_id: authoritativeDocumentId,
           note: note || null,
         }),
-      }
+      },
     );
   },
 
   reopenConflict(
     credentials: Credentials,
     conflictId: string,
-    note?: string
+    note?: string,
   ): Promise<RecordRebuildResponse> {
     return request<RecordRebuildResponse>(
       credentials,
@@ -643,7 +656,7 @@ export const api = {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ note: note || null }),
-      }
+      },
     );
   },
 
@@ -651,10 +664,12 @@ export const api = {
     return request<CrossCheckReport>(credentials, "/api/v1/cross-check");
   },
 
-  getMedicationSafety(credentials: Credentials): Promise<CrossCheckReport & { dosage_report?: DosageReport }> {
+  getMedicationSafety(
+    credentials: Credentials,
+  ): Promise<CrossCheckReport & { dosage_report?: DosageReport }> {
     return request<CrossCheckReport & { dosage_report?: DosageReport }>(
       credentials,
-      "/api/v1/medication-safety"
+      "/api/v1/medication-safety",
     );
   },
 
@@ -712,7 +727,11 @@ export const api = {
 
   searchCareProviders(
     credentials: Credentials,
-    body: { flag_id: string; location: string; availability: "any" | "today" | "this_week" | "evenings" | "weekends" }
+    body: {
+      flag_id: string;
+      location: string;
+      availability: "any" | "today" | "this_week" | "evenings" | "weekends";
+    },
   ): Promise<CareProviderSearchResponse> {
     return request<CareProviderSearchResponse>(credentials, "/api/v1/care-recommendations/search", {
       method: "POST",
@@ -732,7 +751,7 @@ export const api = {
       specialty?: string;
       availability?: CareAvailability;
       signal?: AbortSignal;
-    }
+    },
   ): Promise<CareFacility[]> {
     const params = new URLSearchParams({
       location: options.location,
@@ -748,7 +767,7 @@ export const api = {
     const facilities = await request<CareFacilityResponse[]>(
       credentials,
       `/api/v1/care/facilities?${params.toString()}`,
-      { signal: options.signal }
+      { signal: options.signal },
     );
     return facilities.map(normalizeCareFacility);
   },
@@ -757,7 +776,7 @@ export const api = {
     credentials: Credentials,
     question: string,
     topK = 8,
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ): Promise<QAResponse> {
     return request<QAResponse>(credentials, "/api/v1/qa", {
       method: "POST",
@@ -775,7 +794,7 @@ export const api = {
     credentials: Credentials,
     sessionId: string,
     question: string,
-    topK = 8
+    topK = 8,
   ): Promise<QAResponse> {
     return request<QAResponse>(
       credentials,
@@ -784,30 +803,28 @@ export const api = {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ question, top_k: topK }),
-      }
+      },
     );
   },
 
   getSession(credentials: Credentials, sessionId: string): Promise<SessionHistory> {
     return request<SessionHistory>(
       credentials,
-      `/api/v1/sessions/${encodeURIComponent(sessionId)}`
+      `/api/v1/sessions/${encodeURIComponent(sessionId)}`,
     );
   },
 
   deleteSession(credentials: Credentials, sessionId: string): Promise<void> {
-    return request<void>(
-      credentials,
-      `/api/v1/sessions/${encodeURIComponent(sessionId)}`,
-      { method: "DELETE" }
-    );
+    return request<void>(credentials, `/api/v1/sessions/${encodeURIComponent(sessionId)}`, {
+      method: "DELETE",
+    });
   },
 
   searchFacilities(
     credentials: Credentials,
     location: string,
     kind: FacilityKind = "any",
-    radiusKm = 8
+    radiusKm = 8,
   ): Promise<CareFacilitiesResponse> {
     const params = new URLSearchParams({
       location,
@@ -823,13 +840,11 @@ export const api = {
 
   getScoredCareRecommendations(
     credentials: Credentials,
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ): Promise<ScoredCareRecommendationsResponse> {
-    return request<ScoredCareRecommendationsResponse>(
-      credentials,
-      "/api/v1/care/recommendations",
-      { signal }
-    );
+    return request<ScoredCareRecommendationsResponse>(credentials, "/api/v1/care/recommendations", {
+      signal,
+    });
   },
 
   searchCare(
@@ -840,7 +855,7 @@ export const api = {
       days?: CareDay[];
       time_of_day?: CareTimeOfDay;
       radius_km?: number;
-    }
+    },
   ): Promise<CareSearchResponse> {
     return request<CareSearchResponse>(credentials, "/api/v1/care/search", {
       method: "POST",
@@ -862,7 +877,7 @@ export const api = {
   analyseSymptom(
     credentials: Credentials,
     symptom: string,
-    duration?: string
+    duration?: string,
   ): Promise<SymptomAnalysis> {
     return request<SymptomAnalysis>(credentials, "/api/v1/symptoms/analyse", {
       method: "POST",
@@ -878,7 +893,7 @@ export const api = {
   },
   recordFindingFeedback(
     credentials: Credentials,
-    body: FindingFeedbackInput
+    body: FindingFeedbackInput,
   ): Promise<FindingFeedbackEntry> {
     return request<FindingFeedbackEntry>(credentials, "/api/v1/findings/feedback", {
       method: "POST",
@@ -894,7 +909,7 @@ export const api = {
   },
   setFindingLifecycle(
     credentials: Credentials,
-    body: FindingLifecycleInput
+    body: FindingLifecycleInput,
   ): Promise<FindingLifecycleResult> {
     return request<FindingLifecycleResult>(credentials, "/api/v1/findings/lifecycle", {
       method: "POST",
@@ -914,7 +929,7 @@ export const api = {
   },
   recordPatientMeasurement(
     credentials: Credentials,
-    body: PatientMeasurementInput
+    body: PatientMeasurementInput,
   ): Promise<PatientMeasurement> {
     return request<PatientMeasurement>(credentials, "/api/v1/patient-data/measurements", {
       method: "POST",
@@ -924,17 +939,17 @@ export const api = {
   },
   listPatientMeasurements(
     credentials: Credentials,
-    kind?: string
+    kind?: string,
   ): Promise<{ measurements: PatientMeasurement[] }> {
     const qs = kind ? `?kind=${encodeURIComponent(kind)}` : "";
     return request<{ measurements: PatientMeasurement[] }>(
       credentials,
-      `/api/v1/patient-data/measurements${qs}`
+      `/api/v1/patient-data/measurements${qs}`,
     );
   },
   sendProviderMessage(
     credentials: Credentials,
-    body: ProviderMessageInput
+    body: ProviderMessageInput,
   ): Promise<ProviderMessage> {
     return request<ProviderMessage>(credentials, "/api/v1/provider-messages", {
       method: "POST",
@@ -947,11 +962,11 @@ export const api = {
   },
   listProviderMessages(
     credentials: Credentials,
-    threadId: string
+    threadId: string,
   ): Promise<{ thread_id: string; messages: ProviderMessage[] }> {
     return request<{ thread_id: string; messages: ProviderMessage[] }>(
       credentials,
-      `/api/v1/provider-messages?thread_id=${encodeURIComponent(threadId)}`
+      `/api/v1/provider-messages?thread_id=${encodeURIComponent(threadId)}`,
     );
   },
   getGuidelinesStatus(credentials: Credentials): Promise<GuidelinesStatus> {

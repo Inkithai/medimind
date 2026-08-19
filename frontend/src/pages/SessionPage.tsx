@@ -6,12 +6,7 @@ import { Card, CardBody, CardHeader } from "../components/Card";
 import { QAResultCard } from "../components/QAResultCard";
 import { MedicalDisclaimer } from "../components/MedicalDisclaimer";
 import { Spinner } from "../components/Spinner";
-import {
-  PlusIcon,
-  SendIcon,
-  SessionIcon,
-  TrashIcon,
-} from "../components/icons";
+import { PlusIcon, SendIcon, SessionIcon, TrashIcon } from "../components/icons";
 import { useAuth } from "../context/AuthContext";
 import { useI18n } from "../i18n/I18nContext";
 import type { QAResponse, SessionHistory, SessionTurn } from "../types/api";
@@ -42,7 +37,10 @@ export function SessionPage() {
 
   useEffect(() => {
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: reducedMotion ? "auto" : "smooth" });
+    scrollRef.current?.scrollTo({
+      top: scrollRef.current.scrollHeight,
+      behavior: reducedMotion ? "auto" : "smooth",
+    });
   }, [messages, sending]);
 
   const startNewSession = useCallback(async () => {
@@ -85,13 +83,13 @@ export function SessionPage() {
             role: t.role,
             content: t.content,
             timestamp: t.timestamp,
-          }))
+          })),
         );
       } catch (err) {
         setSessionError(err);
       }
     },
-    [credentials]
+    [credentials],
   );
 
   async function send() {
@@ -125,8 +123,8 @@ export function SessionPage() {
         err instanceof ApiError
           ? `[${err.status}] ${err.message}`
           : err instanceof Error
-          ? err.message
-          : "Failed to send message.";
+            ? err.message
+            : "Failed to send message.";
       // A 404 means the session is gone (server restarted) — surface it
       // distinctly so the user knows to start a new session.
       const gone = err instanceof ApiError && err.status === 404;
@@ -178,11 +176,7 @@ export function SessionPage() {
       {sessionError !== null && <ErrorState error={sessionError} />}
 
       {!sessionId ? (
-        <NoSessionView
-          creating={creating}
-          onStart={startNewSession}
-          onResume={loadExisting}
-        />
+        <NoSessionView creating={creating} onStart={startNewSession} onResume={loadExisting} />
       ) : (
         <Card className="flex flex-col overflow-hidden">
           <CardHeader
@@ -199,9 +193,7 @@ export function SessionPage() {
             className="max-h-[55vh] min-h-[300px] space-y-4 overflow-y-auto bg-slate-50/50 px-5 py-4 scroll-thin"
           >
             {messages.length === 0 && (
-              <p className="py-12 text-center text-sm text-slate-400">
-                {t("conversation.empty")}
-              </p>
+              <p className="py-12 text-center text-sm text-slate-400">{t("conversation.empty")}</p>
             )}
             {messages.map((msg, idx) => (
               <MessageBubble key={idx} message={msg} />
@@ -214,8 +206,16 @@ export function SessionPage() {
             )}
           </div>
           <CardBody className="border-t border-slate-100">
-            <form className="flex gap-2" onSubmit={(event) => { event.preventDefault(); void send(); }}>
-              <label htmlFor="conversation-message" className="sr-only">{t("conversation.inputLabel")}</label>
+            <form
+              className="flex gap-2"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void send();
+              }}
+            >
+              <label htmlFor="conversation-message" className="sr-only">
+                {t("conversation.inputLabel")}
+              </label>
               <input
                 id="conversation-message"
                 type="text"
@@ -240,9 +240,13 @@ export function SessionPage() {
                 {t("conversation.send")}
               </button>
             </form>
-            <div className="mt-3"><MedicalDisclaimer /></div>
+            <div className="mt-3">
+              <MedicalDisclaimer />
+            </div>
             <details className="mt-2 text-xs text-slate-500">
-              <summary className="cursor-pointer font-medium text-slate-700">{t("ask.advanced")}</summary>
+              <summary className="cursor-pointer font-medium text-slate-700">
+                {t("ask.advanced")}
+              </summary>
               <div className="mt-2 flex items-center gap-2">
                 <label htmlFor="session-topk">{t("ask.amount")}:</label>
                 <input
@@ -284,9 +288,7 @@ function MessageBubble({ message }: { message: UiMessage }) {
       <div
         className={classNames(
           "max-w-[85%] space-y-2 rounded-lg px-4 py-2 text-sm",
-          isUser
-            ? "bg-brand-600 text-white"
-            : "border border-slate-200 bg-white text-slate-800"
+          isUser ? "bg-brand-600 text-white" : "border border-slate-200 bg-white text-slate-800",
         )}
       >
         {isUser ? (
@@ -296,12 +298,7 @@ function MessageBubble({ message }: { message: UiMessage }) {
         ) : (
           <p className="whitespace-pre-wrap">{message.content}</p>
         )}
-        <p
-          className={classNames(
-            "text-[10px]",
-            isUser ? "text-brand-100" : "text-slate-400"
-          )}
-        >
+        <p className={classNames("text-[10px]", isUser ? "text-brand-100" : "text-slate-400")}>
           {formatTimestamp(message.timestamp)}
         </p>
       </div>
@@ -328,9 +325,7 @@ function NoSessionView({
           <SessionIcon className="h-7 w-7" />
         </div>
         <div>
-          <h2 className="text-lg font-semibold text-slate-900">
-            {t("conversation.start")}
-          </h2>
+          <h2 className="text-lg font-semibold text-slate-900">{t("conversation.start")}</h2>
           <p className="mx-auto mt-1 max-w-md text-sm text-slate-500">
             {t("conversation.startBody")}
           </p>
@@ -349,7 +344,9 @@ function NoSessionView({
             {t("conversation.resumeTitle")}
           </p>
           <div className="mt-2 flex gap-2">
-            <label htmlFor="resume-session-id" className="sr-only">{t("conversation.resumeTitle")}</label>
+            <label htmlFor="resume-session-id" className="sr-only">
+              {t("conversation.resumeTitle")}
+            </label>
             <input
               id="resume-session-id"
               type="text"

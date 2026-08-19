@@ -80,7 +80,9 @@ def test_facilities_uses_service_not_timeline():
     )
     service = mock.Mock()
     service.search_facilities.return_value = packed
-    with mock.patch.object(api, "get_care_provider", side_effect=api.CareConfigurationError("unset")):
+    with mock.patch.object(
+        api, "get_care_provider", side_effect=api.CareConfigurationError("unset")
+    ):
         with mock.patch.object(api, "get_care_service", return_value=service):
             client = TestClient(api.app)
             response = client.get(
@@ -161,13 +163,15 @@ def test_recommendation_endpoint_maps_saved_high_risk_issue_to_specialty():
     snapshot = {
         "patient_timeline": {"medications_timeline": [], "diagnoses_timeline": [], "visits": []},
         "cross_check_report": {
-            "potential_drug_interactions": [{
-                "medications_involved": ["Warfarin", "Aspirin"],
-                "severity": "high",
-                "confidence": 0.95,
-                "explanation": "Potential bleeding risk",
-                "sources": [{"date": "2026-01-01", "source_file": "rx.pdf", "page": 1}],
-            }],
+            "potential_drug_interactions": [
+                {
+                    "medications_involved": ["Warfarin", "Aspirin"],
+                    "severity": "high",
+                    "confidence": 0.95,
+                    "explanation": "Potential bleeding risk",
+                    "sources": [{"date": "2026-01-01", "source_file": "rx.pdf", "page": 1}],
+                }
+            ],
             "duplicate_prescriptions": [],
             "conflicting_dosage_instructions": [],
             "allergy_conflicts": [],
@@ -176,8 +180,10 @@ def test_recommendation_endpoint_maps_saved_high_risk_issue_to_specialty():
         "lab_trends": {"trends": [], "insufficient_data": [], "note": ""},
     }
     try:
-        with mock.patch.object(api.db, "load_patient_snapshot", return_value=snapshot), \
-             mock.patch.object(api.db, "load_documents", return_value=[]):
+        with (
+            mock.patch.object(api.db, "load_patient_snapshot", return_value=snapshot),
+            mock.patch.object(api.db, "load_documents", return_value=[]),
+        ):
             with _client() as client:
                 response = client.get("/api/v1/care/recommendation")
         assert response.status_code == 200, response.text
@@ -232,26 +238,37 @@ def test_search_returns_ranked_osm_results():
             "time_of_day": "morning",
             "radius_km": 8,
         },
-        "location": {"lat": 7.29, "lon": 80.63, "label": "Kandy, Sri Lanka", "source": "OpenStreetMap Nominatim"},
-        "suggestion": {"id": "endocrinology", "label": "Endocrinology / diabetes", "reasons": ["Medicine on your record: Metformin"]},
-        "results": [{
-            "id": "node/1",
-            "name": "Kandy Diabetes Clinic",
-            "place_type": "clinic",
-            "match_kind": "specialty",
-            "specialties": ["endocrinology"],
-            "address": "Kandy",
-            "phone": "+94 81 0000000",
-            "website": None,
-            "opening_hours": "Mo-Fr 08:00-16:00",
-            "availability": "open",
-            "lat": 7.291,
-            "lon": 80.633,
-            "distance_km": 0.3,
-            "score": 170.0,
-            "source": "OpenStreetMap",
-            "source_url": "https://www.openstreetmap.org/node/1",
-        }],
+        "location": {
+            "lat": 7.29,
+            "lon": 80.63,
+            "label": "Kandy, Sri Lanka",
+            "source": "OpenStreetMap Nominatim",
+        },
+        "suggestion": {
+            "id": "endocrinology",
+            "label": "Endocrinology / diabetes",
+            "reasons": ["Medicine on your record: Metformin"],
+        },
+        "results": [
+            {
+                "id": "node/1",
+                "name": "Kandy Diabetes Clinic",
+                "place_type": "clinic",
+                "match_kind": "specialty",
+                "specialties": ["endocrinology"],
+                "address": "Kandy",
+                "phone": "+94 81 0000000",
+                "website": None,
+                "opening_hours": "Mo-Fr 08:00-16:00",
+                "availability": "open",
+                "lat": 7.291,
+                "lon": 80.633,
+                "distance_km": 0.3,
+                "score": 170.0,
+                "source": "OpenStreetMap",
+                "source_url": "https://www.openstreetmap.org/node/1",
+            }
+        ],
         "result_count": 1,
         "zero_results_hint": None,
         "source": {
@@ -265,12 +282,19 @@ def test_search_returns_ranked_osm_results():
         "disclaimer": care_finder.DISCLAIMER,
     }
     try:
-        with mock.patch.object(api.db, "load_patient_snapshot", return_value=None), \
-             mock.patch.object(care_finder, "search_care", return_value=payload):
+        with (
+            mock.patch.object(api.db, "load_patient_snapshot", return_value=None),
+            mock.patch.object(care_finder, "search_care", return_value=payload),
+        ):
             with TestClient(app) as client:
                 resp = client.post(
                     "/api/v1/care/search",
-                    json={"city": "Kandy", "specialty": "endocrinology", "days": ["mon"], "time_of_day": "morning"},
+                    json={
+                        "city": "Kandy",
+                        "specialty": "endocrinology",
+                        "days": ["mon"],
+                        "time_of_day": "morning",
+                    },
                 )
         assert resp.status_code == 200, resp.text
         body = resp.json()
@@ -284,8 +308,12 @@ def test_search_returns_ranked_osm_results():
 def test_unknown_city_is_422():
     app = _client_with_user()
     try:
-        with mock.patch.object(api.db, "load_patient_snapshot", return_value=None), \
-             mock.patch.object(care_finder, "search_care", side_effect=care_finder.CityNotFoundError("Narnia")):
+        with (
+            mock.patch.object(api.db, "load_patient_snapshot", return_value=None),
+            mock.patch.object(
+                care_finder, "search_care", side_effect=care_finder.CityNotFoundError("Narnia")
+            ),
+        ):
             with TestClient(app) as client:
                 resp = client.post("/api/v1/care/search", json={"city": "Narnia"})
         assert resp.status_code == 422, resp.text
@@ -299,8 +327,12 @@ def test_unknown_city_is_422():
 def test_directory_outage_is_502_retryable():
     app = _client_with_user()
     try:
-        with mock.patch.object(api.db, "load_patient_snapshot", return_value=None), \
-             mock.patch.object(care_finder, "search_care", side_effect=care_finder.DirectoryUnavailableError()):
+        with (
+            mock.patch.object(api.db, "load_patient_snapshot", return_value=None),
+            mock.patch.object(
+                care_finder, "search_care", side_effect=care_finder.DirectoryUnavailableError()
+            ),
+        ):
             with TestClient(app) as client:
                 resp = client.post("/api/v1/care/search", json={"city": "Kandy"})
         assert resp.status_code == 502, resp.text

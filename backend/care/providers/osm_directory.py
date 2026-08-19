@@ -28,7 +28,16 @@ _KIND_ALIASES = {
     "": "any",
 }
 
-_SUPPORTED_KINDS = {"any", "hospital", "clinic", "pharmacy", "laboratory", "lab", "doctor", "healthcare"}
+_SUPPORTED_KINDS = {
+    "any",
+    "hospital",
+    "clinic",
+    "pharmacy",
+    "laboratory",
+    "lab",
+    "doctor",
+    "healthcare",
+}
 
 _MAX_RESULTS = 60
 
@@ -58,7 +67,7 @@ class OpenStreetMapProvider:
         normalized_kind = (kind or "any").strip().lower()
         if normalized_kind not in _SUPPORTED_KINDS:
             raise ValueError(
-                "Unsupported facility type. Use any, hospital, clinic, pharmacy, laboratory, or doctor."
+                "Unsupported facility type. Use any, hospital, clinic, pharmacy, laboratory, or doctor."  # noqa: E501
             )
         query_kind = _KIND_ALIASES.get(normalized_kind, normalized_kind)
         radius = min(max(float(radius_km), 1.0), 50.0)
@@ -84,9 +93,7 @@ class OpenStreetMapProvider:
                     return []
                 origin = resolved
 
-            facilities = self._provider.search_nearby(
-                origin, query_kind, int(round(radius * 1000))
-            )
+            facilities = self._provider.search_nearby(origin, query_kind, int(round(radius * 1000)))
         except ProviderUnavailableError as error:
             # Translate into the error the care factory/route already handle.
             raise CareProviderError(str(error)) from error

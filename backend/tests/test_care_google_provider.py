@@ -9,7 +9,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from care.errors import CareConfigurationError  # noqa: E402
 from care.providers.google import GoogleProvider  # noqa: E402
 
-
 GOOGLE_PLACE = {
     "id": "ChIJ-care-1",
     "displayName": {"text": "Jaffna Teaching Hospital", "languageCode": "en"},

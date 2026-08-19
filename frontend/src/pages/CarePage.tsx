@@ -114,7 +114,9 @@ export function CarePage() {
   const selected = filtered.find((place) => place.id === selectedId) || filtered[0] || null;
 
   function toggleDay(day: CareDay) {
-    setDays((current) => (current.includes(day) ? current.filter((item) => item !== day) : [...current, day]));
+    setDays((current) =>
+      current.includes(day) ? current.filter((item) => item !== day) : [...current, day],
+    );
   }
 
   const specialties = suggestion?.all || [{ id: "general_practice", label: "General practice" }];
@@ -216,7 +218,7 @@ export function CarePage() {
                       "min-h-[40px] rounded-full px-3 text-sm font-medium ring-1",
                       on
                         ? "bg-brand-600 text-white ring-brand-600"
-                        : "bg-white text-slate-600 ring-slate-200 hover:bg-slate-50"
+                        : "bg-white text-slate-600 ring-slate-200 hover:bg-slate-50",
                     )}
                   >
                     {day.label}
@@ -242,7 +244,9 @@ export function CarePage() {
               </select>
             </label>
             <label className="block">
-              <span className="text-sm font-medium text-slate-700">Search radius: {radiusKm} km</span>
+              <span className="text-sm font-medium text-slate-700">
+                Search radius: {radiusKm} km
+              </span>
               <input
                 type="range"
                 min={2}
@@ -261,7 +265,9 @@ export function CarePage() {
       </Card>
 
       {searching && <LoadingState label="Looking up nearby clinics" />}
-      {!searching && searchError !== null && <ErrorState error={searchError} onRetry={() => void search()} />}
+      {!searching && searchError !== null && (
+        <ErrorState error={searchError} onRetry={() => void search()} />
+      )}
 
       {!searching && result && (
         <>
@@ -275,7 +281,9 @@ export function CarePage() {
                 ? "No mapped clinics in this area"
                 : `${result.result_count} place${result.result_count === 1 ? "" : "s"} near ${result.location.label}`}
               {" · "}
-              <span className="font-medium text-slate-700">Provider source: {result.source.name}</span>
+              <span className="font-medium text-slate-700">
+                Provider source: {result.source.name}
+              </span>
               {" · "}
               <a
                 href={result.source.url}
@@ -288,9 +296,21 @@ export function CarePage() {
             </p>
             {result.result_count > 0 && (
               <div className="flex flex-wrap gap-2 text-xs">
-                <FilterChip label="Specialty match" on={onlySpecialty} onToggle={() => setOnlySpecialty((v) => !v)} />
-                <FilterChip label="Open in my window" on={onlyOpen} onToggle={() => setOnlyOpen((v) => !v)} />
-                <FilterChip label="Has a phone" on={onlyPhone} onToggle={() => setOnlyPhone((v) => !v)} />
+                <FilterChip
+                  label="Specialty match"
+                  on={onlySpecialty}
+                  onToggle={() => setOnlySpecialty((v) => !v)}
+                />
+                <FilterChip
+                  label="Open in my window"
+                  on={onlyOpen}
+                  onToggle={() => setOnlyOpen((v) => !v)}
+                />
+                <FilterChip
+                  label="Has a phone"
+                  on={onlyPhone}
+                  onToggle={() => setOnlyPhone((v) => !v)}
+                />
               </div>
             )}
           </div>
@@ -300,14 +320,20 @@ export function CarePage() {
               <CardBody className="py-12 text-center">
                 <p className="text-base font-semibold text-slate-800">No clinics found</p>
                 <p className="secondary-text mx-auto mt-2 max-w-lg">{result.zero_results_hint}</p>
-                <p className="mt-3 text-xs text-slate-400">Source: {result.source.name} · {result.source.license}</p>
+                <p className="mt-3 text-xs text-slate-400">
+                  Source: {result.source.name} · {result.source.license}
+                </p>
               </CardBody>
             </Card>
           ) : filtered.length === 0 ? (
             <Card>
               <CardBody className="py-10 text-center">
-                <p className="text-sm font-semibold text-slate-800">Nothing matches those filters</p>
-                <p className="secondary-text mt-1">Turn a filter off to see the other {result.result_count} result(s).</p>
+                <p className="text-sm font-semibold text-slate-800">
+                  Nothing matches those filters
+                </p>
+                <p className="secondary-text mt-1">
+                  Turn a filter off to see the other {result.result_count} result(s).
+                </p>
               </CardBody>
             </Card>
           ) : (
@@ -333,7 +359,12 @@ export function CarePage() {
                 {selected && (
                   <p className="secondary-text mt-2">
                     Selected: <span className="font-medium text-slate-700">{selected.name}</span> ·{" "}
-                    <a href={selected.source_url} target="_blank" rel="noreferrer" className="text-brand-600">
+                    <a
+                      href={selected.source_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-brand-600"
+                    >
                       View listing
                     </a>
                   </p>
@@ -348,7 +379,9 @@ export function CarePage() {
         <Card>
           <CardBody className="flex flex-col items-center gap-2 py-10 text-center">
             <UploadIcon className="h-8 w-8 text-slate-300" />
-            <p className="text-sm font-medium text-slate-700">Enter a city to see real clinics on the map</p>
+            <p className="text-sm font-medium text-slate-700">
+              Enter a city to see real clinics on the map
+            </p>
             <p className="secondary-text max-w-md">
               Listings come from Geoapify, with OpenStreetMap as a backup directory. Coverage is
               better in cities than in small towns.
@@ -367,7 +400,7 @@ function FilterChip({ label, on, onToggle }: { label: string; on: boolean; onTog
       onClick={onToggle}
       className={classNames(
         "rounded-full px-3 py-1.5 font-medium ring-1",
-        on ? "bg-slate-900 text-white ring-slate-900" : "bg-white text-slate-600 ring-slate-200"
+        on ? "bg-slate-900 text-white ring-slate-900" : "bg-white text-slate-600 ring-slate-200",
       )}
     >
       {label}
@@ -390,7 +423,9 @@ function PlaceCard({
       onClick={onSelect}
       className={classNames(
         "w-full rounded-xl border bg-white p-4 text-left shadow-sm transition",
-        selected ? "border-brand-300 ring-2 ring-brand-100" : "border-slate-200 hover:border-brand-200"
+        selected
+          ? "border-brand-300 ring-2 ring-brand-100"
+          : "border-slate-200 hover:border-brand-200",
       )}
     >
       <div className="flex items-start justify-between gap-2">
@@ -404,25 +439,35 @@ function PlaceCard({
         <div className="flex shrink-0 flex-col items-end gap-1">
           <StatusBadge
             tone={
-              place.match_kind === "specialty" ? "brand" : place.match_kind === "hospital" ? "warning" : "neutral"
+              place.match_kind === "specialty"
+                ? "brand"
+                : place.match_kind === "hospital"
+                  ? "warning"
+                  : "neutral"
             }
           >
             {place.match_kind === "specialty"
               ? "Specialty match"
               : place.match_kind === "hospital"
-              ? "Hospital"
-              : place.match_kind === "general"
-              ? "General"
-              : "Other"}
+                ? "Hospital"
+                : place.match_kind === "general"
+                  ? "General"
+                  : "Other"}
           </StatusBadge>
           <StatusBadge
-            tone={place.availability === "open" ? "success" : place.availability === "closed" ? "danger" : "neutral"}
+            tone={
+              place.availability === "open"
+                ? "success"
+                : place.availability === "closed"
+                  ? "danger"
+                  : "neutral"
+            }
           >
             {place.availability === "open"
               ? "Open in your window"
               : place.availability === "closed"
-              ? "Closed then"
-              : "Hours unknown"}
+                ? "Closed then"
+                : "Hours unknown"}
           </StatusBadge>
         </div>
       </div>
@@ -434,7 +479,11 @@ function PlaceCard({
       </p>
       <div className="mt-2 flex flex-wrap gap-3 text-xs font-medium">
         {place.phone && (
-          <a href={`tel:${place.phone}`} className="text-brand-600 hover:text-brand-700" onClick={(e) => e.stopPropagation()}>
+          <a
+            href={`tel:${place.phone}`}
+            className="text-brand-600 hover:text-brand-700"
+            onClick={(e) => e.stopPropagation()}
+          >
             Call
           </a>
         )}

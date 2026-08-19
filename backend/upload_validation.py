@@ -71,10 +71,7 @@ def validate_upload_content(content: bytes, filename: str) -> Optional[str]:
     extension = suffix[dot:] if dot > 0 else ""
     expected = _EXTENSION_TO_KIND.get(extension)
     if expected is None:
-        return (
-            f"'{filename}' uses an unsupported file extension "
-            f"({extension or 'none'})."
-        )
+        return f"'{filename}' uses an unsupported file extension ({extension or 'none'})."
     if expected != kind:
         return (
             f"'{filename}' is labeled {extension.upper()}, but its content is "

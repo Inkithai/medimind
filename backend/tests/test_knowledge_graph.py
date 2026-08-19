@@ -47,12 +47,19 @@ def _naloxone_doc():
         "additional_languages": [],
         "ocr_confidence": 0.95,
         "translation_confidence": 0.95,
-        "medications": [{
-            "name": "Naloxone", "ingredients": ["naloxone"],
-            "dosage": "400 micrograms", "frequency": "as needed",
-            "dosage_value": 400, "dosage_unit": "mcg",
-            "frequency_per_day": None, "is_as_needed": True, "confidence": 0.95,
-        }],
+        "medications": [
+            {
+                "name": "Naloxone",
+                "ingredients": ["naloxone"],
+                "dosage": "400 micrograms",
+                "frequency": "as needed",
+                "dosage_value": 400,
+                "dosage_unit": "mcg",
+                "frequency_per_day": None,
+                "is_as_needed": True,
+                "confidence": 0.95,
+            }
+        ],
         "lab_results": [],
         "allergies_noted": [],
         "clinical_notes": None,
@@ -96,15 +103,26 @@ def test_endpoint_ingests_and_reports_counts(monkeypatch):
     section = {
         "population": "adult",
         "entries": [
-            {"name": "naloxone", "dosage_form": "Injection", "subsection": "specific",
-             "list_type": "core", "source_page": 1},
-            {"name": "charcoal, activated", "dosage_form": "Powder",
-             "subsection": "non_specific", "list_type": "core", "source_page": 1},
+            {
+                "name": "naloxone",
+                "dosage_form": "Injection",
+                "subsection": "specific",
+                "list_type": "core",
+                "source_page": 1,
+            },
+            {
+                "name": "charcoal, activated",
+                "dosage_form": "Powder",
+                "subsection": "non_specific",
+                "list_type": "core",
+                "source_page": 1,
+            },
         ],
     }
     monkeypatch.setattr(poisoning_kg, "extract_antidote_section", lambda path: section)
     monkeypatch.setattr(
-        poisoning_kg, "ingest_antidote_entries",
+        poisoning_kg,
+        "ingest_antidote_entries",
         lambda sec, source_document: len(sec["entries"]),
     )
     with TestClient(api.app) as client:
@@ -140,7 +158,8 @@ def test_endpoint_reports_missing_antidote_section(monkeypatch):
     _auth_override()
     monkeypatch.setattr(api.graph_db, "is_configured", lambda: True)
     monkeypatch.setattr(
-        poisoning_kg, "extract_antidote_section",
+        poisoning_kg,
+        "extract_antidote_section",
         lambda path: {"population": "adult", "entries": []},
     )
     with TestClient(api.app) as client:
@@ -157,8 +176,15 @@ def test_endpoint_reports_unreachable_graph(monkeypatch):
     monkeypatch.setattr(api.graph_db, "is_configured", lambda: True)
     section = {
         "population": "adult",
-        "entries": [{"name": "naloxone", "dosage_form": "Injection",
-                     "subsection": "specific", "list_type": "core", "source_page": 1}],
+        "entries": [
+            {
+                "name": "naloxone",
+                "dosage_form": "Injection",
+                "subsection": "specific",
+                "list_type": "core",
+                "source_page": 1,
+            }
+        ],
     }
     monkeypatch.setattr(poisoning_kg, "extract_antidote_section", lambda path: section)
 
@@ -189,9 +215,11 @@ LLM_NALOXONE_INTERACTION = (
 
 def _pipeline_patchers(extract_result):
     patchers = [
-        mock.patch.object(api.storage, "upload_patient_document",
-                          return_value={"document_url": "https://cloud/x.pdf",
-                                        "cloudinary_public_id": "x"}),
+        mock.patch.object(
+            api.storage,
+            "upload_patient_document",
+            return_value={"document_url": "https://cloud/x.pdf", "cloudinary_public_id": "x"},
+        ),
         mock.patch.object(api.db, "load_documents", return_value=[]),
         mock.patch.object(api.db, "insert_documents"),
         mock.patch.object(api.db, "save_patient_snapshot"),
@@ -226,22 +254,30 @@ def test_upload_grades_antidote_finding_as_reference_graph(monkeypatch):
                 timeline, graph_backed_findings=graph_backed_findings
             )
 
-    patchers.append(mock.patch.object(
-        api, "cross_check_prescriptions", side_effect=_real_cross_check
-    ))
+    patchers.append(
+        mock.patch.object(api, "cross_check_prescriptions", side_effect=_real_cross_check)
+    )
     for p in patchers:
         p.start()
     monkeypatch.setattr(api.graph_db, "is_configured", lambda: True)
-    monkeypatch.setattr(poisoning_kg, "lookup_antidote_references", lambda names: {
-        "Naloxone": {
-            "display_name": "naloxone",
-            "category": "specific",
-            "listings": [{
-                "population": "adult", "source_document": "who_eml.pdf",
-                "list_type": "core", "dosage_form": "Injection: 400 micrograms/mL",
-            }],
+    monkeypatch.setattr(
+        poisoning_kg,
+        "lookup_antidote_references",
+        lambda names: {
+            "Naloxone": {
+                "display_name": "naloxone",
+                "category": "specific",
+                "listings": [
+                    {
+                        "population": "adult",
+                        "source_document": "who_eml.pdf",
+                        "list_type": "core",
+                        "dosage_form": "Injection: 400 micrograms/mL",
+                    }
+                ],
+            },
         },
-    })
+    )
     try:
         with TestClient(api.app) as client:
             resp = _upload(client)
@@ -279,9 +315,9 @@ def test_upload_without_graph_stays_fail_open(monkeypatch):
                 timeline, graph_backed_findings=graph_backed_findings
             )
 
-    patchers.append(mock.patch.object(
-        api, "cross_check_prescriptions", side_effect=_real_cross_check
-    ))
+    patchers.append(
+        mock.patch.object(api, "cross_check_prescriptions", side_effect=_real_cross_check)
+    )
     for p in patchers:
         p.start()
     monkeypatch.setattr(api.graph_db, "is_configured", lambda: False)
@@ -314,9 +350,9 @@ def test_upload_survives_unreachable_configured_graph(monkeypatch):
                 timeline, graph_backed_findings=graph_backed_findings
             )
 
-    patchers.append(mock.patch.object(
-        api, "cross_check_prescriptions", side_effect=_real_cross_check
-    ))
+    patchers.append(
+        mock.patch.object(api, "cross_check_prescriptions", side_effect=_real_cross_check)
+    )
     for p in patchers:
         p.start()
     monkeypatch.setattr(api.graph_db, "is_configured", lambda: True)

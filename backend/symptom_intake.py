@@ -18,9 +18,9 @@ normalized ingredient list the rest of the pipeline uses.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
-from clinical_lab_values import collect_lab_values, flagged_high, flagged_low, is_high, is_low
+from clinical_lab_values import collect_lab_values, flagged_high, flagged_low
 
 try:
     from drug_interactions import _CLASS_MEMBERS
@@ -29,60 +29,212 @@ except Exception:  # pragma: no cover
 
 # symptom key -> (display, keyword phrases to match in patient text)
 _SYMPTOMS: Dict[str, Tuple[str, Tuple[str, ...]]] = {
-    "dizziness": ("dizziness or light-headedness", ("dizz", "lighthead", "light-headed", "faint", "woozy")),
-    "bleeding_bruising": ("unusual bleeding or bruising", ("bleed", "bruis", "nosebleed", "blood in")),
+    "dizziness": (
+        "dizziness or light-headedness",
+        ("dizz", "lighthead", "light-headed", "faint", "woozy"),
+    ),
+    "bleeding_bruising": (
+        "unusual bleeding or bruising",
+        ("bleed", "bruis", "nosebleed", "blood in"),
+    ),
     "muscle_pain": ("muscle aches or weakness", ("muscle", "myalgia", "weakness", "cramp")),
     "nausea_vomiting": ("nausea or vomiting", ("nausea", "vomit", "throwing up", "sick to")),
     "dry_cough": ("persistent dry cough", ("cough",)),
     "swelling": ("swelling", ("swell", "oedema", "edema", "puffy")),
-    "shortness_of_breath": ("shortness of breath", ("shortness of breath", "breathless", "can't breathe", "wheeze")),
-    "fatigue": ("unusual tiredness / fatigue", ("tired", "fatigue", "exhaust", "no energy", "letharg")),
-    "increased_thirst_urination": ("increased thirst or urination", ("thirst", "urinat", "pee", "drinking a lot")),
+    "shortness_of_breath": (
+        "shortness of breath",
+        ("shortness of breath", "breathless", "can't breathe", "wheeze"),
+    ),
+    "fatigue": (
+        "unusual tiredness / fatigue",
+        ("tired", "fatigue", "exhaust", "no energy", "letharg"),
+    ),
+    "increased_thirst_urination": (
+        "increased thirst or urination",
+        ("thirst", "urinat", "pee", "drinking a lot"),
+    ),
     "abdominal_pain": ("abdominal pain", ("abdom", "stomach pain", "tummy", "belly")),
     "headache": ("headache", ("headache", "head pain", "migraine")),
     "rash": ("skin rash", ("rash", "itch", "hives")),
     "constipation": ("constipation", ("constipat", "hard stools", "unable to pass")),
     "diarrhoea": ("diarrhoea", ("diarrh", "loose stool", "runny stool")),
     "neuropathy": ("numbness or tingling", ("numb", "tingl", "pins and needles", "neuropathy")),
-    "palpitations": ("palpitations / racing heartbeat", ("palpitat", "racing heart", "fast heartbeat", "flutter")),
+    "palpitations": (
+        "palpitations / racing heartbeat",
+        ("palpitat", "racing heart", "fast heartbeat", "flutter"),
+    ),
     "joint_pain": ("joint pain", ("joint pain", "arthralgia", "joint ache", "stiff joints")),
-    "frequent_infections": ("frequent infections", ("frequent infection", "repeated infection", "recurrent infection", "keep getting sick", "getting infections")),
+    "frequent_infections": (
+        "frequent infections",
+        (
+            "frequent infection",
+            "repeated infection",
+            "recurrent infection",
+            "keep getting sick",
+            "getting infections",
+        ),
+    ),
     "chest_pain": ("chest pain or tightness", ("chest pain", "chest tight", "pressure in chest")),
-    "urinary_symptoms": ("urinary symptoms", ("burning urine", "painful urinat", "blood in urine", "frequent urinat")),
+    "urinary_symptoms": (
+        "urinary symptoms",
+        ("burning urine", "painful urinat", "blood in urine", "frequent urinat"),
+    ),
     "vision_changes": ("vision changes", ("blurred vision", "vision change", "double vision")),
 }
 
 # symptom -> drug classes/ingredients that are RELEVANT (can be associated).
 # Neutral: "is relevant", never "is the cause".
 _RELEVANT_DRUGS: Dict[str, Dict[str, Any]] = {
-    "dizziness": {"classes": ("ace_inhibitor", "arb"), "ingredients": {"amlodipine", "furosemide", "doxazosin", "tamsulosin"}},
-    "bleeding_bruising": {"classes": ("anticoagulant", "nsaid", "ssri"), "ingredients": {"clopidogrel"}},
-    "muscle_pain": {"classes": ("cyp3a4_statin",), "ingredients": {"simvastatin", "atorvastatin", "rosuvastatin"}},
-    "nausea_vomiting": {"classes": (), "ingredients": {"metformin", "digoxin", "tramadol", "morphine", "erythromycin"}},
+    "dizziness": {
+        "classes": ("ace_inhibitor", "arb"),
+        "ingredients": {"amlodipine", "furosemide", "doxazosin", "tamsulosin"},
+    },
+    "bleeding_bruising": {
+        "classes": ("anticoagulant", "nsaid", "ssri"),
+        "ingredients": {"clopidogrel"},
+    },
+    "muscle_pain": {
+        "classes": ("cyp3a4_statin",),
+        "ingredients": {"simvastatin", "atorvastatin", "rosuvastatin"},
+    },
+    "nausea_vomiting": {
+        "classes": (),
+        "ingredients": {"metformin", "digoxin", "tramadol", "morphine", "erythromycin"},
+    },
     "dry_cough": {"classes": ("ace_inhibitor",), "ingredients": set()},
     "swelling": {"classes": ("nsaid",), "ingredients": {"amlodipine", "nifedipine"}},
-    "shortness_of_breath": {"classes": (), "ingredients": {"propranolol", "atenolol", "metoprolol", "carvedilol"}},
+    "shortness_of_breath": {
+        "classes": (),
+        "ingredients": {"propranolol", "atenolol", "metoprolol", "carvedilol"},
+    },
     "fatigue": {"classes": (), "ingredients": {"metoprolol", "atenolol", "bisoprolol"}},
     "increased_thirst_urination": {"classes": (), "ingredients": set()},
     "headache": {"classes": (), "ingredients": set()},
-    "rash": {"classes": (), "ingredients": {"amoxicillin", "ampicillin", "allopurinol", "sulfamethoxazole"}},
+    "rash": {
+        "classes": (),
+        "ingredients": {"amoxicillin", "ampicillin", "allopurinol", "sulfamethoxazole"},
+    },
     "abdominal_pain": {"classes": ("nsaid",), "ingredients": {"metformin"}},
-    "constipation": {"classes": (), "ingredients": {"codeine", "morphine", "tramadol", "oxycodone", "amitriptyline", "nortriptyline", "verapamil", "diltiazem", "iron", "ferrous", "aluminium hydroxide"}},
-    "diarrhoea": {"classes": (), "ingredients": {"metformin", "clarithromycin", "amoxicillin", "azithromycin", "omeprazole", "esomeprazole", "magnesium hydroxide"}},
-    "neuropathy": {"classes": (), "ingredients": {"metformin", "phenytoin", "isoniazid", "vincristine", "amiodarone", "hydroxychloroquine"}},
-    "palpitations": {"classes": (), "ingredients": {"salbutamol", "salmetarol", "salmeterol", "terbutaline", "levothyroxine", "thyroxine", "theophylline", "amlodipine"}},
-    "joint_pain": {"classes": ("cyp3a4_statin",), "ingredients": {"simvastatin", "atorvastatin", "rosuvastatin", "furosemide", "hydrochlorothiazide"}},
-    "frequent_infections": {"classes": (), "ingredients": {"prednisolone", "prednisone", "dexamethasone", "hydrocortisone", "methylprednisolone", "azathioprine", "methotrexate", "ciclosporin", "tacrolimus", "mycophenolate"}},
-    "chest_pain": {"classes": (), "ingredients": {"sumatriptan", "rizatriptan", "salbutamol", "sildenafil", "tadalafil", "vardenafil", "levothyroxine", "erythropoietin"}},
-    "urinary_symptoms": {"classes": (), "ingredients": {"nitrofurantoin", "trimethoprim", "ciprofloxacin"}},
-    "vision_changes": {"classes": (), "ingredients": {"amiodarone", "hydroxychloroquine", "sildenafil", "tadalafil", "topiramate", "prednisolone", "prednisone"}},
+    "constipation": {
+        "classes": (),
+        "ingredients": {
+            "codeine",
+            "morphine",
+            "tramadol",
+            "oxycodone",
+            "amitriptyline",
+            "nortriptyline",
+            "verapamil",
+            "diltiazem",
+            "iron",
+            "ferrous",
+            "aluminium hydroxide",
+        },
+    },
+    "diarrhoea": {
+        "classes": (),
+        "ingredients": {
+            "metformin",
+            "clarithromycin",
+            "amoxicillin",
+            "azithromycin",
+            "omeprazole",
+            "esomeprazole",
+            "magnesium hydroxide",
+        },
+    },
+    "neuropathy": {
+        "classes": (),
+        "ingredients": {
+            "metformin",
+            "phenytoin",
+            "isoniazid",
+            "vincristine",
+            "amiodarone",
+            "hydroxychloroquine",
+        },
+    },
+    "palpitations": {
+        "classes": (),
+        "ingredients": {
+            "salbutamol",
+            "salmetarol",
+            "salmeterol",
+            "terbutaline",
+            "levothyroxine",
+            "thyroxine",
+            "theophylline",
+            "amlodipine",
+        },
+    },
+    "joint_pain": {
+        "classes": ("cyp3a4_statin",),
+        "ingredients": {
+            "simvastatin",
+            "atorvastatin",
+            "rosuvastatin",
+            "furosemide",
+            "hydrochlorothiazide",
+        },
+    },
+    "frequent_infections": {
+        "classes": (),
+        "ingredients": {
+            "prednisolone",
+            "prednisone",
+            "dexamethasone",
+            "hydrocortisone",
+            "methylprednisolone",
+            "azathioprine",
+            "methotrexate",
+            "ciclosporin",
+            "tacrolimus",
+            "mycophenolate",
+        },
+    },
+    "chest_pain": {
+        "classes": (),
+        "ingredients": {
+            "sumatriptan",
+            "rizatriptan",
+            "salbutamol",
+            "sildenafil",
+            "tadalafil",
+            "vardenafil",
+            "levothyroxine",
+            "erythropoietin",
+        },
+    },
+    "urinary_symptoms": {
+        "classes": (),
+        "ingredients": {"nitrofurantoin", "trimethoprim", "ciprofloxacin"},
+    },
+    "vision_changes": {
+        "classes": (),
+        "ingredients": {
+            "amiodarone",
+            "hydroxychloroquine",
+            "sildenafil",
+            "tadalafil",
+            "topiramate",
+            "prednisolone",
+            "prednisone",
+        },
+    },
 }
 
 # symptom -> documented conditions relevant to that symptom (cross-reference only).
 _RELEVANT_CONDITIONS: Dict[str, List[str]] = {
     "chest_pain": ["heart", "angina", "coronary", "ischaem", "ischem"],
     "shortness_of_breath": ["asthma", "copd", "heart failure", "cardiac failure", "pulmonary"],
-    "swelling": ["heart failure", "cardiac failure", "chronic kidney", "renal failure", "cirrhosis", "liver"],
+    "swelling": [
+        "heart failure",
+        "cardiac failure",
+        "chronic kidney",
+        "renal failure",
+        "cirrhosis",
+        "liver",
+    ],
     "increased_thirst_urination": ["diabetes"],
     "fatigue": ["diabetes", "hypothyroid", "anaemia", "anemia", "heart failure", "depression"],
     "dizziness": ["hypertension", "diabetes", "arrhythmia", "atrial fibrillation"],
@@ -95,7 +247,7 @@ _RELEVANT_CONDITIONS: Dict[str, List[str]] = {
 # symptom -> lab analytes relevant to that symptom (for cross-reference)
 _RELEVANT_LABS: Dict[str, List[str]] = {
     "dizziness": ["sodium", "potassium"],
-    "fatigue": ["hemoglobin", "potassium", "sodium"],
+    "fatigue": ["hemoglobin", "potassium", "sodium", "glucose"],
     "bleeding_bruising": ["platelet", "hemoglobin", "inr"],
     "muscle_pain": ["alt", "ast"],
     "increased_thirst_urination": ["glucose"],
@@ -103,7 +255,6 @@ _RELEVANT_LABS: Dict[str, List[str]] = {
     "constipation": ["calcium", "sodium"],
     "neuropathy": ["glucose"],
     "palpitations": ["potassium"],
-    "fatigue": ["hemoglobin", "glucose"],
 }
 
 
@@ -151,31 +302,40 @@ def analyse_symptom(
     keys = _match_symptom(symptom_text)
     meds = list(timeline.get("medications_timeline") or [])
     conditions = [
-        str(e.get("name")) for e in (timeline.get("diagnoses_timeline") or [])
+        str(e.get("name"))
+        for e in (timeline.get("diagnoses_timeline") or [])
         if isinstance(e, dict) and e.get("name")
     ]
     findings: List[Dict[str, Any]] = []
     for key in keys:
         display = _SYMPTOMS[key][0]
-        rel_meds = [_med_display(m) for m in meds if _med_relevant(m, _RELEVANT_DRUGS.get(key, {"classes": (), "ingredients": set()}))]
+        rel_meds = [
+            _med_display(m)
+            for m in meds
+            if _med_relevant(m, _RELEVANT_DRUGS.get(key, {"classes": (), "ingredients": set()}))
+        ]
         rel_labs: List[str] = []
         for analyte in _RELEVANT_LABS.get(key, []):
             sig = _relevant_lab_signal(timeline, analyte)
             if sig:
                 rel_labs.append(sig)
         rel_conds = _relevant_conditions_for(key, conditions)
-        findings.append({
-            "symptom": display,
-            "relevant_medications_on_record": rel_meds,
-            "relevant_abnormal_labs": rel_labs,
-            "relevant_conditions_on_record": rel_conds,
-        })
+        findings.append(
+            {
+                "symptom": display,
+                "relevant_medications_on_record": rel_meds,
+                "relevant_abnormal_labs": rel_labs,
+                "relevant_conditions_on_record": rel_conds,
+            }
+        )
     if not findings:
         return {
             "analysed": False,
-            "note": ("No standard symptom keyword was recognised in what you entered, so the "
-                     "record was not cross-referenced. Describe the symptom in your own words "
-                     "(e.g. 'dizzy', 'muscle pain', 'cough', 'rash') and try again."),
+            "note": (
+                "No standard symptom keyword was recognised in what you entered, so the "
+                "record was not cross-referenced. Describe the symptom in your own words "
+                "(e.g. 'dizzy', 'muscle pain', 'cough', 'rash') and try again."
+            ),
         }
     summary_lines: List[str] = []
     for f in findings:

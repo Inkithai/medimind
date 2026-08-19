@@ -1,10 +1,5 @@
 export type FacilityKind =
-  | "hospital"
-  | "clinic"
-  | "pharmacy"
-  | "laboratory"
-  | "doctor"
-  | "healthcare";
+  "hospital" | "clinic" | "pharmacy" | "laboratory" | "doctor" | "healthcare";
 
 /** Provider-neutral facility shape used by the Find Care page. */
 export interface CareFacility {

@@ -11,6 +11,7 @@ retrieval.py and vector_store.py each carry a copy of this function; they
 must stay identical or a write and a later read would resolve to different
 collections. Both are tested here.
 """
+
 import os
 import re
 import sys
@@ -39,27 +40,30 @@ def assert_valid_chroma_name(name):
 
 @pytest.mark.parametrize("sanitize", IMPLEMENTATIONS)
 class TestSanitizeCollectionName:
-    @pytest.mark.parametrize("patient_key", [
-        "amit sharma",
-        "Jane Doe",
-        "a",
-        "ab",
-        "  padded  ",
-        "x" * 200,
-        "!!!",
-        "___",
-        "...",
-        "---",
-        "",
-        "   ",
-        "user@example.com",
-        "patient/with/slashes",
-        "கமலா ராஜ்",              # non-Latin script -> all chars replaced
-        "名前",
-        "123",
-        "1",
-        "a-b_c.d",
-    ])
+    @pytest.mark.parametrize(
+        "patient_key",
+        [
+            "amit sharma",
+            "Jane Doe",
+            "a",
+            "ab",
+            "  padded  ",
+            "x" * 200,
+            "!!!",
+            "___",
+            "...",
+            "---",
+            "",
+            "   ",
+            "user@example.com",
+            "patient/with/slashes",
+            "கமலா ராஜ்",  # non-Latin script -> all chars replaced
+            "名前",
+            "123",
+            "1",
+            "a-b_c.d",
+        ],
+    )
     def test_always_produces_a_valid_name(self, sanitize, patient_key):
         assert_valid_chroma_name(sanitize(patient_key))
 
@@ -97,9 +101,18 @@ def test_both_implementations_agree():
     """retrieval.py and vector_store.py must produce identical names — a
     divergence would mean writes and reads hit different collections."""
     keys = [
-        "amit sharma", "Jane Doe", "a", "", "!!!", "x" * 200,
-        "a" * 62 + " bcd", "user@example.com", "கமலா ராஜ்",
-        "a" * 63 + "_tail", "-leading", "trailing-",
+        "amit sharma",
+        "Jane Doe",
+        "a",
+        "",
+        "!!!",
+        "x" * 200,
+        "a" * 62 + " bcd",
+        "user@example.com",
+        "கமலா ராஜ்",
+        "a" * 63 + "_tail",
+        "-leading",
+        "trailing-",
     ]
     for key in keys:
         assert sanitize_retrieval(key) == sanitize_vector_store(key), (

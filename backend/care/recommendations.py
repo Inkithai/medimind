@@ -82,9 +82,11 @@ SPECIALTY_DISPLAY: Dict[str, str] = {
 
 # ─── Data classes ────────────────────────────────────────────────────────────
 
+
 @dataclass(frozen=True)
 class EvidenceItem:
     """One piece of supporting evidence for a recommendation."""
+
     date: Optional[str] = None
     source_file: Optional[str] = None
     description: str = ""
@@ -100,6 +102,7 @@ class ScoreFactor:
     The frontend renders this as a transparent "what contributed to
     this percentage" disclosure so the score is not a black box.
     """
+
     label: str
     points: int
     note: str = ""
@@ -111,14 +114,15 @@ class ScoreFactor:
 @dataclass(frozen=True)
 class CareRecommendation:
     """A single care-recommendation derived from patient records."""
+
     specialty: str
     specialty_key: str
-    relevance: str                      # "high" | "moderate" | "possible"
-    relevance_score: int                # 0..100
+    relevance: str  # "high" | "moderate" | "possible"
+    relevance_score: int  # 0..100
     title: str
-    reason: str                         # one-sentence patient-friendly why
+    reason: str  # one-sentence patient-friendly why
     evidence: List[EvidenceItem] = field(default_factory=list)
-    source_records: int = 0             # how many documents contributed
+    source_records: int = 0  # how many documents contributed
     score_factors: List[ScoreFactor] = field(default_factory=list)
     has_safety_signal: bool = False
     safety_message: Optional[str] = None
@@ -171,6 +175,7 @@ SAFETY_FLOOR = 55
 
 # ─── Helpers ────────────────────────────────────────────────────────────────
 
+
 def _evidence_from_visit(visit: Dict[str, Any]) -> List[EvidenceItem]:
     """Build evidence items from a visit/visit page."""
     items: List[EvidenceItem] = []
@@ -179,24 +184,30 @@ def _evidence_from_visit(visit: Dict[str, Any]) -> List[EvidenceItem]:
     source_file = source.get("file") if isinstance(source, dict) else None
 
     for med in visit.get("medications", []):
-        items.append(EvidenceItem(
-            date=date,
-            source_file=source_file,
-            description=f"Medication: {med.get('name', 'unknown')} ({med.get('dosage', '')})",
-        ))
+        items.append(
+            EvidenceItem(
+                date=date,
+                source_file=source_file,
+                description=f"Medication: {med.get('name', 'unknown')} ({med.get('dosage', '')})",
+            )
+        )
     for lr in visit.get("lab_results", []):
         flag = lr.get("flag", "unknown")
-        items.append(EvidenceItem(
-            date=date,
-            source_file=source_file,
-            description=f"Lab result: {lr.get('test_name', '')} = {lr.get('value', '')} {lr.get('unit', '')} [{flag}]",
-        ))
+        items.append(
+            EvidenceItem(
+                date=date,
+                source_file=source_file,
+                description=f"Lab result: {lr.get('test_name', '')} = {lr.get('value', '')} {lr.get('unit', '')} [{flag}]",  # noqa: E501
+            )
+        )
     for allergy in visit.get("allergies_noted", []):
-        items.append(EvidenceItem(
-            date=date,
-            source_file=source_file,
-            description=f"Allergy noted: {allergy}",
-        ))
+        items.append(
+            EvidenceItem(
+                date=date,
+                source_file=source_file,
+                description=f"Allergy noted: {allergy}",
+            )
+        )
     return items
 
 
@@ -259,9 +270,17 @@ def _cap_points(points: int) -> int:
 # ─── Diabetes / endocrine keyword set ───────────────────────────────────────
 
 _DIABETES_MED_KEYWORDS = (
-    "metformin", "insulin", "glipizide", "glyburide", "pioglitazone",
-    "sitagliptin", "empagliflozin", "dapagliflozin", "semaglutide",
-    "liraglutide", "canagliflozin",
+    "metformin",
+    "insulin",
+    "glipizide",
+    "glyburide",
+    "pioglitazone",
+    "sitagliptin",
+    "empagliflozin",
+    "dapagliflozin",
+    "semaglutide",
+    "liraglutide",
+    "canagliflozin",
 )
 
 _DIABETES_LAB_KEYWORDS = ("hba1c", "a1c", "glucose", "fasting glucose")
@@ -274,6 +293,7 @@ _DIABETES_LAB_KEYWORDS = ("hba1c", "a1c", "glucose", "fasting glucose")
 
 
 # ─── Recommendation engine ──────────────────────────────────────────────────
+
 
 def generate_care_recommendations(
     timeline: Dict[str, Any],
@@ -347,9 +367,11 @@ def generate_care_recommendations(
             med = conflict.get("medication", "")
             allergy = conflict.get("allergy", "")
             explanation = conflict.get("explanation", "")
-            evidence_items.append(EvidenceItem(
-                description=f"Medication allergy conflict: {med} ↔ {allergy}. {explanation}",
-            ))
+            evidence_items.append(
+                EvidenceItem(
+                    description=f"Medication allergy conflict: {med} ↔ {allergy}. {explanation}",
+                )
+            )
             safety_messages.append(f"{med} is listed while a {allergy} allergy is documented.")
 
         # An explicit allergy conflict is a strong safety signal and a
@@ -357,62 +379,78 @@ def generate_care_recommendations(
         # documented conflict already warrants a high relevance score;
         # multiple conflicts push the score into the "high" band.
         conflict_points = _cap_points(55 + 8 * max(0, len(allergy_conflicts) - 1))
-        score_factors.append(ScoreFactor(
-            label="Medication/allergy conflict",
-            points=conflict_points,
-            note=f"{len(allergy_conflicts)} conflict(s) detected in cross-check",
-        ))
+        score_factors.append(
+            ScoreFactor(
+                label="Medication/allergy conflict",
+                points=conflict_points,
+                note=f"{len(allergy_conflicts)} conflict(s) detected in cross-check",
+            )
+        )
         if known_allergies:
-            score_factors.append(ScoreFactor(
-                label="Documented allergy",
-                points=12,
-                note=f"{len(known_allergies)} known allergy/allergies in records",
-            ))
+            score_factors.append(
+                ScoreFactor(
+                    label="Documented allergy",
+                    points=12,
+                    note=f"{len(known_allergies)} known allergy/allergies in records",
+                )
+            )
 
         score = max(SAFETY_FLOOR, conflict_points + (12 if known_allergies else 0))
         title = "Allergy review"
         reason = (
-            f"An allergy to {' / '.join({c.get('allergy', '') for c in allergy_conflicts} or ['a documented allergen'])} "
+            f"An allergy to {' / '.join({c.get('allergy', '') for c in allergy_conflicts} or ['a documented allergen'])} "  # noqa: E501
             f"is recorded and at least one current medication appears to conflict with it. "
             f"An allergy specialist can clarify the safest options."
         )
 
-        _upsert(CareRecommendation(
-            specialty=SPECIALTY_MAP["allergist"],
-            specialty_key="allergist",
-            relevance=_bucket_for_score(score),
-            relevance_score=score,
-            title=title,
-            reason=reason,
-            evidence=evidence_items,
-            source_records=len(allergy_conflicts),
-            score_factors=score_factors,
-            has_safety_signal=True,
-            safety_message="; ".join(safety_messages),
-        ))
+        _upsert(
+            CareRecommendation(
+                specialty=SPECIALTY_MAP["allergist"],
+                specialty_key="allergist",
+                relevance=_bucket_for_score(score),
+                relevance_score=score,
+                title=title,
+                reason=reason,
+                evidence=evidence_items,
+                source_records=len(allergy_conflicts),
+                score_factors=score_factors,
+                has_safety_signal=True,
+                safety_message="; ".join(safety_messages),
+            )
+        )
 
     # ── 2. Drug interactions / duplicates / dosage conflicts ────────────
     #    → primarily General Physician + Clinical Pharmacist
     med_safety_issues: List[Tuple[str, EvidenceItem, str]] = []
     for di in drug_interactions:
         meds = ", ".join(di.get("medications_involved", []))
-        med_safety_issues.append((
-            "Drug interaction",
-            EvidenceItem(description=f"Drug interaction: {meds}. {di.get('explanation', '')}"),
-            meds,
-        ))
+        med_safety_issues.append(
+            (
+                "Drug interaction",
+                EvidenceItem(description=f"Drug interaction: {meds}. {di.get('explanation', '')}"),
+                meds,
+            )
+        )
     for dup in duplicates:
-        med_safety_issues.append((
-            "Duplicate prescription",
-            EvidenceItem(description=f"Duplicate prescription: {dup.get('medication', '')}. {dup.get('explanation', '')}"),
-            dup.get("medication", ""),
-        ))
+        med_safety_issues.append(
+            (
+                "Duplicate prescription",
+                EvidenceItem(
+                    description=f"Duplicate prescription: {dup.get('medication', '')}. {dup.get('explanation', '')}"  # noqa: E501
+                ),
+                dup.get("medication", ""),
+            )
+        )
     for cd in conflicting_dosage:
-        med_safety_issues.append((
-            "Conflicting dosage",
-            EvidenceItem(description=f"Conflicting dosage: {cd.get('medication', '')}. {cd.get('explanation', '')}"),
-            cd.get("medication", ""),
-        ))
+        med_safety_issues.append(
+            (
+                "Conflicting dosage",
+                EvidenceItem(
+                    description=f"Conflicting dosage: {cd.get('medication', '')}. {cd.get('explanation', '')}"  # noqa: E501
+                ),
+                cd.get("medication", ""),
+            )
+        )
 
     if med_safety_issues:
         # 2a. General Physician (coordinates the reconciliation)
@@ -425,29 +463,37 @@ def generate_care_recommendations(
         gp_evidence: List[EvidenceItem] = []
         issue_count = len(med_safety_issues)
         gp_safety_points = min(35, 22 + 5 * max(0, issue_count - 1))
-        gp_factors.append(ScoreFactor(
-            label="Medication safety issues",
-            points=gp_safety_points,
-            note=f"{issue_count} interaction/duplicate/dosage issue(s) detected",
-        ))
+        gp_factors.append(
+            ScoreFactor(
+                label="Medication safety issues",
+                points=gp_safety_points,
+                note=f"{issue_count} interaction/duplicate/dosage issue(s) detected",
+            )
+        )
         if len(medications) >= 3:
-            gp_factors.append(ScoreFactor(
-                label="Multiple medications",
-                points=min(15, 8 + max(0, len(medications) - 3)),
-                note=f"{len(medications)} active medication(s) in records",
-            ))
+            gp_factors.append(
+                ScoreFactor(
+                    label="Multiple medications",
+                    points=min(15, 8 + max(0, len(medications) - 3)),
+                    note=f"{len(medications)} active medication(s) in records",
+                )
+            )
         if len(visits) >= 2:
-            gp_factors.append(ScoreFactor(
-                label="Multiple care encounters",
-                points=min(10, 4 + max(0, len(visits) - 2)),
-                note=f"{len(visits)} visit(s) across providers",
-            ))
+            gp_factors.append(
+                ScoreFactor(
+                    label="Multiple care encounters",
+                    points=min(10, 4 + max(0, len(visits) - 2)),
+                    note=f"{len(visits)} visit(s) across providers",
+                )
+            )
         if known_allergies:
-            gp_factors.append(ScoreFactor(
-                label="Known allergies to track",
-                points=min(8, 4 + max(0, len(known_allergies) - 1)),
-                note=f"{len(known_allergies)} allergy/allergies",
-            ))
+            gp_factors.append(
+                ScoreFactor(
+                    label="Known allergies to track",
+                    points=min(8, 4 + max(0, len(known_allergies) - 1)),
+                    note=f"{len(known_allergies)} allergy/allergies",
+                )
+            )
         gp_score = max(SAFETY_FLOOR, sum(f.points for f in gp_factors))
         # Cap at 95 so a primary care recommendation never claims
         # absolute certainty; it leaves room for stronger specialist
@@ -459,8 +505,8 @@ def generate_care_recommendations(
         gp_title = "Medication reconciliation"
         gp_reason = (
             f"{issue_count} medication safety finding(s) — including possible drug interactions, "
-            f"duplicate prescriptions, or conflicting instructions — were detected across your records. "
-            f"A general physician can review the full medication list and reconcile any discrepancies."
+            f"duplicate prescriptions, or conflicting instructions — were detected across your records. "  # noqa: E501
+            f"A general physician can review the full medication list and reconcile any discrepancies."  # noqa: E501
         )
         # Build a single short safety message for the card badge. If there
         # is also an allergy conflict, surface it too — allergy conflicts
@@ -468,110 +514,132 @@ def generate_care_recommendations(
         # drug-interaction message.
         safety_msgs: List[str] = []
         if issue_count == 1:
-            safety_msgs.append(f"{med_safety_issues[0][0].lower()} found in your medication list — review recommended.")
+            safety_msgs.append(
+                f"{med_safety_issues[0][0].lower()} found in your medication list — review recommended."  # noqa: E501
+            )
         else:
             safety_msgs.append(f"{issue_count} medication safety findings — review recommended.")
         if allergy_conflicts:
-            allergy_names = sorted({c.get("allergy", "") for c in allergy_conflicts if c.get("allergy")})
+            allergy_names = sorted(
+                {c.get("allergy", "") for c in allergy_conflicts if c.get("allergy")}
+            )
             safety_msgs.insert(
                 0,
                 f"Allergy conflict: {', '.join(allergy_names)} — review recommended.",
             )
         safety_msg = " ".join(safety_msgs)
-        _upsert(CareRecommendation(
-            specialty=SPECIALTY_MAP["general_physician"],
-            specialty_key="general_physician",
-            relevance=_bucket_for_score(gp_score),
-            relevance_score=gp_score,
-            title=gp_title,
-            reason=gp_reason,
-            evidence=gp_evidence,
-            source_records=issue_count,
-            score_factors=gp_factors,
-            has_safety_signal=True,
-            safety_message=safety_msg,
-        ))
+        _upsert(
+            CareRecommendation(
+                specialty=SPECIALTY_MAP["general_physician"],
+                specialty_key="general_physician",
+                relevance=_bucket_for_score(gp_score),
+                relevance_score=gp_score,
+                title=gp_title,
+                reason=gp_reason,
+                evidence=gp_evidence,
+                source_records=issue_count,
+                score_factors=gp_factors,
+                has_safety_signal=True,
+                safety_message=safety_msg,
+            )
+        )
 
         # 2b. Clinical Pharmacist (specialist perspective on meds)
         cp_factors: List[ScoreFactor] = []
         cp_evidence: List[EvidenceItem] = []
         cp_points = min(28, 18 + 3 * max(0, issue_count - 1))
-        cp_factors.append(ScoreFactor(
-            label="Medication safety issues",
-            points=cp_points,
-            note=f"{issue_count} interaction/duplicate/dosage issue(s)",
-        ))
+        cp_factors.append(
+            ScoreFactor(
+                label="Medication safety issues",
+                points=cp_points,
+                note=f"{issue_count} interaction/duplicate/dosage issue(s)",
+            )
+        )
         if len(medications) >= 4:
-            cp_factors.append(ScoreFactor(
-                label="Polypharmacy",
-                points=min(12, 6 + max(0, len(medications) - 4)),
-                note=f"{len(medications)} active medication(s)",
-            ))
+            cp_factors.append(
+                ScoreFactor(
+                    label="Polypharmacy",
+                    points=min(12, 6 + max(0, len(medications) - 4)),
+                    note=f"{len(medications)} active medication(s)",
+                )
+            )
         cp_score = max(50, sum(f.points for f in cp_factors))
         for _, ev, _ in med_safety_issues:
             cp_evidence.append(ev)
         cp_title = "Medication review"
         cp_reason = (
-            f"A clinical pharmacist specialises in reviewing medication lists, identifying interactions, "
-            f"and simplifying complex regimens. {issue_count} safety finding(s) were found in your records."
+            f"A clinical pharmacist specialises in reviewing medication lists, identifying interactions, "  # noqa: E501
+            f"and simplifying complex regimens. {issue_count} safety finding(s) were found in your records."  # noqa: E501
         )
-        _upsert(CareRecommendation(
-            specialty=SPECIALTY_MAP["clinical_pharmacist"],
-            specialty_key="clinical_pharmacist",
-            relevance=_bucket_for_score(cp_score),
-            relevance_score=cp_score,
-            title=cp_title,
-            reason=cp_reason,
-            evidence=cp_evidence,
-            source_records=issue_count,
-            score_factors=cp_factors,
-            has_safety_signal=True,
-            safety_message=None,
-        ))
+        _upsert(
+            CareRecommendation(
+                specialty=SPECIALTY_MAP["clinical_pharmacist"],
+                specialty_key="clinical_pharmacist",
+                relevance=_bucket_for_score(cp_score),
+                relevance_score=cp_score,
+                title=cp_title,
+                reason=cp_reason,
+                evidence=cp_evidence,
+                source_records=issue_count,
+                score_factors=cp_factors,
+                has_safety_signal=True,
+                safety_message=None,
+            )
+        )
 
     # ── 3. Known allergies without explicit conflicts → Allergist ───────
     if known_allergies and not allergy_conflicts:
         evidence_items = [EvidenceItem(description=f"Known allergy: {a}") for a in known_allergies]
-        score_factors = [ScoreFactor(
-            label="Documented allergy",
-            points=min(30, 18 + 4 * max(0, len(known_allergies) - 1)),
-            note=f"{len(known_allergies)} known allergy/allergies",
-        )]
+        score_factors = [
+            ScoreFactor(
+                label="Documented allergy",
+                points=min(30, 18 + 4 * max(0, len(known_allergies) - 1)),
+                note=f"{len(known_allergies)} known allergy/allergies",
+            )
+        ]
         score = sum(f.points for f in score_factors)
-        _upsert(CareRecommendation(
-            specialty=SPECIALTY_MAP["allergist"],
-            specialty_key="allergist",
-            relevance=_bucket_for_score(score),
-            relevance_score=score,
-            title="Allergy history review",
-            reason=(
-                f"{len(known_allergies)} allergy/allergies {'is' if len(known_allergies) == 1 else 'are'} "
-                f"documented. An allergy specialist can confirm triggers, update your list, and advise on "
-                f"safe medication choices."
-            ),
-            evidence=evidence_items,
-            source_records=len(known_allergies),
-            score_factors=score_factors,
-        ))
+        _upsert(
+            CareRecommendation(
+                specialty=SPECIALTY_MAP["allergist"],
+                specialty_key="allergist",
+                relevance=_bucket_for_score(score),
+                relevance_score=score,
+                title="Allergy history review",
+                reason=(
+                    f"{len(known_allergies)} allergy/allergies {'is' if len(known_allergies) == 1 else 'are'} "  # noqa: E501
+                    f"documented. An allergy specialist can confirm triggers, update your list, and advise on "  # noqa: E501
+                    f"safe medication choices."
+                ),
+                evidence=evidence_items,
+                source_records=len(known_allergies),
+                score_factors=score_factors,
+            )
+        )
 
     # ── 4. Diabetes (meds + labs) → Endocrinologist ────────────────────
-    diabetes_meds = [m for m in medications if any(
-        kw in (m.get("name", "").lower()) for kw in _DIABETES_MED_KEYWORDS
-    )]
+    diabetes_meds = [
+        m
+        for m in medications
+        if any(kw in (m.get("name", "").lower()) for kw in _DIABETES_MED_KEYWORDS)
+    ]
     endo_factors: List[ScoreFactor] = []
     endo_evidence: List[EvidenceItem] = []
     if diabetes_meds:
-        endo_factors.append(ScoreFactor(
-            label="Diabetes medication",
-            points=min(45, 30 + 5 * max(0, len(diabetes_meds) - 1)),
-            note=f"{len(diabetes_meds)} diabetes medication(s)",
-        ))
+        endo_factors.append(
+            ScoreFactor(
+                label="Diabetes medication",
+                points=min(45, 30 + 5 * max(0, len(diabetes_meds) - 1)),
+                note=f"{len(diabetes_meds)} diabetes medication(s)",
+            )
+        )
         for m in diabetes_meds:
-            endo_evidence.append(EvidenceItem(
-                date=m.get("date"),
-                source_file=m.get("source_file"),
-                description=f"Medication: {m.get('name', '')} ({m.get('dosage', '')})",
-            ))
+            endo_evidence.append(
+                EvidenceItem(
+                    date=m.get("date"),
+                    source_file=m.get("source_file"),
+                    description=f"Medication: {m.get('name', '')} ({m.get('dosage', '')})",
+                )
+            )
 
     # Lab trends that are diagnostic of diabetes activity. Dedupe by
     # (test_name, direction-bucket) so the same trend contributed by
@@ -591,33 +659,43 @@ def generate_care_recommendations(
         else:
             # Stable direction (e.g. "stable") — not worth a factor, but
             # still count the trend as evidence.
-            endo_evidence.append(EvidenceItem(
-                description=f"{trend.get('test_name', '')}: {direction or 'stable'} — {trend.get('explanation', '')}",
-            ))
+            endo_evidence.append(
+                EvidenceItem(
+                    description=f"{trend.get('test_name', '')}: {direction or 'stable'} — {trend.get('explanation', '')}",  # noqa: E501
+                )
+            )
             continue
         dedupe_key = (trend.get("test_name", ""), bucket)
         if dedupe_key in seen_endo_trends:
             # Still record the evidence, but don't add a duplicate factor.
-            endo_evidence.append(EvidenceItem(
-                description=f"{trend.get('test_name', '')}: {direction} — {trend.get('explanation', '')}",
-            ))
+            endo_evidence.append(
+                EvidenceItem(
+                    description=f"{trend.get('test_name', '')}: {direction} — {trend.get('explanation', '')}",  # noqa: E501
+                )
+            )
             continue
         seen_endo_trends.add(dedupe_key)
         if bucket == "rising":
-            endo_factors.append(ScoreFactor(
-                label=f"Lab trend — {trend.get('test_name', '')} rising",
-                points=28,
-                note=trend.get("explanation", "") or "glucose control worsening",
-            ))
+            endo_factors.append(
+                ScoreFactor(
+                    label=f"Lab trend — {trend.get('test_name', '')} rising",
+                    points=28,
+                    note=trend.get("explanation", "") or "glucose control worsening",
+                )
+            )
         else:
-            endo_factors.append(ScoreFactor(
-                label=f"Lab trend — {trend.get('test_name', '')} improving",
-                points=18,
-                note=trend.get("explanation", "") or "glucose control improving",
-            ))
-        endo_evidence.append(EvidenceItem(
-            description=f"{trend.get('test_name', '')}: {direction} — {trend.get('explanation', '')}",
-        ))
+            endo_factors.append(
+                ScoreFactor(
+                    label=f"Lab trend — {trend.get('test_name', '')} improving",
+                    points=18,
+                    note=trend.get("explanation", "") or "glucose control improving",
+                )
+            )
+        endo_evidence.append(
+            EvidenceItem(
+                description=f"{trend.get('test_name', '')}: {direction} — {trend.get('explanation', '')}",  # noqa: E501
+            )
+        )
 
     if endo_factors:
         endo_score = min(sum(f.points for f in endo_factors), 92)
@@ -626,27 +704,29 @@ def generate_care_recommendations(
         # otherwise lead with the medication evidence.
         if diabetes_lab_trends > 0:
             endo_reason = (
-                f"Your records show diabetes-related medication(s) and glucose/HbA1c trends. "
-                f"An endocrinologist specialises in long-term diabetes management and treatment "
-                f"adjustments."
+                "Your records show diabetes-related medication(s) and glucose/HbA1c trends. "
+                "An endocrinologist specialises in long-term diabetes management and treatment "
+                "adjustments."
             )
         else:
             endo_reason = (
-                f"Your records include diabetes medication(s) (e.g. Metformin). An endocrinologist "
-                f"specialises in long-term diabetes management and can help confirm the diagnosis, "
-                f"adjust treatment, and order follow-up labs."
+                "Your records include diabetes medication(s) (e.g. Metformin). An endocrinologist "
+                "specialises in long-term diabetes management and can help confirm the diagnosis, "
+                "adjust treatment, and order follow-up labs."
             )
-        _upsert(CareRecommendation(
-            specialty=SPECIALTY_MAP["endocrinologist"],
-            specialty_key="endocrinologist",
-            relevance=_bucket_for_score(endo_score),
-            relevance_score=endo_score,
-            title="Ongoing diabetes management",
-            reason=endo_reason,
-            evidence=endo_evidence,
-            source_records=len(diabetes_meds) + diabetes_lab_trends,
-            score_factors=endo_factors,
-        ))
+        _upsert(
+            CareRecommendation(
+                specialty=SPECIALTY_MAP["endocrinologist"],
+                specialty_key="endocrinologist",
+                relevance=_bucket_for_score(endo_score),
+                relevance_score=endo_score,
+                title="Ongoing diabetes management",
+                reason=endo_reason,
+                evidence=endo_evidence,
+                source_records=len(diabetes_meds) + diabetes_lab_trends,
+                score_factors=endo_factors,
+            )
+        )
 
     # ── 5. Kidney lab trends → Nephrologist ────────────────────────────
     kidney_factors: List[ScoreFactor] = []
@@ -655,65 +735,84 @@ def generate_care_recommendations(
     for trend in lab_trend_list:
         test_name = (trend.get("test_name", "") or "").lower()
         direction = (trend.get("direction", "") or "").lower()
-        if not test_name or not ("egfr" in test_name or "creatinine" in test_name or "kidney" in test_name):
+        if not test_name or not (
+            "egfr" in test_name or "creatinine" in test_name or "kidney" in test_name
+        ):
             continue
         if direction in ("decreasing", "fluctuating (net decreasing)"):
             bucket = "declining"
-        elif "creatinine" in test_name and direction in ("increasing", "fluctuating (net increasing)"):
+        elif "creatinine" in test_name and direction in (
+            "increasing",
+            "fluctuating (net increasing)",
+        ):
             bucket = "rising_creatinine"
         elif direction in ("increasing", "fluctuating (net increasing)"):
             bucket = "rising"
         else:
-            kidney_evidence.append(EvidenceItem(
-                description=f"{trend.get('test_name', '')}: {direction or 'stable'} — {trend.get('explanation', '')}",
-            ))
+            kidney_evidence.append(
+                EvidenceItem(
+                    description=f"{trend.get('test_name', '')}: {direction or 'stable'} — {trend.get('explanation', '')}",  # noqa: E501
+                )
+            )
             continue
         dedupe_key = (trend.get("test_name", ""), bucket)
         if dedupe_key in seen_kidney_trends:
-            kidney_evidence.append(EvidenceItem(
-                description=f"{trend.get('test_name', '')}: {direction} — {trend.get('explanation', '')}",
-            ))
+            kidney_evidence.append(
+                EvidenceItem(
+                    description=f"{trend.get('test_name', '')}: {direction} — {trend.get('explanation', '')}",  # noqa: E501
+                )
+            )
             continue
         seen_kidney_trends.add(dedupe_key)
         if bucket == "declining":
-            kidney_factors.append(ScoreFactor(
-                label=f"Lab trend — {trend.get('test_name', '')} declining",
-                points=20,
-                note=trend.get("explanation", "") or "kidney function trending down",
-            ))
+            kidney_factors.append(
+                ScoreFactor(
+                    label=f"Lab trend — {trend.get('test_name', '')} declining",
+                    points=20,
+                    note=trend.get("explanation", "") or "kidney function trending down",
+                )
+            )
         elif bucket == "rising_creatinine":
-            kidney_factors.append(ScoreFactor(
-                label=f"Lab trend — {trend.get('test_name', '')} rising",
-                points=18,
-                note=trend.get("explanation", "") or "creatinine trending up",
-            ))
+            kidney_factors.append(
+                ScoreFactor(
+                    label=f"Lab trend — {trend.get('test_name', '')} rising",
+                    points=18,
+                    note=trend.get("explanation", "") or "creatinine trending up",
+                )
+            )
         else:
-            kidney_factors.append(ScoreFactor(
-                label=f"Lab trend — {trend.get('test_name', '')} rising",
-                points=10,
-                note=trend.get("explanation", "") or "kidney marker rising",
-            ))
-        kidney_evidence.append(EvidenceItem(
-            description=f"{trend.get('test_name', '')}: {direction} — {trend.get('explanation', '')}",
-        ))
+            kidney_factors.append(
+                ScoreFactor(
+                    label=f"Lab trend — {trend.get('test_name', '')} rising",
+                    points=10,
+                    note=trend.get("explanation", "") or "kidney marker rising",
+                )
+            )
+        kidney_evidence.append(
+            EvidenceItem(
+                description=f"{trend.get('test_name', '')}: {direction} — {trend.get('explanation', '')}",  # noqa: E501
+            )
+        )
 
     if kidney_factors:
         kidney_score = min(sum(f.points for f in kidney_factors), 75)
-        _upsert(CareRecommendation(
-            specialty=SPECIALTY_MAP["nephrologist"],
-            specialty_key="nephrologist",
-            relevance=_bucket_for_score(kidney_score),
-            relevance_score=kidney_score,
-            title="Kidney function monitoring",
-            reason=(
-                f"Your kidney-function markers (e.g. eGFR, creatinine) show a trend that may benefit "
-                f"from specialist monitoring. A nephrologist can interpret these patterns in the "
-                f"context of your other medications."
-            ),
-            evidence=kidney_evidence,
-            source_records=len(kidney_factors),
-            score_factors=kidney_factors,
-        ))
+        _upsert(
+            CareRecommendation(
+                specialty=SPECIALTY_MAP["nephrologist"],
+                specialty_key="nephrologist",
+                relevance=_bucket_for_score(kidney_score),
+                relevance_score=kidney_score,
+                title="Kidney function monitoring",
+                reason=(
+                    "Your kidney-function markers (e.g. eGFR, creatinine) show a trend that may benefit "  # noqa: E501
+                    "from specialist monitoring. A nephrologist can interpret these patterns in the "  # noqa: E501
+                    "context of your other medications."
+                ),
+                evidence=kidney_evidence,
+                source_records=len(kidney_factors),
+                score_factors=kidney_factors,
+            )
+        )
 
     # ── 6. General Physician baseline ─────────────────────────────────
     #    A primary-care physician is a baseline option whenever the
@@ -733,43 +832,53 @@ def generate_care_recommendations(
         # medications across multiple providers is a strong
         # primary-care case.
         if len(medications) >= 2:
-            gp_baseline_factors.append(ScoreFactor(
-                label="Multiple medications",
-                points=min(30, 20 + max(0, len(medications) - 2) * 3),
-                note=f"{len(medications)} active medication(s)",
-            ))
+            gp_baseline_factors.append(
+                ScoreFactor(
+                    label="Multiple medications",
+                    points=min(30, 20 + max(0, len(medications) - 2) * 3),
+                    note=f"{len(medications)} active medication(s)",
+                )
+            )
         if len(visits) >= 2:
-            gp_baseline_factors.append(ScoreFactor(
-                label="Multiple visits / providers",
-                points=min(24, 16 + max(0, len(visits) - 2) * 2),
-                note=f"{len(visits)} visit(s)",
-            ))
+            gp_baseline_factors.append(
+                ScoreFactor(
+                    label="Multiple visits / providers",
+                    points=min(24, 16 + max(0, len(visits) - 2) * 2),
+                    note=f"{len(visits)} visit(s)",
+                )
+            )
         if known_allergies:
-            gp_baseline_factors.append(ScoreFactor(
-                label="Documented allergies",
-                points=min(16, 10 + max(0, len(known_allergies) - 1) * 2),
-                note=f"{len(known_allergies)} allergy/allergies to track",
-            ))
+            gp_baseline_factors.append(
+                ScoreFactor(
+                    label="Documented allergies",
+                    points=min(16, 10 + max(0, len(known_allergies) - 1) * 2),
+                    note=f"{len(known_allergies)} allergy/allergies to track",
+                )
+            )
 
         # Safety signals also drive the GP recommendation — they are
         # often the right person to *review* the safety issue and
         # coordinate the next step, even if a specialist is also
         # warranted.
         if allergy_conflicts:
-            gp_baseline_factors.append(ScoreFactor(
-                label="Allergy/safety signal",
-                points=min(30, 20 + 5 * max(0, len(allergy_conflicts) - 1)),
-                note=f"{len(allergy_conflicts)} medication/allergy conflict(s)",
-            ))
+            gp_baseline_factors.append(
+                ScoreFactor(
+                    label="Allergy/safety signal",
+                    points=min(30, 20 + 5 * max(0, len(allergy_conflicts) - 1)),
+                    note=f"{len(allergy_conflicts)} medication/allergy conflict(s)",
+                )
+            )
 
         # If we still have no factors (only one med or visit), keep GP as
         # an honest "possible" baseline.
         if not gp_baseline_factors:
-            gp_baseline_factors.append(ScoreFactor(
-                label="Records present",
-                points=35,
-                note="A general physician can help maintain your overall health.",
-            ))
+            gp_baseline_factors.append(
+                ScoreFactor(
+                    label="Records present",
+                    points=35,
+                    note="A general physician can help maintain your overall health.",
+                )
+            )
         baseline_score = sum(f.points for f in gp_baseline_factors)
         # Cap at 92 so that very strong single-specialist signals
         # (e.g. confirmed worsening T2DM with high HbA1c) can still
@@ -781,31 +890,34 @@ def generate_care_recommendations(
         # safety driver, so the card label reflects the *actual*
         # reason GP is the top pick.
         baseline_title = (
-            "Medication reconciliation" if (allergy_conflicts or med_safety_issues)
+            "Medication reconciliation"
+            if (allergy_conflicts or med_safety_issues)
             else "General health overview"
         )
         if allergy_conflicts and not med_safety_issues:
             baseline_reason = (
-                f"{len(allergy_conflicts)} medication/allergy conflict(s) were found in your records. "
-                f"A general physician can review the full medication list, confirm the safest next step, "
+                f"{len(allergy_conflicts)} medication/allergy conflict(s) were found in your records. "  # noqa: E501
+                f"A general physician can review the full medication list, confirm the safest next step, "  # noqa: E501
                 f"and refer you to a specialist if needed."
             )
         elif med_safety_issues:
             baseline_reason = (
-                f"{len(med_safety_issues)} medication safety finding(s) were detected. A general physician "
-                f"can review the full medication list, reconcile any discrepancies, and coordinate any "
+                f"{len(med_safety_issues)} medication safety finding(s) were detected. A general physician "  # noqa: E501
+                f"can review the full medication list, reconcile any discrepancies, and coordinate any "  # noqa: E501
                 f"specialist referrals."
             )
         else:
             baseline_reason = (
-                f"A general physician can coordinate your overall care, review your medication list, "
-                f"and help you decide whether to see any of the specialists suggested above."
+                "A general physician can coordinate your overall care, review your medication list, "  # noqa: E501
+                "and help you decide whether to see any of the specialists suggested above."
             )
         baseline_safety_msg: Optional[str] = None
         # If both allergy and drug-safety signals exist, surface both —
         # allergy is the more urgent message and should not be hidden.
         if allergy_conflicts and med_safety_issues:
-            allergy_names = sorted({c.get("allergy", "") for c in allergy_conflicts if c.get("allergy")})
+            allergy_names = sorted(
+                {c.get("allergy", "") for c in allergy_conflicts if c.get("allergy")}
+            )
             sample_issue = med_safety_issues[0]
             secondary = (
                 f"{sample_issue[0].lower()} found in your medication list — review recommended."
@@ -816,9 +928,7 @@ def generate_care_recommendations(
                 f"Allergy conflict: {', '.join(allergy_names)} — review recommended. {secondary}"
             )
         elif allergy_conflicts and not med_safety_issues:
-            baseline_safety_msg = (
-                f"Allergy conflict: {', '.join({c.get('allergy', '') for c in allergy_conflicts} or ['documented allergen'])} — review recommended."
-            )
+            baseline_safety_msg = f"Allergy conflict: {', '.join({c.get('allergy', '') for c in allergy_conflicts} or ['documented allergen'])} — review recommended."  # noqa: E501
         elif med_safety_issues:
             sample_issue = med_safety_issues[0]
             baseline_safety_msg = (
@@ -827,46 +937,58 @@ def generate_care_recommendations(
                 else f"{len(med_safety_issues)} medication safety findings — review recommended."
             )
 
-        _upsert(CareRecommendation(
-            specialty=SPECIALTY_MAP["general_physician"],
-            specialty_key="general_physician",
-            relevance=_bucket_for_score(baseline_score),
-            relevance_score=baseline_score,
-            title=baseline_title,
-            reason=baseline_reason,
-            evidence=[EvidenceItem(
-                description=(
-                    f"{len(visits)} visit(s), {len(medications)} medication(s), "
-                    f"{len(known_allergies)} known allergy/allergies"
-                    + (f", {len(allergy_conflicts)} allergy conflict(s)" if allergy_conflicts else "")
-                ),
-            )],
-            source_records=max(1, len(visits) + len(medications)),
-            score_factors=gp_baseline_factors,
-            has_safety_signal=bool(allergy_conflicts or med_safety_issues),
-            safety_message=baseline_safety_msg,
-        ))
+        _upsert(
+            CareRecommendation(
+                specialty=SPECIALTY_MAP["general_physician"],
+                specialty_key="general_physician",
+                relevance=_bucket_for_score(baseline_score),
+                relevance_score=baseline_score,
+                title=baseline_title,
+                reason=baseline_reason,
+                evidence=[
+                    EvidenceItem(
+                        description=(
+                            f"{len(visits)} visit(s), {len(medications)} medication(s), "
+                            f"{len(known_allergies)} known allergy/allergies"
+                            + (
+                                f", {len(allergy_conflicts)} allergy conflict(s)"
+                                if allergy_conflicts
+                                else ""
+                            )
+                        ),
+                    )
+                ],
+                source_records=max(1, len(visits) + len(medications)),
+                score_factors=gp_baseline_factors,
+                has_safety_signal=bool(allergy_conflicts or med_safety_issues),
+                safety_message=baseline_safety_msg,
+            )
+        )
 
     # ── 7. Fallback when nothing else fired ────────────────────────────
     if not recommendations:
-        _upsert(CareRecommendation(
-            specialty=SPECIALTY_MAP["general_physician"],
-            specialty_key="general_physician",
-            relevance="possible",
-            relevance_score=35,
-            title="General health check",
-            reason=(
-                "No specific care needs were detected in your records. "
-                "A general physician can help maintain your overall health."
-            ),
-            evidence=[],
-            source_records=0,
-            score_factors=[ScoreFactor(
-                label="Default baseline",
-                points=35,
-                note="No specific signals found in records",
-            )],
-        ))
+        _upsert(
+            CareRecommendation(
+                specialty=SPECIALTY_MAP["general_physician"],
+                specialty_key="general_physician",
+                relevance="possible",
+                relevance_score=35,
+                title="General health check",
+                reason=(
+                    "No specific care needs were detected in your records. "
+                    "A general physician can help maintain your overall health."
+                ),
+                evidence=[],
+                source_records=0,
+                score_factors=[
+                    ScoreFactor(
+                        label="Default baseline",
+                        points=35,
+                        note="No specific signals found in records",
+                    )
+                ],
+            )
+        )
 
     # ── Sort by score, with stable tiebreakers ─────────────────────────
     sorted_recs = sorted(

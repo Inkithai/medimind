@@ -6,9 +6,9 @@ indexer so no network is involved. Verifies the response contract:
   - indexed=False + index_error when the indexer reports 0 chunks
     (the "No indexable content ... but indexed=True" contradiction).
 """
+
 import os
 import sys
-import json
 from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -24,20 +24,26 @@ os.environ["JWT_SECRET"] = "dummy"
 from fastapi.testclient import TestClient  # noqa: E402
 
 import api  # noqa: E402
-import db  # noqa: E402
-
 
 EXTRACTED_DOC = {
     "document_type": "prescription",
     "date": "2024-03-15",
     "provider_or_doctor": "Dr. Smith",
     "patient_name": "John Doe",
-    "medications": [{
-        "name": "Paracetamol", "ingredients": ["Paracetamol"], "dosage": "500 mg",
-        "frequency": "3x daily", "duration": "5 days", "dosage_value": 500,
-        "dosage_unit": "mg", "frequency_per_day": 3, "is_as_needed": False,
-        "confidence": 0.95,
-    }],
+    "medications": [
+        {
+            "name": "Paracetamol",
+            "ingredients": ["Paracetamol"],
+            "dosage": "500 mg",
+            "frequency": "3x daily",
+            "duration": "5 days",
+            "dosage_value": 500,
+            "dosage_unit": "mg",
+            "frequency_per_day": 3,
+            "is_as_needed": False,
+            "confidence": 0.95,
+        }
+    ],
     "lab_results": [],
     "allergies_noted": [],
     "clinical_notes": None,
@@ -59,18 +65,26 @@ def _make_client(index_chunks):
     app.dependency_overrides[api.get_current_user] = override_user
 
     patchers = [
-        mock.patch.object(api.storage, "upload_patient_document",
-                          return_value={"document_url": "https://cloud/x.jpg",
-                                        "cloudinary_public_id": "x"}),
+        mock.patch.object(
+            api.storage,
+            "upload_patient_document",
+            return_value={"document_url": "https://cloud/x.jpg", "cloudinary_public_id": "x"},
+        ),
         mock.patch.object(api.db, "load_documents", return_value=[]),
         mock.patch.object(api.db, "insert_documents"),
         mock.patch.object(api.db, "save_patient_snapshot"),
         mock.patch.object(api, "process_document", return_value=dict(EXTRACTED_DOC)),
-        mock.patch.object(api, "cross_check_prescriptions", return_value={
-            "potential_drug_interactions": [], "duplicate_prescriptions": [],
-            "conflicting_dosage_instructions": [], "allergy_conflicts": [],
-            "overall_recommendation": "Consult a professional.",
-        }),
+        mock.patch.object(
+            api,
+            "cross_check_prescriptions",
+            return_value={
+                "potential_drug_interactions": [],
+                "duplicate_prescriptions": [],
+                "conflicting_dosage_instructions": [],
+                "allergy_conflicts": [],
+                "overall_recommendation": "Consult a professional.",
+            },
+        ),
         mock.patch.object(api, "index_patient_timeline", return_value=index_chunks),
     ]
     for p in patchers:
@@ -153,8 +167,8 @@ def test_partial_batch_keeps_good_files_and_reports_failures():
     app, patchers = _make_client(index_chunks=2)
     try:
         api.process_document.side_effect = [
-            dict(EXTRACTED_DOC),                                # good
-            dict(NON_MEDICAL_DOC),                              # extraction ok but not medical
+            dict(EXTRACTED_DOC),  # good
+            dict(NON_MEDICAL_DOC),  # extraction ok but not medical
             NonMedicalDocumentError("cv.pdf", "raw text analysis indicates a CV"),
             RuntimeError("provider kept rate-limiting (HTTP 429)"),
         ]
@@ -195,7 +209,10 @@ def test_all_files_transient_failure_is_502():
         with TestClient(app) as client:
             resp = client.post(
                 "/api/v1/documents",
-                files=[("files", ("a.jpg", b"\xff\xd8\xff" + b"a", "image/jpeg")), ("files", ("b.jpg", b"\xff\xd8\xff" + b"b", "image/jpeg"))],
+                files=[
+                    ("files", ("a.jpg", b"\xff\xd8\xff" + b"a", "image/jpeg")),
+                    ("files", ("b.jpg", b"\xff\xd8\xff" + b"b", "image/jpeg")),
+                ],
             )
         assert resp.status_code == 502, resp.text
         assert "rate-limit" in resp.json()["detail"]
@@ -319,13 +336,19 @@ def test_all_files_non_medical_still_422():
     app, patchers = _make_client(index_chunks=2)
     try:
         api.process_document.side_effect = [
-            NonMedicalDocumentError("boarding.jpg", "classified as 'other' with no medications, lab results, or allergies found"),
+            NonMedicalDocumentError(
+                "boarding.jpg",
+                "classified as 'other' with no medications, lab results, or allergies found",
+            ),
             dict(NON_MEDICAL_DOC),
         ]
         with TestClient(app) as client:
             resp = client.post(
                 "/api/v1/documents",
-                files=[("files", ("boarding.jpg", b"\xff\xd8\xff" + b"a", "image/jpeg")), ("files", ("zoom.png", b"\x89PNG\r\n\x1a\n" + b"b", "image/png"))],
+                files=[
+                    ("files", ("boarding.jpg", b"\xff\xd8\xff" + b"a", "image/jpeg")),
+                    ("files", ("zoom.png", b"\x89PNG\r\n\x1a\n" + b"b", "image/png")),
+                ],
             )
         assert resp.status_code == 422, resp.text
         detail = resp.json()["detail"]

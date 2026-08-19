@@ -81,9 +81,7 @@ export function ClinicalSafetyPage() {
 
           {alerts.active_count > 0 && (
             <div>
-              <h2 className="section-title">
-                Active findings ({alerts.active_count})
-              </h2>
+              <h2 className="section-title">Active findings ({alerts.active_count})</h2>
               <div className="grid gap-3 sm:grid-cols-2">
                 {alerts.active_findings.map((f, i) => (
                   <ClinicalFindingCard key={f.finding_key || i} finding={f} />
@@ -99,9 +97,7 @@ export function ClinicalSafetyPage() {
 
           {alerts.suppressed_count > 0 && (
             <div>
-              <h2 className="section-title">
-                Overridden / suppressed ({alerts.suppressed_count})
-              </h2>
+              <h2 className="section-title">Overridden / suppressed ({alerts.suppressed_count})</h2>
               <div className="grid gap-3 sm:grid-cols-2">
                 {alerts.suppressed_findings.map((f, i) => (
                   <ClinicalFindingCard key={f.finding_key || i} finding={f} />
@@ -116,14 +112,8 @@ export function ClinicalSafetyPage() {
               <CardBody>
                 <dl className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
                   <Metric label="Total reviews" value={metrics.total} />
-                  <Metric
-                    label="Confirmation rate"
-                    value={metrics.confirmation_rate ?? "—"}
-                  />
-                  <Metric
-                    label="False-positive rate"
-                    value={metrics.false_positive_rate ?? "—"}
-                  />
+                  <Metric label="Confirmation rate" value={metrics.confirmation_rate ?? "—"} />
+                  <Metric label="False-positive rate" value={metrics.false_positive_rate ?? "—"} />
                   <Metric label="Override rate" value={metrics.override_rate ?? "—"} />
                 </dl>
               </CardBody>

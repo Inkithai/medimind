@@ -28,7 +28,6 @@ from typing import Any, Optional, Sequence
 
 from dateutil import parser as dateutil_parser
 
-
 # YYYY-MM-DD (ISO) is unambiguous, but dateutil still applies `dayfirst` to
 # it and reads "2025-11-09" as 11 September. ISO-looking strings therefore
 # take a dedicated path that never applies the record's day/month convention.
@@ -125,11 +124,14 @@ def sanitize_clinical_date(raw: Any) -> Optional[str]:
     # Require evidence of day, month and year in the source, not values that
     # dateutil could fill from today's date.
     digit_groups = re.findall(r"\d+", text)
-    has_month_word = bool(re.search(
-        r"\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|"
-        r"jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b",
-        text, re.IGNORECASE,
-    ))
+    has_month_word = bool(
+        re.search(
+            r"\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|"
+            r"jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b",
+            text,
+            re.IGNORECASE,
+        )
+    )
     if len(digit_groups) < (2 if has_month_word else 3):
         return None
     return text

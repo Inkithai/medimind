@@ -64,15 +64,34 @@ from typing import Any, Dict, List, Optional, Tuple
 
 TEST_SYNONYMS: List[Tuple[str, Tuple[str, ...]]] = [
     ("hba1c", ("hba1c", "hb a1c", "a1c", "glycated hemoglobin", "glycosylated hemoglobin")),
-    ("glucose_fasting", ("fasting glucose", "glucose fasting", "fbs", "fbg",
-                         "fasting blood sugar", "fasting blood glucose")),
+    (
+        "glucose_fasting",
+        (
+            "fasting glucose",
+            "glucose fasting",
+            "fbs",
+            "fbg",
+            "fasting blood sugar",
+            "fasting blood glucose",
+        ),
+    ),
     ("glucose_random", ("random glucose", "rbs", "random blood sugar", "glucose random")),
     # Bare "glucose"/"blood sugar" with no fasting/random qualifier. Listed
     # AFTER the qualified forms so those win when both could match.
     ("glucose_fasting", ("glucose", "blood sugar")),
     ("hemoglobin", ("hemoglobin", "haemoglobin", "hgb", "hb")),
-    ("wbc", ("wbc", "white blood cell", "white blood cells", "leukocyte",
-             "leucocyte", "total leukocyte count", "tlc")),
+    (
+        "wbc",
+        (
+            "wbc",
+            "white blood cell",
+            "white blood cells",
+            "leukocyte",
+            "leucocyte",
+            "total leukocyte count",
+            "tlc",
+        ),
+    ),
     ("platelets", ("platelet", "platelets", "platelet count", "plt")),
     ("creatinine", ("creatinine", "serum creatinine")),
     ("egfr", ("egfr", "gfr", "estimated gfr")),
@@ -85,8 +104,7 @@ TEST_SYNONYMS: List[Tuple[str, Tuple[str, ...]]] = [
     # fluctuating trend across four values that were never the same analyte.
     # The specific names must therefore be matched BEFORE the generic one,
     # and bare "cholesterol" stays last.
-    ("non_hdl_cholesterol", ("non-hdl cholesterol", "non hdl cholesterol",
-                             "non-hdl-c", "non-hdl")),
+    ("non_hdl_cholesterol", ("non-hdl cholesterol", "non hdl cholesterol", "non-hdl-c", "non-hdl")),
     ("ldl", ("ldl", "ldl cholesterol", "ldl-c", "low density lipoprotein")),
     ("hdl", ("hdl", "hdl cholesterol", "hdl-c", "high density lipoprotein")),
     ("triglycerides", ("triglycerides", "triglyceride", "tg")),
@@ -95,8 +113,10 @@ TEST_SYNONYMS: List[Tuple[str, Tuple[str, ...]]] = [
     ("sodium", ("sodium", "na+", "serum sodium")),
     ("potassium", ("potassium", "k+", "serum potassium")),
     ("ferritin", ("ferritin", "serum ferritin")),
-    ("vitamin_d", ("vitamin d", "25-oh vitamin d", "25 oh vitamin d",
-                   "25-hydroxyvitamin d", "vit d")),
+    (
+        "vitamin_d",
+        ("vitamin d", "25-oh vitamin d", "25 oh vitamin d", "25-hydroxyvitamin d", "vit d"),
+    ),
     ("vitamin_b12", ("vitamin b12", "b12", "cobalamin", "vit b12")),
     ("uric_acid", ("uric acid", "urate", "serum uric acid")),
     ("crp", ("crp", "c-reactive protein", "c reactive protein")),
@@ -107,10 +127,27 @@ TEST_SYNONYMS: List[Tuple[str, Tuple[str, ...]]] = [
 # list only decides what surfaces without being asked for. Kept to the tests a
 # non-clinical reader is likely to have heard of and to have a question about.
 MAIN_TESTS = {
-    "hemoglobin", "wbc", "platelets", "glucose_fasting", "hba1c",
-    "creatinine", "egfr", "alt", "ast", "cholesterol_total", "ldl", "hdl",
-    "triglycerides", "tsh", "sodium", "potassium", "ferritin", "vitamin_d",
-    "vitamin_b12", "uric_acid", "crp",
+    "hemoglobin",
+    "wbc",
+    "platelets",
+    "glucose_fasting",
+    "hba1c",
+    "creatinine",
+    "egfr",
+    "alt",
+    "ast",
+    "cholesterol_total",
+    "ldl",
+    "hdl",
+    "triglycerides",
+    "tsh",
+    "sodium",
+    "potassium",
+    "ferritin",
+    "vitamin_d",
+    "vitamin_b12",
+    "uric_acid",
+    "crp",
 }
 
 # ---------------------------------------------------------------------------
@@ -145,9 +182,20 @@ REFERENCE_INTERVALS: Dict[str, Dict[str, Any]] = {
         "unit": "x10^9/L",
         # 10^9/L, 10^3/uL and K/uL are the same number; /uL and /mm3 are
         # 1000x, hence the 0.001 factor rather than an alias.
-        "units": {"x10^9/l": 1.0, "10^9/l": 1.0, "10*9/l": 1.0, "k/ul": 1.0,
-                  "10^3/ul": 1.0, "x10^3/ul": 1.0, "thou/ul": 1.0, "10e9/l": 1.0,
-                  "/ul": 0.001, "cells/ul": 0.001, "/mm3": 0.001, "cells/mm3": 0.001},
+        "units": {
+            "x10^9/l": 1.0,
+            "10^9/l": 1.0,
+            "10*9/l": 1.0,
+            "k/ul": 1.0,
+            "10^3/ul": 1.0,
+            "x10^3/ul": 1.0,
+            "thou/ul": 1.0,
+            "10e9/l": 1.0,
+            "/ul": 0.001,
+            "cells/ul": 0.001,
+            "/mm3": 0.001,
+            "cells/mm3": 0.001,
+        },
         "rules": [
             {"sex": "any", "age_min": 18, "age_max": None, "low": 4.0, "high": 11.0},
             {"sex": "any", "age_min": 12, "age_max": 17, "low": 4.5, "high": 13.0},
@@ -157,9 +205,20 @@ REFERENCE_INTERVALS: Dict[str, Dict[str, Any]] = {
     "platelets": {
         "label": "Platelet count",
         "unit": "x10^9/L",
-        "units": {"x10^9/l": 1.0, "10^9/l": 1.0, "10*9/l": 1.0, "k/ul": 1.0,
-                  "10^3/ul": 1.0, "x10^3/ul": 1.0, "thou/ul": 1.0, "10e9/l": 1.0,
-                  "/ul": 0.001, "cells/ul": 0.001, "/mm3": 0.001, "cells/mm3": 0.001},
+        "units": {
+            "x10^9/l": 1.0,
+            "10^9/l": 1.0,
+            "10*9/l": 1.0,
+            "k/ul": 1.0,
+            "10^3/ul": 1.0,
+            "x10^3/ul": 1.0,
+            "thou/ul": 1.0,
+            "10e9/l": 1.0,
+            "/ul": 0.001,
+            "cells/ul": 0.001,
+            "/mm3": 0.001,
+            "cells/mm3": 0.001,
+        },
         "rules": [
             # Stable from about a year old onward, so this one rule covers any
             # age -- which also means it still applies when age is unknown.
@@ -490,8 +549,13 @@ if __name__ == "__main__":
     # Ratio" and missed "Total Cholesterol / HDL Ratio", which then merged
     # into HDL.
     for ratio_name in (
-        "Cholesterol/HDL Ratio", "TC/HDL Ratio", "Total Cholesterol / HDL Ratio",
-        "Cholesterol : HDL Ratio", "Chol/HDL", "LDL/HDL Ratio", "CHOL/HDL RATIO",
+        "Cholesterol/HDL Ratio",
+        "TC/HDL Ratio",
+        "Total Cholesterol / HDL Ratio",
+        "Cholesterol : HDL Ratio",
+        "Chol/HDL",
+        "LDL/HDL Ratio",
+        "CHOL/HDL RATIO",
     ):
         if "ratio" in ratio_name.lower():
             assert canonical_test(ratio_name) == "cholesterol_ratio", ratio_name
@@ -499,10 +563,20 @@ if __name__ == "__main__":
     # groups under its own name instead of joining a test it merely mentions.
     assert canonical_test("Albumin/Creatinine Ratio") is None
     assert canonical_test("Neutrophil Lymphocyte Ratio") is None
-    assert len({
-        canonical_test(n) for n in
-        ("Total Cholesterol", "HDL Cholesterol", "LDL Cholesterol", "Cholesterol/HDL Ratio")
-    }) == 4
+    assert (
+        len(
+            {
+                canonical_test(n)
+                for n in (
+                    "Total Cholesterol",
+                    "HDL Cholesterol",
+                    "LDL Cholesterol",
+                    "Cholesterol/HDL Ratio",
+                )
+            }
+        )
+        == 4
+    )
     # A ratio and a non-HDL have no interval in the table, which is correct:
     # they group as their own test and simply get no status.
     assert lookup_interval("cholesterol_ratio", "female", 40) is None

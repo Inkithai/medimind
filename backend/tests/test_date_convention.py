@@ -77,18 +77,56 @@ def test_trend_direction_agrees_with_treatment_windows():
     from risk_timeline import build_treatment_windows
 
     docs = [
-        {"date": "12/11/2025", "document_type": "lab_report", "allergies_noted": [],
-         "lab_results": [{"test_name": "Hb", "value": "10", "unit": "g/dL",
-                          "flag": "low", "reference_range": "12-15"}],
-         "medications": [{"name": "DrugA", "ingredients": ["druga"], "dosage_value": 10,
-                          "dosage_unit": "mg", "frequency_per_day": 1, "duration": "14 days"}],
-         "_source": {"file": "nov.pdf"}},
-        {"date": "10/12/2025", "document_type": "lab_report", "allergies_noted": [],
-         "lab_results": [{"test_name": "Hb", "value": "20", "unit": "g/dL",
-                          "flag": "high", "reference_range": "12-15"}],
-         "medications": [{"name": "DrugB", "ingredients": ["drugb"], "dosage_value": 10,
-                          "dosage_unit": "mg", "frequency_per_day": 1, "duration": "14 days"}],
-         "_source": {"file": "dec.pdf"}},
+        {
+            "date": "12/11/2025",
+            "document_type": "lab_report",
+            "allergies_noted": [],
+            "lab_results": [
+                {
+                    "test_name": "Hb",
+                    "value": "10",
+                    "unit": "g/dL",
+                    "flag": "low",
+                    "reference_range": "12-15",
+                }
+            ],
+            "medications": [
+                {
+                    "name": "DrugA",
+                    "ingredients": ["druga"],
+                    "dosage_value": 10,
+                    "dosage_unit": "mg",
+                    "frequency_per_day": 1,
+                    "duration": "14 days",
+                }
+            ],
+            "_source": {"file": "nov.pdf"},
+        },
+        {
+            "date": "10/12/2025",
+            "document_type": "lab_report",
+            "allergies_noted": [],
+            "lab_results": [
+                {
+                    "test_name": "Hb",
+                    "value": "20",
+                    "unit": "g/dL",
+                    "flag": "high",
+                    "reference_range": "12-15",
+                }
+            ],
+            "medications": [
+                {
+                    "name": "DrugB",
+                    "ingredients": ["drugb"],
+                    "dosage_value": 10,
+                    "dosage_unit": "mg",
+                    "frequency_per_day": 1,
+                    "duration": "14 days",
+                }
+            ],
+            "_source": {"file": "dec.pdf"},
+        },
     ]
     timeline = build_patient_timeline(docs)
     assert [v["date"] for v in timeline["visits"]] == ["12/11/2025", "10/12/2025"]
@@ -102,6 +140,7 @@ def test_trend_direction_agrees_with_treatment_windows():
 
     # Change detection must compare the same consecutive pair.
     from change_detection import detect_record_changes
+
     latest = detect_record_changes(timeline)["latest"]
     assert latest["from_date"] == "12/11/2025"
     assert latest["to_date"] == "10/12/2025"
@@ -111,13 +150,24 @@ def test_same_date_grouping_uses_the_same_reading():
     # Two documents both dated "03/11/2025" (3 Nov, day-first) must group
     # together for same-date discrepancy checks.
     from record_integrity import check_record_integrity
-    timeline = {"visits": [
-        {"date": "03/11/2025", "patient_name": "John",
-         "lab_results": [{"test_name": "Hb", "value": "10", "unit": "g/dL"}],
-         "medications": [], "allergies_noted": []},
-        {"date": "03/11/2025", "patient_name": "John",
-         "lab_results": [{"test_name": "Hb", "value": "14", "unit": "g/dL"}],
-         "medications": [], "allergies_noted": []},
-    ]}
+
+    timeline = {
+        "visits": [
+            {
+                "date": "03/11/2025",
+                "patient_name": "John",
+                "lab_results": [{"test_name": "Hb", "value": "10", "unit": "g/dL"}],
+                "medications": [],
+                "allergies_noted": [],
+            },
+            {
+                "date": "03/11/2025",
+                "patient_name": "John",
+                "lab_results": [{"test_name": "Hb", "value": "14", "unit": "g/dL"}],
+                "medications": [],
+                "allergies_noted": [],
+            },
+        ]
+    }
     report = check_record_integrity(timeline)
     assert any("Same-date Hb" in issue["title"] for issue in report["issues"])

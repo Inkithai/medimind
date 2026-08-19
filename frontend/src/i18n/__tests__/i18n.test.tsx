@@ -31,12 +31,24 @@ function assert(condition: boolean, message: string) {
 
 assert(detectInitialLanguage("ta", ["en-US"]) === "ta", "stored language wins on refresh");
 assert(detectInitialLanguage(null, ["si-LK", "en-US"]) === "si", "browser Sinhala is detected");
-assert(detectInitialLanguage(null, ["fr-FR"]) === "en", "unsupported browser language falls back to English");
+assert(
+  detectInitialLanguage(null, ["fr-FR"]) === "en",
+  "unsupported browser language falls back to English",
+);
 assert(translate("si", "nav.dashboard") === "සාරාංශය", "Sinhala catalog renders Unicode text");
 assert(translate("ta", "nav.dashboard") === "முகப்பு", "Tamil catalog renders Unicode text");
-assert(translate("ta", "care.noResultsBody", { radius: 10 }).includes("10"), "interpolation works in Tamil");
-assert(missingTranslationKeys("si").length === 0, `Sinhala catalog covers every English key: ${missingTranslationKeys("si").join(", ")}`);
-assert(missingTranslationKeys("ta").length === 0, `Tamil catalog covers every English key: ${missingTranslationKeys("ta").join(", ")}`);
+assert(
+  translate("ta", "care.noResultsBody", { radius: 10 }).includes("10"),
+  "interpolation works in Tamil",
+);
+assert(
+  missingTranslationKeys("si").length === 0,
+  `Sinhala catalog covers every English key: ${missingTranslationKeys("si").join(", ")}`,
+);
+assert(
+  missingTranslationKeys("ta").length === 0,
+  `Tamil catalog covers every English key: ${missingTranslationKeys("ta").join(", ")}`,
+);
 
 let latestLanguage = "";
 function Probe() {
@@ -52,13 +64,20 @@ async function main() {
   localStorage.setItem(LANGUAGE_STORAGE_KEY, "ta");
   const root = createRoot(document.getElementById("root")!);
   await act(async () => {
-    root.render(<I18nProvider><Probe /></I18nProvider>);
+    root.render(
+      <I18nProvider>
+        <Probe />
+      </I18nProvider>,
+    );
     await new Promise((resolve) => setTimeout(resolve, 10));
   });
   assert(latestLanguage === "si", "language can be switched at runtime");
   assert(localStorage.getItem(LANGUAGE_STORAGE_KEY) === "si", "selected language is persisted");
   assert(document.documentElement.lang === "si", "document language follows selection");
-  assert(document.body.textContent?.includes("සාරාංශය") === true, "UI rerenders after language switch");
+  assert(
+    document.body.textContent?.includes("සාරාංශය") === true,
+    "UI rerenders after language switch",
+  );
   act(() => root.unmount());
   console.log("\nAll i18n tests passed.");
 }

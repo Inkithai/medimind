@@ -31,7 +31,7 @@ import logging
 import os
 import shutil
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 from PIL import Image, ImageOps, UnidentifiedImageError
 
@@ -76,6 +76,7 @@ def is_tesseract_available() -> bool:
         return False
     try:
         import pytesseract  # noqa: F401
+
         pytesseract.get_tesseract_version()
         return True
     except Exception as exc:
@@ -102,6 +103,7 @@ def _require_tesseract() -> Any:
         )
     try:
         import pytesseract
+
         return pytesseract
     except ImportError as exc:
         raise TesseractNotFoundError(
@@ -116,7 +118,9 @@ def ocr_image(image: Image.Image, page: int = 1, dpi: int = 200) -> OCRPageResul
     readable (blank scan, junk image)."""
     pytesseract = _require_tesseract()
     try:
-        data = pytesseract.image_to_data(image, output_type=pytesseract.Output.DICT, config=f"--dpi {dpi}")
+        data = pytesseract.image_to_data(
+            image, output_type=pytesseract.Output.DICT, config=f"--dpi {dpi}"
+        )
     except Exception as exc:
         # The engine exists but failed on this image — treat as unreadable
         # rather than crashing the caller's extraction path.
@@ -149,7 +153,8 @@ def ocr_image(image: Image.Image, page: int = 1, dpi: int = 200) -> OCRPageResul
         last_block, last_par, last_line = block, par, line
 
     numeric_conf = [
-        float(c) for c in confidences
+        float(c)
+        for c in confidences
         if isinstance(c, (int, float)) or (isinstance(c, str) and c.strip().lstrip("-").isdigit())
     ]
     numeric_conf = [c for c in numeric_conf if c >= 0]
@@ -164,12 +169,16 @@ def ocr_image_bytes(image_bytes: bytes, page: int = 1, dpi: Optional[int] = None
     try:
         img = Image.open(__import__("io").BytesIO(image_bytes))
         transposed = ImageOps.exif_transpose(img)
-        return ocr_image(transposed if transposed is not None else img, page=page, dpi=dpi or _dpi())
+        return ocr_image(
+            transposed if transposed is not None else img, page=page, dpi=dpi or _dpi()
+        )
     except UnidentifiedImageError as exc:
         raise InvalidImageError("OCR received bytes that are not a readable image.") from exc
 
 
-def ocr_pdf_pages(pdf_path: str, page_indices: List[int], dpi: Optional[int] = None) -> List[OCRPageResult]:
+def ocr_pdf_pages(
+    pdf_path: str, page_indices: List[int], dpi: Optional[int] = None
+) -> List[OCRPageResult]:
     """OCR selected 0-indexed pages of a PDF by rendering them to images
     first. Raises InvalidPDFError for an unreadable PDF and
     TesseractNotFoundError when the engine is missing."""
@@ -195,7 +204,9 @@ def ocr_pdf_pages(pdf_path: str, page_indices: List[int], dpi: Optional[int] = N
     return results
 
 
-def transcript_is_usable(results: List[OCRPageResult], min_chars: int = 80) -> Tuple[bool, str, Optional[float]]:
+def transcript_is_usable(
+    results: List[OCRPageResult], min_chars: int = 80
+) -> Tuple[bool, str, Optional[float]]:
     """Decides whether a set of OCR pages is trustworthy enough to feed the
     text extraction path. Returns (usable, joined_text, avg_confidence).
 
@@ -204,9 +215,7 @@ def transcript_is_usable(results: List[OCRPageResult], min_chars: int = 80) -> T
     with_text = [r for r in results if r.text and r.text.strip()]
     if not with_text:
         return False, "", None
-    joined = "\n\n".join(
-        f"--- Page {r.page} ---\n{r.text.strip()}" for r in with_text
-    )
+    joined = "\n\n".join(f"--- Page {r.page} ---\n{r.text.strip()}" for r in with_text)
     if len(joined.strip()) < min_chars:
         return False, joined, None
     confidences = [r.confidence for r in with_text if r.confidence is not None]

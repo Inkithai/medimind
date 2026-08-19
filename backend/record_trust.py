@@ -22,14 +22,24 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from clinical_events import ALL_FACT_COLLECTIONS, CLINICAL_EVENT_CORRECTABLE_FIELDS
 
-
 _CORRECTABLE_ROOT_FIELDS = {"date", "patient_name", "provider_or_doctor"}
 _CORRECTABLE_MEDICATION_FIELDS = {
-    "name", "ingredients", "dosage", "frequency", "duration",
-    "dosage_value", "dosage_unit", "frequency_per_day", "is_as_needed",
+    "name",
+    "ingredients",
+    "dosage",
+    "frequency",
+    "duration",
+    "dosage_value",
+    "dosage_unit",
+    "frequency_per_day",
+    "is_as_needed",
 }
 _CORRECTABLE_LAB_FIELDS = {
-    "test_name", "value", "unit", "reference_range", "flag",
+    "test_name",
+    "value",
+    "unit",
+    "reference_range",
+    "flag",
 }
 _CORRECTABLE_COLLECTION_FIELDS = {
     "medications": frozenset(_CORRECTABLE_MEDICATION_FIELDS),
@@ -66,11 +76,36 @@ def normalize_name(value: Any) -> str:
 # Honorifics, titles, and form-field noise that extraction legitimately
 # captures inside patient names ("PERERA, Anjali (Mrs.)", "Patient Name:
 # Silva, Kamala (Female)") but that carry no identity signal.
-_IDENTITY_NOISE_TOKENS = frozenset({
-    "mr", "mrs", "ms", "miss", "mx", "master", "baby", "dr", "prof",
-    "rev", "fr", "sir", "madam", "shri", "smt", "kumari", "mahatma",
-    "name", "patient", "male", "female", "sex", "m", "f", "b", "o",
-})
+_IDENTITY_NOISE_TOKENS = frozenset(
+    {
+        "mr",
+        "mrs",
+        "ms",
+        "miss",
+        "mx",
+        "master",
+        "baby",
+        "dr",
+        "prof",
+        "rev",
+        "fr",
+        "sir",
+        "madam",
+        "shri",
+        "smt",
+        "kumari",
+        "mahatma",
+        "name",
+        "patient",
+        "male",
+        "female",
+        "sex",
+        "m",
+        "f",
+        "b",
+        "o",
+    }
+)
 
 
 def identity_key(value: Any) -> Tuple[str, ...]:
@@ -116,7 +151,7 @@ def validate_correction_path(path: str) -> Tuple[str, Optional[int], str]:
     match = _PATH_RE.match(path)
     if not match:
         raise CorrectionValidationError(
-            "Only dates, patient/provider identities, and supported structured clinical fields can be corrected."
+            "Only dates, patient/provider identities, and supported structured clinical fields can be corrected."  # noqa: E501
         )
     collection, index_text, field = match.groups()
     allowed = _CORRECTABLE_COLLECTION_FIELDS[collection]
@@ -131,14 +166,29 @@ def _validate_value(collection: str, field: str, value: Any) -> None:
             isinstance(value, list) and all(isinstance(item, str) for item in value)
         ):
             raise CorrectionValidationError("Medication ingredients must be an array of names.")
-        if field in {"dosage_value", "frequency_per_day"} and value is not None and not isinstance(value, (int, float)):
+        if (
+            field in {"dosage_value", "frequency_per_day"}
+            and value is not None
+            and not isinstance(value, (int, float))
+        ):
             raise CorrectionValidationError(f"{field} must be a number or null.")
         if field == "is_as_needed" and not isinstance(value, bool):
             raise CorrectionValidationError("is_as_needed must be true or false.")
-    if collection == "lab_results" and field == "flag" and value not in {"normal", "high", "low", "unknown"}:
+    if (
+        collection == "lab_results"
+        and field == "flag"
+        and value not in {"normal", "high", "low", "unknown"}
+    ):
         raise CorrectionValidationError("Lab flag must be normal, high, low, or unknown.")
     enum_fields = {
-        ("diagnoses", "status"): {"active", "confirmed", "suspected", "history", "resolved", "unknown"},
+        ("diagnoses", "status"): {
+            "active",
+            "confirmed",
+            "suspected",
+            "history",
+            "resolved",
+            "unknown",
+        },
         ("symptoms", "severity"): {"mild", "moderate", "severe", "unknown"},
         ("symptoms", "status"): {"current", "resolved", "intermittent", "historical", "unknown"},
         ("procedures", "status"): {"completed", "planned", "cancelled", "historical", "unknown"},
@@ -226,7 +276,9 @@ def apply_correction_events(
     """
     result = copy.deepcopy(list(documents))
     by_id = {document_id(doc): doc for doc in result if document_id(doc)}
-    ordered = sorted(events, key=lambda event: (str(event.get("created_at") or ""), str(event.get("id") or "")))
+    ordered = sorted(
+        events, key=lambda event: (str(event.get("created_at") or ""), str(event.get("id") or ""))
+    )
     for event in ordered:
         doc = by_id.get(str(event.get("document_id") or ""))
         if doc is None:
@@ -271,7 +323,9 @@ def build_correction_events(
     if not changes:
         raise CorrectionValidationError("At least one field change is required.")
     if len(changes) > 100:
-        raise CorrectionValidationError("A correction batch cannot contain more than 100 field changes.")
+        raise CorrectionValidationError(
+            "A correction batch cannot contain more than 100 field changes."
+        )
 
     now = created_at or utc_now_iso()
     events: List[Dict[str, Any]] = []
@@ -279,34 +333,43 @@ def build_correction_events(
     for change in changes:
         path = str(change.get("field_path") or "")
         if path in seen_paths:
-            raise CorrectionValidationError(f"Field '{path}' appears more than once in this correction batch.")
+            raise CorrectionValidationError(
+                f"Field '{path}' appears more than once in this correction batch."
+            )
         seen_paths.add(path)
         collection, _index, field = validate_correction_path(path)
         corrected_value = change.get("corrected_value")
         _validate_value(collection, field, corrected_value)
         original_value = get_path(original_document, path)
         previous_value = get_path(effective_document, path)
-        if "expected_previous_value" in change and change["expected_previous_value"] != previous_value:
+        if (
+            "expected_previous_value" in change
+            and change["expected_previous_value"] != previous_value
+        ):
             raise CorrectionValidationError(
                 f"Field '{path}' changed since it was opened. Reload the document before saving."
             )
         if corrected_value == previous_value:
             continue
         event_number = len(events) + 1
-        events.append({
-            "id": f"{correction_batch_id}:{event_number}",
-            "correction_batch_id": correction_batch_id,
-            "user_id": user_id,
-            "document_id": document_id(original_document),
-            "field_path": path,
-            "original_value": original_value,
-            "previous_value": previous_value,
-            "corrected_value": copy.deepcopy(corrected_value),
-            "reason": reason.strip(),
-            "created_at": now,
-        })
+        events.append(
+            {
+                "id": f"{correction_batch_id}:{event_number}",
+                "correction_batch_id": correction_batch_id,
+                "user_id": user_id,
+                "document_id": document_id(original_document),
+                "field_path": path,
+                "original_value": original_value,
+                "previous_value": previous_value,
+                "corrected_value": copy.deepcopy(corrected_value),
+                "reason": reason.strip(),
+                "created_at": now,
+            }
+        )
     if not events:
-        raise CorrectionValidationError("None of the submitted values differ from the current extraction.")
+        raise CorrectionValidationError(
+            "None of the submitted values differ from the current extraction."
+        )
     return events
 
 
@@ -315,7 +378,9 @@ def _stable_conflict_id(kind: str, fact_key: str) -> str:
     return f"conflict_{digest}"
 
 
-def _source_item(doc: Dict[str, Any], path: str, value: Any, confidence: Any = None) -> Dict[str, Any]:
+def _source_item(
+    doc: Dict[str, Any], path: str, value: Any, confidence: Any = None
+) -> Dict[str, Any]:
     source = doc.get("_source") if isinstance(doc.get("_source"), dict) else {}
     evidence = value.get("evidence") if isinstance(value, dict) else None
     region = next((item for item in (evidence or []) if isinstance(item, dict)), {})
@@ -325,7 +390,9 @@ def _source_item(doc: Dict[str, Any], path: str, value: Any, confidence: Any = N
         "value": copy.deepcopy(value),
         "source_file": source.get("file") or "unknown",
         "page": region.get("page") or source.get("page"),
-        "confidence": confidence if isinstance(confidence, (int, float)) else doc.get("overall_confidence"),
+        "confidence": confidence
+        if isinstance(confidence, (int, float))
+        else doc.get("overall_confidence"),
     }
 
 
@@ -356,18 +423,20 @@ def detect_conflicts(documents: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]
             for group_docs in identity_groups.values()
             for doc in group_docs
         ]
-        conflicts.append({
-            "conflict_id": _stable_conflict_id("identity", "patient_name"),
-            "kind": "identity",
-            "field_type": "patient_name",
-            "fact_key": "patient_name",
-            "severity": "critical",
-            "summary": "Different patient identities were extracted in this workspace.",
-            "items": items,
-            "status": "unresolved",
-            "authoritative_document_id": None,
-            "resolution_note": None,
-        })
+        conflicts.append(
+            {
+                "conflict_id": _stable_conflict_id("identity", "patient_name"),
+                "kind": "identity",
+                "field_type": "patient_name",
+                "fact_key": "patient_name",
+                "severity": "critical",
+                "summary": "Different patient identities were extracted in this workspace.",
+                "items": items,
+                "status": "unresolved",
+                "authoritative_document_id": None,
+                "resolution_note": None,
+            }
+        )
 
     # Two pages from the same source file should agree on the document date.
     date_groups: Dict[str, List[Tuple[Dict[str, Any], str]]] = {}
@@ -380,20 +449,24 @@ def detect_conflicts(documents: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]
     for file_key, group in date_groups.items():
         if len(group) < 2 or len({date for _doc, date in group}) < 2:
             continue
-        conflicts.append({
-            "conflict_id": _stable_conflict_id("document_date", file_key),
-            "kind": "document_date",
-            "field_type": "date",
-            "fact_key": file_key,
-            "severity": "high",
-            "summary": "Pages from the same document have conflicting dates.",
-            "items": [_source_item(doc, "/date", doc.get("date")) for doc, _date in group],
-            "status": "unresolved",
-            "authoritative_document_id": None,
-            "resolution_note": None,
-        })
+        conflicts.append(
+            {
+                "conflict_id": _stable_conflict_id("document_date", file_key),
+                "kind": "document_date",
+                "field_type": "date",
+                "fact_key": file_key,
+                "severity": "high",
+                "summary": "Pages from the same document have conflicting dates.",
+                "items": [_source_item(doc, "/date", doc.get("date")) for doc, _date in group],
+                "status": "unresolved",
+                "authoritative_document_id": None,
+                "resolution_note": None,
+            }
+        )
 
-    medication_groups: Dict[str, List[Tuple[Dict[str, Any], int, Dict[str, Any], Tuple[Any, ...]]]] = {}
+    medication_groups: Dict[
+        str, List[Tuple[Dict[str, Any], int, Dict[str, Any], Tuple[Any, ...]]]
+    ] = {}
     lab_groups: Dict[str, List[Tuple[Dict[str, Any], int, Dict[str, Any], Tuple[Any, ...]]]] = {}
     vital_groups: Dict[str, List[Tuple[Dict[str, Any], int, Dict[str, Any], Tuple[Any, ...]]]] = {}
     for doc in docs:
@@ -401,14 +474,22 @@ def detect_conflicts(documents: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]
         for index, med in enumerate(doc.get("medications") or []):
             if not isinstance(med, dict):
                 continue
-            ingredients = tuple(sorted(normalize_name(item) for item in (med.get("ingredients") or []) if normalize_name(item)))
+            ingredients = tuple(
+                sorted(
+                    normalize_name(item)
+                    for item in (med.get("ingredients") or [])
+                    if normalize_name(item)
+                )
+            )
             medicine_key = "+".join(ingredients) or normalize_name(med.get("name"))
             if not medicine_key:
                 continue
             key = f"{date_key}|{medicine_key}"
             if med.get("dosage_value") is not None and med.get("dosage_unit"):
                 dose_signature: Tuple[Any, ...] = (
-                    "normalized", med.get("dosage_value"), normalize_text(med.get("dosage_unit")),
+                    "normalized",
+                    med.get("dosage_value"),
+                    normalize_text(med.get("dosage_unit")),
                 )
             else:
                 dose_signature = ("printed", normalize_text(med.get("dosage")))
@@ -448,66 +529,80 @@ def detect_conflicts(documents: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]
 
     for fact_key, group in medication_groups.items():
         source_ids = {document_id(doc) for doc, _index, _med, _signature in group}
-        if len(source_ids) < 2 or not _different_signatures(signature for _d, _i, _m, signature in group):
+        if len(source_ids) < 2 or not _different_signatures(
+            signature for _d, _i, _m, signature in group
+        ):
             continue
-        medicine_label = (group[0][2].get("ingredients") or [group[0][2].get("name") or "medication"])[0]
-        conflicts.append({
-            "conflict_id": _stable_conflict_id("medication", fact_key),
-            "kind": "medication",
-            "field_type": "medication_instruction",
-            "fact_key": fact_key,
-            "severity": "high",
-            "summary": f"Conflicting instructions were found for {medicine_label} on the same date.",
-            "items": [
-                _source_item(doc, f"/medications/{index}", med, med.get("confidence"))
-                for doc, index, med, _signature in group
-            ],
-            "status": "unresolved",
-            "authoritative_document_id": None,
-            "resolution_note": None,
-        })
+        medicine_label = (
+            group[0][2].get("ingredients") or [group[0][2].get("name") or "medication"]
+        )[0]
+        conflicts.append(
+            {
+                "conflict_id": _stable_conflict_id("medication", fact_key),
+                "kind": "medication",
+                "field_type": "medication_instruction",
+                "fact_key": fact_key,
+                "severity": "high",
+                "summary": f"Conflicting instructions were found for {medicine_label} on the same date.",  # noqa: E501
+                "items": [
+                    _source_item(doc, f"/medications/{index}", med, med.get("confidence"))
+                    for doc, index, med, _signature in group
+                ],
+                "status": "unresolved",
+                "authoritative_document_id": None,
+                "resolution_note": None,
+            }
+        )
 
     for fact_key, group in lab_groups.items():
         source_ids = {document_id(doc) for doc, _index, _lab, _signature in group}
-        if len(source_ids) < 2 or not _different_signatures(signature for _d, _i, _lab, signature in group):
+        if len(source_ids) < 2 or not _different_signatures(
+            signature for _d, _i, _lab, signature in group
+        ):
             continue
         test_label = group[0][2].get("test_name") or "lab result"
-        conflicts.append({
-            "conflict_id": _stable_conflict_id("lab_result", fact_key),
-            "kind": "lab_result",
-            "field_type": "lab_value",
-            "fact_key": fact_key,
-            "severity": "high",
-            "summary": f"Different values were extracted for {test_label} on the same date.",
-            "items": [
-                _source_item(doc, f"/lab_results/{index}", lab, lab.get("confidence"))
-                for doc, index, lab, _signature in group
-            ],
-            "status": "unresolved",
-            "authoritative_document_id": None,
-            "resolution_note": None,
-        })
+        conflicts.append(
+            {
+                "conflict_id": _stable_conflict_id("lab_result", fact_key),
+                "kind": "lab_result",
+                "field_type": "lab_value",
+                "fact_key": fact_key,
+                "severity": "high",
+                "summary": f"Different values were extracted for {test_label} on the same date.",
+                "items": [
+                    _source_item(doc, f"/lab_results/{index}", lab, lab.get("confidence"))
+                    for doc, index, lab, _signature in group
+                ],
+                "status": "unresolved",
+                "authoritative_document_id": None,
+                "resolution_note": None,
+            }
+        )
 
     for fact_key, group in vital_groups.items():
         source_ids = {document_id(doc) for doc, _index, _vital, _signature in group}
-        if len(source_ids) < 2 or not _different_signatures(signature for _d, _i, _v, signature in group):
+        if len(source_ids) < 2 or not _different_signatures(
+            signature for _d, _i, _v, signature in group
+        ):
             continue
         vital_label = group[0][2].get("name") or "vital sign"
-        conflicts.append({
-            "conflict_id": _stable_conflict_id("vital_sign", fact_key),
-            "kind": "vital_sign",
-            "field_type": "vital_value",
-            "fact_key": fact_key,
-            "severity": "high",
-            "summary": f"Different values were extracted for {vital_label} at the same recorded time.",
-            "items": [
-                _source_item(doc, f"/vital_signs/{index}", vital, vital.get("confidence"))
-                for doc, index, vital, _signature in group
-            ],
-            "status": "unresolved",
-            "authoritative_document_id": None,
-            "resolution_note": None,
-        })
+        conflicts.append(
+            {
+                "conflict_id": _stable_conflict_id("vital_sign", fact_key),
+                "kind": "vital_sign",
+                "field_type": "vital_value",
+                "fact_key": fact_key,
+                "severity": "high",
+                "summary": f"Different values were extracted for {vital_label} at the same recorded time.",  # noqa: E501
+                "items": [
+                    _source_item(doc, f"/vital_signs/{index}", vital, vital.get("confidence"))
+                    for doc, index, vital, _signature in group
+                ],
+                "status": "unresolved",
+                "authoritative_document_id": None,
+                "resolution_note": None,
+            }
+        )
 
     return sorted(conflicts, key=lambda conflict: (conflict["kind"], conflict["conflict_id"]))
 
@@ -598,7 +693,11 @@ def apply_conflict_quarantine(
 
         if kind == "identity" and status == "resolved":
             authoritative_item = next(
-                (item for item in conflict.get("items", []) if str(item.get("document_id")) == authoritative),
+                (
+                    item
+                    for item in conflict.get("items", [])
+                    if str(item.get("document_id")) == authoritative
+                ),
                 None,
             )
             # Same canonical comparison as detection: a resolved
@@ -607,7 +706,10 @@ def apply_conflict_quarantine(
             # after being confirmed authoritative against "Anjali Perera".
             authoritative_name = identity_key((authoritative_item or {}).get("value"))
             for doc in result:
-                matches = bool(authoritative_name) and identity_key(doc.get("patient_name")) == authoritative_name
+                matches = (
+                    bool(authoritative_name)
+                    and identity_key(doc.get("patient_name")) == authoritative_name
+                )
                 _mark_fact(doc, "/patient_name", conflict, quarantined=not bool(matches))
             continue
 
@@ -619,7 +721,9 @@ def apply_conflict_quarantine(
             quarantined = status != "resolved" or source_id != authoritative
             _mark_fact(doc, str(source.get("field_path") or ""), conflict, quarantined)
 
-    quarantined_documents = sum(bool((doc.get("_trust") or {}).get("quarantined")) for doc in result)
+    quarantined_documents = sum(
+        bool((doc.get("_trust") or {}).get("quarantined")) for doc in result
+    )
     quarantined_facts = 0
     for doc in result:
         for collection in ALL_FACT_COLLECTIONS:

@@ -11,14 +11,20 @@ function cloudinaryPageImage(url: string, page: number): string | null {
   return url.replace("/upload/", `/upload/f_jpg,pg_${Math.max(1, page)}/`);
 }
 
-export function EvidenceViewer({ visit, evidence }: { visit: Visit; evidence?: EvidenceRegion | null }) {
+export function EvidenceViewer({
+  visit,
+  evidence,
+}: {
+  visit: Visit;
+  evidence?: EvidenceRegion | null;
+}) {
   const [previewFailed, setPreviewFailed] = useState(false);
   const url = visit.document_url || "";
   const pdf = isPdf(url) || visit._source.method === "text_layer";
   const page = evidence?.page || visit._source.page || 1;
   const previewUrl = useMemo(
     () => (pdf ? cloudinaryPageImage(url, page) : url || null),
-    [pdf, url, page]
+    [pdf, url, page],
   );
   const bbox = evidence?.bbox;
 
@@ -30,7 +36,8 @@ export function EvidenceViewer({ visit, evidence }: { visit: Visit; evidence?: E
     return (
       <div className="space-y-3">
         <p className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-8 text-center text-sm text-slate-500">
-          The original file is unavailable. The saved page and evidence text are shown below when available.
+          The original file is unavailable. The saved page and evidence text are shown below when
+          available.
         </p>
         {evidence && <EvidenceDetails evidence={evidence} page={page} />}
       </div>
@@ -71,14 +78,19 @@ export function EvidenceViewer({ visit, evidence }: { visit: Visit; evidence?: E
           />
         </div>
       ) : (
-        <img src={url} alt="Original document" className="max-h-[680px] w-full object-contain bg-white" />
+        <img
+          src={url}
+          alt="Original document"
+          className="max-h-[680px] w-full object-contain bg-white"
+        />
       )}
 
       {evidence ? (
         <EvidenceDetails evidence={evidence} page={page} />
       ) : (
         <p className="flex items-center gap-2 text-xs text-slate-500">
-          <FileIcon className="h-4 w-4" /> Choose “View evidence” beside an extracted fact to highlight it.
+          <FileIcon className="h-4 w-4" /> Choose “View evidence” beside an extracted fact to
+          highlight it.
         </p>
       )}
     </div>
@@ -92,14 +104,25 @@ function EvidenceDetails({ evidence, page }: { evidence: EvidenceRegion; page: n
       <div className="flex flex-wrap items-center gap-2 text-xs font-semibold uppercase tracking-wide text-amber-800">
         <span>Page {page}</span>
         <span>·</span>
-        <span>{evidence.bbox ? "Exact highlighted region" : hasQuote ? "Page-linked quote" : "Page-only source link"}</span>
-        {evidence.verification_status && <span>· {evidence.verification_status.replace(/_/g, " ")}</span>}
+        <span>
+          {evidence.bbox
+            ? "Exact highlighted region"
+            : hasQuote
+              ? "Page-linked quote"
+              : "Page-only source link"}
+        </span>
+        {evidence.verification_status && (
+          <span>· {evidence.verification_status.replace(/_/g, " ")}</span>
+        )}
       </div>
       <blockquote className="mt-1.5 border-l-2 border-amber-400 pl-2 text-sm leading-relaxed text-slate-700">
-        {hasQuote ? evidence.quote : "No verbatim quote was established for this legacy extraction."}
+        {hasQuote
+          ? evidence.quote
+          : "No verbatim quote was established for this legacy extraction."}
       </blockquote>
       <p className="mt-1 text-[11px] text-amber-700/80">
-        Locator: {evidence.locator.replace(/_/g, " ")} · evidence confidence {Math.round(evidence.confidence * 100)}%
+        Locator: {evidence.locator.replace(/_/g, " ")} · evidence confidence{" "}
+        {Math.round(evidence.confidence * 100)}%
       </p>
     </div>
   );
