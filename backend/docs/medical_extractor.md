@@ -87,9 +87,10 @@ Both do not attach `_source` — caller does.
 
 ### 5. Grouping & timeline
 
-`group_documents_by_patient(raw_results, drop_demo=True)`:
+`group_documents_by_patient(raw_results, drop_demo_documents=SKIP_DEMO_DOCUMENTS)`:
 
-- Flattens, drops `_is_demo_document` (DEMO/SAMPLE/DUMMY names), groups by lowercased `patient_name` → `unknown_patient` bucket for missing names, warns if >1 real patient.
+- Flattens and groups by lowercased `patient_name` → `unknown_patient` bucket for missing names; warns if more than one named patient is found.
+- Demo/placeholder detection always runs, but dropping is off by default. Set `SKIP_DEMO_DOCUMENTS=true` only for intentional mock/sample-pack imports. A name marker never overrides structured clinical content, and generated documents with `_source.method=synthetic` remain structurally identifiable.
 
 `build_patient_timeline(raw_results)`:
 

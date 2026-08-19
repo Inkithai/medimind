@@ -44,7 +44,11 @@ import vector_store  # noqa: E402
 from analysis_log import build_extraction_analyses  # noqa: E402
 from auth import get_current_user  # noqa: E402
 from brand_resolver import resolve_brand_ingredients  # noqa: E402
-from document_filter import NonMedicalDocumentError, assert_medical_document  # noqa: E402
+from document_filter import (  # noqa: E402
+    NonMedicalDocumentError,
+    assert_medical_document,
+    has_medical_content,
+)
 from document_processing import process_raw_text  # noqa: E402
 from document_types import normalize_document_type, summarize_document_types  # noqa: E402
 from identity_guard import build_identity_review, check_batch_identity  # noqa: E402
@@ -54,6 +58,7 @@ from language_guard import (  # noqa: E402
     assess_documents_translation_risk,
 )
 from medical_extractor import (  # noqa: E402
+    SKIP_DEMO_DOCUMENTS,
     ProviderRateLimitError,
     _is_demo_document,
     build_patient_timeline,
@@ -298,12 +303,20 @@ def _raise_no_usable_files(file_errors: List[Dict[str, Any]], total_files: int) 
 
     kinds = {item.get("kind") for item in file_errors}
     if kinds and kinds <= {"not_medical", "invalid", "unsupported"}:
-        names = ", ".join(str(item.get("file", "file")) for item in file_errors[:5])
+        # A raised HTTP error has no separate per-file status list beneath it,
+        # so the previous "review below" instruction hid the only useful
+        # explanation. These error strings are curated user-facing messages
+        # (never provider traces); include a bounded set directly in detail.
+        reasons = "; ".join(
+            f"{item.get('file', 'file')}: {item.get('error', 'no usable content found')}"
+            for item in file_errors[:5]
+        )
         if len(file_errors) > 5:
-            names += f", and {len(file_errors) - 5} more"
+            reasons += f"; and {len(file_errors) - 5} more file(s)"
         raise UploadPipelineError(
             422,
-            f"We couldn't find readable medical information in any of the {total_files} file(s): {names}. Review each file's status below.",  # noqa: E501
+            f"We couldn't find readable medical information in any of the "
+            f"{total_files} file(s). {reasons}",
             code="no_medical_content",
             retryable=False,
         )
@@ -645,19 +658,35 @@ async def _execute_upload_pipeline(
                             else f"{original_name} (page {page_num})"
                         )
                         if _is_demo_document(page):
-                            # During explicit user uploads, demo/placeholder
-                            # documents are NOT silently rejected — the user
-                            # chose to upload these files.  Log an info note
-                            # but still run the medical-content assertion so
-                            # genuinely empty pages are caught.  The
-                            # _is_demo_document gate is reserved for batch/
-                            # folder processing (group_documents_by_patient)
-                            # where a folder might accidentally mix in sample
-                            # documents alongside real patient data.
+                            # A placeholder-like name is only a hint. Structured
+                            # clinical content wins so a real prescription for
+                            # somebody named Demonte, or a lab report whose
+                            # patient field captured "Sample Collected", is not
+                            # silently lost. Dropping an otherwise valid empty
+                            # template is an explicit deployment opt-in.
+                            medical_content_found = has_medical_content(page)
+                            if SKIP_DEMO_DOCUMENTS and not medical_content_found:
+                                reason = (
+                                    f"'{label}' matched a demo/placeholder marker and contained "
+                                    "no structured clinical content"
+                                )
+                                skipped_page_reasons.append(reason)
+                                logger.warning(
+                                    "upload: user=%s skipped page %s",
+                                    user_id,
+                                    reason,
+                                )
+                                continue
                             logger.info(
-                                "upload: user=%s demo/placeholder content detected in '%s' — processing anyway",  # noqa: E501
+                                "upload: user=%s demo/placeholder marker detected in '%s', "
+                                "but %s — keeping it",
                                 user_id,
                                 label,
+                                (
+                                    "structured clinical content was found"
+                                    if medical_content_found
+                                    else "SKIP_DEMO_DOCUMENTS is off"
+                                ),
                             )
                         try:
                             assert_medical_document(page, label)
