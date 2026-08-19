@@ -29,6 +29,7 @@ export function DocumentsPage() {
     kind: "reprocess" | "delete";
   } | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [typeFilter, setTypeFilter] = useState<string>("");
   const { toastSuccess, toastError } = useToast();
 
   const load = useCallback(async () => {
@@ -69,6 +70,12 @@ export function DocumentsPage() {
   }, [load]);
 
   const documentVisits = timeline?.documents || timeline?.visits || [];
+  const documentTypes = Array.from(
+    new Set(documentVisits.map((visit) => visit.document_type).filter(Boolean)),
+  );
+  const visibleVisits = typeFilter
+    ? documentVisits.filter((visit) => visit.document_type === typeFilter)
+    : documentVisits;
 
   return (
     <div className="space-y-6">
@@ -97,7 +104,10 @@ export function DocumentsPage() {
                 conflict(s); quarantined or non-authoritative evidence is excluded from answers and
                 analytics.
               </span>
-              <Link to="/review" className="font-semibold text-amber-900 underline">
+              <Link
+                to="/record-integrity?tab=conflicts"
+                className="font-semibold text-amber-900 underline"
+              >
                 Review conflicts
               </Link>
             </div>
@@ -126,10 +136,50 @@ export function DocumentsPage() {
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    {formatNumber(documentVisits.length)} {t("common.documents")}
+                    {formatNumber(visibleVisits.length)} {t("common.documents")}
+                    {typeFilter ? ` · ${documentTypeLabel(typeFilter)}` : ""}
                   </p>
                   <p className="text-xs text-slate-600">{t("documentsPage.clickFile")}</p>
                 </div>
+
+                {documentTypes.length > 1 && (
+                  <div
+                    className="flex flex-wrap items-center gap-2"
+                    role="group"
+                    aria-label={t("documentsPage.filterLabel")}
+                  >
+                    <FilterChip
+                      active={typeFilter === ""}
+                      onClick={() => setTypeFilter("")}
+                      label={t("documentsPage.filterAll")}
+                    />
+                    {documentTypes.map((type) => (
+                      <FilterChip
+                        key={type}
+                        active={typeFilter === type}
+                        onClick={() => setTypeFilter(type)}
+                        label={documentTypeLabel(type)}
+                      />
+                    ))}
+                  </div>
+                )}
+
+                {visibleVisits.length === 0 && (
+                  <Card>
+                    <CardBody className="py-10 text-center">
+                      <p className="text-sm font-semibold text-slate-700">
+                        {t("documentsPage.noMatches")}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setTypeFilter("")}
+                        className="btn-secondary mt-4"
+                      >
+                        {t("documentsPage.filterAll")}
+                      </button>
+                    </CardBody>
+                  </Card>
+                )}
 
                 {actionError && (
                   <div
@@ -140,7 +190,7 @@ export function DocumentsPage() {
                   </div>
                 )}
                 <div className="space-y-2">
-                  {documentVisits.map((visit, idx) => {
+                  {visibleVisits.map((visit, idx) => {
                     const isSelected = selected?._document_id === visit._document_id;
                     const clinicalCount =
                       (visit.diagnoses?.length || 0) +
@@ -388,5 +438,30 @@ export function DocumentsPage() {
         </>
       )}
     </div>
+  );
+}
+
+function FilterChip({
+  active,
+  onClick,
+  label,
+}: {
+  active: boolean;
+  onClick: () => void;
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={`rounded-full px-3 py-1.5 text-xs font-medium transition ${
+        active
+          ? "bg-brand-600 text-white shadow-sm"
+          : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+      }`}
+    >
+      {label}
+    </button>
   );
 }

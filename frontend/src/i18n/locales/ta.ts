@@ -106,10 +106,10 @@ export const ta = {
       vitals: "Vital-sign trends, early-warning screen and adherence signals.",
       preventive: "Screening and immunisation reminders for you.",
       symptoms: "Cross-reference a symptom against your record. Not a diagnosis.",
-      guidelines: "Review status of the clinical knowledge sources used.",
+      guidelines: "See the clinical references MediMind checks against.",
       messages: "Message a provider about a finding.",
-      fhir: "Import an electronic health record (FHIR R4) directly.",
-      ask: "உங்கள் சொந்த பதிவுகளிலிருந்து பதிலளிக்கப்படும் கேள்விகளைக் கேளுங்கள்.",
+      fhir: "Import a record exported from another health system.",
+      ask: "உங்கள் சொந்த பதிவுகளிலிருந்து பதிலளிக்கப்படும் கேள்வியைக் கேளுங்கள் அல்லது அறிகுறியைச் சரிபார்க்கவும்.",
       care: "அருகிலுள்ள சுகாதார நிலையங்களையும் நிபுணர்களையும் கண்டறியுங்கள்.",
       settings: "உங்கள் பணியிடத்தையும் விருப்பங்களையும் நிர்வகியுங்கள்.",
       upload: "மருந்துச் சீட்டு, ஆய்வக அறிக்கை அல்லது மருத்துவ ஆவணத்தைச் சேர்க்கவும்.",
@@ -217,6 +217,9 @@ export const ta = {
     select: "ஒரு ஆவணத்தைத் தேர்ந்தெடுக்கவும்",
     selectBody: "மூலத்தையும் கண்டறிந்த தகவல்களையும் காண ஒரு கோப்பைத் தேர்ந்தெடுக்கவும்.",
     clickFile: "பார்க்க ஒரு கோப்பைத் தேர்ந்தெடுக்கவும்.",
+    filterLabel: "வகைப்படி வடிகட்டு",
+    filterAll: "அனைத்தும்",
+    noMatches: "இந்த வகையிலான ஆவணங்கள் இல்லை.",
   },
   viewer: {
     region: "ஆவண விவரங்கள்",
@@ -244,9 +247,11 @@ export const ta = {
     title: "மருந்துகள்",
     subtitle: "உங்கள் ஆவணங்களில் {{count}} பதிவுகள் கண்டறியப்பட்டன.",
     loading: "மருந்துகள் ஏற்றப்படுகின்றன",
-    description: "பதிவேற்றிய ஆவணங்களில் கண்டறியப்பட்ட மருந்துகள்.",
+    description:
+      "நீங்கள் பதிவேற்றிய ஆவணங்களில் காணப்பட்ட மருந்துகள். ஒவ்வொரு பதிவும் அது வந்த ஆவணத்தைத் திறக்கும்.",
     searchLabel: "மருந்துகளைத் தேடவும்",
     searchPlaceholder: "மருந்து அல்லது மூலப்பொருளால் தேடவும்…",
+    searchHelp: "பட்டியலைச் சுருக்க மருந்தின் பெயர் அல்லது மூலப்பொருளைத் தட்டச்சு செய்யவும்.",
     noMedicines: "மருந்துகள் எதுவும் இல்லை",
     noMatches: "பொருத்தங்கள் இல்லை",
     current: "தற்போதைய மருந்துகள்",
@@ -305,7 +310,8 @@ export const ta = {
   },
   ask: {
     title: "AI-யிடம் கேளுங்கள்",
-    subtitle: "உங்கள் பதிவுகள் குறித்து கேளுங்கள். பதில்கள் உங்கள் ஆவணங்களை மட்டுமே பயன்படுத்தும்.",
+    subtitle:
+      "உங்கள் பதிவுகள் குறித்து கேளுங்கள், அல்லது ஒரு அறிகுறியைச் சரிபார்க்கவும். பதில்கள் உங்கள் ஆவணங்களை மட்டுமே பயன்படுத்தும்.",
     question: "உங்கள் கேள்வி",
     description: "MediMind உங்கள் பதிவுகளைப் படிக்கும்; மருத்துவருக்கு மாற்றாகாது.",
     inputLabel: "மருத்துவப் பதிவுகள் குறித்த கேள்வி",
@@ -313,6 +319,13 @@ export const ta = {
     ask: "கேளுங்கள்",
     advanced: "மேம்பட்டவை",
     amount: "ஒரு பதிலுக்கு படிக்க வேண்டிய பதிவின் அளவு",
+    scopeLabel: "ஒவ்வொரு பதிலும் படிக்கும் பதிவின் அளவு",
+    scopeHelp:
+      "ஒவ்வொரு பதிலும் உங்கள் பதிவுகளில் மிகப் பொருத்தமான பகுதிகளை மட்டுமே படிக்கிறது — இயல்பாக {{count}}. முழுப் பதிவையும் ஒரே நேரத்தில் படிக்காது; இணையத்தையும் தேடாது.",
+    tabQuestion: "கேள்வி கேளுங்கள்",
+    tabSymptom: "அறிகுறியைச் சரிபார்க்கவும்",
+    symptomHint:
+      "உங்கள் மருந்துகள், நிலைகள் மற்றும் சமீபத்திய பரிசோதனைகளுடன் ஒப்பிட ஒரு அறிகுறியை விவரிக்கவும்.",
     suggestions: "பரிந்துரைக்கப்பட்ட கேள்விகள்",
     suggestion1: "நான் தற்போது எவ்வகை மருந்துகளை எடுத்துக்கொள்கிறேன்?",
     suggestion2: "எனது சமீபத்திய ஆய்வக முடிவுகள் என்ன?",
@@ -975,10 +988,20 @@ export const ta = {
   symptoms: {
     title: "Symptom Check",
     subtitle: "Cross-reference a symptom against your record. Not a diagnosis.",
+    formLabel: "உங்கள் சொந்த வார்த்தைகளில் ஒரு அறிகுறியை விவரிக்கவும்",
+    formPlaceholder: "எ.கா: 3 நாட்களாக மயக்கம் மற்றும் உலர் இருமல்",
+    durationLabel: "இது எவ்வளவு காலமாக உள்ளது? (விருப்பம்)",
+    submit: "என் பதிவுடன் ஒப்பிடு",
+    analysing: "உங்கள் பதிவுடன் ஒப்பிடுகிறது…",
+    noMatch:
+      "இந்த அறிகுறியுடன் பொருந்தும் மருந்துகள் அல்லது அசாதாரண பரிசோதனைகள் உங்கள் பதிவில் இல்லை.",
   },
   guidelines: {
     title: "Guidelines",
-    subtitle: "Version and review status of every curated clinical source.",
+    subtitle:
+      "The clinical references and knowledge sources MediMind relies on, with their review status.",
+    introBody:
+      "These are the curated medical references MediMind checks your records against — for example, the WHO Essential Medicines list. A source shown as due for review is flagged here for transparency; it does not change how your records are read.",
   },
   messages: {
     title: "Provider Messages",
@@ -988,5 +1011,8 @@ export const ta = {
     title: "Import FHIR Record",
     subtitle:
       "Import an existing electronic health record (FHIR R4 Bundle) instead of uploading individual documents. The structured data is read straight into your workspace.",
+    whoForTitle: "இந்தப் பக்கம் யாருக்கு?",
+    whoForBody:
+      "பெரும்பாலானோர் Upload பயன்படுத்த வேண்டும். வேறு சுகாதார அமைப்பிலிருந்து ஏற்றுமதி செய்யப்பட்ட FHIR கோப்பு இருந்தால் மட்டுமே இங்கு இறக்குமதி செய்யவும்.",
   },
 };

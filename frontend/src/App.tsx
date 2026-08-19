@@ -18,10 +18,7 @@ import { HistoryPage } from "./pages/HistoryPage";
 import { RiskTimelinePage } from "./pages/RiskTimelinePage";
 import { ClinicalSafetyPage } from "./pages/ClinicalSafetyPage";
 import { VitalsPage } from "./pages/VitalsPage";
-import { PreventiveCarePage } from "./pages/PreventiveCarePage";
-import { SymptomCheckerPage } from "./pages/SymptomCheckerPage";
 import { GuidelinesPage } from "./pages/GuidelinesPage";
-import { MessagesPage } from "./pages/MessagesPage";
 import { FhirImportPage } from "./pages/FhirImportPage";
 import { ChangesPage } from "./pages/ChangesPage";
 import { AppointmentPrepPage } from "./pages/AppointmentPrepPage";
@@ -29,7 +26,6 @@ import { AnalysesPage } from "./pages/AnalysesPage";
 import { WhoToSeePage } from "./pages/WhoToSeePage";
 import { RecordIntegrityPage } from "./pages/RecordIntegrityPage";
 import { FollowUpPage } from "./pages/FollowUpPage";
-import { ReviewPage } from "./pages/ReviewPage";
 import { JudgePrepPage } from "./pages/JudgePrepPage";
 import { Spinner } from "./components/Spinner";
 import { useI18n } from "./i18n/I18nContext";
@@ -130,14 +126,8 @@ export default function App() {
             </RequireAuth>
           }
         />
-        <Route
-          path="/review"
-          element={
-            <RequireAuth>
-              <ReviewPage />
-            </RequireAuth>
-          }
-        />
+        {/* Merged into Record Check (Trust Review). */}
+        <Route path="/review" element={<Navigate to="/record-integrity?tab=conflicts" replace />} />
         <Route
           path="/medicines"
           element={
@@ -259,22 +249,10 @@ export default function App() {
             </RequireAuth>
           }
         />
-        <Route
-          path="/preventive-care"
-          element={
-            <RequireAuth>
-              <PreventiveCarePage />
-            </RequireAuth>
-          }
-        />
-        <Route
-          path="/symptoms"
-          element={
-            <RequireAuth>
-              <SymptomCheckerPage />
-            </RequireAuth>
-          }
-        />
+        {/* Merged into the Action Center. */}
+        <Route path="/preventive-care" element={<Navigate to="/follow-up" replace />} />
+        {/* Merged into Ask AI. */}
+        <Route path="/symptoms" element={<Navigate to="/ask?tab=symptoms" replace />} />
         <Route
           path="/guidelines"
           element={
@@ -283,14 +261,8 @@ export default function App() {
             </RequireAuth>
           }
         />
-        <Route
-          path="/messages"
-          element={
-            <RequireAuth>
-              <MessagesPage />
-            </RequireAuth>
-          }
-        />
+        {/* Removed: messages had no delivery transport and no role-based access. */}
+        <Route path="/messages" element={<Navigate to="/dashboard" replace />} />
         <Route
           path="/import"
           element={

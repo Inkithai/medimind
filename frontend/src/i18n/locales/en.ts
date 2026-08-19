@@ -105,10 +105,10 @@ export const en = {
       vitals: "Vital-sign trends, early-warning screen and adherence signals.",
       preventive: "Screening and immunisation reminders for you.",
       symptoms: "Cross-reference a symptom against your record. Not a diagnosis.",
-      guidelines: "Review status of the clinical knowledge sources used.",
+      guidelines: "See the clinical references MediMind checks against.",
       messages: "Message a provider about a finding.",
-      fhir: "Import an electronic health record (FHIR R4) directly.",
-      ask: "Ask questions answered from your own records.",
+      fhir: "Import a record exported from another health system.",
+      ask: "Ask a question or check a symptom, answered from your own records.",
       care: "Find nearby healthcare facilities and professionals.",
       settings: "Manage your workspace and preferences.",
       upload: "Add a prescription, lab report, or medical document.",
@@ -217,6 +217,9 @@ export const en = {
     select: "Select a document",
     selectBody: "Choose a file to see the original and the information found inside it.",
     clickFile: "Select a file to view it.",
+    filterLabel: "Filter by type",
+    filterAll: "All",
+    noMatches: "No documents of this type.",
   },
   viewer: {
     region: "Document details",
@@ -243,9 +246,10 @@ export const en = {
     title: "Medications",
     subtitle: "{{count}} entries found across your documents.",
     loading: "Loading medicines",
-    description: "Found in uploaded documents; every entry links to its source.",
+    description: "Found in your uploaded documents. Each entry opens the document it came from.",
     searchLabel: "Search medications",
     searchPlaceholder: "Search by medicine or ingredient…",
+    searchHelp: "Type a medicine name or ingredient to narrow the list.",
     noMedicines: "No medicines found",
     noMatches: "No matches",
     current: "Current medicines",
@@ -305,7 +309,8 @@ export const en = {
   },
   ask: {
     title: "Ask AI",
-    subtitle: "Ask about your records. Answers use only your documents and cite their sources.",
+    subtitle:
+      "Ask about your records, or check a symptom. Answers use only your documents and cite their sources.",
     question: "Your question",
     description: "MediMind reads your records to answer. It never replaces a doctor.",
     inputLabel: "Question about your medical records",
@@ -313,6 +318,13 @@ export const en = {
     ask: "Ask",
     advanced: "Advanced",
     amount: "How much of your record to read per answer",
+    scopeLabel: "How much of your record each answer reads",
+    scopeHelp:
+      "Each answer reads only the most relevant passages from your own records — {{count}} by default. It never reads your whole record at once and never searches the internet.",
+    tabQuestion: "Ask a question",
+    tabSymptom: "Check a symptom",
+    symptomHint:
+      "Describe a symptom to see how it lines up with your medications, conditions and recent labs.",
     suggestions: "Suggested questions",
     suggestion1: "What medications am I currently taking?",
     suggestion2: "What were my most recent lab results?",
@@ -962,11 +974,19 @@ export const en = {
     title: "Symptom Check",
     subtitle:
       "Describe a symptom and cross-reference it against your medications, conditions, and recent labs. Not a diagnosis.",
+    formLabel: "Describe a symptom in your own words",
+    formPlaceholder: "e.g. I've been dizzy and had a dry cough for 3 days",
+    durationLabel: "How long has this been going on? (optional)",
+    submit: "Check it against my record",
+    analysing: "Checking against your record…",
+    noMatch: "No medications or abnormal labs on your record matched this symptom.",
   },
   guidelines: {
     title: "Guidelines",
     subtitle:
-      "Version and review status of every curated clinical knowledge source the app relies on.",
+      "The clinical references and knowledge sources MediMind relies on, with their review status.",
+    introBody:
+      "These are the curated medical references MediMind checks your records against — for example, the WHO Essential Medicines list. A source shown as due for review is flagged here for transparency; it does not change how your records are read.",
   },
   messages: {
     title: "Provider Messages",
@@ -976,6 +996,9 @@ export const en = {
     title: "Import FHIR Record",
     subtitle:
       "Import an existing electronic health record (FHIR R4 Bundle) instead of uploading individual documents. The structured data is read straight into your workspace.",
+    whoForTitle: "Who is this page for?",
+    whoForBody:
+      "Most people should use Upload instead. Import here only if you already have a FHIR record file exported from another health system — for example, from a hospital portal or a health app.",
   },
 } as const;
 

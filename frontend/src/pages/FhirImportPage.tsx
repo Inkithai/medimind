@@ -86,20 +86,51 @@ export function FhirImportPage() {
         <p className="secondary-text mt-2 max-w-2xl">{t("fhir.subtitle")}</p>
       </div>
 
+      <div className="rounded-2xl border border-sky-100 bg-sky-50/70 p-5 text-sm leading-relaxed text-sky-900">
+        <p className="font-semibold">{t("fhir.whoForTitle")}</p>
+        <p className="mt-1">{t("fhir.whoForBody")}</p>
+        <Link
+          to="/upload"
+          className="mt-3 inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700"
+        >
+          <UploadIcon className="h-4 w-4" /> Upload documents instead
+        </Link>
+      </div>
+
       <Card>
         <CardHeader
           title="FHIR R4 Bundle"
-          description="Paste your Bundle, or upload a .json file from your health record export. The importer understands Patient, MedicationStatement/Request, Observation, Condition, AllergyIntolerance, Encounter and DiagnosticReport."
+          description="If you already have a FHIR record file, upload it here. The importer understands Patient, MedicationStatement/Request, Observation, Condition, AllergyIntolerance, Encounter and DiagnosticReport."
         />
         <CardBody className="space-y-3">
-          <textarea
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            placeholder={'{\n  "resourceType": "Bundle",\n  "entry": [ ... ]\n}'}
-            rows={12}
-            className="block w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-xs"
-            spellCheck={false}
-          />
+          <label className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50">
+            <FileIcon className="h-4 w-4" /> Choose a .json record file
+            <input
+              type="file"
+              accept="application/json,.json"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) onFile(f);
+                e.target.value = "";
+              }}
+            />
+          </label>
+
+          <details className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+            <summary className="cursor-pointer text-sm font-semibold text-slate-700">
+              Advanced: paste the FHIR JSON directly
+            </summary>
+            <textarea
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              placeholder={'{\n  "resourceType": "Bundle",\n  "entry": [ ... ]\n}'}
+              rows={12}
+              className="mt-3 block w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-xs"
+              spellCheck={false}
+            />
+          </details>
+
           <div className="flex flex-wrap items-center gap-3">
             <button
               type="button"
@@ -110,19 +141,11 @@ export function FhirImportPage() {
               <UploadIcon className="h-4 w-4" />
               {busy ? "Importing…" : "Import into workspace"}
             </button>
-            <label className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
-              <FileIcon className="h-4 w-4" /> Upload .json
-              <input
-                type="file"
-                accept="application/json,.json"
-                className="hidden"
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) onFile(f);
-                  e.target.value = "";
-                }}
-              />
-            </label>
+            {!text.trim() && (
+              <p className="text-xs text-slate-500">
+                Choose a .json file, or paste FHIR JSON under “Advanced” above, then import.
+              </p>
+            )}
           </div>
         </CardBody>
       </Card>

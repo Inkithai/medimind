@@ -103,6 +103,10 @@ export function GuidelinesPage() {
         </div>
       </div>
 
+      <div className="rounded-2xl border border-slate-200 bg-white p-5 text-sm leading-relaxed text-slate-700">
+        {t("guidelines.introBody")}
+      </div>
+
       {loading && <LoadingState label={t("common.loading")} />}
 
       {!loading && error !== null && (

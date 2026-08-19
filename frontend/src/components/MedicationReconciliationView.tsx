@@ -66,10 +66,43 @@ function stateView(state: string): StateView {
   );
 }
 
+// Turns "5 mg|daily" into "5 mg, once a day". Frequencies are mapped to plain
+// words an elderly or unfamiliar reader understands; anything we cannot map
+// confidently is shown exactly as the record wrote it rather than guessed.
+function plainFrequency(raw: string | undefined): string {
+  if (!raw) return "";
+  const lower = raw.trim().toLowerCase();
+  if (/(as ?needed|prn|sos)/.test(lower)) return "as needed";
+  if (/(at ?night|bedtime|hs|nocte)/.test(lower)) return "at bedtime";
+  if (/(in ?the ?morning|morning|mane)/.test(lower)) return "in the morning";
+  if (/(three|3 ?x|tid|t\.d\.s)/.test(lower)) return "three times a day";
+  if (/(four|4 ?x|qid)/.test(lower)) return "four times a day";
+  if (/(twice|two|2 ?x|bid|b\.d\.s)/.test(lower)) return "twice a day";
+  if (/(once|daily|every ?day|od|q\.?d|1 ?x)/.test(lower)) return "once a day";
+  if (/(weekly|once ?a ?week)/.test(lower)) return "once a week";
+  return raw.trim();
+}
+
+function friendlyDose(dose: string): string {
+  if (!dose || dose === "unknown_dose") return "";
+  const [amount, frequency] = dose.split("|");
+  const amountText = (amount || "").trim();
+  const freqText = plainFrequency(frequency);
+  if (!amountText) return freqText;
+  if (!freqText) return amountText;
+  return `${amountText}, ${freqText}`;
+}
+
 function doseText(medicine: ReconciledMedication): string {
-  const doses = (medicine.doses || []).filter((dose) => dose && dose !== "unknown_dose");
+  const doses = Array.from(
+    new Set(
+      (medicine.doses || [])
+        .map((dose) => friendlyDose(dose))
+        .filter((dose): dose is string => Boolean(dose)),
+    ),
+  );
   if (doses.length === 0) return "Dose not recorded";
-  return doses.map((dose) => dose.replace(/\|/g, " · ")).join("  /  ");
+  return doses.join("  /  ");
 }
 
 export function MedicationReconciliationView({
@@ -125,7 +158,7 @@ export function MedicationReconciliationView({
                     Status
                   </th>
                   <th scope="col" className="px-4 py-3 font-semibold">
-                    Dose on record
+                    Dose &amp; how often
                   </th>
                   <th scope="col" className="px-4 py-3 font-semibold">
                     What this means

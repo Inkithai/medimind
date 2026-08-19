@@ -4,10 +4,11 @@ import { api } from "../api/client";
 import { Card, CardBody } from "../components/Card";
 import { ErrorState } from "../components/ErrorState";
 import { LoadingState } from "../components/Spinner";
+import { StatusBadge } from "../components/StatusBadge";
 import { AlertIcon, CheckIcon, FileIcon, ReminderIcon, UploadIcon } from "../components/icons";
 import { useAuth } from "../context/AuthContext";
 import { useStrictEffect } from "../hooks/useStrictEffect";
-import type { FollowUpPlan, FollowUpTask } from "../types/api";
+import type { FollowUpPlan, FollowUpTask, PreventiveCareReport } from "../types/api";
 import { formatDate } from "../utils/format";
 
 type TaskState = Record<string, { completed: boolean; reminderDate: string }>;
@@ -26,6 +27,7 @@ export function FollowUpPage() {
   const { credentials } = useAuth();
   const storageKey = `medimind.follow-up.v1.${credentials.userId}`;
   const [plan, setPlan] = useState<FollowUpPlan | null>(null);
+  const [preventive, setPreventive] = useState<PreventiveCareReport | null>(null);
   const [taskState, setTaskState] = useState<TaskState>(() => readState(storageKey));
   const [stateWorkspace, setStateWorkspace] = useState(storageKey);
   const [view, setView] = useState<View>("open");
@@ -35,6 +37,12 @@ export function FollowUpPage() {
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
+    // Preventive-care reminders load independently: the follow-up queue must
+    // still render even when the reminder service is unavailable.
+    void api
+      .getPreventiveCare(credentials)
+      .then(setPreventive)
+      .catch(() => setPreventive(null));
     try {
       setPlan(await api.getFollowUpPlan(credentials));
       setTaskState(readState(storageKey));
@@ -100,6 +108,60 @@ export function FollowUpPage() {
         />
       )}
       {!loading && error !== null && <FollowUpError error={error} onRetry={() => void load()} />}
+
+      {!loading && preventive && (
+        <section
+          aria-labelledby="preventive-care-title"
+          className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+        >
+          <div className="flex items-center gap-3">
+            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700">
+              <ReminderIcon className="h-5 w-5" />
+            </div>
+            <div>
+              <h2 id="preventive-care-title" className="card-title">
+                Preventive care reminders
+              </h2>
+              <p className="secondary-text mt-0.5">
+                Screenings and immunisations based on your age, sex, and recorded conditions.
+              </p>
+            </div>
+          </div>
+
+          {preventive.count === 0 ? (
+            <p className="mt-4 text-sm text-slate-600">
+              No reminders right now. Add your date of birth in Settings to unlock age-based
+              screening reminders.
+            </p>
+          ) : (
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              {preventive.care_gaps.map((g, i) => (
+                <div
+                  key={`${g.kind}-${g.title}-${i}`}
+                  className="rounded-xl border border-slate-200 bg-slate-50/60 p-4"
+                >
+                  <div className="flex flex-wrap items-center gap-2">
+                    <StatusBadge tone="info">
+                      {g.kind === "vaccination"
+                        ? "Vaccination"
+                        : g.kind === "screening"
+                          ? "Screening"
+                          : g.kind === "monitoring"
+                            ? "Monitoring"
+                            : g.kind}
+                    </StatusBadge>
+                    <StatusBadge tone={g.priority === "soon" ? "warning" : "neutral"}>
+                      {g.priority}
+                    </StatusBadge>
+                  </div>
+                  <h3 className="mt-2 text-sm font-semibold text-slate-800">{g.title}</h3>
+                  <p className="mt-1 text-xs leading-relaxed text-slate-600">{g.detail}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
 
       {!loading && plan && (
         <>

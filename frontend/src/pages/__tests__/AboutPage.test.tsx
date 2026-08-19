@@ -282,8 +282,8 @@ const tests: Array<[string, () => void]> = [
       assert.ok(!navArray.includes("/about"), "About must not be in the workflow NAV array");
       assert.equal(
         (navArray.match(/to: "/g) || []).length,
-        23,
-        "all 23 workflow items are present",
+        19,
+        "all 19 workflow items are present",
       );
       // The tagline is the only content the sidebar redesign removes.
       assert.ok(

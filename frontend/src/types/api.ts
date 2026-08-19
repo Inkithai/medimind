@@ -206,6 +206,9 @@ export interface SourceReference {
 export interface MedicationTimelineEntry extends Medication {
   date: string | null;
   source_file: string | null;
+  // The source document's id, used to link an entry back to the document it
+  // was extracted from (backend medical_extractor.py adds this).
+  document_id?: string | null;
   // Documents recording the SAME physical prescription share a group id
   // (document_dedup.py) so re-uploads don't count as repeat prescriptions.
   prescription_group?: string | null;

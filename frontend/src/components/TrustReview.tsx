@@ -1,12 +1,20 @@
+/**
+ * Trust Review — resolve competing source facts (conflicts).
+ *
+ * Formerly a standalone page (/review); merged into the Record Check page as
+ * the "Conflicts to resolve" tab. Unresolved facts stay visible here but are
+ * excluded from retrieval and every derived clinical view until the user
+ * picks the source that matches the original document.
+ */
 import { useCallback, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
-import { Alert } from "../components/Alert";
-import { Card, CardBody } from "../components/Card";
-import { ErrorState } from "../components/ErrorState";
-import { LoadingState, Spinner } from "../components/Spinner";
-import { StatusBadge } from "../components/StatusBadge";
-import { ShieldIcon } from "../components/icons";
+import { Alert } from "./Alert";
+import { Card, CardBody } from "./Card";
+import { ErrorState } from "./ErrorState";
+import { LoadingState, Spinner } from "./Spinner";
+import { StatusBadge } from "./StatusBadge";
+import { ShieldIcon } from "./icons";
 import { useAuth } from "../context/AuthContext";
 import { useStrictEffect } from "../hooks/useStrictEffect";
 import type { ConflictsResponse, RecordConflict } from "../types/api";
@@ -30,7 +38,7 @@ function displayValue(value: unknown): string {
   return JSON.stringify(value);
 }
 
-export function ReviewPage() {
+export function TrustReview() {
   const { credentials } = useAuth();
   const [data, setData] = useState<ConflictsResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -98,129 +106,116 @@ export function ReviewPage() {
   const resolved = active.filter((item) => item.status === "resolved");
   const superseded = conflicts.filter((item) => item.status === "superseded");
 
+  if (loading) return <LoadingState label="Checking source conflicts" />;
+  if (error !== null && !data) return <ErrorState error={error} onRetry={() => void load()} />;
+
   return (
-    <div className="space-y-6">
-      <header className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="page-title">Trust Review</h1>
-          <p className="secondary-text mt-2 max-w-2xl">
-            Resolve competing source facts before MediMind uses them in answers, lab trends,
-            medication safety, or summaries.
-          </p>
-        </div>
-        <Link to="/documents" className="btn-secondary">
+    <div className="space-y-4">
+      <div className="grid gap-3 sm:grid-cols-4">
+        <Metric label="Needs review" value={unresolved.length} tone="text-amber-700" />
+        <Metric label="Resolved" value={resolved.length} tone="text-emerald-700" />
+        <Metric
+          label="Quarantined sources"
+          value={data?.trust_summary?.quarantined_documents || 0}
+          tone="text-red-700"
+        />
+        <Metric
+          label="Corrected fields"
+          value={data?.trust_summary?.corrected_fields || 0}
+          tone="text-brand-700"
+        />
+      </div>
+
+      {unresolved.length > 0 ? (
+        <Alert variant="warning" title="Conflicting evidence is quarantined">
+          Unresolved facts stay visible below, but are excluded from retrieval and every derived
+          clinical view. Choose the source that matches the original document; do not guess.
+        </Alert>
+      ) : (
+        <Alert variant="success" title="No unresolved source conflicts">
+          All currently detected conflicts have an authoritative source, or were removed by a
+          correction.
+        </Alert>
+      )}
+
+      <div className="space-y-4">
+        {unresolved.map((conflict) => (
+          <ConflictCard
+            key={conflict.conflict_id}
+            conflict={conflict}
+            selected={selected[conflict.conflict_id] || ""}
+            note={notes[conflict.conflict_id] || ""}
+            working={working === conflict.conflict_id}
+            onSelect={(value) => setSelected({ ...selected, [conflict.conflict_id]: value })}
+            onNote={(value) => setNotes({ ...notes, [conflict.conflict_id]: value })}
+            onResolve={() => void resolve(conflict)}
+          />
+        ))}
+      </div>
+
+      {resolved.length > 0 && (
+        <details
+          className="rounded-xl border border-slate-200 bg-white p-4"
+          open={unresolved.length === 0}
+        >
+          <summary className="cursor-pointer font-semibold text-slate-800">
+            Resolved conflicts ({resolved.length})
+          </summary>
+          <div className="mt-3 space-y-3">
+            {resolved.map((conflict) => {
+              const chosen = conflict.items.find(
+                (item) => item.document_id === conflict.authoritative_document_id,
+              );
+              return (
+                <div
+                  key={conflict.conflict_id}
+                  className="rounded-lg border border-emerald-200 bg-emerald-50/50 p-3"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-800">{conflict.summary}</p>
+                      <p className="mt-1 text-xs text-slate-600">
+                        Authoritative: {chosen?.source_file || conflict.authoritative_document_id}
+                        {chosen?.page ? `, page ${chosen.page}` : ""}
+                      </p>
+                      {conflict.resolution_note && (
+                        <p className="mt-1 text-xs text-slate-500">{conflict.resolution_note}</p>
+                      )}
+                    </div>
+                    <button
+                      className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700"
+                      disabled={working === conflict.conflict_id}
+                      onClick={() => void reopen(conflict)}
+                    >
+                      Reopen
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </details>
+      )}
+
+      {superseded.length > 0 && (
+        <details className="rounded-xl border border-slate-200 bg-white p-4">
+          <summary className="cursor-pointer text-sm font-semibold text-slate-700">
+            Superseded audit records ({superseded.length})
+          </summary>
+          <ul className="mt-3 space-y-2 text-xs text-slate-500">
+            {superseded.map((item) => (
+              <li key={item.conflict_id}>{item.summary}</li>
+            ))}
+          </ul>
+        </details>
+      )}
+
+      <p className="text-xs text-slate-500">
+        Need to fix something MediMind read incorrectly instead?{" "}
+        <Link to="/documents" className="font-semibold text-brand-700 hover:underline">
           Correct an extraction
         </Link>
-      </header>
-
-      {loading && <LoadingState label="Checking source conflicts" />}
-      {!loading && error !== null && <ErrorState error={error} onRetry={() => void load()} />}
-
-      {!loading && data && (
-        <>
-          <div className="grid gap-3 sm:grid-cols-4">
-            <Metric label="Needs review" value={unresolved.length} tone="text-amber-700" />
-            <Metric label="Resolved" value={resolved.length} tone="text-emerald-700" />
-            <Metric
-              label="Quarantined sources"
-              value={data.trust_summary?.quarantined_documents || 0}
-              tone="text-red-700"
-            />
-            <Metric
-              label="Corrected fields"
-              value={data.trust_summary?.corrected_fields || 0}
-              tone="text-brand-700"
-            />
-          </div>
-
-          {unresolved.length > 0 ? (
-            <Alert variant="warning" title="Conflicting evidence is quarantined">
-              Unresolved facts stay visible below, but are excluded from retrieval and every derived
-              clinical view. Choose the source that matches the original document; do not guess.
-            </Alert>
-          ) : (
-            <Alert variant="success" title="No unresolved source conflicts">
-              All currently detected conflicts have an authoritative source, or were removed by a
-              correction.
-            </Alert>
-          )}
-
-          <div className="space-y-4">
-            {unresolved.map((conflict) => (
-              <ConflictCard
-                key={conflict.conflict_id}
-                conflict={conflict}
-                selected={selected[conflict.conflict_id] || ""}
-                note={notes[conflict.conflict_id] || ""}
-                working={working === conflict.conflict_id}
-                onSelect={(value) => setSelected({ ...selected, [conflict.conflict_id]: value })}
-                onNote={(value) => setNotes({ ...notes, [conflict.conflict_id]: value })}
-                onResolve={() => void resolve(conflict)}
-              />
-            ))}
-          </div>
-
-          {resolved.length > 0 && (
-            <details
-              className="rounded-xl border border-slate-200 bg-white p-4"
-              open={unresolved.length === 0}
-            >
-              <summary className="cursor-pointer font-semibold text-slate-800">
-                Resolved conflicts ({resolved.length})
-              </summary>
-              <div className="mt-3 space-y-3">
-                {resolved.map((conflict) => {
-                  const chosen = conflict.items.find(
-                    (item) => item.document_id === conflict.authoritative_document_id,
-                  );
-                  return (
-                    <div
-                      key={conflict.conflict_id}
-                      className="rounded-lg border border-emerald-200 bg-emerald-50/50 p-3"
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="text-sm font-semibold text-slate-800">{conflict.summary}</p>
-                          <p className="mt-1 text-xs text-slate-600">
-                            Authoritative:{" "}
-                            {chosen?.source_file || conflict.authoritative_document_id}
-                            {chosen?.page ? `, page ${chosen.page}` : ""}
-                          </p>
-                          {conflict.resolution_note && (
-                            <p className="mt-1 text-xs text-slate-500">
-                              {conflict.resolution_note}
-                            </p>
-                          )}
-                        </div>
-                        <button
-                          className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700"
-                          disabled={working === conflict.conflict_id}
-                          onClick={() => void reopen(conflict)}
-                        >
-                          Reopen
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </details>
-          )}
-
-          {superseded.length > 0 && (
-            <details className="rounded-xl border border-slate-200 bg-white p-4">
-              <summary className="cursor-pointer text-sm font-semibold text-slate-700">
-                Superseded audit records ({superseded.length})
-              </summary>
-              <ul className="mt-3 space-y-2 text-xs text-slate-500">
-                {superseded.map((item) => (
-                  <li key={item.conflict_id}>{item.summary}</li>
-                ))}
-              </ul>
-            </details>
-          )}
-        </>
-      )}
+      </p>
     </div>
   );
 }
@@ -311,7 +306,7 @@ function ConflictCard({
             />
             <div className="mt-3 flex justify-end">
               <button className="btn-primary" disabled={!selected || working} onClick={onResolve}>
-                {working && <Spinner className="h-4 w-4" />} Confirm source & rebuild
+                {working && <Spinner className="h-4 w-4" />} Confirm source &amp; rebuild
               </button>
             </div>
           </div>

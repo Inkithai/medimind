@@ -228,7 +228,7 @@ export function DashboardPage() {
               derived views.
             </p>
           </div>
-          <Link to="/review" className="btn-secondary">
+          <Link to="/record-integrity?tab=conflicts" className="btn-secondary">
             Review sources
           </Link>
         </div>
