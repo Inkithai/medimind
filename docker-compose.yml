@@ -1,0 +1,41 @@
+# ============================================================
+# MediMind — docker-compose
+# ============================================================
+# Starts the FastAPI backend together with all its backing
+# services. The backend connects to Supabase (external SaaS)
+# for database/vector storage, but this compose file gives a
+# full reproducible local environment.
+#
+# Usage:
+#   cp backend/.env.example backend/.env   # fill in secrets
+#   docker compose up --build
+#   # Backend at http://localhost:8000
+#   # Docs at  http://localhost:8000/docs
+# ============================================================
+
+services:
+  medimind-backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: medimind-backend
+    env_file:
+      - backend/.env
+    environment:
+      - PORT=8000
+      # Default to Supabase vector store for containerised runs
+      - VECTOR_STORE=${VECTOR_STORE:-supabase}
+      # Preload the embedding model at startup
+      - PRELOAD_EMBEDDING_MODEL=true
+    ports:
+      - "8000:8000"
+    volumes:
+      # Persist local Chroma data when VECTOR_STORE=chroma
+      - chroma_data:/app/chroma_db
+      # Cache the ONNX embedding model
+      - onnx_cache:/app/.cache/chroma
+    restart: unless-stopped
+
+volumes:
+  chroma_data:
+  onnx_cache:
