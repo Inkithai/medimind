@@ -59,12 +59,22 @@ def _blank_pdf(path):
 # ---------------------------------------------------------------------------
 
 
+def _no_configured_cmd(monkeypatch):
+    """Availability must be decided by the machine, not by the developer's
+    shell — these tests would otherwise pass or fail depending on whether
+    MEDIMIND_TESSERACT_CMD happens to be exported."""
+    monkeypatch.delenv("MEDIMIND_TESSERACT_CMD", raising=False)
+    monkeypatch.delenv("TESSERACT_CMD", raising=False)
+
+
 def test_is_tesseract_available_returns_bool_and_never_raises(monkeypatch):
+    _no_configured_cmd(monkeypatch)
     monkeypatch.setattr(ocr_service.shutil, "which", lambda name: None)
     assert ocr_service.is_tesseract_available() is False
 
 
 def test_missing_engine_raises_tesseract_not_found(monkeypatch):
+    _no_configured_cmd(monkeypatch)
     monkeypatch.setattr(ocr_service.shutil, "which", lambda name: None)
     try:
         ocr_service._require_tesseract()
@@ -72,6 +82,116 @@ def test_missing_engine_raises_tesseract_not_found(monkeypatch):
         pass
     else:
         raise AssertionError("expected TesseractNotFoundError")
+
+
+# ---------------------------------------------------------------------------
+# Locating the engine (MEDIMIND_TESSERACT_CMD)
+#
+# A PATH-only lookup silently disables OCR on machines that DO have
+# Tesseract: the Windows installer drops it in "C:\Program Files\
+# Tesseract-OCR\tesseract.exe" without touching PATH, and some container
+# images install it outside the default search path. The env var is the
+# escape hatch; a wrong value must degrade to "no OCR", never crash an
+# upload.
+# ---------------------------------------------------------------------------
+
+
+def test_configured_path_is_used_when_not_on_path(monkeypatch, tmp_path):
+    binary = tmp_path / "tesseract"
+    binary.write_text("#!/bin/sh\n")
+    binary.chmod(0o755)
+
+    monkeypatch.delenv("TESSERACT_CMD", raising=False)
+    monkeypatch.setenv("MEDIMIND_TESSERACT_CMD", str(binary))
+    # Nothing on PATH: without the env var this machine would report "no OCR".
+    monkeypatch.setattr(ocr_service.shutil, "which", lambda name: None)
+
+    assert ocr_service.tesseract_cmd() == str(binary)
+
+
+def test_legacy_tesseract_cmd_variable_is_accepted(monkeypatch, tmp_path):
+    """TESSERACT_CMD is the name used by pytesseract docs and by the sibling
+    project's deployment config, so it is honoured as an alias."""
+    binary = tmp_path / "tesseract"
+    binary.write_text("#!/bin/sh\n")
+    binary.chmod(0o755)
+
+    monkeypatch.delenv("MEDIMIND_TESSERACT_CMD", raising=False)
+    monkeypatch.setenv("TESSERACT_CMD", str(binary))
+    monkeypatch.setattr(ocr_service.shutil, "which", lambda name: None)
+
+    assert ocr_service.tesseract_cmd() == str(binary)
+
+
+def test_quoted_windows_style_path_is_unwrapped(monkeypatch, tmp_path):
+    """A path pasted from Windows often arrives wrapped in quotes."""
+    binary = tmp_path / "tesseract.exe"
+    binary.write_text("")
+    binary.chmod(0o755)
+
+    monkeypatch.setenv("MEDIMIND_TESSERACT_CMD", f'"{binary}"')
+    monkeypatch.setattr(ocr_service.shutil, "which", lambda name: None)
+
+    assert ocr_service.tesseract_cmd() == str(binary)
+
+
+def test_bare_command_name_is_resolved_through_path(monkeypatch):
+    monkeypatch.setenv("MEDIMIND_TESSERACT_CMD", "tesseract5")
+    monkeypatch.setattr(
+        ocr_service.shutil,
+        "which",
+        lambda name: "/opt/bin/tesseract5" if name == "tesseract5" else None,
+    )
+    assert ocr_service.tesseract_cmd() == "/opt/bin/tesseract5"
+
+
+def test_bad_configured_path_degrades_to_path_lookup(monkeypatch):
+    """A typo in a deployment variable must not break uploads: fall back to
+    PATH and carry on with whatever is really installed."""
+    ocr_service._WARNED_BAD_CMD.clear()
+    monkeypatch.setenv("MEDIMIND_TESSERACT_CMD", "/nope/not-here/tesseract")
+    monkeypatch.setattr(
+        ocr_service.shutil,
+        "which",
+        lambda name: "/usr/bin/tesseract" if name == "tesseract" else None,
+    )
+    assert ocr_service.tesseract_cmd() == "/usr/bin/tesseract"
+
+
+def test_bad_configured_path_with_nothing_on_path_is_unavailable(monkeypatch):
+    ocr_service._WARNED_BAD_CMD.clear()
+    monkeypatch.setenv("MEDIMIND_TESSERACT_CMD", "/nope/not-here/tesseract")
+    monkeypatch.setattr(ocr_service.shutil, "which", lambda name: None)
+    assert ocr_service.tesseract_cmd() is None
+    assert ocr_service.is_tesseract_available() is False
+
+
+def test_bad_configured_path_warns_once(monkeypatch, caplog):
+    ocr_service._WARNED_BAD_CMD.clear()
+    monkeypatch.setenv("MEDIMIND_TESSERACT_CMD", "/nope/not-here/tesseract")
+    monkeypatch.setattr(ocr_service.shutil, "which", lambda name: None)
+    with caplog.at_level("WARNING", logger="ocr_service"):
+        for _ in range(5):
+            ocr_service.tesseract_cmd()
+    warnings = [r for r in caplog.records if "not an executable tesseract" in r.getMessage()]
+    assert len(warnings) == 1, f"expected one warning, saw {len(warnings)}"
+
+
+def test_require_tesseract_points_the_binding_at_the_configured_binary(monkeypatch, tmp_path):
+    """pytesseract defaults to a bare 'tesseract' lookup, so resolving the
+    path is not enough — the binding has to be told about it."""
+    binary = tmp_path / "tesseract"
+    binary.write_text("#!/bin/sh\n")
+    binary.chmod(0o755)
+    monkeypatch.setenv("MEDIMIND_TESSERACT_CMD", str(binary))
+    monkeypatch.setattr(ocr_service.shutil, "which", lambda name: None)
+
+    fake_binding = mock.MagicMock()
+    with mock.patch.dict(sys.modules, {"pytesseract": fake_binding}):
+        returned = ocr_service._require_tesseract()
+
+    assert returned is fake_binding
+    assert fake_binding.pytesseract.tesseract_cmd == str(binary)
 
 
 def test_transcript_usability_gates_on_confidence_and_length():

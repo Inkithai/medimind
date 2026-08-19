@@ -151,7 +151,12 @@ The system is designed to be evidence-based and conservative: it explains what u
 
 - PyMuPDF
 - pdfplumber
-- Tesseract OCR / pytesseract
+- Tesseract OCR / pytesseract — optional offline pre-pass, auto-detected. It is
+  used only when the binary is present and its transcript is confident;
+  otherwise the vision model runs exactly as before. Set
+  `MEDIMIND_TESSERACT_CMD` when Tesseract is installed somewhere `PATH` does
+  not reach (the Windows installer does not touch `PATH`) — an unusable value
+  is logged once and ignored rather than failing an upload.
 - Pillow
 
 ### Healthcare provider search

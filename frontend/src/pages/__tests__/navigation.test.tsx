@@ -268,7 +268,7 @@ const tests: Array<[string, () => void]> = [
         'role="tab"',
         'role="tabpanel"',
         "aria-selected={selected}",
-        "aria-controls={panelId(group, tab.id)}",
+        "aria-controls={selected ? panelId(group, tab.id) : undefined}",
         "aria-labelledby={tabId(group, id)}",
         "tabIndex={selected ? 0 : -1}",
       ]) {

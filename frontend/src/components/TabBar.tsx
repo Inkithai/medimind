@@ -153,7 +153,12 @@ export function TabBar({
             role="tab"
             id={tabId(group, tab.id)}
             aria-selected={selected}
-            aria-controls={panelId(group, tab.id)}
+            /* Only the active panel is mounted (so a hidden tab never fires
+               its request), and aria-controls must not point at an element
+               that is not in the document — screen readers announce a
+               dangling reference as a broken control. Advertise the
+               relationship only for the tab whose panel actually exists. */
+            aria-controls={selected ? panelId(group, tab.id) : undefined}
             tabIndex={selected ? 0 : -1}
             onClick={() => onSelect(tab.id)}
             className={classNames(

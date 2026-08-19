@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import { Card, CardBody } from "../components/Card";
 import { ErrorState } from "../components/ErrorState";
@@ -22,7 +22,7 @@ import type {
   RecordIntegrityReport,
 } from "../types/api";
 import { formatDate } from "../utils/format";
-import type { EmbeddedPageProps } from "../components/TabBar";
+import { TabBar, useTabParam, type EmbeddedPageProps, type TabSpec } from "../components/TabBar";
 
 export function RecordIntegrityPage({
   embedded,
@@ -36,8 +36,14 @@ export function RecordIntegrityPage({
   view?: "discrepancies" | "conflicts";
 } = {}) {
   const { credentials } = useAuth();
-  const [searchParams, setSearchParams] = useSearchParams();
-  const tab = view || (searchParams.get("tab") === "conflicts" ? "conflicts" : "discrepancies");
+  /* Standalone route only: inside the Record check hub the parent owns the
+     tab strip, and `view` is passed instead. */
+  const standaloneTabs: TabSpec[] = [
+    { id: "discrepancies", label: "Discrepancies" },
+    { id: "conflicts", label: "Conflicts to resolve" },
+  ];
+  const [standaloneTab, setStandaloneTab] = useTabParam(standaloneTabs);
+  const tab = view || standaloneTab;
   const [report, setReport] = useState<RecordIntegrityReport | null>(null);
   const [corrections, setCorrections] = useState<CorrectionEvent[]>([]);
   const [reviewed, setReviewed] = useState<Set<string>>(new Set());
@@ -100,24 +106,13 @@ export function RecordIntegrityPage({
       {/* Hidden when the Record check hub already renders these as top-level
           tabs; kept for the standalone /record-integrity route. */}
       {!view && (
-        <div
-          className="flex gap-1 border-b border-slate-200"
-          role="tablist"
-          aria-label="Record check views"
-        >
-          <Tab
-            active={tab === "discrepancies"}
-            onClick={() => setSearchParams({}, { replace: true })}
-          >
-            Discrepancies
-          </Tab>
-          <Tab
-            active={tab === "conflicts"}
-            onClick={() => setSearchParams({ tab: "conflicts" }, { replace: true })}
-          >
-            Conflicts to resolve
-          </Tab>
-        </div>
+        <TabBar
+          tabs={standaloneTabs}
+          active={tab}
+          onSelect={setStandaloneTab}
+          group="record-integrity"
+          label="Record check views"
+        />
       )}
 
       {tab === "conflicts" ? (
@@ -326,32 +321,6 @@ function Evidence({ source }: { source: IntegrityEvidence }) {
       <FileIcon className="h-3 w-3" />
       {label}
     </span>
-  );
-}
-
-function Tab({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      role="tab"
-      aria-selected={active}
-      onClick={onClick}
-      className={`border-b-2 px-4 py-3 text-sm font-semibold transition ${
-        active
-          ? "border-brand-600 text-brand-700"
-          : "border-transparent text-slate-500 hover:text-slate-800"
-      }`}
-    >
-      {children}
-    </button>
   );
 }
 

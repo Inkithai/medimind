@@ -136,6 +136,11 @@ const NAV: NavItem[] = [
   },
 ];
 
+/* The one destination that is readable before a workspace exists: it
+   carries the About page and the settings screen, both of which must work
+   for a first-time visitor. */
+const WORKSPACE_FREE_ROUTE = "/about";
+
 const NAV_GROUPS: Array<{ key: NavItem["group"]; labelKey?: string }> = [
   { key: "home" },
   { key: "records", labelKey: "nav.groupRecords" },
@@ -267,6 +272,15 @@ export function Layout() {
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const sidebarRef = useRef<HTMLElement>(null);
   const firstNavRef = useRef<HTMLAnchorElement>(null);
+
+  /* Opening the mobile drawer moves focus to the first row a user can
+     actually activate. Without a workspace every workflow row is disabled
+     and only About is reachable, so this has to be derived from the enabled
+     state rather than a fixed index — a positional guess silently starts
+     the focus trap on an aria-disabled link whenever NAV is reordered. */
+  const firstFocusableNavIndex = NAV.findIndex(
+    (item) => isConfigured || item.to === WORKSPACE_FREE_ROUTE,
+  );
 
   useEffect(() => {
     if (!sidebarOpen || desktop) return;
@@ -496,17 +510,13 @@ export function Layout() {
                   {items.map((item) => {
                     const index = NAV.indexOf(item);
                     const Icon = item.icon;
-                    /* About & settings carries the settings screen, so it
-                       must stay reachable before a workspace exists. */
-                    const worksWithoutWorkspace = item.to === "/about";
+                    const worksWithoutWorkspace = item.to === WORKSPACE_FREE_ROUTE;
                     const disabled = !worksWithoutWorkspace && !isConfigured;
                     const safetyCount = item.to === "/safety" ? navSignals.safety : 0;
                     const showNew = item.to === "/record-check" && navSignals.hasChanges;
                     return (
                       <NavLink
-                        ref={
-                          index === (isConfigured ? 0 : NAV.length - 1) ? firstNavRef : undefined
-                        }
+                        ref={index === firstFocusableNavIndex ? firstNavRef : undefined}
                         key={item.to}
                         to={disabled ? "#" : item.to}
                         tabIndex={!navInteractive || disabled ? -1 : undefined}

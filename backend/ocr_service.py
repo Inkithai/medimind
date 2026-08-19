@@ -23,6 +23,8 @@ Env:
     MEDIMIND_OCR_MIN_CONFIDENCE  average word confidence (0-100) required
                                  to trust the OCR transcript (default 60)
     MEDIMIND_OCR_DPI             render DPI for PDF pages (default 200)
+    MEDIMIND_TESSERACT_CMD       explicit path to the tesseract executable,
+                                 for installs that are not on PATH
 """
 
 from __future__ import annotations
@@ -68,15 +70,60 @@ def _dpi() -> int:
         return 200
 
 
+# Paths already reported as unusable, so a misconfiguration is logged once
+# rather than on every page of every upload.
+_WARNED_BAD_CMD: set = set()
+
+
+def tesseract_cmd() -> Optional[str]:
+    """Path to the tesseract executable, or None when it cannot be found.
+
+    Resolution order:
+
+      1. ``MEDIMIND_TESSERACT_CMD`` / ``TESSERACT_CMD`` — an explicit path.
+         The Windows installer does not put tesseract on PATH (it lands in
+         ``C:\\Program Files\\Tesseract-OCR\\tesseract.exe``), and some
+         container images install it outside the default search path, so a
+         PATH-only lookup silently disables OCR on a machine that has it.
+      2. ``shutil.which`` — the normal Linux/macOS/Render case.
+
+    An explicit path that does not exist is reported (once, as a warning)
+    and treated as "not installed" rather than raising: OCR is an optional
+    pre-pass, and a typo in a deployment variable must not break uploads.
+    """
+    configured = (
+        (os.environ.get("MEDIMIND_TESSERACT_CMD") or os.environ.get("TESSERACT_CMD") or "")
+        .strip()
+        .strip('"')
+    )
+    if configured:
+        # An absolute/relative path to the binary, or a bare name to look up.
+        if os.path.isfile(configured) and os.access(configured, os.X_OK):
+            return configured
+        resolved = shutil.which(configured)
+        if resolved:
+            return resolved
+        if configured not in _WARNED_BAD_CMD:
+            _WARNED_BAD_CMD.add(configured)
+            logger.warning(
+                "ocr: MEDIMIND_TESSERACT_CMD=%r is not an executable tesseract binary; "
+                "falling back to PATH lookup.",
+                configured,
+            )
+    return shutil.which("tesseract")
+
+
 def is_tesseract_available() -> bool:
     """True when the tesseract binary AND the pytesseract binding are usable.
 
     Never raises — availability is a deployment property, not an error."""
-    if shutil.which("tesseract") is None:
+    command = tesseract_cmd()
+    if command is None:
         return False
     try:
         import pytesseract  # noqa: F401
 
+        pytesseract.pytesseract.tesseract_cmd = command
         pytesseract.get_tesseract_version()
         return True
     except Exception as exc:
@@ -95,15 +142,21 @@ class OCRPageResult:
 
 
 def _require_tesseract() -> Any:
-    if not shutil.which("tesseract"):
+    command = tesseract_cmd()
+    if not command:
         raise TesseractNotFoundError(
             "Tesseract OCR is not installed on this server (no 'tesseract' "
-            "binary on PATH). Scanned documents continue to use vision "
-            "extraction."
+            "binary on PATH, and MEDIMIND_TESSERACT_CMD is unset or does not "
+            "point at an executable). Scanned documents continue to use "
+            "vision extraction."
         )
     try:
         import pytesseract
 
+        # Point the binding at the resolved binary every time: the env var
+        # may name a path that is not on PATH, and pytesseract defaults to a
+        # bare "tesseract" lookup.
+        pytesseract.pytesseract.tesseract_cmd = command
         return pytesseract
     except ImportError as exc:
         raise TesseractNotFoundError(

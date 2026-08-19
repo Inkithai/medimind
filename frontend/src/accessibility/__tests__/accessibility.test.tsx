@@ -7,6 +7,7 @@ import { LanguageSelector } from "../../components/LanguageSelector";
 import { LoadingState } from "../../components/Spinner";
 import { ConsultationPack } from "../../components/ConsultationPack";
 import { ProviderResultCard } from "../../components/ProviderResultCard";
+import { TabBar, TabPanel } from "../../components/TabBar";
 import { I18nProvider } from "../../i18n/I18nContext";
 import type {
   ConsultationPack as ConsultationPackData,
@@ -91,6 +92,12 @@ const provider: LiveProvider = {
   },
 };
 
+const HUB_TABS = [
+  { id: "alerts", label: "Alerts", badge: 2 },
+  { id: "clinical", label: "Clinical" },
+  { id: "timeline", label: "Over time" },
+];
+
 async function main() {
   const { default: axe } = await import("axe-core");
   const root = createRoot(document.getElementById("root")!);
@@ -109,6 +116,22 @@ async function main() {
           <h2>Test provider results</h2>
           <ProviderResultCard provider={provider} index={0} />
         </section>
+        {/* Hub tab chrome. Only the selected panel is mounted, which is why
+            aria-controls is advertised for the selected tab alone — axe
+            fails a control that points at an element not in the document. */}
+        <section>
+          <h2>Test hub tabs</h2>
+          <TabBar
+            tabs={HUB_TABS}
+            active="clinical"
+            onSelect={() => undefined}
+            group="axe"
+            label="Safety views"
+          />
+          <TabPanel group="axe" id="clinical" active="clinical">
+            <p>Clinical findings panel</p>
+          </TabPanel>
+        </section>
       </I18nProvider>,
     );
   });
@@ -126,17 +149,35 @@ async function main() {
     );
   }
 
-  let tabs = document.querySelectorAll<HTMLElement>('[role="tab"]');
+  const tablists = document.querySelectorAll<HTMLElement>('[role="tablist"]');
+  if (tablists.length !== 2)
+    throw new Error(`Expected the document and hub tablists, found ${tablists.length}`);
+
+  let tabs = Array.from(tablists[0].querySelectorAll<HTMLElement>('[role="tab"]'));
   if (tabs.length !== 3) throw new Error(`Expected 3 accessible tabs, found ${tabs.length}`);
   await act(async () => {
     tabs[1].dispatchEvent(
       new dom.window.KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }),
     );
   });
-  tabs = document.querySelectorAll<HTMLElement>('[role="tab"]');
+  tabs = Array.from(tablists[0].querySelectorAll<HTMLElement>('[role="tab"]'));
   if (tabs[0].getAttribute("aria-selected") !== "true") {
     throw new Error("Document tabs must support arrow-key navigation");
   }
+
+  // Hub tabs: exactly one selected, and only it claims a panel.
+  const hubTabs = Array.from(tablists[1].querySelectorAll<HTMLElement>('[role="tab"]'));
+  const selectedHubTabs = hubTabs.filter((tab) => tab.getAttribute("aria-selected") === "true");
+  if (selectedHubTabs.length !== 1)
+    throw new Error(`Expected exactly one selected hub tab, found ${selectedHubTabs.length}`);
+  for (const tab of hubTabs) {
+    const controls = tab.getAttribute("aria-controls");
+    if (!controls) continue;
+    if (!document.getElementById(controls))
+      throw new Error(`Tab "${tab.textContent}" points at a panel that is not rendered`);
+  }
+  if (selectedHubTabs[0].getAttribute("tabindex") === "-1")
+    throw new Error("The selected hub tab must be the one in the tab order");
   if (!document.querySelector("select[aria-label]"))
     throw new Error("Language selector needs an accessible name");
   if (!document.querySelector('[role="alert"]'))
