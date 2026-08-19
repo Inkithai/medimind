@@ -128,14 +128,14 @@ export function FollowUpPage() {
             </div>
           </div>
 
-          {preventive.count === 0 ? (
+          {preventive.count === 0 || !preventive.care_gaps ? (
             <p className="mt-4 text-sm text-slate-600">
               No reminders right now. Add your date of birth in Settings to unlock age-based
               screening reminders.
             </p>
           ) : (
             <div className="mt-4 grid gap-3 sm:grid-cols-2">
-              {preventive.care_gaps.map((g, i) => (
+              {(preventive.care_gaps || []).map((g, i) => (
                 <div
                   key={`${g.kind}-${g.title}-${i}`}
                   className="rounded-xl border border-slate-200 bg-slate-50/60 p-4"

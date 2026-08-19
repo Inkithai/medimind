@@ -244,7 +244,28 @@ export function Layout() {
     safetyPending: false,
     hasChanges: false,
   });
+  // Friendly workspace name (optional; shown in the sidebar header).
+  const [workspaceName, setWorkspaceName] = useState<string | null>(null);
   const desktop = useDesktopLayout();
+
+  useEffect(() => {
+    if (!isConfigured) {
+      setWorkspaceName(null);
+      return;
+    }
+    let cancelled = false;
+    api
+      .getWorkspaceName(credentials)
+      .then((result) => {
+        if (!cancelled) setWorkspaceName(result.name);
+      })
+      .catch(() => {
+        if (!cancelled) setWorkspaceName(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [credentials, isConfigured]);
 
   useEffect(() => {
     if (!isConfigured) {
@@ -429,6 +450,11 @@ export function Layout() {
               <Logo />
               <div className="min-w-0 flex-1">
                 <p className="text-xl font-bold leading-tight text-slate-900">MediMind</p>
+                {workspaceName && (
+                  <p className="truncate text-xs text-slate-500" title={workspaceName}>
+                    {workspaceName}
+                  </p>
+                )}
               </div>
             </div>
             {desktop && (
