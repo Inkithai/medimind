@@ -15,6 +15,7 @@ import {
 } from "../components/icons";
 import { useI18n } from "../i18n/I18nContext";
 import { classNames } from "../utils/format";
+import type { EmbeddedPageProps } from "../components/TabBar";
 
 /**
  * About / technical overview — an informational page INSIDE the application.
@@ -33,7 +34,7 @@ import { classNames } from "../utils/format";
  * backend/api.py, pipeline stages against medical_extractor.py and
  * retrieval.py. A backend test asserts the documented routes exist.
  */
-export function AboutPage() {
+export function AboutPage({ embedded }: EmbeddedPageProps = {}) {
   const { t } = useI18n();
 
   const sections = [
@@ -53,7 +54,7 @@ export function AboutPage() {
 
   return (
     <div className="about-page">
-      <PageHeader />
+      <PageHeader embedded={embedded} />
 
       <SectionNavBar sections={sections} activeId={activeId} />
 
@@ -78,16 +79,22 @@ export function AboutPage() {
 /* registration, no back button: navigation belongs to the sidebar.    */
 /* ------------------------------------------------------------------ */
 
-function PageHeader() {
+function PageHeader({ embedded }: { embedded?: boolean }) {
   const { t } = useI18n();
   const facts = ["fact1", "fact2", "fact3"];
   return (
     <header className="flex flex-col gap-8 lg:flex-row lg:items-start lg:justify-between">
       <div className="min-w-0 max-w-3xl">
-        <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-brand-200 bg-brand-50 px-3 py-1 text-xs font-bold uppercase tracking-wider text-brand-700">
-          <InfoIcon className="h-3.5 w-3.5" /> {t("about.eyebrow")}
-        </div>
-        <h1 className="page-title">{t("about.title")}</h1>
+        {!embedded && (
+          <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-brand-200 bg-brand-50 px-3 py-1 text-xs font-bold uppercase tracking-wider text-brand-700">
+            <InfoIcon className="h-3.5 w-3.5" /> {t("about.eyebrow")}
+          </div>
+        )}
+        {embedded ? (
+          <h2 className="section-title">{t("about.title")}</h2>
+        ) : (
+          <h1 className="page-title">{t("about.title")}</h1>
+        )}
         <p className="mt-3 text-base leading-relaxed text-slate-600">{t("about.lede")}</p>
         <ul className="mt-4 flex flex-wrap gap-2">
           {facts.map((key) => (

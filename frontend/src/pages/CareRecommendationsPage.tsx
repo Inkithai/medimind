@@ -16,8 +16,9 @@ import type {
   CareRecommendationContext,
 } from "../types/api";
 import { confidenceTone, formatConfidence } from "../utils/format";
+import type { EmbeddedPageProps } from "../components/TabBar";
 
-export function CareRecommendationsPage() {
+export function CareRecommendationsPage({ embedded }: EmbeddedPageProps = {}) {
   const { credentials } = useAuth();
   const { t } = useI18n();
   const availabilityOptions: Array<{ value: AvailabilityPreference; label: string }> = [
@@ -84,10 +85,12 @@ export function CareRecommendationsPage() {
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="page-title">{t("care.localTitle")}</h1>
-        <p className="secondary-text mt-2 max-w-3xl">{t("care.localSubtitle")}</p>
-      </header>
+      {!embedded && (
+        <header>
+          <h1 className="page-title">{t("care.localTitle")}</h1>
+          <p className="secondary-text mt-2 max-w-3xl">{t("care.localSubtitle")}</p>
+        </header>
+      )}
 
       <Alert variant="info" title={t("care.medicalNotice")}>
         {context.disclaimer}

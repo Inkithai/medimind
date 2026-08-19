@@ -10,6 +10,7 @@ import { useAuth } from "../context/AuthContext";
 import { useStrictEffect } from "../hooks/useStrictEffect";
 import type { FollowUpPlan, FollowUpTask, PreventiveCareReport } from "../types/api";
 import { formatDate } from "../utils/format";
+import type { EmbeddedPageProps } from "../components/TabBar";
 
 type TaskState = Record<string, { completed: boolean; reminderDate: string }>;
 type View = "open" | "completed";
@@ -23,7 +24,7 @@ function readState(key: string): TaskState {
   }
 }
 
-export function FollowUpPage() {
+export function FollowUpPage({ embedded }: EmbeddedPageProps = {}) {
   const { credentials } = useAuth();
   const storageKey = `medimind.follow-up.v1.${credentials.userId}`;
   const [plan, setPlan] = useState<FollowUpPlan | null>(null);
@@ -91,10 +92,14 @@ export function FollowUpPage() {
   return (
     <div className="space-y-6">
       <header>
-        <div className="flex items-center gap-2 text-sm font-semibold text-brand-700">
-          <ReminderIcon className="h-4 w-4" /> Follow-up intelligence
-        </div>
-        <h1 className="page-title mt-1">My Action Center</h1>
+        {!embedded && (
+          <>
+            <div className="flex items-center gap-2 text-sm font-semibold text-brand-700">
+              <ReminderIcon className="h-4 w-4" /> Follow-up intelligence
+            </div>
+            <h1 className="page-title mt-1">My Action Center</h1>
+          </>
+        )}
         <p className="secondary-text mt-2 max-w-2xl">
           One grounded queue for facts to verify and questions to take to a clinician. You control
           completion and reminder dates.
@@ -109,7 +114,9 @@ export function FollowUpPage() {
       )}
       {!loading && error !== null && <FollowUpError error={error} onRetry={() => void load()} />}
 
-      {!loading && preventive && (
+      {/* Inside the Next steps hub, preventive reminders have their own tab,
+          so this inline copy would be a duplicate. */}
+      {!loading && preventive && !embedded && (
         <section
           aria-labelledby="preventive-care-title"
           className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"

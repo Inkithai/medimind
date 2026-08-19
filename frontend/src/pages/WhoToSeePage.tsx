@@ -31,6 +31,7 @@ import { useAuth } from "../context/AuthContext";
 import { useStrictEffect } from "../hooks/useStrictEffect";
 import type { ConsultTriageReport, TriageAction } from "../types/api";
 import { formatConfidence } from "../utils/format";
+import type { EmbeddedPageProps } from "../components/TabBar";
 
 /** Urgency → the words, tone and symbol shown to the user (never colour alone). */
 const URGENCY_LABELS: Record<
@@ -62,7 +63,7 @@ function UrgencyBadge({ urgency }: { urgency?: string | null }) {
   );
 }
 
-export function WhoToSeePage() {
+export function WhoToSeePage({ embedded }: EmbeddedPageProps = {}) {
   const { credentials } = useAuth();
   const [report, setReport] = useState<ConsultTriageReport | null>(null);
   const [noRecords, setNoRecords] = useState(false);
@@ -96,7 +97,11 @@ export function WhoToSeePage() {
     <div className="space-y-6">
       <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="max-w-2xl">
-          <h1 className="page-title">Who should I talk to?</h1>
+          {embedded ? (
+            <h2 className="section-title">Who should I talk to?</h2>
+          ) : (
+            <h1 className="page-title">Who should I talk to?</h1>
+          )}
           <p className="secondary-text mt-2 text-base">
             MediMind looks at what it found in your uploaded records and suggests whether a
             pharmacist or a doctor should look at it, and how soon. This is a suggestion about who
@@ -182,7 +187,7 @@ export function WhoToSeePage() {
                       </div>
                       <div className="flex items-center gap-3">
                         <UrgencyBadge urgency={specialty.urgency} />
-                        <Link to="/find-care" className="btn-secondary">
+                        <Link to="/care?tab=map" className="btn-secondary">
                           Find care
                         </Link>
                       </div>
@@ -197,7 +202,7 @@ export function WhoToSeePage() {
             <Alert variant="info" title="Check these documents against the originals">
               <p className="text-base leading-relaxed">{report.document_quality_note}</p>
               <Link
-                to="/record-integrity"
+                to="/record-check"
                 className="mt-2 inline-block text-base font-semibold underline"
               >
                 Review document quality

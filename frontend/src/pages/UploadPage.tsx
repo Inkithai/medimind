@@ -13,6 +13,7 @@ import { useStrictEffect } from "../hooks/useStrictEffect";
 import { useI18n } from "../i18n/I18nContext";
 import type { Timeline, UploadResponse } from "../types/api";
 import { classNames, documentTypeLabel, fileSizeLabel, relativeTime } from "../utils/format";
+import type { EmbeddedPageProps } from "../components/TabBar";
 
 const ACCEPTED = [".pdf", ".png", ".jpg", ".jpeg", ".webp"];
 const MAX_MB = 25;
@@ -158,7 +159,7 @@ function completedFallbackProgress(
   };
 }
 
-export function UploadPage() {
+export function UploadPage({ embedded }: EmbeddedPageProps = {}) {
   const { credentials } = useAuth();
   const { t } = useI18n();
   const navigate = useNavigate();
@@ -454,10 +455,12 @@ export function UploadPage() {
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="page-title">{t("upload.title")}</h1>
-        <p className="secondary-text mt-2">{t("upload.subtitle")}</p>
-      </header>
+      {!embedded && (
+        <header>
+          <h1 className="page-title">{t("upload.title")}</h1>
+          <p className="secondary-text mt-2">{t("upload.subtitle")}</p>
+        </header>
+      )}
 
       <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
         <div className="space-y-4">

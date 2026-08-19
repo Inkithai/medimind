@@ -8,7 +8,7 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "lint": "tsc --noEmit",
-    "test": "npm run test:hook && npm run test:auth && npm run test:i18n && npm run test:a11y && npm run test:geolocation && npm run test:care && npm run test:sources && npm run test:safety-summary && npm run test:analyses && npm run test:qacard && npm run test:toast && npm run test:surfaces && npm run test:format && npm run test:about && npm run test:timeline-empty && npm run test:who-to-see && npm run test:pages && npm run test:judge-prep",
+    "test": "npm run test:hook && npm run test:auth && npm run test:i18n && npm run test:a11y && npm run test:geolocation && npm run test:care && npm run test:sources && npm run test:safety-summary && npm run test:analyses && npm run test:qacard && npm run test:toast && npm run test:surfaces && npm run test:format && npm run test:about && npm run test:timeline-empty && npm run test:who-to-see && npm run test:pages && npm run test:judge-prep && npm run test:navigation && npm run test:navigation-render",
     "test:hook": "NODE_ENV=development tsx src/hooks/__tests__/useStrictEffect.test.tsx",
     "test:auth": "NODE_ENV=development tsx src/context/__tests__/AuthContext.test.tsx",
     "test:i18n": "NODE_ENV=development tsx src/i18n/__tests__/i18n.test.tsx",
@@ -30,7 +30,9 @@
     "test:evidence": "tsx src/components/__smoke__/evidence-viewer.smoke.tsx",
     "test:clinical-events": "tsx src/components/__smoke__/clinical-events.smoke.tsx",
     "lint:eslint": "eslint src --max-warnings=0",
-    "lint:format": "prettier --check \"src/**/*.{ts,tsx}\""
+    "lint:format": "prettier --check \"src/**/*.{ts,tsx}\"",
+    "test:navigation": "NODE_ENV=development tsx src/pages/__tests__/navigation.test.tsx",
+    "test:navigation-render": "NODE_ENV=development tsx src/pages/__tests__/navigationRender.test.tsx"
   },
   "dependencies": {
     "leaflet": "^1.9.4",

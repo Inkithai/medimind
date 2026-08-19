@@ -13,6 +13,7 @@ import { useAuth } from "../context/AuthContext";
 import { useStrictEffect } from "../hooks/useStrictEffect";
 import { useI18n } from "../i18n/I18nContext";
 import { formatDate } from "../utils/format";
+import type { EmbeddedPageProps } from "../components/TabBar";
 import type {
   VitalTrendsReport,
   EarlyWarningReport,
@@ -61,7 +62,7 @@ function dedupeAdherenceSignals(signals: AdherenceSignal[]): AdherenceSignal[] {
   });
 }
 
-export function VitalsPage() {
+export function VitalsPage({ embedded }: EmbeddedPageProps = {}) {
   const { credentials } = useAuth();
   const { t } = useI18n();
   const { toastSuccess, toastError } = useToast();
@@ -149,10 +150,14 @@ export function VitalsPage() {
   return (
     <div className="space-y-6">
       <div className="flex min-w-0 flex-col items-start justify-between gap-4 sm:flex-row">
-        <div className="min-w-0">
-          <h1 className="page-title">{t("vitals.title")}</h1>
-          <p className="secondary-text mt-2 max-w-2xl">{t("vitals.subtitle")}</p>
-        </div>
+        {embedded ? (
+          <div className="min-w-0" />
+        ) : (
+          <div className="min-w-0">
+            <h1 className="page-title">{t("vitals.title")}</h1>
+            <p className="secondary-text mt-2 max-w-2xl">{t("vitals.subtitle")}</p>
+          </div>
+        )}
         <button
           onClick={() => setReloadKey((k) => k + 1)}
           className="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"

@@ -1,51 +1,42 @@
-import { lazy, Suspense } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { Layout } from "./components/Layout";
 import { useAuth } from "./context/AuthContext";
 import { AboutPage } from "./pages/AboutPage";
-import { CrossCheckPage } from "./pages/CrossCheckPage";
+import { AnalysesPage } from "./pages/AnalysesPage";
+import { AppointmentPrepPage } from "./pages/AppointmentPrepPage";
 import { CareRecommendationsPage } from "./pages/CareRecommendationsPage";
+import { ChangesPage } from "./pages/ChangesPage";
+import { ClinicalSafetyPage } from "./pages/ClinicalSafetyPage";
+import { CrossCheckPage } from "./pages/CrossCheckPage";
 import { DashboardPage } from "./pages/DashboardPage";
+import { DocumentsPage } from "./pages/DocumentsPage";
+import { FhirImportPage } from "./pages/FhirImportPage";
+import { FollowUpPage } from "./pages/FollowUpPage";
+import { GetCareHubPage } from "./pages/GetCareHubPage";
+import { GuidelinesPage } from "./pages/GuidelinesPage";
+import { HistoryPage } from "./pages/HistoryPage";
+import { JudgePrepPage } from "./pages/JudgePrepPage";
 import { LabTrendsPage } from "./pages/LabTrendsPage";
+import { LabsHubPage } from "./pages/LabsHubPage";
 import { LandingPage } from "./pages/LandingPage";
+import { MedicinesPage } from "./pages/MedicinesPage";
+import { NextStepsHubPage } from "./pages/NextStepsHubPage";
+import { PreventiveCarePage } from "./pages/PreventiveCarePage";
+import { ProviderMessagesPage } from "./pages/ProviderMessagesPage";
 import { QAPage } from "./pages/QAPage";
+import { RecordCheckHubPage } from "./pages/RecordCheckHubPage";
+import { RecordIntegrityPage } from "./pages/RecordIntegrityPage";
+import { RecordsHubPage } from "./pages/RecordsHubPage";
+import { RiskTimelinePage } from "./pages/RiskTimelinePage";
+import { SafetyHubPage } from "./pages/SafetyHubPage";
 import { SessionPage } from "./pages/SessionPage";
 import { SettingsPage } from "./pages/SettingsPage";
-import { UploadPage } from "./pages/UploadPage";
-import { DocumentsPage } from "./pages/DocumentsPage";
-import { MedicinesPage } from "./pages/MedicinesPage";
-import { HistoryPage } from "./pages/HistoryPage";
-import { RiskTimelinePage } from "./pages/RiskTimelinePage";
-import { ClinicalSafetyPage } from "./pages/ClinicalSafetyPage";
+import { TrustHubPage } from "./pages/TrustHubPage";
+import { UploadHubPage } from "./pages/UploadHubPage";
 import { VitalsPage } from "./pages/VitalsPage";
-import { GuidelinesPage } from "./pages/GuidelinesPage";
-import { FhirImportPage } from "./pages/FhirImportPage";
-import { ChangesPage } from "./pages/ChangesPage";
-import { AppointmentPrepPage } from "./pages/AppointmentPrepPage";
-import { AnalysesPage } from "./pages/AnalysesPage";
 import { WhoToSeePage } from "./pages/WhoToSeePage";
-import { RecordIntegrityPage } from "./pages/RecordIntegrityPage";
-import { FollowUpPage } from "./pages/FollowUpPage";
-import { JudgePrepPage } from "./pages/JudgePrepPage";
 import { Spinner } from "./components/Spinner";
 import { useI18n } from "./i18n/I18nContext";
-
-const FindCarePage = lazy(() =>
-  import("./pages/FindCarePage").then((module) => ({ default: module.FindCarePage })),
-);
-
-function FindCareLoading() {
-  const { t } = useI18n();
-  return (
-    <div
-      role="status"
-      aria-live="polite"
-      className="flex min-h-[50vh] items-center justify-center gap-3 text-sm font-medium text-slate-700"
-    >
-      <Spinner className="h-5 w-5 text-brand-600" /> {t("care.finding")}
-    </div>
-  );
-}
 
 function RequireAuth({ children }: { children: JSX.Element }) {
   const { isConfigured, isInitializing, initError } = useAuth();
@@ -72,245 +63,342 @@ function RequireAuth({ children }: { children: JSX.Element }) {
   return children;
 }
 
+/** Shorthand: a workspace-scoped route. */
+function Guarded({ children }: { children: JSX.Element }) {
+  return <RequireAuth>{children}</RequireAuth>;
+}
+
+/**
+ * Route table.
+ *
+ * The sidebar shows eleven destinations, but the app still answers every URL
+ * it ever answered. Routes fall into three kinds:
+ *
+ *   HUB      — a parent page with tabs (Safety, Record check, Ask, Find care,
+ *              Next steps, My record, Labs, Upload, About & settings).
+ *   TAB URL  — an old top-level path, redirected onto the hub tab that now
+ *              holds that screen. Nothing 404s mid-demo.
+ *   DEEP     — a real page kept out of the sidebar on purpose: the analysis
+ *              audit log (/analyses) and the viva sheet (/ygc-prep).
+ *
+ * Several screens are also still mounted standalone (e.g. /record-integrity,
+ * /settings, /guidelines) because links, print views and tests point at them.
+ */
 export default function App() {
   return (
     <Routes>
       <Route path="/" element={<LandingPage />} />
-      {/* Speaker notes only — no nav, sidebar, or landing link. Type /ygc-prep. */}
+      {/* DEEP: speaker notes only — no nav, sidebar, or landing link. Type /ygc-prep. */}
       <Route path="/ygc-prep" element={<JudgePrepPage />} />
       <Route element={<Layout />}>
         <Route index element={<Navigate to="/dashboard" replace />} />
-        <Route path="/settings" element={<SettingsPage />} />
-        {/* Informational, like /settings: readable without a workspace. */}
-        <Route path="/about" element={<AboutPage />} />
-        <Route
-          path="/find-care"
-          element={
-            <RequireAuth>
-              <Suspense fallback={<FindCareLoading />}>
-                <FindCarePage />
-              </Suspense>
-            </RequireAuth>
-          }
-        />
-        <Route path="/location-picker" element={<Navigate to="/find-care" replace />} />
+
+        {/* ---------------- Start ---------------- */}
         <Route
           path="/dashboard"
           element={
-            <RequireAuth>
+            <Guarded>
               <DashboardPage />
-            </RequireAuth>
+            </Guarded>
           }
         />
+        {/* HUB: Photos & PDFs | FHIR file */}
         <Route
           path="/upload"
           element={
-            <RequireAuth>
-              <UploadPage />
-            </RequireAuth>
+            <Guarded>
+              <UploadHubPage />
+            </Guarded>
           }
         />
+        {/* TAB URL: FHIR import is the second Upload tab. */}
+        <Route path="/import" element={<Navigate to="/upload?tab=fhir" replace />} />
+        <Route
+          path="/upload/fhir"
+          element={
+            <Guarded>
+              <FhirImportPage />
+            </Guarded>
+          }
+        />
+
+        {/* ---------------- My record ---------------- */}
+        {/* HUB: Files | Timeline */}
         <Route
           path="/documents"
           element={
-            <RequireAuth>
+            <Guarded>
+              <RecordsHubPage />
+            </Guarded>
+          }
+        />
+        {/* TAB URLs: the timeline is a view of the same documents. */}
+        <Route path="/history" element={<Navigate to="/documents?tab=timeline" replace />} />
+        <Route path="/timeline" element={<Navigate to="/documents?tab=timeline" replace />} />
+        <Route
+          path="/documents/files"
+          element={
+            <Guarded>
               <DocumentsPage />
-            </RequireAuth>
+            </Guarded>
           }
         />
         <Route
-          path="/history"
+          path="/documents/timeline"
           element={
-            <RequireAuth>
+            <Guarded>
               <HistoryPage />
-            </RequireAuth>
+            </Guarded>
           }
         />
-        {/* Merged into Record Check (Trust Review). */}
-        <Route path="/review" element={<Navigate to="/record-integrity?tab=conflicts" replace />} />
         <Route
           path="/medicines"
           element={
-            <RequireAuth>
+            <Guarded>
               <MedicinesPage />
-            </RequireAuth>
+            </Guarded>
           }
         />
-        {/* Legacy timeline path */}
-        <Route
-          path="/timeline"
-          element={
-            <RequireAuth>
-              <HistoryPage />
-            </RequireAuth>
-          }
-        />
-        <Route
-          path="/changes"
-          element={
-            <RequireAuth>
-              <ChangesPage />
-            </RequireAuth>
-          }
-        />
-        <Route
-          path="/follow-up"
-          element={
-            <RequireAuth>
-              <FollowUpPage />
-            </RequireAuth>
-          }
-        />
-        <Route
-          path="/record-integrity"
-          element={
-            <RequireAuth>
-              <RecordIntegrityPage />
-            </RequireAuth>
-          }
-        />
-        <Route
-          path="/appointment-prep"
-          element={
-            <RequireAuth>
-              <AppointmentPrepPage />
-            </RequireAuth>
-          }
-        />
-        <Route
-          path="/who-to-see"
-          element={
-            <RequireAuth>
-              <WhoToSeePage />
-            </RequireAuth>
-          }
-        />
-        <Route
-          path="/analyses"
-          element={
-            <RequireAuth>
-              <AnalysesPage />
-            </RequireAuth>
-          }
-        />
-        <Route
-          path="/cross-check"
-          element={
-            <RequireAuth>
-              <CrossCheckPage />
-            </RequireAuth>
-          }
-        />
-        <Route
-          path="/safety"
-          element={
-            <RequireAuth>
-              <CrossCheckPage />
-            </RequireAuth>
-          }
-        />
-        <Route
-          path="/lab-trends"
-          element={
-            <RequireAuth>
-              <LabTrendsPage />
-            </RequireAuth>
-          }
-        />
+        {/* HUB: Lab trends | Home vitals */}
         <Route
           path="/labs"
           element={
-            <RequireAuth>
+            <Guarded>
+              <LabsHubPage />
+            </Guarded>
+          }
+        />
+        <Route path="/lab-trends" element={<Navigate to="/labs" replace />} />
+        {/* TAB URL: home BP / weight / sugar live under Labs. */}
+        <Route path="/vitals" element={<Navigate to="/labs?tab=vitals" replace />} />
+        <Route
+          path="/labs/trends"
+          element={
+            <Guarded>
               <LabTrendsPage />
-            </RequireAuth>
+            </Guarded>
           }
         />
         <Route
-          path="/risk-timeline"
+          path="/labs/vitals"
           element={
-            <RequireAuth>
-              <RiskTimelinePage />
-            </RequireAuth>
-          }
-        />
-        <Route
-          path="/clinical-safety"
-          element={
-            <RequireAuth>
-              <ClinicalSafetyPage />
-            </RequireAuth>
-          }
-        />
-        <Route
-          path="/vitals"
-          element={
-            <RequireAuth>
+            <Guarded>
               <VitalsPage />
-            </RequireAuth>
+            </Guarded>
           }
         />
-        {/* Merged into the Action Center. */}
-        <Route path="/preventive-care" element={<Navigate to="/follow-up" replace />} />
-        {/* Merged into Ask AI. */}
-        <Route path="/symptoms" element={<Navigate to="/ask?tab=symptoms" replace />} />
+
+        {/* ---------------- Insights ---------------- */}
+        {/* HUB: Alerts | Clinical | Over time */}
         <Route
-          path="/guidelines"
+          path="/safety"
           element={
-            <RequireAuth>
-              <GuidelinesPage />
-            </RequireAuth>
+            <Guarded>
+              <SafetyHubPage />
+            </Guarded>
           }
         />
-        {/* Removed: messages had no delivery transport and no role-based access. */}
-        <Route path="/messages" element={<Navigate to="/dashboard" replace />} />
+        <Route path="/cross-check" element={<Navigate to="/safety" replace />} />
+        {/* TAB URLs: the two other halves of the same safety question. */}
+        <Route path="/clinical-safety" element={<Navigate to="/safety?tab=clinical" replace />} />
+        <Route path="/risk-timeline" element={<Navigate to="/safety?tab=timeline" replace />} />
         <Route
-          path="/import"
+          path="/safety/alerts"
           element={
-            <RequireAuth>
-              <FhirImportPage />
-            </RequireAuth>
-          }
-        />
-        <Route
-          path="/care"
-          element={
-            <RequireAuth>
-              <CareRecommendationsPage />
-            </RequireAuth>
+            <Guarded>
+              <CrossCheckPage />
+            </Guarded>
           }
         />
         <Route
-          path="/qa"
+          path="/safety/clinical"
           element={
-            <RequireAuth>
-              <QAPage />
-            </RequireAuth>
+            <Guarded>
+              <ClinicalSafetyPage />
+            </Guarded>
           }
         />
+        <Route
+          path="/safety/timeline"
+          element={
+            <Guarded>
+              <RiskTimelinePage />
+            </Guarded>
+          }
+        />
+
+        {/* HUB: Discrepancies | Conflicts | What changed */}
+        <Route
+          path="/record-check"
+          element={
+            <Guarded>
+              <RecordCheckHubPage />
+            </Guarded>
+          }
+        />
+        {/* TAB URLs. /record-integrity keeps its own ?tab=conflicts contract,
+            so it is redirected with the parameter preserved below. */}
+        <Route path="/changes" element={<Navigate to="/record-check?tab=changes" replace />} />
+        <Route path="/review" element={<Navigate to="/record-check?tab=conflicts" replace />} />
+        <Route
+          path="/record-integrity"
+          element={
+            <Guarded>
+              <RecordIntegrityPage />
+            </Guarded>
+          }
+        />
+        <Route
+          path="/record-check/changes"
+          element={
+            <Guarded>
+              <ChangesPage />
+            </Guarded>
+          }
+        />
+
+        {/* HUB: Question | Symptom | Conversation */}
         <Route
           path="/ask"
           element={
-            <RequireAuth>
+            <Guarded>
               <QAPage />
-            </RequireAuth>
+            </Guarded>
+          }
+        />
+        <Route path="/qa" element={<Navigate to="/ask" replace />} />
+        {/* TAB URLs: symptom check and multi-turn chat are Ask AI tabs. */}
+        <Route path="/symptoms" element={<Navigate to="/ask?tab=symptoms" replace />} />
+        <Route path="/conversations" element={<Navigate to="/ask?tab=chat" replace />} />
+        <Route path="/sessions" element={<Navigate to="/ask?tab=chat" replace />} />
+        <Route
+          path="/ask/chat"
+          element={
+            <Guarded>
+              <SessionPage />
+            </Guarded>
+          }
+        />
+
+        {/* ---------------- Take action ---------------- */}
+        {/* HUB: Find local care (default) | Who to see | Browse nearby.
+            The flag → specialty → live listing flow used to be reachable only
+            by typing /care; it is now the landing tab of a sidebar entry. */}
+        <Route
+          path="/care"
+          element={
+            <Guarded>
+              <GetCareHubPage />
+            </Guarded>
           }
         />
         <Route
-          path="/sessions"
+          path="/find-care"
           element={
-            <RequireAuth>
-              <SessionPage />
-            </RequireAuth>
+            <Guarded>
+              <GetCareHubPage />
+            </Guarded>
+          }
+        />
+        <Route path="/location-picker" element={<Navigate to="/care?tab=map" replace />} />
+        {/* TAB URL: pharmacist-vs-doctor triage is the second Find care tab. */}
+        <Route path="/who-to-see" element={<Navigate to="/care?tab=who" replace />} />
+        <Route
+          path="/care/who-to-see"
+          element={
+            <Guarded>
+              <WhoToSeePage />
+            </Guarded>
           }
         />
         <Route
-          path="/conversations"
+          path="/care/local"
           element={
-            <RequireAuth>
-              <SessionPage />
-            </RequireAuth>
+            <Guarded>
+              <CareRecommendationsPage />
+            </Guarded>
           }
         />
+
+        {/* HUB: Appointment prep | Action Center | Preventive | Messages */}
+        <Route
+          path="/appointment-prep"
+          element={
+            <Guarded>
+              <NextStepsHubPage />
+            </Guarded>
+          }
+        />
+        {/* TAB URLs. Preventive care and provider messages previously
+            redirected to other screens, which made two shipped features look
+            deleted; they are real tabs again. */}
+        <Route path="/follow-up" element={<Navigate to="/appointment-prep?tab=queue" replace />} />
+        <Route
+          path="/preventive-care"
+          element={<Navigate to="/appointment-prep?tab=preventive" replace />}
+        />
+        <Route
+          path="/messages"
+          element={<Navigate to="/appointment-prep?tab=messages" replace />}
+        />
+        <Route
+          path="/next-steps/prep"
+          element={
+            <Guarded>
+              <AppointmentPrepPage />
+            </Guarded>
+          }
+        />
+        <Route
+          path="/next-steps/queue"
+          element={
+            <Guarded>
+              <FollowUpPage />
+            </Guarded>
+          }
+        />
+        <Route
+          path="/next-steps/preventive"
+          element={
+            <Guarded>
+              <PreventiveCarePage />
+            </Guarded>
+          }
+        />
+        <Route
+          path="/next-steps/messages"
+          element={
+            <Guarded>
+              <ProviderMessagesPage />
+            </Guarded>
+          }
+        />
+
+        {/* ---------------- Trust ---------------- */}
+        {/* HUB: How it works | Guidelines | Settings | Advanced.
+            Informational, like /settings: readable without a workspace. */}
+        <Route path="/about" element={<TrustHubPage />} />
+        <Route path="/about/how-it-works" element={<AboutPage />} />
+        <Route path="/settings" element={<SettingsPage />} />
+        <Route
+          path="/guidelines"
+          element={
+            <Guarded>
+              <GuidelinesPage />
+            </Guarded>
+          }
+        />
+        {/* DEEP: audit log. Reachable from About → Advanced, never the sidebar. */}
+        <Route
+          path="/analyses"
+          element={
+            <Guarded>
+              <AnalysesPage />
+            </Guarded>
+          }
+        />
+
+        {/* A typo mid-demo must not blank the screen. */}
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Route>
     </Routes>

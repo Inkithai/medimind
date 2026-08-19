@@ -9,8 +9,9 @@ import { useAuth } from "../context/AuthContext";
 import { useStrictEffect } from "../hooks/useStrictEffect";
 import type { AppointmentEvidence, AppointmentPrepReport, AppointmentPriority } from "../types/api";
 import { formatDate } from "../utils/format";
+import type { EmbeddedPageProps } from "../components/TabBar";
 
-export function AppointmentPrepPage() {
+export function AppointmentPrepPage({ embedded }: EmbeddedPageProps = {}) {
   const { credentials } = useAuth();
   const [report, setReport] = useState<AppointmentPrepReport | null>(null);
   const [checked, setChecked] = useState<Set<string>>(new Set());
@@ -40,16 +41,23 @@ export function AppointmentPrepPage() {
   return (
     <div className="space-y-6 appointment-prep-page">
       <header className="flex flex-wrap items-start justify-between gap-4 print:mb-6">
-        <div>
-          <div className="flex items-center gap-2 text-sm font-semibold text-brand-700">
-            <AppointmentIcon className="h-4 w-4" /> Visit preparation
-          </div>
-          <h1 className="page-title mt-1">Prepare for My Appointment</h1>
-          <p className="secondary-text mt-2 max-w-2xl">
+        {embedded ? (
+          <p className="secondary-text max-w-2xl">
             A focused clinician handoff and question list built from your records—with evidence
             attached.
           </p>
-        </div>
+        ) : (
+          <div>
+            <div className="flex items-center gap-2 text-sm font-semibold text-brand-700">
+              <AppointmentIcon className="h-4 w-4" /> Visit preparation
+            </div>
+            <h1 className="page-title mt-1">Prepare for My Appointment</h1>
+            <p className="secondary-text mt-2 max-w-2xl">
+              A focused clinician handoff and question list built from your records—with evidence
+              attached.
+            </p>
+          </div>
+        )}
         <button
           type="button"
           onClick={() => window.print()}

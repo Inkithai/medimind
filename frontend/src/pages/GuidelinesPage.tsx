@@ -11,8 +11,9 @@ import { useAuth } from "../context/AuthContext";
 import { useStrictEffect } from "../hooks/useStrictEffect";
 import { useI18n } from "../i18n/I18nContext";
 import type { GuidelinesRefreshResult, GuidelinesStatus } from "../types/api";
+import type { EmbeddedPageProps } from "../components/TabBar";
 
-export function GuidelinesPage() {
+export function GuidelinesPage({ embedded }: EmbeddedPageProps = {}) {
   const { credentials } = useAuth();
   const { t } = useI18n();
   const { toastSuccess, toastError, toastInfo } = useToast();
@@ -73,10 +74,17 @@ export function GuidelinesPage() {
   return (
     <div className="space-y-6">
       <div className="flex min-w-0 flex-col items-start justify-between gap-4 sm:flex-row">
-        <div className="min-w-0">
-          <h1 className="page-title">{t("guidelines.title")}</h1>
-          <p className="secondary-text mt-2 max-w-2xl">{t("guidelines.subtitle")}</p>
-        </div>
+        {embedded ? (
+          <div className="min-w-0 max-w-2xl">
+            <h2 className="section-title">{t("guidelines.title")}</h2>
+            <p className="secondary-text mt-2">{t("guidelines.subtitle")}</p>
+          </div>
+        ) : (
+          <div className="min-w-0">
+            <h1 className="page-title">{t("guidelines.title")}</h1>
+            <p className="secondary-text mt-2 max-w-2xl">{t("guidelines.subtitle")}</p>
+          </div>
+        )}
         <div className="flex flex-wrap gap-3">
           <button
             onClick={() => setReloadKey((k) => k + 1)}

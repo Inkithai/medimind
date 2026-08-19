@@ -11,6 +11,7 @@ import { useAuth } from "../context/AuthContext";
 import { useI18n } from "../i18n/I18nContext";
 import type { QAResponse, SessionHistory, SessionTurn } from "../types/api";
 import { classNames, formatTimestamp } from "../utils/format";
+import type { EmbeddedPageProps } from "../components/TabBar";
 
 interface UiMessage {
   role: "user" | "assistant";
@@ -22,7 +23,7 @@ interface UiMessage {
   error?: string;
 }
 
-export function SessionPage() {
+export function SessionPage({ embedded }: EmbeddedPageProps = {}) {
   const { credentials } = useAuth();
   const { t } = useI18n();
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -149,10 +150,14 @@ export function SessionPage() {
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="page-title">{t("conversation.title")}</h1>
-          <p className="secondary-text mt-2 max-w-2xl">{t("conversation.subtitle")}</p>
-        </div>
+        {embedded ? (
+          <p className="secondary-text max-w-2xl">{t("conversation.subtitle")}</p>
+        ) : (
+          <div>
+            <h1 className="page-title">{t("conversation.title")}</h1>
+            <p className="secondary-text mt-2 max-w-2xl">{t("conversation.subtitle")}</p>
+          </div>
+        )}
         {sessionId ? (
           <button
             onClick={endSession}

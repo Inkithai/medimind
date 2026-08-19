@@ -8,13 +8,14 @@ import { Card, CardBody } from "../components/Card";
 import { LoadingState } from "../components/Spinner";
 import { MedicalDisclaimer } from "../components/MedicalDisclaimer";
 import { RefreshIcon, UploadIcon } from "../components/icons";
+import type { EmbeddedPageProps } from "../components/TabBar";
 import { useAuth } from "../context/AuthContext";
 import { useStrictEffect } from "../hooks/useStrictEffect";
 import { useI18n } from "../i18n/I18nContext";
 import type { CrossCheckReport, DosageReport } from "../types/api";
 import { collectSafetyAlerts } from "../utils/safety";
 
-export function CrossCheckPage() {
+export function CrossCheckPage({ embedded }: EmbeddedPageProps = {}) {
   const { credentials } = useAuth();
   const { t } = useI18n();
   const [report, setReport] = useState<CrossCheckReport | null>(null);
@@ -47,10 +48,14 @@ export function CrossCheckPage() {
   return (
     <div className="space-y-6">
       <div className="flex min-w-0 flex-col items-start justify-between gap-4 sm:flex-row">
-        <div className="min-w-0">
-          <h1 className="page-title">{t("safety.title")}</h1>
-          <p className="secondary-text mt-2 max-w-2xl">{t("safety.subtitle")}</p>
-        </div>
+        {embedded ? (
+          <div className="min-w-0" />
+        ) : (
+          <div className="min-w-0">
+            <h1 className="page-title">{t("safety.title")}</h1>
+            <p className="secondary-text mt-2 max-w-2xl">{t("safety.subtitle")}</p>
+          </div>
+        )}
         <div className="flex flex-wrap gap-2">
           <button
             type="button"

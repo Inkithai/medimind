@@ -10,8 +10,9 @@ import type { FhirValidationReport } from "../types/api";
 import { useAuth } from "../context/AuthContext";
 import { useI18n } from "../i18n/I18nContext";
 import { LanguageSelector } from "../components/LanguageSelector";
+import type { EmbeddedPageProps } from "../components/TabBar";
 
-export function SettingsPage() {
+export function SettingsPage({ embedded }: EmbeddedPageProps = {}) {
   const {
     credentials,
     isConfigured,
@@ -190,10 +191,17 @@ export function SettingsPage() {
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="page-title">{t("settings.title")}</h1>
-        <p className="secondary-text mt-2 max-w-2xl">{t("settings.subtitle")}</p>
-      </header>
+      {embedded ? (
+        <header>
+          <h2 className="section-title">{t("settings.title")}</h2>
+          <p className="secondary-text mt-2 max-w-2xl">{t("settings.subtitle")}</p>
+        </header>
+      ) : (
+        <header>
+          <h1 className="page-title">{t("settings.title")}</h1>
+          <p className="secondary-text mt-2 max-w-2xl">{t("settings.subtitle")}</p>
+        </header>
+      )}
 
       <section
         aria-labelledby="language-settings-title"

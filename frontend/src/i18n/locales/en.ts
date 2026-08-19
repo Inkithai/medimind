@@ -82,6 +82,7 @@ export const en = {
     fhir: "Import Record",
     ask: "Ask AI",
     care: "Find Care",
+    nextSteps: "Next Steps",
     settings: "Settings",
     upload: "Upload Document",
     groupRecords: "My records",
@@ -110,6 +111,7 @@ export const en = {
       fhir: "Import a record exported from another health system.",
       ask: "Ask a question or check a symptom, answered from your own records.",
       care: "Find nearby healthcare facilities and professionals.",
+      nextSteps: "Prepare for a visit, work your follow-up queue, and see reminders.",
       settings: "Manage your workspace and preferences.",
       upload: "Add a prescription, lab report, or medical document.",
       about: "Learn how MediMind works and handles your data.",
@@ -323,6 +325,11 @@ export const en = {
       "Each answer reads only the most relevant passages from your own records — {{count}} by default. It never reads your whole record at once and never searches the internet.",
     tabQuestion: "Ask a question",
     tabSymptom: "Check a symptom",
+    eyebrow: "Grounded in your records",
+    tabsLabel: "Ask AI views",
+    tabChat: "Conversation",
+    preferChat: "Prefer a back-and-forth chat?",
+    openChat: "Switch to Conversation →",
     symptomHint:
       "Describe a symptom to see how it lines up with your medications, conditions and recent labs.",
     suggestions: "Suggested questions",
@@ -991,6 +998,23 @@ export const en = {
       "Longitudinal vital-sign trends, an early-warning screen, and possible adherence signals. Add your own home readings.",
   },
   preventive: {
+    eyebrow: "Preventive care",
+    loading: "Checking screening and immunisation reminders",
+    generalTitle: "General reminders, not personal advice",
+    generalBody:
+      "These prompts come from age, sex and condition-based guidance. They do not mean you are overdue for anything specific.",
+    profileTitle: "Add your details for better reminders",
+    profileBodyBoth:
+      "Your date of birth and sex are not on record, so age-based screening reminders cannot be generated.",
+    profileBodyAge:
+      "Your date of birth is not on record, so age-based screening reminders cannot be generated.",
+    profileBodySex: "Your sex is not on record, so some screening reminders cannot be generated.",
+    openSettings: "Open Settings",
+    emptyTitle: "No reminders right now",
+    emptyBody:
+      "Nothing in the general screening or immunisation guidance applies to your record today.",
+    disclaimer:
+      "Preventive prompts are general guidance. Your doctor decides what you actually need and when.",
     title: "Preventive Care",
     subtitle:
       "Screening and immunisation reminders based on your age, sex, and the conditions on record.",
@@ -1014,6 +1038,28 @@ export const en = {
       "These are the curated medical references MediMind checks your records against — for example, the WHO Essential Medicines list. A source shown as due for review is flagged here for transparency; it does not change how your records are read.",
   },
   messages: {
+    eyebrow: "Provider notes",
+    print: "Print notes",
+    notDeliveredTitle: "These notes are not delivered to anyone",
+    notDeliveredBody:
+      "MediMind has no messaging connection to a clinic. Notes are saved in your own workspace so you can print them or read them out at your visit.",
+    composeTitle: "Write a note for a provider",
+    composeBody:
+      "Draft what you want to raise while it is fresh. It is saved with a date so you can bring it to your appointment.",
+    providerLabel: "Provider or clinic (optional)",
+    providerPlaceholder: "e.g. Dr Perera, Negombo General",
+    bodyLabel: "Your note",
+    bodyPlaceholder: "e.g. I want to ask whether I should keep taking both blood pressure tablets.",
+    save: "Save note",
+    addToThread: "Add to this note",
+    startNewThread: "Start a separate note",
+    saved: "Saved to your workspace.",
+    loading: "Loading your saved notes",
+    emptyTitle: "No saved notes yet",
+    emptyBody: "Notes you write here stay in this workspace and can be printed for a visit.",
+    savedNotes: "Saved notes",
+    noProvider: "No provider named",
+    threadMeta: "{{count}} note(s) · last updated {{when}}",
     title: "Provider Messages",
     subtitle: "Message a provider about a finding. Stored in your workspace.",
   },
@@ -1024,6 +1070,83 @@ export const en = {
     whoForTitle: "Who is this page for?",
     whoForBody:
       "Most people should use Upload instead. Import here only if you already have a FHIR record file exported from another health system — for example, from a hospital portal or a health app.",
+  },
+  safetyHub: {
+    eyebrow: "Safety checks",
+    title: "Safety",
+    subtitle:
+      "Everything MediMind flagged in your medicines and results — what was found, what it means clinically, and whether those courses actually overlapped.",
+    tabsLabel: "Safety views",
+    tabAlerts: "Alerts",
+    tabClinical: "Clinical",
+    tabTimeline: "Over time",
+  },
+  recordsHub: {
+    eyebrow: "My record",
+    title: "My Record",
+    subtitle: "Every document you uploaded, and the same information laid out in date order.",
+    tabsLabel: "Record views",
+    tabFiles: "Files",
+    tabTimeline: "Timeline",
+  },
+  labsHub: {
+    eyebrow: "Measurements",
+    title: "Labs & Vitals",
+    subtitle: "Test results read from your reports, plus the readings you take at home.",
+    tabsLabel: "Measurement views",
+    tabTrends: "Lab trends",
+    tabVitals: "Home vitals",
+  },
+  recordCheckHub: {
+    eyebrow: "Record integrity",
+    title: "Record Check",
+    subtitle:
+      "Can you trust what was read out of your documents? Facts that disagree, conflicts to resolve, and what changed between visits.",
+    tabsLabel: "Record check views",
+    tabDiscrepancies: "Discrepancies",
+    tabConflicts: "Conflicts",
+    tabChanges: "What changed",
+  },
+  careHub: {
+    eyebrow: "Get care",
+    title: "Find Care",
+    subtitle:
+      "Start from a safety flag and find a matching professional near you — or check first whether a pharmacist is enough.",
+    tabsLabel: "Find care views",
+    tabLocal: "Find local care",
+    tabWho: "Who to see",
+    tabMap: "Browse nearby",
+  },
+  nextSteps: {
+    eyebrow: "After the record",
+    title: "Next Steps",
+    subtitle:
+      "Take your record to a clinician: a printable handoff, your follow-up queue, preventive reminders, and notes for a provider.",
+    tabsLabel: "Next steps views",
+    tabPrep: "Appointment prep",
+    tabQueue: "Action Center",
+    tabPreventive: "Preventive",
+    tabMessages: "Messages",
+  },
+  uploadHub: {
+    eyebrow: "Add to your record",
+    tabsLabel: "Upload methods",
+    tabFiles: "Photos & PDFs",
+    tabFhir: "FHIR file",
+  },
+  trustHub: {
+    eyebrow: "Trust & control",
+    title: "About MediMind",
+    subtitle:
+      "How MediMind reads your records, which clinical sources it checks against, and full control of your workspace data.",
+    tabsLabel: "About and settings views",
+    tabHow: "How it works",
+    tabGuidelines: "Guidelines",
+    tabSettings: "Settings",
+    tabAdvanced: "Advanced",
+    advancedTitle: "Analysis audit log",
+    advancedBody:
+      "A patient-scoped record of what was extracted from each document and which answers were saved. Kept for transparency — it is not part of the day-to-day flow.",
   },
 } as const;
 

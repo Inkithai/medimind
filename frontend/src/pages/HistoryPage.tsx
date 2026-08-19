@@ -13,8 +13,9 @@ import { useStrictEffect } from "../hooks/useStrictEffect";
 import { useI18n } from "../i18n/I18nContext";
 import { documentTypeLabel, formatDate } from "../utils/format";
 import type { Timeline, Visit } from "../types/api";
+import type { EmbeddedPageProps } from "../components/TabBar";
 
-export function HistoryPage() {
+export function HistoryPage({ embedded }: EmbeddedPageProps = {}) {
   const { credentials } = useAuth();
   const { t, formatNumber } = useI18n();
   const [timeline, setTimeline] = useState<Timeline | null>(null);
@@ -77,10 +78,12 @@ export function HistoryPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="page-title">{t("history.title")}</h1>
-        <p className="secondary-text mt-2 max-w-2xl">{t("history.subtitle")}</p>
-      </div>
+      {!embedded && (
+        <div>
+          <h1 className="page-title">{t("history.title")}</h1>
+          <p className="secondary-text mt-2 max-w-2xl">{t("history.subtitle")}</p>
+        </div>
+      )}
 
       {loading && <LoadingState label={t("history.loading")} />}
 

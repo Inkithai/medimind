@@ -271,20 +271,48 @@ const tests: Array<[string, () => void]> = [
     },
   ],
   [
-    "the sidebar entry is secondary and does not join the workflow nav",
+    "About MediMind is one of the ten sidebar destinations",
     () => {
-      assert.ok(layoutSource.includes('to="/about"'), "sidebar links to /about");
-      // Patient workflow items live in the NAV array; About must not be there.
+      // The IA groups sibling screens into tabbed parents, so the sidebar
+      // lists the jobs a patient has (10, plus the Upload button) rather
+      // than every screen (19).
+      // About & settings is one of those jobs: it carries How it works,
+      // Guidelines, Settings and the analysis audit log as tabs.
       const navArray = layoutSource.slice(
         layoutSource.indexOf("const NAV:"),
-        layoutSource.indexOf("export function Layout"),
+        layoutSource.indexOf("const NAV_GROUPS"),
       );
-      assert.ok(!navArray.includes("/about"), "About must not be in the workflow NAV array");
+      assert.ok(navArray.includes('to: "/about"'), "About MediMind is a sidebar destination");
+      // Judges look for "About MediMind" by name. It must not be hidden
+      // behind a settings gear or a merged "About & settings" label.
+      assert.ok(
+        navArray.includes('labelKey: "about.nav"'),
+        'the row is labelled "About MediMind", not folded into Settings',
+      );
+      assert.ok(navArray.includes("icon: InfoIcon"), "the About row uses the info icon");
       assert.equal(
         (navArray.match(/to: "/g) || []).length,
-        19,
-        "all 19 workflow items are present",
+        10,
+        "the sidebar lists exactly 10 destinations",
       );
+      // Screens that were promoted to tabs must not reappear as nav rows.
+      for (const merged of [
+        "/clinical-safety",
+        "/risk-timeline",
+        "/changes",
+        "/vitals",
+        "/import",
+        "/who-to-see",
+        "/find-care",
+        "/follow-up",
+        "/guidelines",
+        "/history",
+        "/conversations",
+      ]) {
+        assert.ok(!navArray.includes(`to: "${merged}"`), `${merged} is a tab, not a nav row`);
+      }
+      // The audit log stays reachable by URL but never advertised.
+      assert.ok(!navArray.includes("/analyses"), "the analysis log is not in the sidebar");
       // The tagline is the only content the sidebar redesign removes.
       assert.ok(
         !layoutSource.includes('t("common.tagline")'),
@@ -295,19 +323,21 @@ const tests: Array<[string, () => void]> = [
   [
     "the sidebar entry is keyboard accessible and labelled",
     () => {
-      const linkBlock = layoutSource.slice(layoutSource.indexOf('to="/about"'));
-      assert.ok(linkBlock.includes("focus-visible:ring"), "visible focus state");
+      // About & settings is now rendered by the shared nav row, so it
+      // inherits the same guarantees as every other destination instead of
+      // needing its own bespoke markup.
+      const rowBlock = layoutSource.slice(layoutSource.indexOf("{items.map((item) => {"));
+      assert.ok(rowBlock.includes("focus-visible:ring"), "visible focus state");
+      assert.ok(rowBlock.includes("aria-label={"), "accessible label when collapsed");
+      assert.ok(rowBlock.includes("t(item.descriptionKey)"), "tooltip explains the destination");
+      assert.ok(rowBlock.includes("min-h-[44px]"), "44px touch target");
+      // Collapses to an icon on the desktop rail, like the other items.
+      assert.ok(rowBlock.includes('collapsed && "lg:hidden"'), "label hides when collapsed");
+      // Its description is a real i18n key, not an English literal.
       assert.ok(
-        linkBlock.includes('aria-label={collapsed ? t("about.nav")'),
-        "accessible label from i18n",
+        layoutSource.includes('descriptionKey: "nav.descriptions.about"'),
+        "the About row's description comes from the dictionary",
       );
-      assert.ok(
-        linkBlock.includes('t("nav.descriptions.about")'),
-        "collapsed tooltip explains the destination",
-      );
-      assert.ok(linkBlock.includes("min-h-[44px]"), "44px touch target");
-      // Collapses to an icon on main's desktop rail, like the other items.
-      assert.ok(linkBlock.includes('collapsed && "lg:hidden"'), "label hides when collapsed");
     },
   ],
   [
@@ -316,10 +346,7 @@ const tests: Array<[string, () => void]> = [
       // Selection is signalled by background + weight/color + edge marker,
       // never by color alone (the old gray About style is gone).
       const activeClass = "bg-[#eaf6f4]";
-      assert.ok(
-        occurrences(layoutSource, activeClass) >= 2,
-        "nav rows and About row share the active treatment",
-      );
+      assert.ok(occurrences(layoutSource, activeClass) >= 1, "nav rows share one active treatment");
       assert.ok(layoutSource.includes("shadow-[inset_3px_0_0_#0F766E]"), "teal edge marker");
       // Destructive deletion no longer sits beside New workspace in the
       // sidebar; it lives behind the explicit confirmation flow in Settings.

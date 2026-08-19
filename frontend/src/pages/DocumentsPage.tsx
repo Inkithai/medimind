@@ -13,8 +13,9 @@ import { useStrictEffect } from "../hooks/useStrictEffect";
 import { useI18n } from "../i18n/I18nContext";
 import type { Timeline, Visit } from "../types/api";
 import { documentTypeLabel, formatDate } from "../utils/format";
+import type { EmbeddedPageProps } from "../components/TabBar";
 
-export function DocumentsPage() {
+export function DocumentsPage({ embedded }: EmbeddedPageProps = {}) {
   const { credentials } = useAuth();
   const { t, formatNumber } = useI18n();
   const [searchParams] = useSearchParams();
@@ -80,10 +81,14 @@ export function DocumentsPage() {
   return (
     <div className="space-y-6">
       <div className="flex min-w-0 flex-col items-start justify-between gap-4 sm:flex-row">
-        <div className="min-w-0">
-          <h1 className="page-title">{t("documentsPage.title")}</h1>
-          <p className="secondary-text mt-2">{t("documentsPage.subtitle")}</p>
-        </div>
+        {embedded ? (
+          <div className="min-w-0" />
+        ) : (
+          <div className="min-w-0">
+            <h1 className="page-title">{t("documentsPage.title")}</h1>
+            <p className="secondary-text mt-2">{t("documentsPage.subtitle")}</p>
+          </div>
+        )}
         <Link to="/upload" className="btn-primary">
           <UploadIcon className="h-5 w-5" /> {t("upload.upload")}
         </Link>
@@ -105,7 +110,7 @@ export function DocumentsPage() {
                 analytics.
               </span>
               <Link
-                to="/record-integrity?tab=conflicts"
+                to="/record-check?tab=conflicts"
                 className="font-semibold text-amber-900 underline"
               >
                 Review conflicts
