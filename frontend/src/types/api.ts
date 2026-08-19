@@ -915,10 +915,44 @@ export interface PatientSnapshot {
 
 // ---- AI analysis logs -----------------------------------------------------
 
+/** Entity counts persisted for one document extraction. */
+export interface AnalysisPersistedCounts {
+  medications?: number;
+  lab_results?: number;
+  allergies?: number;
+  findings?: number;
+  events?: number;
+}
+
+/**
+ * Result payload of a `document_extraction` entry. One entry covers one
+ * uploaded document — `page_count` / `document_ids` describe the extracted
+ * page rows that were merged into it.
+ */
+export interface DocumentExtractionResult {
+  summary?: string | null;
+  document_type_detected?: string | null;
+  confidence_score?: number | null;
+  persisted_counts?: AnalysisPersistedCounts;
+  source_file?: string | null;
+  document_id?: string | null;
+  document_ids?: string[];
+  page_count?: number;
+  raw_text_processing?: Record<string, unknown> | null;
+}
+
+/** Result payload of a saved `qa` entry. */
+export interface QaAnalysisResult {
+  paragraphs?: string[];
+  citations?: Array<Record<string, unknown>>;
+  confidence?: number | null;
+  guidance?: string | null;
+}
+
 export interface AnalysisLogRecord {
   id: string;
   analysis_type: "document_extraction" | "qa" | string;
-  result: Record<string, unknown>;
+  result: Record<string, unknown> & Partial<DocumentExtractionResult> & Partial<QaAnalysisResult>;
   confidence?: number | null;
   summary?: string | null;
   created_at?: string | null;

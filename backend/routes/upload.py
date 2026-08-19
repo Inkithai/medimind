@@ -41,6 +41,7 @@ import graph_db  # noqa: E402
 import jobs  # noqa: E402
 import storage  # noqa: E402
 import vector_store  # noqa: E402
+from analysis_log import build_extraction_analyses  # noqa: E402
 from auth import get_current_user  # noqa: E402
 from document_filter import NonMedicalDocumentError, assert_medical_document  # noqa: E402
 from document_processing import process_raw_text  # noqa: E402
@@ -2067,39 +2068,12 @@ async def list_ai_analyses(
         docs = db.load_documents(user_id)
     except Exception:
         docs = []
-    for doc in docs:
-        doc_id = trust_document_id(doc)
-        source_file = ((doc.get("_source") or {}).get("file")) or "uploaded document"
-        counts = {
-            "medications": len(doc.get("medications") or []),
-            "lab_results": len(doc.get("lab_results") or []),
-            "allergies": len(doc.get("allergies_noted") or []),
-            "findings": len(doc.get("diagnoses") or []) + len(doc.get("symptoms") or []),
-            "events": len(doc.get("procedures") or [])
-            + len(doc.get("vital_signs") or [])
-            + len(doc.get("imaging_results") or []),
-        }
-        summary = doc.get("clinical_notes") or (
-            f"Extracted {counts['medications']} medication(s), {counts['lab_results']} lab result(s), "  # noqa: E501
-            f"and {counts['findings']} clinical finding(s) from {source_file}."
-        )
-        records.append(
-            {
-                "id": f"document_extraction:{doc_id}",
-                "analysis_type": "document_extraction",
-                "result": {
-                    "summary": summary,
-                    "document_type_detected": doc.get("document_type"),
-                    "persisted_counts": counts,
-                    "source_file": source_file,
-                    "document_id": doc_id,
-                    "raw_text_processing": doc.get("raw_text_processing"),
-                },
-                "confidence": doc.get("overall_confidence"),
-                "summary": summary,
-                "created_at": doc.get("uploaded_at") or doc.get("date") or "",
-            }
-        )
+    # Documents are persisted one row per extracted PAGE. Emitting one card
+    # per row showed a multi-page (or re-extracted) file as several separate
+    # extractions of the same document, with its medications and labs counted
+    # once per page. build_extraction_analyses() collapses the page rows back
+    # into the physical upload they came from — see analysis_log.py.
+    records.extend(build_extraction_analyses(docs))
 
     # Best-effort Q&A log from persisted conversation sessions. Older/local
     # deployments may not have the table; extraction logs still return.

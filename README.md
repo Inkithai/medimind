@@ -687,8 +687,24 @@ python backend/inspect_chroma.py "anon_ab12cd34ef56" --type medication
 VECTOR_STORE=supabase python backend/inspect_chroma.py "anon_ab12cd34ef56"
 ```
 
+### AI analysis log & duplicate cleanup
+
+`GET /api/v1/analyses` is the audit/display log of what the AI did with a workspace's records (document extractions + saved Q&A). Documents are persisted **one row per extracted page**, so the log groups those rows back into the physical upload they came from (`analysis_log.py`): one entry per document, counts summed across its pages, the document type pinned to the closed vocabulary, and the confidence reported as the **lowest** page confidence rather than an average — a document is only as trustworthy as its least legible page. `page_count`, `document_ids`, and `confidence_score` are included in each entry's `result` payload.
+
+Workspaces ingested before the upload hash-dedup guard existed can still hold the same extracted page twice. `clean_duplicate_analyses.py` reports and (only with `--execute`) removes those exact re-ingests, keeping the newest copy:
+
+```bash
+# Dry run (default): report only, deletes nothing
+python backend/clean_duplicate_analyses.py --user-id "anon_ab12cd34ef56"
+# Delete the duplicates listed by the dry run
+python backend/clean_duplicate_analyses.py --user-id "anon_ab12cd34ef56" --execute
+```
+
+It only deletes rows with the same upload identity, the same page number, and an identical clinical payload. Different pages, a reprocess that read the page differently, documents with correction events attached, and rows with no upload identity are all preserved, and no derived table (snapshots, corrections, conflicts, conversations) is ever touched.
+
 ### What changed
 
+- **One analysis log entry per document** — the analysis log grouped page rows into the upload they came from, so a multi-page scan no longer appears as several separate "Document extraction" analyses with its medications counted once per page. Document type is normalized (never null/free-form), confidence falls back to the result payload in the UI and is normalized when reported as a percentage, and `clean_duplicate_analyses.py` cleans historical duplicate page rows (dry-run by default).
 - **Sticky sidebar** — the desktop sidebar is now `lg:sticky lg:top-0 lg:h-screen lg:self-start` instead of a flex child stretched by its sibling, so it stays fixed in the viewport on long pages rather than scrolling away and growing to the content height.
 - **Accurate current location** — "Use my current location" now refines the GPS fix instead of accepting the first coarse estimate, never lets reverse geocoding move the confirmed coordinates, and surfaces the accuracy radius so the user can correct a poor fix.
 - **Find Care no longer needs an API key** — the directory defaults to a keyless OpenStreetMap/Overpass adapter, and `CARE_PROVIDER=google` now falls back to it whenever Google is unconfigured, rejects the call (e.g. `PERMISSION_DENIED` from a project without Places API (New)/billing), or returns nothing. This removes the "Nearby search didn't load" 503 that a missing/invalid Google key used to cause. Set `CARE_FALLBACK=off` to restore strict Google-only behaviour.

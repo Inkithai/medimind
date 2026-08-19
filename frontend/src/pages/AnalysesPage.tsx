@@ -11,7 +11,13 @@ import { ChartIcon, FileIcon } from "../components/icons";
 import { useAuth } from "../context/AuthContext";
 import { useStrictEffect } from "../hooks/useStrictEffect";
 import type { AnalysisLogRecord } from "../types/api";
-import { formatConfidence, formatDate } from "../utils/format";
+import {
+  analysisConfidence,
+  analysisCounts,
+  analysisPageCount,
+  dedupeAnalyses,
+} from "../utils/analyses";
+import { classNames, confidenceTone, formatConfidence, formatDate } from "../utils/format";
 
 export function AnalysesPage() {
   const { credentials } = useAuth();
@@ -24,7 +30,7 @@ export function AnalysesPage() {
     setError(null);
     try {
       const data = await api.listAnalyses(credentials);
-      setRecords(data.analyses || []);
+      setRecords(dedupeAnalyses(data.analyses || []));
     } catch (err) {
       setError(err);
     } finally {
@@ -85,13 +91,11 @@ export function AnalysesPage() {
 
 function ExtractionAnalysisCard({ record }: { record: AnalysisLogRecord }) {
   const result = record.result || {};
-  const counts = (
-    typeof result.persisted_counts === "object" && result.persisted_counts !== null
-      ? result.persisted_counts
-      : {}
-  ) as Record<string, number>;
+  const counts = analysisCounts(record);
   const source = String(result.source_file || "uploaded document");
   const docId = String(result.document_id || "");
+  const confidence = analysisConfidence(record);
+  const pageCount = analysisPageCount(record);
   return (
     <Card>
       <CardHeader
@@ -101,11 +105,19 @@ function ExtractionAnalysisCard({ record }: { record: AnalysisLogRecord }) {
       />
       <CardBody className="space-y-3">
         <div className="flex flex-wrap gap-2">
-          <StatusBadge tone="brand">
-            {String(result.document_type_detected || "document")}
-          </StatusBadge>
-          {typeof record.confidence === "number" && (
-            <StatusBadge tone="success">{formatConfidence(record.confidence)}</StatusBadge>
+          <StatusBadge tone="brand">{String(result.document_type_detected || "other")}</StatusBadge>
+          {confidence !== null && (
+            <span
+              className={classNames(
+                "inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold",
+                confidenceTone(confidence),
+              )}
+            >
+              Confidence {formatConfidence(confidence)}
+            </span>
+          )}
+          {pageCount > 1 && (
+            <StatusBadge tone="neutral">{pageCount} pages in this document</StatusBadge>
           )}
         </div>
         {record.summary && (
@@ -145,6 +157,7 @@ function ExtractionAnalysisCard({ record }: { record: AnalysisLogRecord }) {
 
 function QaAnalysisCard({ record }: { record: AnalysisLogRecord }) {
   const result = record.result || {};
+  const confidence = analysisConfidence(record);
   const paragraphs = Array.isArray(result.paragraphs) ? result.paragraphs.map(String) : [];
   const citations = Array.isArray(result.citations)
     ? (result.citations as Array<Record<string, unknown>>)
@@ -157,6 +170,16 @@ function QaAnalysisCard({ record }: { record: AnalysisLogRecord }) {
         icon={<ChartIcon className="h-5 w-5" />}
       />
       <CardBody className="space-y-3">
+        {confidence !== null && (
+          <span
+            className={classNames(
+              "inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold",
+              confidenceTone(confidence),
+            )}
+          >
+            Confidence {formatConfidence(confidence)}
+          </span>
+        )}
         {paragraphs.length > 0 ? (
           paragraphs.map((text, index) => (
             <p key={index} className="text-sm leading-relaxed text-slate-700">
