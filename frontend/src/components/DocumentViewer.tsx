@@ -75,23 +75,34 @@ export function DocumentViewer({
   }
 
   const onTabKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight" && event.key !== "Home" && event.key !== "End") return;
+    if (
+      event.key !== "ArrowLeft" &&
+      event.key !== "ArrowRight" &&
+      event.key !== "Home" &&
+      event.key !== "End"
+    )
+      return;
     event.preventDefault();
     const tabs = ["original", "structured", "correct"] as const;
     const current = tabs.indexOf(tab);
-    const next = event.key === "Home"
-      ? 0
-      : event.key === "End"
-        ? tabs.length - 1
-        : event.key === "ArrowRight"
-          ? (current + 1) % tabs.length
-          : (current - 1 + tabs.length) % tabs.length;
+    const next =
+      event.key === "Home"
+        ? 0
+        : event.key === "End"
+          ? tabs.length - 1
+          : event.key === "ArrowRight"
+            ? (current + 1) % tabs.length
+            : (current - 1 + tabs.length) % tabs.length;
     setTab(tabs[next]);
     tabRefs.current[next]?.focus();
   };
 
   return (
-    <section role="region" aria-labelledby={titleId} className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg">
+    <section
+      role="region"
+      aria-labelledby={titleId}
+      className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg"
+    >
       <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
         <div>
           <div className="flex items-center gap-2">
@@ -101,10 +112,13 @@ export function DocumentViewer({
             ) : visit._corrections?.paths.length ? (
               <StatusBadge tone="success">Corrected</StatusBadge>
             ) : null}
-            <h2 id={titleId} className="text-sm font-semibold text-slate-900">{visit._source.file}</h2>
+            <h2 id={titleId} className="text-sm font-semibold text-slate-900">
+              {visit._source.file}
+            </h2>
           </div>
           <p className="mt-1 text-xs text-slate-500">
-            {formatDate(visit.date)} {visit.provider_or_doctor ? `• ${visit.provider_or_doctor}` : ""} • confidence{" "}
+            {formatDate(visit.date)}{" "}
+            {visit.provider_or_doctor ? `• ${visit.provider_or_doctor}` : ""} • confidence{" "}
             {formatConfidence(visit.overall_confidence)}
           </p>
         </div>
@@ -128,7 +142,8 @@ export function DocumentViewer({
               }}
               className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60"
             >
-              <LinkIcon className="h-3.5 w-3.5" /> {openingOriginal ? "Opening…" : t("viewer.openOriginal")}
+              <LinkIcon className="h-3.5 w-3.5" />{" "}
+              {openingOriginal ? "Opening…" : t("viewer.openOriginal")}
               <span className="sr-only"> ({t("common.opensNewWindow")})</span>
             </button>
           )}
@@ -153,10 +168,14 @@ export function DocumentViewer({
             </button>
           )}
           {reprocessError && (
-            <p role="alert" className="text-xs text-red-600">{t("viewer.reprocessFailed")}: {reprocessError}</p>
+            <p role="alert" className="text-xs text-red-600">
+              {t("viewer.reprocessFailed")}: {reprocessError}
+            </p>
           )}
           {originalError && (
-            <p role="alert" className="text-xs text-red-600">Open failed: {originalError}</p>
+            <p role="alert" className="text-xs text-red-600">
+              Open failed: {originalError}
+            </p>
           )}
           {onDelete && (
             <button
@@ -185,34 +204,82 @@ export function DocumentViewer({
       </div>
 
       <div className="border-b border-slate-100 bg-slate-50 px-2">
-        <div role="tablist" aria-label={t("a11y.tabs")} onKeyDown={onTabKeyDown} className="flex gap-1 p-1">
-          <TabButton ref={(node) => { tabRefs.current[0] = node; }} id={originalTabId} controls={originalPanelId} active={tab === "original"} onClick={() => setTab("original")}>
+        <div
+          role="tablist"
+          aria-label={t("a11y.tabs")}
+          onKeyDown={onTabKeyDown}
+          className="flex gap-1 p-1"
+        >
+          <TabButton
+            ref={(node) => {
+              tabRefs.current[0] = node;
+            }}
+            id={originalTabId}
+            controls={originalPanelId}
+            active={tab === "original"}
+            onClick={() => setTab("original")}
+          >
             {t("viewer.original")}
           </TabButton>
-          <TabButton ref={(node) => { tabRefs.current[1] = node; }} id={structuredTabId} controls={structuredPanelId} active={tab === "structured"} onClick={() => setTab("structured")}>
+          <TabButton
+            ref={(node) => {
+              tabRefs.current[1] = node;
+            }}
+            id={structuredTabId}
+            controls={structuredPanelId}
+            active={tab === "structured"}
+            onClick={() => setTab("structured")}
+          >
             {t("viewer.structured")}
           </TabButton>
-          <TabButton ref={(node) => { tabRefs.current[2] = node; }} id={correctTabId} controls={correctPanelId} active={tab === "correct"} onClick={() => setTab("correct")}>
+          <TabButton
+            ref={(node) => {
+              tabRefs.current[2] = node;
+            }}
+            id={correctTabId}
+            controls={correctPanelId}
+            active={tab === "correct"}
+            onClick={() => setTab("correct")}
+          >
             Correct & Audit
           </TabButton>
         </div>
       </div>
 
       {tab === "original" ? (
-        <div id={originalPanelId} role="tabpanel" aria-labelledby={originalTabId} tabIndex={0} className="p-4">
+        <div
+          id={originalPanelId}
+          role="tabpanel"
+          aria-labelledby={originalTabId}
+          tabIndex={0}
+          className="p-4"
+        >
           <EvidenceViewer visit={visit} evidence={selectedEvidence} />
           <div className="mt-3 flex items-center gap-2 text-xs text-slate-500">
             <FileIcon className="h-4 w-4" />
-            {visit._source.file} • {visit._source.method === "text_layer" ? "Digital PDF" : "Scanned or photo"}
+            {visit._source.file} •{" "}
+            {visit._source.method === "text_layer" ? "Digital PDF" : "Scanned or photo"}
             {visit._source.page ? ` • page ${visit._source.page}` : ""}
           </div>
         </div>
       ) : tab === "correct" ? (
-        <div id={correctPanelId} role="tabpanel" aria-labelledby={correctTabId} tabIndex={0} className="p-5">
+        <div
+          id={correctPanelId}
+          role="tabpanel"
+          aria-labelledby={correctTabId}
+          tabIndex={0}
+          className="p-5"
+        >
           <CorrectionEditor visit={visit} onSaved={() => onUpdated?.()} />
         </div>
       ) : (
-        <div id={structuredPanelId} role="tabpanel" aria-labelledby={structuredTabId} tabIndex={0} className="space-y-5 p-5">
+        <div
+          id={structuredPanelId}
+          role="tabpanel"
+          aria-labelledby={structuredTabId}
+          tabIndex={0}
+          className="space-y-5 p-5"
+        >
           <Section title="Document facts">
             <div className="grid gap-2 sm:grid-cols-2">
               <FactRow
@@ -271,7 +338,11 @@ export function DocumentViewer({
                   <ClinicalCard
                     key={index}
                     title={item.name}
-                    meta={[item.status, item.code ? `code ${item.code}` : null, item.onset_date ? `onset ${item.onset_date}` : null]}
+                    meta={[
+                      item.status,
+                      item.code ? `code ${item.code}` : null,
+                      item.onset_date ? `onset ${item.onset_date}` : null,
+                    ]}
                     confidence={item.confidence}
                     evidence={item.evidence?.[0]}
                     onEvidence={showEvidence}
@@ -288,7 +359,11 @@ export function DocumentViewer({
                   <ClinicalCard
                     key={index}
                     title={item.name}
-                    meta={[item.severity, item.status, item.onset_date ? `onset ${item.onset_date}` : null]}
+                    meta={[
+                      item.severity,
+                      item.status,
+                      item.onset_date ? `onset ${item.onset_date}` : null,
+                    ]}
                     confidence={item.confidence}
                     evidence={item.evidence?.[0]}
                     onEvidence={showEvidence}
@@ -342,7 +417,11 @@ export function DocumentViewer({
                     key={index}
                     title={item.study_type}
                     meta={[item.body_site, item.study_date]}
-                    detail={item.impression ? `${item.findings} · Impression: ${item.impression}` : item.findings}
+                    detail={
+                      item.impression
+                        ? `${item.findings} · Impression: ${item.impression}`
+                        : item.findings
+                    }
                     confidence={item.confidence}
                     evidence={item.evidence?.[0]}
                     onEvidence={showEvidence}
@@ -353,10 +432,16 @@ export function DocumentViewer({
           )}
 
           {visit.medications.length > 0 && (
-            <Section title={`${t("common.medications")} (${visit.medications.length})`} icon={<PillIcon className="h-4 w-4" />}>
+            <Section
+              title={`${t("common.medications")} (${visit.medications.length})`}
+              icon={<PillIcon className="h-4 w-4" />}
+            >
               <div className="grid gap-2 sm:grid-cols-2">
                 {visit.medications.map((med, i) => (
-                  <div key={i} className="rounded-lg border border-slate-200 bg-slate-50/60 px-3 py-2.5 text-sm">
+                  <div
+                    key={i}
+                    className="rounded-lg border border-slate-200 bg-slate-50/60 px-3 py-2.5 text-sm"
+                  >
                     <div className="flex items-start justify-between gap-2">
                       <p className="font-medium text-slate-800">{med.name}</p>
                       <span className="rounded-full bg-white px-2 py-0.5 text-xs ring-1 ring-slate-200">
@@ -372,7 +457,9 @@ export function DocumentViewer({
                     {(med.dosage_value != null || med.frequency_per_day != null) && (
                       <p className="mt-1 text-[11px] text-slate-500">
                         {t("viewer.normalized")}:{" "}
-                        {med.dosage_value != null && med.dosage_unit ? `${med.dosage_value} ${med.dosage_unit}` : "—"}
+                        {med.dosage_value != null && med.dosage_unit
+                          ? `${med.dosage_value} ${med.dosage_unit}`
+                          : "—"}
                         {med.frequency_per_day != null ? ` • ${med.frequency_per_day}x/day` : ""}
                         {med.is_as_needed ? " • PRN" : ""}
                       </p>
@@ -385,17 +472,32 @@ export function DocumentViewer({
           )}
 
           {visit.lab_results.length > 0 && (
-            <Section title={`${t("common.labResults")} (${visit.lab_results.length})`} icon={<BeakerIcon className="h-4 w-4" />}>
+            <Section
+              title={`${t("common.labResults")} (${visit.lab_results.length})`}
+              icon={<BeakerIcon className="h-4 w-4" />}
+            >
               <div className="overflow-x-auto rounded-lg border border-slate-200">
                 <table className="min-w-full text-sm">
-                  <caption className="sr-only">{t("common.labResults")} — {visit._source.file}</caption>
+                  <caption className="sr-only">
+                    {t("common.labResults")} — {visit._source.file}
+                  </caption>
                   <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
                     <tr>
-                      <th scope="col" className="px-3 py-2 font-medium">{t("common.test")}</th>
-                      <th scope="col" className="px-3 py-2 font-medium">{t("common.value")}</th>
-                      <th scope="col" className="px-3 py-2 font-medium">{t("common.range")}</th>
-                      <th scope="col" className="px-3 py-2 font-medium">{t("common.flag")}</th>
-                      <th scope="col" className="px-3 py-2 font-medium">Evidence</th>
+                      <th scope="col" className="px-3 py-2 font-medium">
+                        {t("common.test")}
+                      </th>
+                      <th scope="col" className="px-3 py-2 font-medium">
+                        {t("common.value")}
+                      </th>
+                      <th scope="col" className="px-3 py-2 font-medium">
+                        {t("common.range")}
+                      </th>
+                      <th scope="col" className="px-3 py-2 font-medium">
+                        {t("common.flag")}
+                      </th>
+                      <th scope="col" className="px-3 py-2 font-medium">
+                        Evidence
+                      </th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -410,14 +512,24 @@ export function DocumentViewer({
                         <td className="px-3 py-2">
                           <StatusBadge
                             tone={
-                              lab.flag === "normal" ? "success" : lab.flag === "high" ? "danger" : lab.flag === "low" ? "info" : "neutral"
+                              lab.flag === "normal"
+                                ? "success"
+                                : lab.flag === "high"
+                                  ? "danger"
+                                  : lab.flag === "low"
+                                    ? "info"
+                                    : "neutral"
                             }
                           >
                             {lab.flag}
                           </StatusBadge>
                         </td>
                         <td className="px-3 py-2">
-                          <EvidenceButton evidence={lab.evidence?.[0]} onClick={showEvidence} compact />
+                          <EvidenceButton
+                            evidence={lab.evidence?.[0]}
+                            onClick={showEvidence}
+                            compact
+                          />
                         </td>
                       </tr>
                     ))}
@@ -435,28 +547,41 @@ export function DocumentViewer({
                     {a}
                   </StatusBadge>
                 ))}
-                <EvidenceButton evidence={visit.field_evidence?.allergies_noted?.[0]} onClick={showEvidence} compact />
+                <EvidenceButton
+                  evidence={visit.field_evidence?.allergies_noted?.[0]}
+                  onClick={showEvidence}
+                  compact
+                />
               </div>
             </Section>
           )}
 
           {visit.clinical_notes && (
             <Section title={t("common.clinicalNotes")}>
-              <p className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-700">{visit.clinical_notes}</p>
-              <EvidenceButton evidence={visit.field_evidence?.clinical_notes?.[0]} onClick={showEvidence} />
+              <p className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                {visit.clinical_notes}
+              </p>
+              <EvidenceButton
+                evidence={visit.field_evidence?.clinical_notes?.[0]}
+                onClick={showEvidence}
+              />
             </Section>
           )}
 
           {visit.illegible_or_low_confidence_fields.length > 0 && (
             <div className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800 ring-1 ring-amber-200">
-              <span className="font-semibold">{t("viewer.lowConfidence")}:</span> {visit.illegible_or_low_confidence_fields.join("; ")}
+              <span className="font-semibold">{t("viewer.lowConfidence")}:</span>{" "}
+              {visit.illegible_or_low_confidence_fields.join("; ")}
             </div>
           )}
         </div>
       )}
 
       {deleteOpen && (
-        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/55 p-4" role="presentation">
+        <div
+          className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/55 p-4"
+          role="presentation"
+        >
           <div
             role="dialog"
             aria-modal="true"
@@ -464,15 +589,26 @@ export function DocumentViewer({
             aria-describedby={deleteDescriptionId}
             className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl"
           >
-            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-red-50 text-xl text-red-700" aria-hidden="true">!</div>
-            <h3 id={deleteTitleId} className="mt-4 text-lg font-bold text-slate-900">{t("viewer.deleteTitle")}</h3>
+            <div
+              className="flex h-11 w-11 items-center justify-center rounded-xl bg-red-50 text-xl text-red-700"
+              aria-hidden="true"
+            >
+              !
+            </div>
+            <h3 id={deleteTitleId} className="mt-4 text-lg font-bold text-slate-900">
+              {t("viewer.deleteTitle")}
+            </h3>
             <p id={deleteDescriptionId} className="mt-2 text-sm leading-relaxed text-slate-600">
               {t("viewer.deleteBody", { file: visit._source.file })}
             </p>
             <p className="mt-3 rounded-xl bg-red-50 px-3 py-2 text-xs leading-relaxed text-red-800">
               {t("viewer.deleteImpact")}
             </p>
-            {deleteError && <p role="alert" className="mt-3 text-sm text-red-700">{deleteError}</p>}
+            {deleteError && (
+              <p role="alert" className="mt-3 text-sm text-red-700">
+                {deleteError}
+              </p>
+            )}
             <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
               <button
                 type="button"
@@ -513,7 +649,6 @@ export function DocumentViewer({
   );
 }
 
-
 function RawTextProcessingPanel({
   visit,
   processing,
@@ -532,10 +667,13 @@ function RawTextProcessingPanel({
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="space-y-1 text-xs text-slate-600">
           <p>
-            <span className="font-semibold text-slate-700">Status:</span> {raw?.processing_status || "not processed"}
+            <span className="font-semibold text-slate-700">Status:</span>{" "}
+            {raw?.processing_status || "not processed"}
             {raw?.extraction_method ? ` · method: ${raw.extraction_method}` : ""}
             {typeof raw?.page_count === "number" ? ` · pages: ${raw.page_count}` : ""}
-            {typeof raw?.confidence === "number" ? ` · confidence: ${formatConfidence(raw.confidence / (raw.confidence > 1 ? 100 : 1))}` : ""}
+            {typeof raw?.confidence === "number"
+              ? ` · confidence: ${formatConfidence(raw.confidence / (raw.confidence > 1 ? 100 : 1))}`
+              : ""}
           </p>
           {raw?.processed_at && <p>Processed: {formatDate(raw.processed_at)}</p>}
           {raw?.error_message && <p className="text-amber-800">{raw.error_message}</p>}
@@ -549,13 +687,19 @@ function RawTextProcessingPanel({
           {processing ? "Processing…" : raw ? "Refresh raw text" : "Process raw text"}
         </button>
       </div>
-      {error && <p role="alert" className="mt-2 text-xs text-red-700">{error}</p>}
+      {error && (
+        <p role="alert" className="mt-2 text-xs text-red-700">
+          {error}
+        </p>
+      )}
       {text ? (
         <pre className="mt-3 max-h-56 overflow-auto whitespace-pre-wrap rounded-md bg-white p-3 text-xs leading-relaxed text-slate-700 ring-1 ring-slate-200">
           {text}
         </pre>
       ) : (
-        <p className="mt-3 text-xs text-slate-500">No reusable raw text/OCR layer is stored for this document yet.</p>
+        <p className="mt-3 text-xs text-slate-500">
+          No reusable raw text/OCR layer is stored for this document yet.
+        </p>
       )}
     </div>
   );
@@ -655,13 +799,16 @@ function EvidenceButton({
   );
 }
 
-const TabButton = forwardRef<HTMLButtonElement, {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-  id: string;
-  controls: string;
-}>(function TabButton({ active, onClick, children, id, controls }, ref) {
+const TabButton = forwardRef<
+  HTMLButtonElement,
+  {
+    active: boolean;
+    onClick: () => void;
+    children: React.ReactNode;
+    id: string;
+    controls: string;
+  }
+>(function TabButton({ active, onClick, children, id, controls }, ref) {
   return (
     <button
       ref={ref}
@@ -673,7 +820,9 @@ const TabButton = forwardRef<HTMLButtonElement, {
       tabIndex={active ? 0 : -1}
       onClick={onClick}
       className={`min-h-[44px] rounded-lg px-3 py-1.5 text-sm font-medium transition ${
-        active ? "bg-white text-slate-950 shadow-sm ring-1 ring-slate-300" : "text-slate-700 hover:bg-white hover:text-slate-950"
+        active
+          ? "bg-white text-slate-950 shadow-sm ring-1 ring-slate-300"
+          : "text-slate-700 hover:bg-white hover:text-slate-950"
       }`}
     >
       {children}
@@ -681,7 +830,15 @@ const TabButton = forwardRef<HTMLButtonElement, {
   );
 });
 
-function Section({ title, children, icon }: { title: string; children: React.ReactNode; icon?: React.ReactNode }) {
+function Section({
+  title,
+  children,
+  icon,
+}: {
+  title: string;
+  children: React.ReactNode;
+  icon?: React.ReactNode;
+}) {
   return (
     <div>
       <h3 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-700">

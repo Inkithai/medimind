@@ -10,7 +10,7 @@ import type { QASource, Timeline, Visit } from "../types/api";
  */
 export function findVisitForSource(
   timeline: Timeline | null | undefined,
-  source: QASource | null | undefined
+  source: QASource | null | undefined,
 ): Visit | null {
   if (!timeline?.visits?.length || !source?.source_file) return null;
 

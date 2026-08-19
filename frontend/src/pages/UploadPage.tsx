@@ -1,11 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import {
-  api,
-  ApiError,
-  type JobFileProgress,
-  type JobProgress,
-} from "../api/client";
+import { api, ApiError, type JobFileProgress, type JobProgress } from "../api/client";
 import { Alert } from "../components/Alert";
 import { ErrorState } from "../components/ErrorState";
 import { HealthSummaryCard } from "../components/HealthSummaryCard";
@@ -100,14 +95,14 @@ function initialFileProgress(files: PendingFile[]): JobFileProgress[] {
 
 function filesAfterResult(files: PendingFile[], response: UploadResponse): PendingFile[] {
   const retryableFailures = (response.failed_files || []).filter(
-    (failure) => failure.retryable !== false && failure.kind !== "not_medical"
+    (failure) => failure.retryable !== false && failure.kind !== "not_medical",
   );
   if (retryableFailures.length === 0) return [];
 
   const failedIndices = new Set(
     retryableFailures
       .map((failure) => failure.file_index)
-      .filter((index): index is number => typeof index === "number")
+      .filter((index): index is number => typeof index === "number"),
   );
   if (failedIndices.size > 0) {
     return files.filter((_, index) => failedIndices.has(index + 1));
@@ -120,14 +115,16 @@ function filesAfterResult(files: PendingFile[], response: UploadResponse): Pendi
 
 function completedFallbackProgress(
   initialFiles: JobFileProgress[],
-  response: UploadResponse
+  response: UploadResponse,
 ): JobProgress {
   const failuresByIndex = new Map(
     (response.failed_files || [])
       .filter((failure) => typeof failure.file_index === "number")
-      .map((failure) => [failure.file_index as number, failure])
+      .map((failure) => [failure.file_index as number, failure]),
   );
-  const failuresByName = new Map((response.failed_files || []).map((failure) => [failure.file, failure]));
+  const failuresByName = new Map(
+    (response.failed_files || []).map((failure) => [failure.file, failure]),
+  );
   const files = initialFiles.map((file) => {
     const failure = failuresByIndex.get(file.index) || failuresByName.get(file.name);
     if (!failure) {
@@ -225,7 +222,7 @@ export function UploadPage() {
       if (phase === "uploading") return;
       if (e.dataTransfer.files?.length) addFiles(e.dataTransfer.files);
     },
-    [addFiles, phase]
+    [addFiles, phase],
   );
 
   const validate = (): Error | null => {
@@ -249,7 +246,7 @@ export function UploadPage() {
       progress: JobProgress | undefined,
       response: UploadResponse | undefined,
       jobError: string | null | undefined,
-      filesForRun: PendingFile[] | null
+      filesForRun: PendingFile[] | null,
     ) => {
       if (finalStatus === "failed") {
         throw new ApiError(
@@ -260,7 +257,7 @@ export function UploadPage() {
             code: progress?.error_code,
             retryable: progress?.retryable,
             retryAfterSeconds: progress?.retry_after_seconds,
-          }
+          },
         );
       }
       if (!response) {
@@ -275,7 +272,7 @@ export function UploadPage() {
       setProcessingStep(indexingIncomplete || progress?.step === "partial" ? "partial" : "ready");
       if (progress) setJobProgress(progress);
     },
-    []
+    [],
   );
 
   const watchJob = useCallback(
@@ -294,7 +291,7 @@ export function UploadPage() {
         {
           onUnreachable: () => setServerUnreachable(true),
           onReconnected: () => setServerUnreachable(false),
-        }
+        },
       );
       setServerUnreachable(false);
       applyFinalJob(
@@ -302,10 +299,10 @@ export function UploadPage() {
         final.progress,
         final.result as UploadResponse | undefined,
         final.error,
-        filesForRun
+        filesForRun,
       );
     },
-    [applyFinalJob, credentials]
+    [applyFinalJob, credentials],
   );
 
   // Recover an upload that was in flight when the page was closed, refreshed,
@@ -391,14 +388,14 @@ export function UploadPage() {
       try {
         const queued = await api.uploadDocumentsAsync(
           credentials,
-          filesForRun.map((pendingFile) => pendingFile.file)
+          filesForRun.map((pendingFile) => pendingFile.file),
         );
         if (!queued.job_id) {
           throw new ApiError(500, "The server did not return a processing job.");
         }
         if (queued.worker_limit) {
           setJobProgress((current) =>
-            current ? { ...current, worker_limit: queued.worker_limit } : current
+            current ? { ...current, worker_limit: queued.worker_limit } : current,
           );
         }
 
@@ -430,7 +427,7 @@ export function UploadPage() {
 
       const response = await api.uploadDocuments(
         credentials,
-        filesForRun.map((pendingFile) => pendingFile.file)
+        filesForRun.map((pendingFile) => pendingFile.file),
       );
       setResult(response);
       setPending(filesAfterResult(filesForRun, response));
@@ -474,7 +471,7 @@ export function UploadPage() {
             onDrop={onDrop}
             className={classNames(
               "rounded-2xl border-2 border-dashed bg-white p-8 text-center transition sm:p-10",
-              dragging ? "border-brand-500 bg-brand-50/40" : "border-slate-300"
+              dragging ? "border-brand-500 bg-brand-50/40" : "border-slate-300",
             )}
             aria-label={t("upload.area")}
           >
@@ -490,9 +487,7 @@ export function UploadPage() {
             >
               {t("upload.browse")}
             </button>
-            <p className="secondary-text mt-4">
-              {t("upload.supported", { size: MAX_MB })}
-            </p>
+            <p className="secondary-text mt-4">{t("upload.supported", { size: MAX_MB })}</p>
             <div className="mt-4 flex flex-wrap justify-center gap-2">
               {SUPPORTED_TYPES.map((t) => (
                 <span
@@ -525,7 +520,9 @@ export function UploadPage() {
               aria-label={t("upload.ready")}
             >
               <div className="border-b border-slate-100 px-5 py-4">
-                <h2 className="card-title">{pending.length} {pending.length === 1 ? "file" : "files"} ready</h2>
+                <h2 className="card-title">
+                  {pending.length} {pending.length === 1 ? "file" : "files"} ready
+                </h2>
               </div>
               <ul className="divide-y divide-slate-100">
                 {pending.map((p) => {
@@ -544,7 +541,9 @@ export function UploadPage() {
                         </div>
                       )}
                       <div className="min-w-0 flex-1">
-                        <p className="truncate text-base font-medium text-slate-800">{p.file.name}</p>
+                        <p className="truncate text-base font-medium text-slate-800">
+                          {p.file.name}
+                        </p>
                         <p className="secondary-text">{fileSizeLabel(p.file.size)}</p>
                       </div>
                       <div className="flex shrink-0 items-center gap-1">
@@ -555,7 +554,8 @@ export function UploadPage() {
                             rel="noreferrer"
                             className="flex min-h-[44px] items-center rounded-lg px-3 text-sm font-medium text-brand-600 hover:bg-brand-50"
                           >
-                            {t("upload.preview")}<span className="sr-only"> ({t("common.opensNewWindow")})</span>
+                            {t("upload.preview")}
+                            <span className="sr-only"> ({t("common.opensNewWindow")})</span>
                           </a>
                         )}
                         <button
@@ -650,10 +650,10 @@ export function UploadPage() {
                 busy
                   ? processingStep
                   : uploadFailed
-                  ? "failed"
-                  : processingStep === "partial"
-                  ? "partial"
-                  : "ready"
+                    ? "failed"
+                    : processingStep === "partial"
+                      ? "partial"
+                      : "ready"
               }
               files={jobProgress?.files || []}
               workerLimit={jobProgress?.worker_limit}
@@ -665,16 +665,12 @@ export function UploadPage() {
             <>
               <Alert
                 variant={result.failed_files?.length ? "warning" : "success"}
-                title={
-                  result.failed_files?.length
-                    ? t("upload.partial")
-                    : t("upload.success")
-                }
+                title={result.failed_files?.length ? t("upload.partial") : t("upload.success")}
               >
                 <p className="text-sm">
                   Added <strong>{result.files_added ?? result.documents_added}</strong>{" "}
-                  {(result.files_added ?? result.documents_added) === 1 ? "file" : "files"}. Your record now
-                  contains <strong>{result.documents_total}</strong>{" "}
+                  {(result.files_added ?? result.documents_added) === 1 ? "file" : "files"}. Your
+                  record now contains <strong>{result.documents_total}</strong>{" "}
                   {result.documents_total === 1 ? "document page" : "document pages"} in total.
                 </p>
                 {result.duplicate_files_skipped && result.duplicate_files_skipped.length > 0 && (
@@ -695,8 +691,8 @@ export function UploadPage() {
                       ))}
                     </ul>
                     <p className="mt-1 text-xs text-sky-800">
-                      Nothing was lost — the existing copies are still there, and your safety
-                      checks won't count the same prescription twice.
+                      Nothing was lost — the existing copies are still there, and your safety checks
+                      won't count the same prescription twice.
                     </p>
                   </div>
                 )}
@@ -766,15 +762,16 @@ export function UploadPage() {
           <div className="flex items-center justify-between">
             <h2 className="card-title">{t("upload.recent")}</h2>
             {recent.length > 0 && (
-              <Link to="/documents" className="text-sm font-medium text-brand-600 hover:text-brand-700">
+              <Link
+                to="/documents"
+                className="text-sm font-medium text-brand-600 hover:text-brand-700"
+              >
                 View all →
               </Link>
             )}
           </div>
           {recent.length === 0 ? (
-            <p className="secondary-text mt-3">
-              {t("upload.none")}
-            </p>
+            <p className="secondary-text mt-3">{t("upload.none")}</p>
           ) : (
             <ul className="mt-4 space-y-2">
               {recent.map((v, i) => (
@@ -784,10 +781,16 @@ export function UploadPage() {
                     className="flex items-center gap-3 rounded-xl border border-slate-100 px-4 py-3 transition hover:border-brand-200 hover:bg-slate-50"
                   >
                     <span className="text-xl" aria-hidden="true">
-                      {v.document_type === "lab_report" ? "🧪" : v.document_type === "prescription" ? "💊" : "📄"}
+                      {v.document_type === "lab_report"
+                        ? "🧪"
+                        : v.document_type === "prescription"
+                          ? "💊"
+                          : "📄"}
                     </span>
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium text-slate-800">{v._source.file}</p>
+                      <p className="truncate text-sm font-medium text-slate-800">
+                        {v._source.file}
+                      </p>
                       <p className="secondary-text">{documentTypeLabel(v.document_type)}</p>
                     </div>
                     <span className="secondary-text shrink-0">{relativeTime(v.date)}</span>

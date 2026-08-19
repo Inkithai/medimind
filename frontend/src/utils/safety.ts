@@ -1,12 +1,7 @@
 import type { CrossCheckReport, DosageReport } from "../types/api";
 
 export type SafetyAlertKind =
-  | "allergy"
-  | "interaction"
-  | "duplicate"
-  | "dosage"
-  | "concurrent_duplicate"
-  | "age_restriction";
+  "allergy" | "interaction" | "duplicate" | "dosage" | "concurrent_duplicate" | "age_restriction";
 
 export interface SafetyAlertSummary {
   key: string;
@@ -19,7 +14,11 @@ export interface SafetyAlertSummary {
 }
 
 function normalized(value: unknown): string {
-  return String(value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
 }
 
 function pairKey(values: unknown[]): string {
@@ -37,13 +36,13 @@ function isLive(item: { timing?: { status?: string } }): boolean {
  */
 export function collectSafetyAlerts(
   report: CrossCheckReport,
-  dosageReport?: DosageReport | null
+  dosageReport?: DosageReport | null,
 ): SafetyAlertSummary[] {
   const alerts: SafetyAlertSummary[] = [];
   const guidelinePairs = new Set(
     (report.guideline_flagged_combinations || []).map((item) =>
-      pairKey([item.opioid, item.depressant])
-    )
+      pairKey([item.opioid, item.depressant]),
+    ),
   );
 
   for (const item of report.allergy_conflicts || []) {
@@ -96,7 +95,9 @@ export function collectSafetyAlerts(
       kind: "concurrent_duplicate",
       severity: "high",
       title: `Overlapping prescriptions: ${ingredient}`,
-      description: item.note || "Two active prescriptions supplied the same ingredient during an overlapping period.",
+      description:
+        item.note ||
+        "Two active prescriptions supplied the same ingredient during an overlapping period.",
     });
   }
 
@@ -132,7 +133,10 @@ export function collectSafetyAlerts(
       kind: "age_restriction",
       severity: "high",
       title: `Published age restriction: ${item.medication || "medication"}`,
-      description: item.explanation || item.restriction || "A published age restriction needs professional review.",
+      description:
+        item.explanation ||
+        item.restriction ||
+        "A published age restriction needs professional review.",
       confidence: item.confidence,
       evidenceSource: item.evidence_source,
     });
@@ -148,7 +152,9 @@ export function collectSafetyAlerts(
       kind: "dosage",
       severity: "high",
       title: `Dose needs review: ${subject}`,
-      description: item.explanation || "The extracted dose is above a configured adult ceiling and needs professional confirmation.",
+      description:
+        item.explanation ||
+        "The extracted dose is above a configured adult ceiling and needs professional confirmation.",
       confidence: item.confidence,
       evidenceSource: item.source,
     });
@@ -156,6 +162,6 @@ export function collectSafetyAlerts(
 
   const rank = { high: 0, moderate: 1, low: 2 };
   return [...new Map(alerts.map((item) => [item.key, item])).values()].sort(
-    (a, b) => rank[a.severity] - rank[b.severity] || a.title.localeCompare(b.title)
+    (a, b) => rank[a.severity] - rank[b.severity] || a.title.localeCompare(b.title),
   );
 }

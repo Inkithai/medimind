@@ -8,11 +8,18 @@ import { LoadingState } from "../../components/Spinner";
 import { ConsultationPack } from "../../components/ConsultationPack";
 import { ProviderResultCard } from "../../components/ProviderResultCard";
 import { I18nProvider } from "../../i18n/I18nContext";
-import type { ConsultationPack as ConsultationPackData, LiveProvider, Visit } from "../../types/api";
+import type {
+  ConsultationPack as ConsultationPackData,
+  LiveProvider,
+  Visit,
+} from "../../types/api";
 
-const dom = new JSDOM("<!doctype html><html lang='en'><head><title>Accessibility test</title></head><body><main id='root'></main></body></html>", {
-  url: "https://medimind.test/",
-});
+const dom = new JSDOM(
+  "<!doctype html><html lang='en'><head><title>Accessibility test</title></head><body><main id='root'></main></body></html>",
+  {
+    url: "https://medimind.test/",
+  },
+);
 Object.assign(globalThis, {
   window: dom.window,
   document: dom.window.document,
@@ -92,7 +99,9 @@ async function main() {
       <I18nProvider>
         <h1>Accessibility test</h1>
         <LanguageSelector />
-        <Alert variant="danger" title="Error">Example error</Alert>
+        <Alert variant="danger" title="Error">
+          Example error
+        </Alert>
         <LoadingState label="Loading records" />
         <DocumentViewer visit={visit} onClose={() => undefined} />
         <ConsultationPack pack={consultationPack} />
@@ -100,7 +109,7 @@ async function main() {
           <h2>Test provider results</h2>
           <ProviderResultCard provider={provider} index={0} />
         </section>
-      </I18nProvider>
+      </I18nProvider>,
     );
   });
 
@@ -112,21 +121,28 @@ async function main() {
     },
   });
   if (results.violations.length) {
-    throw new Error(results.violations.map((violation) => `${violation.id}: ${violation.help}`).join("\n"));
+    throw new Error(
+      results.violations.map((violation) => `${violation.id}: ${violation.help}`).join("\n"),
+    );
   }
 
   let tabs = document.querySelectorAll<HTMLElement>('[role="tab"]');
   if (tabs.length !== 3) throw new Error(`Expected 3 accessible tabs, found ${tabs.length}`);
   await act(async () => {
-    tabs[1].dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }));
+    tabs[1].dispatchEvent(
+      new dom.window.KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }),
+    );
   });
   tabs = document.querySelectorAll<HTMLElement>('[role="tab"]');
   if (tabs[0].getAttribute("aria-selected") !== "true") {
     throw new Error("Document tabs must support arrow-key navigation");
   }
-  if (!document.querySelector('select[aria-label]')) throw new Error("Language selector needs an accessible name");
-  if (!document.querySelector('[role="alert"]')) throw new Error("Error alert needs assertive semantics");
-  if (!document.querySelector('[aria-busy="true"]')) throw new Error("Loading state needs aria-busy");
+  if (!document.querySelector("select[aria-label]"))
+    throw new Error("Language selector needs an accessible name");
+  if (!document.querySelector('[role="alert"]'))
+    throw new Error("Error alert needs assertive semantics");
+  if (!document.querySelector('[aria-busy="true"]'))
+    throw new Error("Loading state needs aria-busy");
 
   act(() => root.unmount());
   console.log("PASS: axe found no WCAG violations in shared interactive components");

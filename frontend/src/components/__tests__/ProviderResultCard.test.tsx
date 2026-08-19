@@ -38,12 +38,22 @@ const sparseDirectoryResult: LiveProvider = {
   },
 };
 
-const markup = renderToStaticMarkup(<I18nProvider><ProviderResultCard provider={sparseDirectoryResult} index={0} /></I18nProvider>);
+const markup = renderToStaticMarkup(
+  <I18nProvider>
+    <ProviderResultCard provider={sparseDirectoryResult} index={0} />
+  </I18nProvider>,
+);
 assert(markup.includes("Directory match 72"), "labels score as a directory match");
 assert(!markup.includes("Match score"), "does not use generic match-score wording");
 assert(!markup.includes("Rating"), "does not render a missing directory rating");
-assert(!markup.includes("Opening hours supplied by directory"), "does not render missing directory hours");
+assert(
+  !markup.includes("Opening hours supplied by directory"),
+  "does not render missing directory hours",
+);
 assert(!markup.includes("Provider website"), "does not render an invalid external URL");
-assert(markup.includes("Why this directory match is shown"), "explains ranking as a directory match");
+assert(
+  markup.includes("Why this directory match is shown"),
+  "explains ranking as a directory match",
+);
 
 console.log("\nAll ProviderResultCard tests passed.");

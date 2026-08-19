@@ -44,10 +44,7 @@ export function SpecialtySelector({
 
   // De-duplicate: a specialty that appears in suggestions should not also
   // appear in the browse list.
-  const suggestedIds = useMemo(
-    () => new Set((suggestions ?? []).map((s) => s.id)),
-    [suggestions],
-  );
+  const suggestedIds = useMemo(() => new Set((suggestions ?? []).map((s) => s.id)), [suggestions]);
 
   const suggestedOptions = useMemo(
     () => (suggestions ?? []).map((s) => ({ ...s, group: "suggested" as const })),
@@ -150,7 +147,12 @@ export function SpecialtySelector({
           aria-expanded={false}
         >
           <SearchIcon className="h-5 w-5 shrink-0 text-slate-400" />
-          <span className={classNames("flex-1 truncate", selectedOption ? "text-slate-800" : "text-slate-400")}>
+          <span
+            className={classNames(
+              "flex-1 truncate",
+              selectedOption ? "text-slate-800" : "text-slate-400",
+            )}
+          >
             {selectedOption ? selectedOption.label : placeholder}
           </span>
           {isSuggested && (
@@ -181,9 +183,7 @@ export function SpecialtySelector({
               aria-autocomplete="list"
               aria-expanded={showListbox}
               aria-controls={`${baseId}-listbox`}
-              aria-activedescendant={
-                activeIndex >= 0 ? `${baseId}-opt-${activeIndex}` : undefined
-              }
+              aria-activedescendant={activeIndex >= 0 ? `${baseId}-opt-${activeIndex}` : undefined}
               autoComplete="off"
               spellCheck={false}
               autoFocus

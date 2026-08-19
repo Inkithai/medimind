@@ -129,14 +129,17 @@ export function ProcessingStatus({
             {current === "ready"
               ? t("processing.complete")
               : isPartial
-              ? t("processing.recordsSaved")
-              : current === "failed"
-              ? t("processing.stopped")
-              : t("processing.documents")}
+                ? t("processing.recordsSaved")
+                : current === "failed"
+                  ? t("processing.stopped")
+                  : t("processing.documents")}
           </h3>
           <p className="secondary-text mt-1">
             {total > 0
-              ? t("processing.progress", { processed: formatNumber(processed), total: formatNumber(total) })
+              ? t("processing.progress", {
+                  processed: formatNumber(processed),
+                  total: formatNumber(total),
+                })
               : t("processing.preparing")}
           </p>
         </div>
@@ -160,11 +163,7 @@ export function ProcessingStatus({
           <div
             className={classNames(
               "h-full rounded-full transition-all duration-500",
-              current === "failed"
-                ? "bg-amber-500"
-                : isPartial
-                ? "bg-amber-400"
-                : "bg-brand-600"
+              current === "failed" ? "bg-amber-500" : isPartial ? "bg-amber-400" : "bg-brand-600",
             )}
             style={{ width: `${percent}%` }}
           />
@@ -180,7 +179,8 @@ export function ProcessingStatus({
               </h4>
               {files.length > 1 && (
                 <p className="mt-1 text-xs leading-5 text-slate-500">
-                  Files move independently. A large scan can still be reading while another file is ready.
+                  Files move independently. A large scan can still be reading while another file is
+                  ready.
                   {workerLimit
                     ? ` Up to ${workerLimit} ${workerLimit === 1 ? "file is" : "files are"} processed at once to prevent overload.`
                     : " Waiting files start as processing capacity becomes available."}
@@ -190,7 +190,9 @@ export function ProcessingStatus({
             {(successful > 0 || failed > 0) && (
               <p className="shrink-0 text-xs text-slate-500">
                 <span className="font-medium text-emerald-700">{successful} ready</span>
-                {failed > 0 && <span className="ml-2 font-medium text-red-700">{failed} failed</span>}
+                {failed > 0 && (
+                  <span className="ml-2 font-medium text-red-700">{failed} failed</span>
+                )}
               </p>
             )}
           </div>
@@ -208,10 +210,10 @@ export function ProcessingStatus({
                     isFailed
                       ? "border-red-200 bg-red-50/70"
                       : isComplete
-                      ? "border-emerald-200 bg-emerald-50/60"
-                      : isActive
-                      ? "border-brand-200 bg-brand-50/50"
-                      : "border-slate-200 bg-slate-50/70"
+                        ? "border-emerald-200 bg-emerald-50/60"
+                        : isActive
+                          ? "border-brand-200 bg-brand-50/50"
+                          : "border-slate-200 bg-slate-50/70",
                   )}
                 >
                   <div className="flex items-start gap-3">
@@ -221,10 +223,10 @@ export function ProcessingStatus({
                         isFailed
                           ? "bg-red-600 text-white"
                           : isComplete
-                          ? "bg-emerald-600 text-white"
-                          : isActive
-                          ? "bg-brand-600 text-white"
-                          : "bg-slate-200 text-slate-600"
+                            ? "bg-emerald-600 text-white"
+                            : isActive
+                              ? "bg-brand-600 text-white"
+                              : "bg-slate-200 text-slate-600",
                       )}
                       aria-hidden="true"
                     >
@@ -232,7 +234,10 @@ export function ProcessingStatus({
                     </span>
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
-                        <p className="truncate text-sm font-semibold text-slate-800" title={file.name}>
+                        <p
+                          className="truncate text-sm font-semibold text-slate-800"
+                          title={file.name}
+                        >
                           {file.name}
                         </p>
                         <span
@@ -241,10 +246,10 @@ export function ProcessingStatus({
                             isFailed
                               ? "text-red-700"
                               : isComplete
-                              ? "text-emerald-700"
-                              : isActive
-                              ? "text-brand-700"
-                              : "text-slate-500"
+                                ? "text-emerald-700"
+                                : isActive
+                                  ? "text-brand-700"
+                                  : "text-slate-500",
                           )}
                         >
                           {fileStepLabel(file, t)}
@@ -253,7 +258,7 @@ export function ProcessingStatus({
                       <p
                         className={classNames(
                           "mt-0.5 text-xs leading-5",
-                          isFailed ? "text-red-700" : "text-slate-500"
+                          isFailed ? "text-red-700" : "text-slate-500",
                         )}
                       >
                         {file.error || file.message}
@@ -272,9 +277,7 @@ export function ProcessingStatus({
           <h4 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
             {t("processing.finalize")}
           </h4>
-          <p className="mt-1 text-xs leading-5 text-slate-500">
-            {t("processing.finalizeBody")}
-          </p>
+          <p className="mt-1 text-xs leading-5 text-slate-500">{t("processing.finalizeBody")}</p>
         </div>
 
         <ol className="mt-4 grid gap-2 sm:grid-cols-2">
@@ -289,10 +292,10 @@ export function ProcessingStatus({
                   isPast
                     ? "border-emerald-200 bg-emerald-50/60"
                     : isCurrent && isPartial
-                    ? "border-amber-200 bg-amber-50/70"
-                    : isCurrent
-                    ? "border-brand-200 bg-brand-50/60"
-                    : "border-slate-100 bg-slate-50/60 opacity-60"
+                      ? "border-amber-200 bg-amber-50/70"
+                      : isCurrent
+                        ? "border-brand-200 bg-brand-50/60"
+                        : "border-slate-100 bg-slate-50/60 opacity-60",
                 )}
               >
                 <span
@@ -301,10 +304,10 @@ export function ProcessingStatus({
                     isPast
                       ? "bg-emerald-600 text-white"
                       : isCurrent && isPartial
-                      ? "bg-amber-500 text-white"
-                      : isCurrent
-                      ? "bg-brand-600 text-white"
-                      : "bg-slate-200 text-slate-500"
+                        ? "bg-amber-500 text-white"
+                        : isCurrent
+                          ? "bg-brand-600 text-white"
+                          : "bg-slate-200 text-slate-500",
                   )}
                   aria-hidden="true"
                 >
@@ -335,14 +338,17 @@ export function ProcessingStatus({
             {successful > 0
               ? `All ${successful} ${successful === 1 ? "file is" : "files are"} stored in your record and visible on your dashboard. `
               : "Your record is stored and visible on your dashboard. "}
-            Only the question-answering index did not finish, and it rebuilds
-            automatically the next time you ask a question.
+            Only the question-answering index did not finish, and it rebuilds automatically the next
+            time you ask a question.
           </p>
         </div>
       )}
 
       {error && (
-        <div role="alert" className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">
+        <div
+          role="alert"
+          className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900"
+        >
           {error}
         </div>
       )}
@@ -353,7 +359,7 @@ export function ProcessingStatus({
 export function mapUploadPhaseToStep(
   isUploading: boolean,
   hasResult: boolean,
-  hasError: boolean
+  hasError: boolean,
 ): ProcessingStepId {
   if (hasError) return "failed";
   if (hasResult) return "ready";

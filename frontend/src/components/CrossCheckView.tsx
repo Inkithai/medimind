@@ -1,6 +1,11 @@
 import { Link } from "react-router-dom";
 import { useI18n } from "../i18n/I18nContext";
-import type { CrossCheckReport, DosageReport, MedicationTransition, SourceReference } from "../types/api";
+import type {
+  CrossCheckReport,
+  DosageReport,
+  MedicationTransition,
+  SourceReference,
+} from "../types/api";
 import { formatConfidence, severityTone } from "../utils/format";
 import { collectSafetyAlerts } from "../utils/safety";
 import { Alert } from "./Alert";
@@ -35,49 +40,63 @@ function uniqueBy<T>(items: T[], keyOf: (item: T) => string): T[] {
 }
 
 function normalized(value: unknown): string {
-  return String(value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
 }
 
-export function CrossCheckView({ report, dosageReport }: { report: CrossCheckReport; dosageReport?: DosageReport | null }) {
+export function CrossCheckView({
+  report,
+  dosageReport,
+}: {
+  report: CrossCheckReport;
+  dosageReport?: DosageReport | null;
+}) {
   const { t, formatNumber } = useI18n();
   const canonicalAlerts = collectSafetyAlerts(report, dosageReport);
   const totalIssues = canonicalAlerts.length;
   const continuations = report.medication_continuations || [];
   const supplementalKinds = new Set(["concurrent_duplicate", "age_restriction"]);
-  const supplementalAlerts = canonicalAlerts.filter((item) =>
-    supplementalKinds.has(item.kind) || item.evidenceSource === "published_reference" ||
-    (item.kind === "dosage" && item.key.startsWith("dosage-rule:"))
+  const supplementalAlerts = canonicalAlerts.filter(
+    (item) =>
+      supplementalKinds.has(item.kind) ||
+      item.evidenceSource === "published_reference" ||
+      (item.kind === "dosage" && item.key.startsWith("dosage-rule:")),
   );
   const guidelinePairs = new Set(
     (report.guideline_flagged_combinations || []).map((item) =>
-      [item.opioid, item.depressant].map(normalized).sort().join("+")
-    )
+      [item.opioid, item.depressant].map(normalized).sort().join("+"),
+    ),
   );
   const displayReport: CrossCheckReport = {
     ...report,
     potential_drug_interactions: uniqueBy(
-      report.potential_drug_interactions.filter((item) =>
-        item.timing?.status !== "not_concurrent" && !guidelinePairs.has(
-          item.medications_involved.map(normalized).sort().join("+")
-        )
+      report.potential_drug_interactions.filter(
+        (item) =>
+          item.timing?.status !== "not_concurrent" &&
+          !guidelinePairs.has(item.medications_involved.map(normalized).sort().join("+")),
       ),
-      (item) => item.medications_involved.map(normalized).sort().join("+")
+      (item) => item.medications_involved.map(normalized).sort().join("+"),
     ),
     duplicate_prescriptions: uniqueBy(
       report.duplicate_prescriptions.filter((item) => item.timing?.status !== "not_concurrent"),
-      (item) => normalized(item.medication)
+      (item) => normalized(item.medication),
     ),
     conflicting_dosage_instructions: uniqueBy(
-      report.conflicting_dosage_instructions.filter((item) => item.timing?.status !== "not_concurrent"),
-      (item) => normalized(item.medication)
+      report.conflicting_dosage_instructions.filter(
+        (item) => item.timing?.status !== "not_concurrent",
+      ),
+      (item) => normalized(item.medication),
     ),
     allergy_conflicts: uniqueBy(
       report.allergy_conflicts.filter((item) => item.timing?.status !== "not_concurrent"),
-      (item) => `${normalized(item.medication)}:${normalized(item.allergy)}`
+      (item) => `${normalized(item.medication)}:${normalized(item.allergy)}`,
     ),
   };
   const hasLowConfidence = canonicalAlerts.some(
-    (item) => typeof item.confidence === "number" && item.confidence < 0.6
+    (item) => typeof item.confidence === "number" && item.confidence < 0.6,
   );
   const hasHighRisk = canonicalAlerts.some((item) => item.severity === "high");
 
@@ -85,7 +104,11 @@ export function CrossCheckView({ report, dosageReport }: { report: CrossCheckRep
     <Card>
       <CardHeader
         title={t("safety.title")}
-        description={totalIssues === 0 ? t("safety.noIssuesBody") : `${formatNumber(totalIssues)} · ${t("safety.subtitle")}`}
+        description={
+          totalIssues === 0
+            ? t("safety.noIssuesBody")
+            : `${formatNumber(totalIssues)} · ${t("safety.subtitle")}`
+        }
         icon={<ShieldIcon className="h-5 w-5" />}
       />
       <CardBody className="space-y-5">
@@ -99,7 +122,10 @@ export function CrossCheckView({ report, dosageReport }: { report: CrossCheckRep
           <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">
             <p className="font-semibold">{t("safety.highRisk")}</p>
             <p className="mt-1">{t("safety.highRiskBody")}</p>
-            <Link to="/find-care?from=safety" className="mt-2 inline-flex font-semibold text-brand-700 hover:underline">
+            <Link
+              to="/find-care?from=safety"
+              className="mt-2 inline-flex font-semibold text-brand-700 hover:underline"
+            >
               {t("safety.findCare")} →
             </Link>
           </div>
@@ -109,7 +135,10 @@ export function CrossCheckView({ report, dosageReport }: { report: CrossCheckRep
           <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
             <p className="font-semibold">{t("safety.lowConfidence")}</p>
             <p className="mt-1">{t("safety.lowConfidenceBody")}</p>
-            <Link to="/find-care?from=low-confidence-safety" className="mt-2 inline-flex font-semibold text-brand-700 hover:underline">
+            <Link
+              to="/find-care?from=low-confidence-safety"
+              className="mt-2 inline-flex font-semibold text-brand-700 hover:underline"
+            >
               {t("safety.verify")} →
             </Link>
           </div>
@@ -138,11 +167,7 @@ export function CrossCheckView({ report, dosageReport }: { report: CrossCheckRep
         )}
 
         {continuations.length > 0 && (
-          <TransitionSection
-            title={t("safety.continuations")}
-            items={continuations}
-            tone="info"
-          />
+          <TransitionSection title={t("safety.continuations")} items={continuations} tone="info" />
         )}
       </CardBody>
     </Card>
@@ -162,15 +187,12 @@ function IssueSection({ report, section }: { report: CrossCheckReport; section: 
       </div>
       <div className="space-y-2">
         {items.map((item, idx) => (
-          <div
-            key={idx}
-            className="rounded-lg border border-slate-200 bg-slate-50/60 px-4 py-3"
-          >
+          <div key={idx} className="rounded-lg border border-slate-200 bg-slate-50/60 px-4 py-3">
             {"severity" in item && (
               <div className="mb-1.5">
                 <span
                   className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${severityTone(
-                    item.severity
+                    item.severity,
                   )}`}
                 >
                   {t("safety.severity", { level: item.severity })}
@@ -188,8 +210,7 @@ function IssueSection({ report, section }: { report: CrossCheckReport; section: 
             )}
             {"allergy" in item && (
               <p className="text-sm font-medium text-slate-800">
-                {item.medication}{" "}
-                <span className="text-slate-400">↔</span>{" "}
+                {item.medication} <span className="text-slate-400">↔</span>{" "}
                 <span className="rounded bg-red-50 px-1.5 py-0.5 text-xs text-red-700 ring-1 ring-inset ring-red-200">
                   allergy: {item.allergy}
                 </span>
@@ -243,20 +264,37 @@ function CanonicalAlertSection({ items }: { items: ReturnType<typeof collectSafe
   return (
     <div>
       <div className="mb-2 flex items-center gap-2">
-        <h3 className="text-sm font-semibold text-slate-900">Additional deterministic safety checks</h3>
+        <h3 className="text-sm font-semibold text-slate-900">
+          Additional deterministic safety checks
+        </h3>
         <StatusBadge tone="warning">{items.length}</StatusBadge>
       </div>
       <div className="space-y-2">
         {items.map((item) => (
-          <div key={item.key} className="rounded-lg border border-slate-200 bg-slate-50/60 px-4 py-3">
+          <div
+            key={item.key}
+            className="rounded-lg border border-slate-200 bg-slate-50/60 px-4 py-3"
+          >
             <div className="flex flex-wrap items-center gap-2">
-              <StatusBadge tone={item.severity === "high" ? "danger" : item.severity === "moderate" ? "warning" : "info"}>
+              <StatusBadge
+                tone={
+                  item.severity === "high"
+                    ? "danger"
+                    : item.severity === "moderate"
+                      ? "warning"
+                      : "info"
+                }
+              >
                 {item.severity}
               </StatusBadge>
               <p className="text-sm font-semibold text-slate-800">{item.title}</p>
             </div>
             <p className="mt-1 text-sm text-slate-600">{item.description}</p>
-            {item.evidenceSource && <p className="mt-2 text-xs text-slate-500">Evidence: {item.evidenceSource.replace(/_/g, " ")}</p>}
+            {item.evidenceSource && (
+              <p className="mt-2 text-xs text-slate-500">
+                Evidence: {item.evidenceSource.replace(/_/g, " ")}
+              </p>
+            )}
           </div>
         ))}
       </div>
@@ -283,7 +321,10 @@ function TransitionSection({
       </div>
       <div className="space-y-2">
         {items.map((item, index) => (
-          <div key={`${item.medication}-${index}`} className="rounded-lg border border-slate-200 bg-slate-50/60 px-4 py-3">
+          <div
+            key={`${item.medication}-${index}`}
+            className="rounded-lg border border-slate-200 bg-slate-50/60 px-4 py-3"
+          >
             <p className="text-sm font-semibold text-slate-800">{item.medication}</p>
             {item.changed_fields?.length ? (
               <p className="mt-1 text-xs font-medium text-amber-700">
@@ -293,12 +334,22 @@ function TransitionSection({
               <p className="mt-1 text-xs font-medium text-sky-800">{t("safety.same")}</p>
             )}
             <div className="mt-2 grid gap-2 text-xs text-slate-600 sm:grid-cols-2">
-              <p><span className="font-semibold">{t("safety.earlier")}:</span> {[item.previous.dosage, item.previous.frequency].filter(Boolean).join(" · ") || "not specified"}</p>
-              <p><span className="font-semibold">{t("safety.later")}:</span> {[item.current.dosage, item.current.frequency].filter(Boolean).join(" · ") || "not specified"}</p>
+              <p>
+                <span className="font-semibold">{t("safety.earlier")}:</span>{" "}
+                {[item.previous.dosage, item.previous.frequency].filter(Boolean).join(" · ") ||
+                  "not specified"}
+              </p>
+              <p>
+                <span className="font-semibold">{t("safety.later")}:</span>{" "}
+                {[item.current.dosage, item.current.frequency].filter(Boolean).join(" · ") ||
+                  "not specified"}
+              </p>
             </div>
             <p className="mt-2 text-sm text-slate-600">{item.explanation}</p>
             <SourceList sources={item.sources} />
-            <p className="mt-2 text-xs text-slate-400">confidence {formatConfidence(item.confidence)}</p>
+            <p className="mt-2 text-xs text-slate-400">
+              confidence {formatConfidence(item.confidence)}
+            </p>
           </div>
         ))}
       </div>

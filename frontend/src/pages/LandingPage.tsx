@@ -4,7 +4,14 @@ import { useAuth } from "../context/AuthContext";
 import { useI18n } from "../i18n/I18nContext";
 import { LanguageSelector } from "../components/LanguageSelector";
 import { Spinner } from "../components/Spinner";
-import { BeakerIcon, ChartIcon, PillIcon, ShieldIcon, UploadIcon, SparkleIcon } from "../components/icons";
+import {
+  BeakerIcon,
+  ChartIcon,
+  PillIcon,
+  ShieldIcon,
+  UploadIcon,
+  SparkleIcon,
+} from "../components/icons";
 
 export function LandingPage() {
   const { isConfigured, isInitializing, initError, createNewWorkspace } = useAuth();
@@ -19,7 +26,9 @@ export function LandingPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-brand-50">
-      <a href="#landing-main" className="skip-link">{t("common.skipToContent")}</a>
+      <a href="#landing-main" className="skip-link">
+        {t("common.skipToContent")}
+      </a>
       <header className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-5 sm:px-6">
         <div className="flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-600 text-white shadow-sm">
@@ -76,8 +85,8 @@ export function LandingPage() {
               ) : initError ? (
                 <div className="space-y-3">
                   <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
-                    We couldn't set up your workspace: {initError}. Please check your connection and try
-                    again.
+                    We couldn't set up your workspace: {initError}. Please check your connection and
+                    try again.
                   </div>
                   <button
                     onClick={() => void createNewWorkspace()}
@@ -96,9 +105,7 @@ export function LandingPage() {
                   <span className="ml-1 transition group-hover:translate-x-0.5">→</span>
                 </button>
               )}
-              <p className="text-xs text-slate-500">
-                {t("landing.noCredentials")}
-              </p>
+              <p className="text-xs text-slate-500">{t("landing.noCredentials")}</p>
             </div>
 
             <div className="grid gap-4 pt-4 sm:grid-cols-3">
@@ -133,10 +140,19 @@ export function LandingPage() {
               <div className="mt-5 space-y-3">
                 <Step done label={t("common.appName")} sub={t("landing.noCredentials")} />
                 <Step done label={t("settings.ready")} sub={t("nav.privateBody")} />
-                <Step active label={t("upload.title")} sub={`${t("common.prescription")} • ${t("common.labReport")} • ${t("common.dischargeSummary")}`} />
-                <Step label={t("upload.subtitle")} sub={`${t("common.medications")} • ${t("common.labResults")} • ${t("common.allergies")}`} />
+                <Step
+                  active
+                  label={t("upload.title")}
+                  sub={`${t("common.prescription")} • ${t("common.labReport")} • ${t("common.dischargeSummary")}`}
+                />
+                <Step
+                  label={t("upload.subtitle")}
+                  sub={`${t("common.medications")} • ${t("common.labResults")} • ${t("common.allergies")}`}
+                />
                 <Step label={t("dashboard.title")} />
-                <Step label={`${t("history.title")} • ${t("labs.trendsTitle")} • ${t("ask.title")}`} />
+                <Step
+                  label={`${t("history.title")} • ${t("labs.trendsTitle")} • ${t("ask.title")}`}
+                />
               </div>
             </div>
 
@@ -205,14 +221,16 @@ function Step({
           done
             ? "bg-emerald-600 text-white"
             : active
-            ? "bg-brand-600 text-white ring-4 ring-brand-100"
-            : "bg-slate-100 text-slate-400"
+              ? "bg-brand-600 text-white ring-4 ring-brand-100"
+              : "bg-slate-100 text-slate-400"
         }`}
       >
         {done ? "✓" : active ? "●" : "○"}
       </div>
       <div>
-        <p className={`text-sm ${active ? "font-semibold text-slate-900" : "font-medium text-slate-700"}`}>
+        <p
+          className={`text-sm ${active ? "font-semibold text-slate-900" : "font-medium text-slate-700"}`}
+        >
           {label}
         </p>
         {sub && <p className="text-xs text-slate-500">{sub}</p>}
@@ -225,7 +243,9 @@ function Pillar({ icon, title, items }: { icon: React.ReactNode; title: string; 
   return (
     <div>
       <div className="flex items-center gap-2">
-        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-900 text-white">{icon}</div>
+        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-900 text-white">
+          {icon}
+        </div>
         <p className="text-sm font-semibold text-slate-900">{title}</p>
       </div>
       <ul className="mt-3 space-y-1.5">

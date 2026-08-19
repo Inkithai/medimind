@@ -15,19 +15,14 @@ import { useEffect, useRef } from "react";
  * result) re-runs it as normal. Production builds never double-invoke
  * effects, so this is a no-op there.
  */
-export function useStrictEffect(
-  effect: () => void | (() => void),
-  deps: readonly unknown[]
-): void {
+export function useStrictEffect(effect: () => void | (() => void), deps: readonly unknown[]): void {
   const lastDeps = useRef<readonly unknown[] | null>(null);
 
   useEffect(() => {
     const prev = lastDeps.current;
     lastDeps.current = deps;
     const changed =
-      prev === null ||
-      prev.length !== deps.length ||
-      prev.some((d, i) => !Object.is(d, deps[i]));
+      prev === null || prev.length !== deps.length || prev.some((d, i) => !Object.is(d, deps[i]));
     if (!changed) return undefined;
     return effect();
     // eslint-disable-next-line react-hooks/exhaustive-deps

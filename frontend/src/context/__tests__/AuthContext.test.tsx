@@ -60,7 +60,7 @@ function mountProvider(onSnapshot: (snapshot: AuthSnapshot) => void): Root {
         <AuthProvider>
           <Probe />
         </AuthProvider>
-      </StrictMode>
+      </StrictMode>,
     );
   });
   return root;
@@ -89,8 +89,14 @@ async function main() {
     const successfulState = requireSnapshot(observed);
 
     assert(createCalls === 1, `StrictMode creates one anonymous session (observed ${createCalls})`);
-    assert(successfulState.isConfigured === true, "successful provisioning configures the workspace");
-    assert(successfulState.isInitializing === false, "successful provisioning clears the loading state");
+    assert(
+      successfulState.isConfigured === true,
+      "successful provisioning configures the workspace",
+    );
+    assert(
+      successfulState.isInitializing === false,
+      "successful provisioning clears the loading state",
+    );
     assert(successfulState.initError === null, "successful provisioning has no setup error");
     act(() => successfulRoot.unmount());
 
@@ -110,12 +116,18 @@ async function main() {
     await settleAsyncWork();
     const failedState = requireSnapshot(failedObserved);
 
-    assert(createCalls === 1, `failed StrictMode provisioning also makes one request (observed ${createCalls})`);
-    assert(failedState.isConfigured === false, "failed provisioning does not configure a workspace");
+    assert(
+      createCalls === 1,
+      `failed StrictMode provisioning also makes one request (observed ${createCalls})`,
+    );
+    assert(
+      failedState.isConfigured === false,
+      "failed provisioning does not configure a workspace",
+    );
     assert(failedState.isInitializing === false, "failed provisioning clears the loading state");
     assert(
       failedState.initError === "session service unavailable",
-      "failed provisioning exposes an actionable error"
+      "failed provisioning exposes an actionable error",
     );
     act(() => failedRoot.unmount());
   } finally {

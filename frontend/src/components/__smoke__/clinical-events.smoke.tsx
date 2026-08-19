@@ -26,48 +26,62 @@ const visit: Visit = {
   patient_name: "Jane Doe",
   medications: [],
   lab_results: [],
-  diagnoses: [{
-    name: "Essential hypertension",
-    code: "I10",
-    status: "active",
-    onset_date: "2024-01-10",
-    confidence: 0.93,
-    evidence: [evidence("ev_diagnosis", "/diagnoses/0", "Assessment: Essential hypertension (I10)")],
-  }],
-  symptoms: [{
-    name: "Headache",
-    severity: "moderate",
-    status: "current",
-    onset_date: "2025-05-18",
-    confidence: 0.9,
-    evidence: [evidence("ev_symptom", "/symptoms/0", "moderate headache")],
-  }],
-  procedures: [{
-    name: "Appendectomy",
-    procedure_date: "2018-06-01",
-    body_site: "appendix",
-    status: "historical",
-    outcome: "No documented complications",
-    confidence: 0.88,
-    evidence: [evidence("ev_procedure", "/procedures/0", "Past surgery: appendectomy")],
-  }],
-  vital_signs: [{
-    name: "Blood pressure",
-    value: "120/80",
-    unit: "mmHg",
-    measured_at: "2025-05-20",
-    confidence: 0.97,
-    evidence: [evidence("ev_vital", "/vital_signs/0", "BP 120/80 mmHg")],
-  }],
-  imaging_results: [{
-    study_type: "Chest X-ray",
-    body_site: "chest",
-    study_date: "2025-05-19",
-    findings: "No focal airspace opacity",
-    impression: "No acute cardiopulmonary abnormality",
-    confidence: 0.95,
-    evidence: [evidence("ev_imaging", "/imaging_results/0", "No acute cardiopulmonary abnormality")],
-  }],
+  diagnoses: [
+    {
+      name: "Essential hypertension",
+      code: "I10",
+      status: "active",
+      onset_date: "2024-01-10",
+      confidence: 0.93,
+      evidence: [
+        evidence("ev_diagnosis", "/diagnoses/0", "Assessment: Essential hypertension (I10)"),
+      ],
+    },
+  ],
+  symptoms: [
+    {
+      name: "Headache",
+      severity: "moderate",
+      status: "current",
+      onset_date: "2025-05-18",
+      confidence: 0.9,
+      evidence: [evidence("ev_symptom", "/symptoms/0", "moderate headache")],
+    },
+  ],
+  procedures: [
+    {
+      name: "Appendectomy",
+      procedure_date: "2018-06-01",
+      body_site: "appendix",
+      status: "historical",
+      outcome: "No documented complications",
+      confidence: 0.88,
+      evidence: [evidence("ev_procedure", "/procedures/0", "Past surgery: appendectomy")],
+    },
+  ],
+  vital_signs: [
+    {
+      name: "Blood pressure",
+      value: "120/80",
+      unit: "mmHg",
+      measured_at: "2025-05-20",
+      confidence: 0.97,
+      evidence: [evidence("ev_vital", "/vital_signs/0", "BP 120/80 mmHg")],
+    },
+  ],
+  imaging_results: [
+    {
+      study_type: "Chest X-ray",
+      body_site: "chest",
+      study_date: "2025-05-19",
+      findings: "No focal airspace opacity",
+      impression: "No acute cardiopulmonary abnormality",
+      confidence: 0.95,
+      evidence: [
+        evidence("ev_imaging", "/imaging_results/0", "No acute cardiopulmonary abnormality"),
+      ],
+    },
+  ],
   allergies_noted: [],
   clinical_notes: null,
   field_evidence: {
@@ -98,11 +112,24 @@ const timeline: Timeline = {
   documents: [visit],
   medications_timeline: [],
   lab_results_timeline: [],
-  diagnoses_timeline: [{ ...visit.diagnoses![0], ...provenance, date: "2024-01-10", fact_path: "/diagnoses/0" }],
-  symptoms_timeline: [{ ...visit.symptoms![0], ...provenance, date: "2025-05-18", fact_path: "/symptoms/0" }],
-  procedures_timeline: [{ ...visit.procedures![0], ...provenance, date: "2018-06-01", fact_path: "/procedures/0" }],
+  diagnoses_timeline: [
+    { ...visit.diagnoses![0], ...provenance, date: "2024-01-10", fact_path: "/diagnoses/0" },
+  ],
+  symptoms_timeline: [
+    { ...visit.symptoms![0], ...provenance, date: "2025-05-18", fact_path: "/symptoms/0" },
+  ],
+  procedures_timeline: [
+    { ...visit.procedures![0], ...provenance, date: "2018-06-01", fact_path: "/procedures/0" },
+  ],
   vital_signs_timeline: [{ ...visit.vital_signs![0], ...provenance, fact_path: "/vital_signs/0" }],
-  imaging_results_timeline: [{ ...visit.imaging_results![0], ...provenance, date: "2025-05-19", fact_path: "/imaging_results/0" }],
+  imaging_results_timeline: [
+    {
+      ...visit.imaging_results![0],
+      ...provenance,
+      date: "2025-05-19",
+      fact_path: "/imaging_results/0",
+    },
+  ],
   known_allergies: [],
 };
 
@@ -113,17 +140,33 @@ function assertIncludes(markup: string, expected: string, label: string) {
   console.log(`PASS: ${label}`);
 }
 
-const documentMarkup = renderToStaticMarkup(<I18nProvider><DocumentViewer visit={visit} /></I18nProvider>);
+const documentMarkup = renderToStaticMarkup(
+  <I18nProvider>
+    <DocumentViewer visit={visit} />
+  </I18nProvider>,
+);
 assertIncludes(documentMarkup, "Documented diagnoses (1)", "document viewer shows diagnoses");
 assertIncludes(documentMarkup, "Symptoms &amp; signs (1)", "document viewer shows symptoms");
 assertIncludes(documentMarkup, "Procedures (1)", "document viewer shows procedures");
 assertIncludes(documentMarkup, "Vital signs (1)", "document viewer shows vitals");
 assertIncludes(documentMarkup, "Imaging (1)", "document viewer shows imaging");
 assertIncludes(documentMarkup, "Page 2 · View evidence", "clinical facts link to page evidence");
-assertIncludes(documentMarkup, "No acute cardiopulmonary abnormality", "imaging impression remains visible");
+assertIncludes(
+  documentMarkup,
+  "No acute cardiopulmonary abnormality",
+  "imaging impression remains visible",
+);
 
-const timelineMarkup = renderToStaticMarkup(<I18nProvider><TimelineView timeline={timeline} /></I18nProvider>);
-assertIncludes(timelineMarkup, "5 clinical events", "timeline summarizes longitudinal clinical event count");
+const timelineMarkup = renderToStaticMarkup(
+  <I18nProvider>
+    <TimelineView timeline={timeline} />
+  </I18nProvider>,
+);
+assertIncludes(
+  timelineMarkup,
+  "5 clinical events",
+  "timeline summarizes longitudinal clinical event count",
+);
 assertIncludes(timelineMarkup, "Essential hypertension", "timeline renders documented diagnoses");
 assertIncludes(timelineMarkup, "120/80", "timeline renders vital values");
 assertIncludes(timelineMarkup, "Chest X-ray", "timeline renders imaging studies");
@@ -131,14 +174,22 @@ assertIncludes(timelineMarkup, "Chest X-ray", "timeline renders imaging studies"
 const clinicalTimelineMarkup = renderToStaticMarkup(
   <MemoryRouter>
     <ClinicalEventsTimeline timeline={timeline} />
-  </MemoryRouter>
+  </MemoryRouter>,
 );
-assertIncludes(clinicalTimelineMarkup, "Longitudinal clinical events", "history has an event-date-specific clinical timeline");
-assertIncludes(clinicalTimelineMarkup, "2018", "historical procedure date is surfaced independently of document date");
+assertIncludes(
+  clinicalTimelineMarkup,
+  "Longitudinal clinical events",
+  "history has an event-date-specific clinical timeline",
+);
+assertIncludes(
+  clinicalTimelineMarkup,
+  "2018",
+  "historical procedure date is surfaced independently of document date",
+);
 assertIncludes(
   clinicalTimelineMarkup,
   "/documents?document=doc-clinical&amp;evidence=ev_diagnosis",
-  "clinical timeline events deep-link to exact source evidence"
+  "clinical timeline events deep-link to exact source evidence",
 );
 
 const undatedTimeline: Timeline = {
@@ -150,7 +201,9 @@ const undatedTimeline: Timeline = {
   imaging_results_timeline: [],
 };
 const undatedMarkup = renderToStaticMarkup(
-  <MemoryRouter><ClinicalEventsTimeline timeline={undatedTimeline} /></MemoryRouter>
+  <MemoryRouter>
+    <ClinicalEventsTimeline timeline={undatedTimeline} />
+  </MemoryRouter>,
 );
 if (undatedMarkup.indexOf("First undated") >= undatedMarkup.indexOf("Second undated")) {
   throw new Error("FAIL: undated events retain deterministic insertion order");

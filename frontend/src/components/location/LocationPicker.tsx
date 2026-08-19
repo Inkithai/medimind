@@ -1,11 +1,4 @@
-import {
-  useEffect,
-  useId,
-  useRef,
-  useState,
-  type FocusEvent,
-  type KeyboardEvent,
-} from "react";
+import { useEffect, useId, useRef, useState, type FocusEvent, type KeyboardEvent } from "react";
 import { locationSecondaryText, reverseGeocode, searchLocations } from "../../services/geocoding";
 import { useI18n } from "../../i18n/I18nContext";
 import {
@@ -71,7 +64,9 @@ function resultTypeLabel(type?: string): string {
     building: "Address",
     road: "Street",
   };
-  return labels[type] || type.replace(/_/g, " ").replace(/^./, (letter: string) => letter.toUpperCase());
+  return (
+    labels[type] || type.replace(/_/g, " ").replace(/^./, (letter: string) => letter.toUpperCase())
+  );
 }
 
 export function LocationPicker({
@@ -156,7 +151,9 @@ export function LocationPicker({
         if (controller.signal.aborted) return;
         setResults([]);
         setStatus("error");
-        setSearchError(error instanceof Error ? error.message : "Location search failed. Please try again.");
+        setSearchError(
+          error instanceof Error ? error.message : "Location search failed. Please try again.",
+        );
         setActiveIndex(-1);
       }
     }, SEARCH_DEBOUNCE_MS);
@@ -273,7 +270,7 @@ export function LocationPicker({
       setGpsAccuracyMetres(fix.accuracyMetres);
       await resolveAndSelect(
         { latitude: fix.latitude, longitude: fix.longitude },
-        t("location.current")
+        t("location.current"),
       );
     } catch (error) {
       if (!mountedRef.current) return;
@@ -324,7 +321,11 @@ export function LocationPicker({
     try {
       await onConfirm(confirmed);
     } catch (error) {
-      setConfirmError(error instanceof Error ? error.message : "We couldn't save this location. Please try again.");
+      setConfirmError(
+        error instanceof Error
+          ? error.message
+          : "We couldn't save this location. Please try again.",
+      );
     } finally {
       if (mountedRef.current) setIsConfirming(false);
     }
@@ -334,7 +335,7 @@ export function LocationPicker({
     <section
       className={classNames(
         "rounded-3xl border border-slate-200 bg-white shadow-xl shadow-slate-200/50",
-        className
+        className,
       )}
       aria-labelledby={`${listboxId}-title`}
     >
@@ -344,24 +345,30 @@ export function LocationPicker({
             <p className="mb-2 text-xs font-bold uppercase tracking-[0.14em] text-brand-600">
               {step === "search" ? t("location.stepSearch") : t("location.stepConfirm")}
             </p>
-            <h2 id={`${listboxId}-title`} className="text-2xl font-bold tracking-tight text-slate-900">
+            <h2
+              id={`${listboxId}-title`}
+              className="text-2xl font-bold tracking-tight text-slate-900"
+            >
               {step === "search" ? resolvedTitle : t("location.confirmTitle")}
             </h2>
             <p className="mt-1.5 max-w-xl text-sm leading-relaxed text-slate-500">
-              {step === "search"
-                ? resolvedDescription
-                : t("location.confirmDescription")}
+              {step === "search" ? resolvedDescription : t("location.confirmDescription")}
             </p>
           </div>
           <div className="hidden items-center gap-2 sm:flex" aria-hidden="true">
             <span className="flex h-8 w-8 items-center justify-center rounded-full bg-brand-600 text-xs font-bold text-white">
               {step === "search" ? "1" : <CheckIcon className="h-4 w-4" />}
             </span>
-            <span className={classNames("h-0.5 w-8", step === "confirm" ? "bg-brand-600" : "bg-slate-200")} />
+            <span
+              className={classNames(
+                "h-0.5 w-8",
+                step === "confirm" ? "bg-brand-600" : "bg-slate-200",
+              )}
+            />
             <span
               className={classNames(
                 "flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold",
-                step === "confirm" ? "bg-brand-600 text-white" : "bg-slate-100 text-slate-400"
+                step === "confirm" ? "bg-brand-600 text-white" : "bg-slate-100 text-slate-400",
               )}
             >
               2
@@ -373,7 +380,10 @@ export function LocationPicker({
       {step === "search" ? (
         <div className="px-5 py-6 sm:px-7 sm:py-7">
           <div className="relative" onBlur={handleSearchBlur}>
-            <label htmlFor={`${listboxId}-input`} className="mb-2 block text-sm font-semibold text-slate-800">
+            <label
+              htmlFor={`${listboxId}-input`}
+              className="mb-2 block text-sm font-semibold text-slate-800"
+            >
               {t("location.searchLabel")}
             </label>
             <div className="relative">
@@ -396,7 +406,9 @@ export function LocationPicker({
                 aria-autocomplete="list"
                 aria-expanded={showSuggestions}
                 aria-controls={listboxId}
-                aria-activedescendant={activeIndex >= 0 ? `${listboxId}-option-${activeIndex}` : undefined}
+                aria-activedescendant={
+                  activeIndex >= 0 ? `${listboxId}-option-${activeIndex}` : undefined
+                }
                 autoComplete="off"
                 spellCheck={false}
                 placeholder={t("location.searchPlaceholder")}
@@ -421,16 +433,26 @@ export function LocationPicker({
             {showSuggestions && (
               <div className="absolute z-[1000] mt-2 w-full overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-300/50">
                 {status === "loading" ? (
-                  <div className="flex items-center gap-3 px-4 py-5 text-sm text-slate-600" role="status">
+                  <div
+                    className="flex items-center gap-3 px-4 py-5 text-sm text-slate-600"
+                    role="status"
+                  >
                     <Spinner className="h-5 w-5 text-brand-600" /> {t("location.searching")}
                   </div>
                 ) : status === "error" ? (
                   <div className="px-4 py-5" role="alert">
-                    <p className="text-sm font-semibold text-slate-900">{t("location.unavailable")}</p>
+                    <p className="text-sm font-semibold text-slate-900">
+                      {t("location.unavailable")}
+                    </p>
                     <p className="mt-1 text-sm text-slate-500">{searchError}</p>
                   </div>
                 ) : results.length ? (
-                  <ul id={listboxId} role="listbox" aria-label={t("location.searchLabel")} className="py-1.5">
+                  <ul
+                    id={listboxId}
+                    role="listbox"
+                    aria-label={t("location.searchLabel")}
+                    className="py-1.5"
+                  >
                     {results.map((place, index) => (
                       <li
                         key={place.id}
@@ -442,7 +464,7 @@ export function LocationPicker({
                         onClick={() => selectSearchResult(place)}
                         className={classNames(
                           "flex cursor-pointer items-start gap-3 border-b border-slate-100 px-4 py-3.5 last:border-0",
-                          activeIndex === index ? "bg-brand-50" : "bg-white hover:bg-slate-50"
+                          activeIndex === index ? "bg-brand-50" : "bg-white hover:bg-slate-50",
                         )}
                       >
                         <span
@@ -450,14 +472,16 @@ export function LocationPicker({
                             "mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl",
                             activeIndex === index
                               ? "bg-brand-600 text-white"
-                              : "bg-slate-100 text-slate-500"
+                              : "bg-slate-100 text-slate-500",
                           )}
                         >
                           <LocationIcon className="h-5 w-5" />
                         </span>
                         <span className="min-w-0 flex-1">
                           <span className="flex items-center gap-2">
-                            <span className="truncate text-sm font-semibold text-slate-900">{place.name}</span>
+                            <span className="truncate text-sm font-semibold text-slate-900">
+                              {place.name}
+                            </span>
                             <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-500">
                               {resultTypeLabel(place.type)}
                             </span>
@@ -477,11 +501,21 @@ export function LocationPicker({
                 )}
                 <div className="border-t border-slate-100 bg-slate-50 px-4 py-2 text-right text-[11px] text-slate-400">
                   Search data ©{" "}
-                  <a className="underline hover:text-slate-600" href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">
+                  <a
+                    className="underline hover:text-slate-600"
+                    href="https://www.openstreetmap.org/copyright"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
                     OpenStreetMap
                   </a>{" "}
                   ·{" "}
-                  <a className="underline hover:text-slate-600" href="https://www.geonames.org/" target="_blank" rel="noreferrer">
+                  <a
+                    className="underline hover:text-slate-600"
+                    href="https://www.geonames.org/"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
                     GeoNames
                   </a>
                 </div>
@@ -491,7 +525,9 @@ export function LocationPicker({
 
           <div className="my-5 flex items-center gap-3" aria-hidden="true">
             <span className="h-px flex-1 bg-slate-200" />
-            <span className="text-xs font-medium uppercase tracking-wider text-slate-600">{t("upload.or")}</span>
+            <span className="text-xs font-medium uppercase tracking-wider text-slate-600">
+              {t("upload.or")}
+            </span>
             <span className="h-px flex-1 bg-slate-200" />
           </div>
 
@@ -506,7 +542,10 @@ export function LocationPicker({
           </button>
 
           {locationError && (
-            <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800" role="alert">
+            <div
+              className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"
+              role="alert"
+            >
               {locationError}
             </div>
           )}
@@ -527,7 +566,11 @@ export function LocationPicker({
           <div className="px-5 py-6 sm:px-7">
             <div className="flex items-start gap-3">
               <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-brand-50 text-brand-700 ring-1 ring-brand-100">
-                {isResolvingPin ? <Spinner className="h-5 w-5" /> : <LocationIcon className="h-6 w-6" />}
+                {isResolvingPin ? (
+                  <Spinner className="h-5 w-5" />
+                ) : (
+                  <LocationIcon className="h-6 w-6" />
+                )}
               </span>
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-start justify-between gap-2">
@@ -548,7 +591,10 @@ export function LocationPicker({
                   </button>
                 </div>
                 <div className="mt-2 flex flex-wrap items-center gap-2">
-                  <p className="font-mono text-xs text-slate-600" aria-label={t("location.coordinates")}>
+                  <p
+                    className="font-mono text-xs text-slate-600"
+                    aria-label={t("location.coordinates")}
+                  >
                     {coordinatesLabel(selectedPlace)}
                   </p>
                   {gpsAccuracyMetres !== null && (
@@ -557,7 +603,7 @@ export function LocationPicker({
                         "rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide",
                         gpsAccuracyMetres <= COARSE_ACCURACY_THRESHOLD_M
                           ? "bg-emerald-50 text-emerald-800"
-                          : "bg-amber-50 text-amber-800"
+                          : "bg-amber-50 text-amber-800",
                       )}
                     >
                       {t("location.gpsAccuracy", { accuracy: accuracyText(gpsAccuracyMetres) })}
@@ -575,10 +621,16 @@ export function LocationPicker({
 
             {showAddressDetails && (
               <div className="mt-5">
-                <label htmlFor={`${listboxId}-details`} className="block text-sm font-semibold text-slate-800">
-                  {t("location.details")} <span className="font-normal text-slate-600">({t("common.optional")})</span>
+                <label
+                  htmlFor={`${listboxId}-details`}
+                  className="block text-sm font-semibold text-slate-800"
+                >
+                  {t("location.details")}{" "}
+                  <span className="font-normal text-slate-600">({t("common.optional")})</span>
                 </label>
-                <p id={`${listboxId}-details-help`} className="mt-0.5 text-xs text-slate-600">{t("location.detailsHelp")}</p>
+                <p id={`${listboxId}-details-help`} className="mt-0.5 text-xs text-slate-600">
+                  {t("location.detailsHelp")}
+                </p>
                 <input
                   id={`${listboxId}-details`}
                   name="care-location-details"
@@ -592,13 +644,20 @@ export function LocationPicker({
             )}
 
             {confirmError && (
-              <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800" role="alert">
+              <div
+                className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"
+                role="alert"
+              >
                 {confirmError}
               </div>
             )}
 
             <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-              <button type="button" onClick={returnToSearch} className="btn-secondary sm:min-w-[120px]">
+              <button
+                type="button"
+                onClick={returnToSearch}
+                className="btn-secondary sm:min-w-[120px]"
+              >
                 {t("common.back")}
               </button>
               <button

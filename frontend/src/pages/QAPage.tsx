@@ -13,7 +13,12 @@ import { useI18n } from "../i18n/I18nContext";
 import type { QAResponse, QASource, Timeline, Visit } from "../types/api";
 import { findVisitForSource } from "../utils/sources";
 
-const SUGGESTION_KEYS = ["ask.suggestion1", "ask.suggestion2", "ask.suggestion3", "ask.suggestion4"] as const;
+const SUGGESTION_KEYS = [
+  "ask.suggestion1",
+  "ask.suggestion2",
+  "ask.suggestion3",
+  "ask.suggestion4",
+] as const;
 
 export function QAPage() {
   const { credentials } = useAuth();
@@ -24,7 +29,7 @@ export function QAPage() {
   const [result, setResult] = useState<QAResponse | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [openSource, setOpenSource] = useState<{ source: QASource; visit: Visit | null } | null>(
-    null
+    null,
   );
   const inFlightRef = useRef(false);
   const timelineRef = useRef<Timeline | null>(null);
@@ -95,7 +100,9 @@ export function QAPage() {
               void ask();
             }}
           >
-            <label htmlFor="record-question" className="sr-only">{t("ask.inputLabel")}</label>
+            <label htmlFor="record-question" className="sr-only">
+              {t("ask.inputLabel")}
+            </label>
             <input
               id="record-question"
               name="question"
@@ -122,10 +129,14 @@ export function QAPage() {
               {t("ask.ask")}
             </button>
           </form>
-          <p id="question-help" className="sr-only">{t("ask.description")}</p>
+          <p id="question-help" className="sr-only">
+            {t("ask.description")}
+          </p>
 
           <details className="text-xs text-slate-500">
-            <summary className="cursor-pointer font-medium text-slate-700">{t("ask.advanced")}</summary>
+            <summary className="cursor-pointer font-medium text-slate-700">
+              {t("ask.advanced")}
+            </summary>
             <div className="mt-2 flex flex-wrap items-center gap-2">
               <label htmlFor="topk">{t("ask.amount")}:</label>
               <input
@@ -142,25 +153,27 @@ export function QAPage() {
           </details>
 
           <fieldset>
-            <legend className="mb-2 text-xs font-semibold text-slate-700">{t("ask.suggestions")}</legend>
+            <legend className="mb-2 text-xs font-semibold text-slate-700">
+              {t("ask.suggestions")}
+            </legend>
             <div className="flex flex-wrap gap-2">
-            {SUGGESTION_KEYS.map((key) => {
-              const suggestion = t(key);
-              return (
-              <button
-                type="button"
-                key={key}
-                onClick={() => {
-                  setQuestion(suggestion);
-                  void ask(suggestion);
-                }}
-                disabled={loading}
-                className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-50"
-              >
-                {suggestion}
-              </button>
-              );
-            })}
+              {SUGGESTION_KEYS.map((key) => {
+                const suggestion = t(key);
+                return (
+                  <button
+                    type="button"
+                    key={key}
+                    onClick={() => {
+                      setQuestion(suggestion);
+                      void ask(suggestion);
+                    }}
+                    disabled={loading}
+                    className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-50"
+                  >
+                    {suggestion}
+                  </button>
+                );
+              })}
             </div>
           </fieldset>
         </CardBody>

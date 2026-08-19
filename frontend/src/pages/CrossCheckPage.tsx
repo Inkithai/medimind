@@ -63,13 +63,18 @@ export function CrossCheckPage() {
                 const result = await api.reanalyzeMedicationSafety(credentials);
                 setReport(result.cross_check_report);
                 setDosageReport(result.dosage_report);
-                window.dispatchEvent(new CustomEvent("medimind:safety-updated", {
-                  detail: { count: collectSafetyAlerts(result.cross_check_report, result.dosage_report).length },
-                }));
+                window.dispatchEvent(
+                  new CustomEvent("medimind:safety-updated", {
+                    detail: {
+                      count: collectSafetyAlerts(result.cross_check_report, result.dosage_report)
+                        .length,
+                    },
+                  }),
+                );
                 setReanalyzeNotice(
                   result.resolved_count > 0
                     ? `Safety analysis updated. ${result.resolved_count} previous finding(s) resolved.`
-                    : `Safety analysis is current (${result.findings_after} finding(s)).`
+                    : `Safety analysis is current (${result.findings_after} finding(s)).`,
                 );
               } catch (err) {
                 setError(err);
@@ -94,7 +99,10 @@ export function CrossCheckPage() {
       </div>
 
       {reanalyzeNotice && (
-        <div role="status" className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+        <div
+          role="status"
+          className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900"
+        >
           {reanalyzeNotice}
         </div>
       )}
@@ -102,10 +110,7 @@ export function CrossCheckPage() {
       {loading && <LoadingState label={t("safety.loading")} />}
 
       {!loading && error !== null && (
-        <NotFoundOrError
-          error={error}
-          onRetry={() => setReloadKey((k) => k + 1)}
-        />
+        <NotFoundOrError error={error} onRetry={() => setReloadKey((k) => k + 1)} />
       )}
 
       {!loading && report && (
@@ -139,9 +144,7 @@ function NotFoundOrError({ error, onRetry }: { error: unknown; onRetry: () => vo
       <Card>
         <CardBody>
           <div className="flex flex-col items-center gap-3 py-10 text-center">
-            <p className="text-base font-semibold text-slate-700">
-              {t("safety.noIssues")}
-            </p>
+            <p className="text-base font-semibold text-slate-700">{t("safety.noIssues")}</p>
             <p className="max-w-md text-sm text-slate-500">
               Upload at least one document and we'll check your medicines for you.
             </p>

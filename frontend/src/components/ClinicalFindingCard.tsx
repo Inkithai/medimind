@@ -23,9 +23,7 @@ function labPhrase(f: ClinicalFinding): string | null {
     return `${f.lab.test} ${f.lab.value ?? ""} ${f.lab.unit ?? ""}`.trim();
   }
   if (f.lab_markers && f.lab_markers.length) {
-    return f.lab_markers
-      .map((m) => `${m.test} ${m.value ?? ""} ${m.unit ?? ""}`.trim())
-      .join(", ");
+    return f.lab_markers.map((m) => `${m.test} ${m.value ?? ""} ${m.unit ?? ""}`.trim()).join(", ");
   }
   return null;
 }
@@ -37,9 +35,7 @@ function labPhrase(f: ClinicalFinding): string | null {
  */
 export function ClinicalFindingCard({ finding }: { finding: ClinicalFinding }) {
   const { credentials } = useAuth();
-  const [verdict, setVerdict] = useState<string | null>(
-    finding.feedback_verdict ?? null
-  );
+  const [verdict, setVerdict] = useState<string | null>(finding.feedback_verdict ?? null);
   const [saving, setSaving] = useState<FeedbackVerdict | null>(null);
   const [reason, setReason] = useState("");
 
@@ -150,8 +146,8 @@ export function ClinicalFindingCard({ finding }: { finding: ClinicalFinding }) {
               ))}
             </div>
             <p className="text-[11px] text-slate-400">
-              Captured for this workspace only. Used to tune alert priority and
-              track false-positive / override rates.
+              Captured for this workspace only. Used to tune alert priority and track false-positive
+              / override rates.
             </p>
           </div>
         </details>

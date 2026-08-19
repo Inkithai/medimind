@@ -29,9 +29,7 @@ export function Figure({
       <div role="img" aria-label={label}>
         {children}
       </div>
-      {caption && (
-        <figcaption className="mt-3 text-xs text-slate-500">{caption}</figcaption>
-      )}
+      {caption && <figcaption className="mt-3 text-xs text-slate-500">{caption}</figcaption>}
     </figure>
   );
 }
@@ -55,16 +53,14 @@ export function Node({
       className={classNames(
         "flex w-full flex-col rounded-xl border px-3.5 py-3 text-left shadow-sm",
         TONES[tone],
-        className
+        className,
       )}
     >
       <span className="flex items-center gap-2">
         {icon && <span className="shrink-0 opacity-80">{icon}</span>}
         <span className="text-sm font-semibold leading-snug">{title}</span>
       </span>
-      {subtitle && (
-        <span className="mt-1 text-xs leading-relaxed opacity-80">{subtitle}</span>
-      )}
+      {subtitle && <span className="mt-1 text-xs leading-relaxed opacity-80">{subtitle}</span>}
     </div>
   );
 }
@@ -90,11 +86,14 @@ export function Flow({ children }: { children: ReactNode[] }) {
 /** Downward connector. Decorative — the order is conveyed by the text too. */
 export function Connector({ className }: { className?: string }) {
   return (
-    <div
-      className={classNames("flex justify-center py-1.5", className)}
-      aria-hidden="true"
-    >
-      <svg viewBox="0 0 12 20" className="h-4 w-3 text-slate-300" fill="none" stroke="currentColor" strokeWidth={1.5}>
+    <div className={classNames("flex justify-center py-1.5", className)} aria-hidden="true">
+      <svg
+        viewBox="0 0 12 20"
+        className="h-4 w-3 text-slate-300"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={1.5}
+      >
         <path d="M6 0v14" />
         <path d="M1.5 10.5 6 15l4.5-4.5" strokeLinecap="round" strokeLinejoin="round" />
       </svg>

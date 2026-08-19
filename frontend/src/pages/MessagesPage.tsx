@@ -139,7 +139,9 @@ export function MessagesPage() {
                       }`}
                     >
                       {m.body}
-                      <div className={`mt-1 text-[10px] ${m.direction === "outbound" ? "text-brand-100" : "text-slate-400"}`}>
+                      <div
+                        className={`mt-1 text-[10px] ${m.direction === "outbound" ? "text-brand-100" : "text-slate-400"}`}
+                      >
                         {new Date(m.created_at).toLocaleString()}
                       </div>
                     </div>

@@ -44,7 +44,7 @@ function render(result: QAResponse, extra: Record<string, unknown> = {}): string
       <I18nProvider>
         <QAResultCard result={result} {...extra} />
       </I18nProvider>
-    </MemoryRouter>
+    </MemoryRouter>,
   );
 }
 
@@ -131,7 +131,7 @@ const tests: Array<[string, () => void]> = [
     () => {
       const html = render(
         { ...GROUNDED, answer: "Nothing about <script>alert(1)</script> is recorded." },
-        { question: "What is <script>alert(1)</script>?" }
+        { question: "What is <script>alert(1)</script>?" },
       );
       assert.ok(!html.includes("<script>"), "script tags must be escaped");
       assert.ok(html.includes("&lt;script&gt;"));

@@ -22,12 +22,22 @@ const completeFlag: ClinicalFlag = {
     id: "pharmacy",
     label: "Pharmacist / prescribing doctor",
     provider_query: "pharmacy",
-    reason: "Medication safety concerns are best reviewed by a pharmacist or prescribing clinician.",
+    reason:
+      "Medication safety concerns are best reviewed by a pharmacist or prescribing clinician.",
     matched_terms: [],
-    primary: { id: "pharmacy", label: "Pharmacist / prescribing doctor", provider_query: "pharmacy" },
-    alternative: { id: "general_practice", label: "General Physician", provider_query: "general practitioner" },
+    primary: {
+      id: "pharmacy",
+      label: "Pharmacist / prescribing doctor",
+      provider_query: "pharmacy",
+    },
+    alternative: {
+      id: "general_practice",
+      label: "General Physician",
+      provider_query: "general practitioner",
+    },
   },
-  care_route_explanation: "MediMind identified a potential medication-safety issue from 2 medication record(s).",
+  care_route_explanation:
+    "MediMind identified a potential medication-safety issue from 2 medication record(s).",
   pathway_evidence: [
     {
       kind: "medication",
@@ -47,11 +57,21 @@ const completeFlag: ClinicalFlag = {
   ],
 };
 
-const completeMarkup = renderToStaticMarkup(<I18nProvider><CareEvidencePanel flag={completeFlag} /></I18nProvider>);
-assert(completeMarkup.includes("Why MediMind suggests this care route"), "renders the care-route title");
+const completeMarkup = renderToStaticMarkup(
+  <I18nProvider>
+    <CareEvidencePanel flag={completeFlag} />
+  </I18nProvider>,
+);
+assert(
+  completeMarkup.includes("Why MediMind suggests this care route"),
+  "renders the care-route title",
+);
 assert(completeMarkup.includes("Medication A"), "renders source-linked medication evidence");
 assert(completeMarkup.includes("Prescription_01.pdf"), "renders the actual source filename");
-assert(completeMarkup.includes("View source document"), "renders a source link only for the existing URL");
+assert(
+  completeMarkup.includes("View source document"),
+  "renders a source link only for the existing URL",
+);
 assert(completeMarkup.includes("91%"), "renders actual available confidence");
 assert(completeMarkup.includes("General Physician"), "renders the broader alternative route");
 
@@ -71,10 +91,23 @@ const sparseFlag: ClinicalFlag = {
   ],
 };
 
-const sparseMarkup = renderToStaticMarkup(<I18nProvider><CareEvidencePanel flag={sparseFlag} /></I18nProvider>);
+const sparseMarkup = renderToStaticMarkup(
+  <I18nProvider>
+    <CareEvidencePanel flag={sparseFlag} />
+  </I18nProvider>,
+);
 assert(!sparseMarkup.includes("91%"), "does not fabricate a missing flag confidence");
-assert(!sparseMarkup.includes("View source document"), "does not render a source link without a valid URL");
-assert(!sparseMarkup.includes("General Physician"), "does not fabricate an absent broader alternative");
-assert(sparseMarkup.includes("Original_Prescription.pdf"), "renders source filename when a URL is unavailable");
+assert(
+  !sparseMarkup.includes("View source document"),
+  "does not render a source link without a valid URL",
+);
+assert(
+  !sparseMarkup.includes("General Physician"),
+  "does not fabricate an absent broader alternative",
+);
+assert(
+  sparseMarkup.includes("Original_Prescription.pdf"),
+  "renders source filename when a URL is unavailable",
+);
 
 console.log("\nAll CareEvidencePanel tests passed.");

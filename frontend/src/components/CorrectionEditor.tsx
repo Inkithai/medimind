@@ -37,7 +37,12 @@ interface Draft {
     flag: LabResult["flag"];
   }>;
   diagnoses: Array<{ name: string; code: string; status: Diagnosis["status"]; onset_date: string }>;
-  symptoms: Array<{ name: string; severity: Symptom["severity"]; status: Symptom["status"]; onset_date: string }>;
+  symptoms: Array<{
+    name: string;
+    severity: Symptom["severity"];
+    status: Symptom["status"];
+    onset_date: string;
+  }>;
   procedures: Array<{
     name: string;
     procedure_date: string;
@@ -141,14 +146,21 @@ function buildChanges(visit: Visit, draft: Draft) {
     add(
       `${prefix}/ingredients`,
       old.ingredients,
-      item.ingredients.split(",").map((value) => value.trim()).filter(Boolean)
+      item.ingredients
+        .split(",")
+        .map((value) => value.trim())
+        .filter(Boolean),
     );
     add(`${prefix}/dosage`, old.dosage, item.dosage.trim());
     add(`${prefix}/frequency`, old.frequency, item.frequency.trim());
     add(`${prefix}/duration`, old.duration, item.duration.trim() || null);
     add(`${prefix}/dosage_value`, old.dosage_value, optionalNumber(item.dosage_value));
     add(`${prefix}/dosage_unit`, old.dosage_unit, item.dosage_unit.trim() || null);
-    add(`${prefix}/frequency_per_day`, old.frequency_per_day, optionalNumber(item.frequency_per_day));
+    add(
+      `${prefix}/frequency_per_day`,
+      old.frequency_per_day,
+      optionalNumber(item.frequency_per_day),
+    );
     add(`${prefix}/is_as_needed`, old.is_as_needed, item.is_as_needed);
   });
 
@@ -227,17 +239,21 @@ export function CorrectionEditor({ visit, onSaved }: { visit: Visit; onSaved: ()
   useEffect(() => {
     let active = true;
     setLoadingHistory(true);
-    api.getDocumentCorrections(credentials, visit._document_id)
+    api
+      .getDocumentCorrections(credentials, visit._document_id)
       .then((response) => {
         if (active) setHistory(response.corrections);
       })
       .catch((err) => {
-        if (active) setError(err instanceof Error ? err.message : "Could not load correction history.");
+        if (active)
+          setError(err instanceof Error ? err.message : "Could not load correction history.");
       })
       .finally(() => {
         if (active) setLoadingHistory(false);
       });
-    return () => { active = false; };
+    return () => {
+      active = false;
+    };
   }, [credentials, visit._document_id]);
 
   const changes = useMemo(() => buildChanges(visit, draft), [visit, draft]);
@@ -248,7 +264,12 @@ export function CorrectionEditor({ visit, onSaved }: { visit: Visit; onSaved: ()
     setError(null);
     setSaved(false);
     try {
-      const result = await api.correctDocument(credentials, visit._document_id, changes, reason.trim());
+      const result = await api.correctDocument(
+        credentials,
+        visit._document_id,
+        changes,
+        reason.trim(),
+      );
       setHistory((current) => [...current, ...(result.events || [])]);
       setSaved(true);
       onSaved();
@@ -268,19 +289,32 @@ export function CorrectionEditor({ visit, onSaved }: { visit: Visit; onSaved: ()
 
       {visit._trust?.quarantined && (
         <Alert variant="warning" title="This source is quarantined">
-          It is visible for review but excluded from answers and analytics until its conflict is resolved.
+          It is visible for review but excluded from answers and analytics until its conflict is
+          resolved.
         </Alert>
       )}
 
       <div className="grid gap-3 sm:grid-cols-2">
         <Field label="Document date">
-          <input className="input" value={draft.date} onChange={(e) => setDraft({ ...draft, date: e.target.value })} />
+          <input
+            className="input"
+            value={draft.date}
+            onChange={(e) => setDraft({ ...draft, date: e.target.value })}
+          />
         </Field>
         <Field label="Patient identity">
-          <input className="input" value={draft.patient_name} onChange={(e) => setDraft({ ...draft, patient_name: e.target.value })} />
+          <input
+            className="input"
+            value={draft.patient_name}
+            onChange={(e) => setDraft({ ...draft, patient_name: e.target.value })}
+          />
         </Field>
         <Field label="Provider or doctor">
-          <input className="input" value={draft.provider_or_doctor} onChange={(e) => setDraft({ ...draft, provider_or_doctor: e.target.value })} />
+          <input
+            className="input"
+            value={draft.provider_or_doctor}
+            onChange={(e) => setDraft({ ...draft, provider_or_doctor: e.target.value })}
+          />
         </Field>
       </div>
 
@@ -290,17 +324,32 @@ export function CorrectionEditor({ visit, onSaved }: { visit: Visit; onSaved: ()
             Medication {index + 1}
           </legend>
           <div className="grid gap-3 sm:grid-cols-2">
-            {(["name", "ingredients", "dosage", "frequency", "duration", "dosage_value", "dosage_unit", "frequency_per_day"] as const).map((key) => (
+            {(
+              [
+                "name",
+                "ingredients",
+                "dosage",
+                "frequency",
+                "duration",
+                "dosage_value",
+                "dosage_unit",
+                "frequency_per_day",
+              ] as const
+            ).map((key) => (
               <Field key={key} label={key.replace(/_/g, " ")}>
                 <input
                   className="input"
                   type={key === "dosage_value" || key === "frequency_per_day" ? "number" : "text"}
                   step="any"
                   value={med[key] as string}
-                  onChange={(e) => setDraft({
-                    ...draft,
-                    medications: draft.medications.map((item, i) => i === index ? { ...item, [key]: e.target.value } : item),
-                  })}
+                  onChange={(e) =>
+                    setDraft({
+                      ...draft,
+                      medications: draft.medications.map((item, i) =>
+                        i === index ? { ...item, [key]: e.target.value } : item,
+                      ),
+                    })
+                  }
                 />
               </Field>
             ))}
@@ -308,10 +357,14 @@ export function CorrectionEditor({ visit, onSaved }: { visit: Visit; onSaved: ()
               <input
                 type="checkbox"
                 checked={med.is_as_needed}
-                onChange={(e) => setDraft({
-                  ...draft,
-                  medications: draft.medications.map((item, i) => i === index ? { ...item, is_as_needed: e.target.checked } : item),
-                })}
+                onChange={(e) =>
+                  setDraft({
+                    ...draft,
+                    medications: draft.medications.map((item, i) =>
+                      i === index ? { ...item, is_as_needed: e.target.checked } : item,
+                    ),
+                  })
+                }
               />
               Taken as needed (PRN)
             </label>
@@ -321,17 +374,23 @@ export function CorrectionEditor({ visit, onSaved }: { visit: Visit; onSaved: ()
 
       {draft.lab_results.map((lab, index) => (
         <fieldset key={index} className="rounded-lg border border-slate-200 p-3">
-          <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Lab result {index + 1}</legend>
+          <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
+            Lab result {index + 1}
+          </legend>
           <div className="grid gap-3 sm:grid-cols-2">
             {(["test_name", "value", "unit", "reference_range"] as const).map((key) => (
               <Field key={key} label={key.replace(/_/g, " ")}>
                 <input
                   className="input"
                   value={lab[key]}
-                  onChange={(e) => setDraft({
-                    ...draft,
-                    lab_results: draft.lab_results.map((item, i) => i === index ? { ...item, [key]: e.target.value } : item),
-                  })}
+                  onChange={(e) =>
+                    setDraft({
+                      ...draft,
+                      lab_results: draft.lab_results.map((item, i) =>
+                        i === index ? { ...item, [key]: e.target.value } : item,
+                      ),
+                    })
+                  }
                 />
               </Field>
             ))}
@@ -339,10 +398,14 @@ export function CorrectionEditor({ visit, onSaved }: { visit: Visit; onSaved: ()
               <select
                 className="input"
                 value={lab.flag}
-                onChange={(e) => setDraft({
-                  ...draft,
-                  lab_results: draft.lab_results.map((item, i) => i === index ? { ...item, flag: e.target.value as LabResult["flag"] } : item),
-                })}
+                onChange={(e) =>
+                  setDraft({
+                    ...draft,
+                    lab_results: draft.lab_results.map((item, i) =>
+                      i === index ? { ...item, flag: e.target.value as LabResult["flag"] } : item,
+                    ),
+                  })
+                }
               >
                 <option value="normal">normal</option>
                 <option value="high">high</option>
@@ -356,20 +419,46 @@ export function CorrectionEditor({ visit, onSaved }: { visit: Visit; onSaved: ()
 
       {draft.diagnoses.map((item, index) => (
         <fieldset key={index} className="rounded-lg border border-slate-200 p-3">
-          <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Diagnosis {index + 1}</legend>
+          <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
+            Diagnosis {index + 1}
+          </legend>
           <div className="grid gap-3 sm:grid-cols-2">
             {(["name", "code", "onset_date"] as const).map((key) => (
               <Field key={key} label={key.replace(/_/g, " ")}>
                 <input
                   className="input"
                   value={item[key]}
-                  onChange={(e) => setDraft({ ...draft, diagnoses: draft.diagnoses.map((value, i) => i === index ? { ...value, [key]: e.target.value } : value) })}
+                  onChange={(e) =>
+                    setDraft({
+                      ...draft,
+                      diagnoses: draft.diagnoses.map((value, i) =>
+                        i === index ? { ...value, [key]: e.target.value } : value,
+                      ),
+                    })
+                  }
                 />
               </Field>
             ))}
             <Field label="status">
-              <select className="input" value={item.status} onChange={(e) => setDraft({ ...draft, diagnoses: draft.diagnoses.map((value, i) => i === index ? { ...value, status: e.target.value as Diagnosis["status"] } : value) })}>
-                {(["active", "confirmed", "suspected", "history", "resolved", "unknown"] as const).map((value) => <option key={value}>{value}</option>)}
+              <select
+                className="input"
+                value={item.status}
+                onChange={(e) =>
+                  setDraft({
+                    ...draft,
+                    diagnoses: draft.diagnoses.map((value, i) =>
+                      i === index
+                        ? { ...value, status: e.target.value as Diagnosis["status"] }
+                        : value,
+                    ),
+                  })
+                }
+              >
+                {(
+                  ["active", "confirmed", "suspected", "history", "resolved", "unknown"] as const
+                ).map((value) => (
+                  <option key={value}>{value}</option>
+                ))}
               </select>
             </Field>
           </div>
@@ -378,21 +467,66 @@ export function CorrectionEditor({ visit, onSaved }: { visit: Visit; onSaved: ()
 
       {draft.symptoms.map((item, index) => (
         <fieldset key={index} className="rounded-lg border border-slate-200 p-3">
-          <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Symptom or sign {index + 1}</legend>
+          <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
+            Symptom or sign {index + 1}
+          </legend>
           <div className="grid gap-3 sm:grid-cols-2">
             {(["name", "onset_date"] as const).map((key) => (
               <Field key={key} label={key.replace(/_/g, " ")}>
-                <input className="input" value={item[key]} onChange={(e) => setDraft({ ...draft, symptoms: draft.symptoms.map((value, i) => i === index ? { ...value, [key]: e.target.value } : value) })} />
+                <input
+                  className="input"
+                  value={item[key]}
+                  onChange={(e) =>
+                    setDraft({
+                      ...draft,
+                      symptoms: draft.symptoms.map((value, i) =>
+                        i === index ? { ...value, [key]: e.target.value } : value,
+                      ),
+                    })
+                  }
+                />
               </Field>
             ))}
             <Field label="severity">
-              <select className="input" value={item.severity} onChange={(e) => setDraft({ ...draft, symptoms: draft.symptoms.map((value, i) => i === index ? { ...value, severity: e.target.value as Symptom["severity"] } : value) })}>
-                {(["mild", "moderate", "severe", "unknown"] as const).map((value) => <option key={value}>{value}</option>)}
+              <select
+                className="input"
+                value={item.severity}
+                onChange={(e) =>
+                  setDraft({
+                    ...draft,
+                    symptoms: draft.symptoms.map((value, i) =>
+                      i === index
+                        ? { ...value, severity: e.target.value as Symptom["severity"] }
+                        : value,
+                    ),
+                  })
+                }
+              >
+                {(["mild", "moderate", "severe", "unknown"] as const).map((value) => (
+                  <option key={value}>{value}</option>
+                ))}
               </select>
             </Field>
             <Field label="status">
-              <select className="input" value={item.status} onChange={(e) => setDraft({ ...draft, symptoms: draft.symptoms.map((value, i) => i === index ? { ...value, status: e.target.value as Symptom["status"] } : value) })}>
-                {(["current", "resolved", "intermittent", "historical", "unknown"] as const).map((value) => <option key={value}>{value}</option>)}
+              <select
+                className="input"
+                value={item.status}
+                onChange={(e) =>
+                  setDraft({
+                    ...draft,
+                    symptoms: draft.symptoms.map((value, i) =>
+                      i === index
+                        ? { ...value, status: e.target.value as Symptom["status"] }
+                        : value,
+                    ),
+                  })
+                }
+              >
+                {(["current", "resolved", "intermittent", "historical", "unknown"] as const).map(
+                  (value) => (
+                    <option key={value}>{value}</option>
+                  ),
+                )}
               </select>
             </Field>
           </div>
@@ -401,16 +535,46 @@ export function CorrectionEditor({ visit, onSaved }: { visit: Visit; onSaved: ()
 
       {draft.procedures.map((item, index) => (
         <fieldset key={index} className="rounded-lg border border-slate-200 p-3">
-          <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Procedure {index + 1}</legend>
+          <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
+            Procedure {index + 1}
+          </legend>
           <div className="grid gap-3 sm:grid-cols-2">
             {(["name", "procedure_date", "body_site", "outcome"] as const).map((key) => (
               <Field key={key} label={key.replace(/_/g, " ")}>
-                <input className="input" value={item[key]} onChange={(e) => setDraft({ ...draft, procedures: draft.procedures.map((value, i) => i === index ? { ...value, [key]: e.target.value } : value) })} />
+                <input
+                  className="input"
+                  value={item[key]}
+                  onChange={(e) =>
+                    setDraft({
+                      ...draft,
+                      procedures: draft.procedures.map((value, i) =>
+                        i === index ? { ...value, [key]: e.target.value } : value,
+                      ),
+                    })
+                  }
+                />
               </Field>
             ))}
             <Field label="status">
-              <select className="input" value={item.status} onChange={(e) => setDraft({ ...draft, procedures: draft.procedures.map((value, i) => i === index ? { ...value, status: e.target.value as Procedure["status"] } : value) })}>
-                {(["completed", "planned", "cancelled", "historical", "unknown"] as const).map((value) => <option key={value}>{value}</option>)}
+              <select
+                className="input"
+                value={item.status}
+                onChange={(e) =>
+                  setDraft({
+                    ...draft,
+                    procedures: draft.procedures.map((value, i) =>
+                      i === index
+                        ? { ...value, status: e.target.value as Procedure["status"] }
+                        : value,
+                    ),
+                  })
+                }
+              >
+                {(["completed", "planned", "cancelled", "historical", "unknown"] as const).map(
+                  (value) => (
+                    <option key={value}>{value}</option>
+                  ),
+                )}
               </select>
             </Field>
           </div>
@@ -419,11 +583,24 @@ export function CorrectionEditor({ visit, onSaved }: { visit: Visit; onSaved: ()
 
       {draft.vital_signs.map((item, index) => (
         <fieldset key={index} className="rounded-lg border border-slate-200 p-3">
-          <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Vital sign {index + 1}</legend>
+          <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
+            Vital sign {index + 1}
+          </legend>
           <div className="grid gap-3 sm:grid-cols-2">
             {(["name", "value", "unit", "measured_at"] as const).map((key) => (
               <Field key={key} label={key.replace(/_/g, " ")}>
-                <input className="input" value={item[key]} onChange={(e) => setDraft({ ...draft, vital_signs: draft.vital_signs.map((value, i) => i === index ? { ...value, [key]: e.target.value } : value) })} />
+                <input
+                  className="input"
+                  value={item[key]}
+                  onChange={(e) =>
+                    setDraft({
+                      ...draft,
+                      vital_signs: draft.vital_signs.map((value, i) =>
+                        i === index ? { ...value, [key]: e.target.value } : value,
+                      ),
+                    })
+                  }
+                />
               </Field>
             ))}
           </div>
@@ -432,16 +609,40 @@ export function CorrectionEditor({ visit, onSaved }: { visit: Visit; onSaved: ()
 
       {draft.imaging_results.map((item, index) => (
         <fieldset key={index} className="rounded-lg border border-slate-200 p-3">
-          <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Imaging result {index + 1}</legend>
+          <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
+            Imaging result {index + 1}
+          </legend>
           <div className="grid gap-3 sm:grid-cols-2">
             {(["study_type", "body_site", "study_date"] as const).map((key) => (
               <Field key={key} label={key.replace(/_/g, " ")}>
-                <input className="input" value={item[key]} onChange={(e) => setDraft({ ...draft, imaging_results: draft.imaging_results.map((value, i) => i === index ? { ...value, [key]: e.target.value } : value) })} />
+                <input
+                  className="input"
+                  value={item[key]}
+                  onChange={(e) =>
+                    setDraft({
+                      ...draft,
+                      imaging_results: draft.imaging_results.map((value, i) =>
+                        i === index ? { ...value, [key]: e.target.value } : value,
+                      ),
+                    })
+                  }
+                />
               </Field>
             ))}
             {(["findings", "impression"] as const).map((key) => (
               <Field key={key} label={key}>
-                <textarea className="input min-h-20" value={item[key]} onChange={(e) => setDraft({ ...draft, imaging_results: draft.imaging_results.map((value, i) => i === index ? { ...value, [key]: e.target.value } : value) })} />
+                <textarea
+                  className="input min-h-20"
+                  value={item[key]}
+                  onChange={(e) =>
+                    setDraft({
+                      ...draft,
+                      imaging_results: draft.imaging_results.map((value, i) =>
+                        i === index ? { ...value, [key]: e.target.value } : value,
+                      ),
+                    })
+                  }
+                />
               </Field>
             ))}
           </div>
@@ -449,7 +650,10 @@ export function CorrectionEditor({ visit, onSaved }: { visit: Visit; onSaved: ()
       ))}
 
       <div className="rounded-lg bg-slate-50 p-3 ring-1 ring-slate-200">
-        <label className="text-xs font-semibold uppercase tracking-wide text-slate-600" htmlFor="correction-reason">
+        <label
+          className="text-xs font-semibold uppercase tracking-wide text-slate-600"
+          htmlFor="correction-reason"
+        >
           Reason for correction
         </label>
         <textarea
@@ -460,7 +664,9 @@ export function CorrectionEditor({ visit, onSaved }: { visit: Visit; onSaved: ()
           className="mt-2 block min-h-20 w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
         />
         <div className="mt-3 flex items-center justify-between gap-3">
-          <p className="text-xs text-slate-500">{changes.length} changed field{changes.length === 1 ? "" : "s"}</p>
+          <p className="text-xs text-slate-500">
+            {changes.length} changed field{changes.length === 1 ? "" : "s"}
+          </p>
           <button
             type="button"
             onClick={() => void save()}
@@ -472,25 +678,41 @@ export function CorrectionEditor({ visit, onSaved }: { visit: Visit; onSaved: ()
         </div>
       </div>
 
-      {error && <Alert variant="danger" title="Correction not saved">{error}</Alert>}
-      {saved && <Alert variant="success" title="Correction saved">All derived views were rebuilt from the corrected record.</Alert>}
+      {error && (
+        <Alert variant="danger" title="Correction not saved">
+          {error}
+        </Alert>
+      )}
+      {saved && (
+        <Alert variant="success" title="Correction saved">
+          All derived views were rebuilt from the corrected record.
+        </Alert>
+      )}
 
       <div>
         <h3 className="text-sm font-semibold text-slate-800">Audit history</h3>
         {loadingHistory ? (
-          <p className="mt-2 flex items-center gap-2 text-xs text-slate-500"><Spinner className="h-3.5 w-3.5" /> Loading history</p>
+          <p className="mt-2 flex items-center gap-2 text-xs text-slate-500">
+            <Spinner className="h-3.5 w-3.5" /> Loading history
+          </p>
         ) : history.length === 0 ? (
-          <p className="mt-2 text-xs text-slate-500">No corrections have been made to this document.</p>
+          <p className="mt-2 text-xs text-slate-500">
+            No corrections have been made to this document.
+          </p>
         ) : (
           <ol className="mt-2 space-y-2">
             {[...history].reverse().map((event) => (
-              <li key={event.id} className="rounded-lg border border-slate-200 bg-white p-3 text-xs">
+              <li
+                key={event.id}
+                className="rounded-lg border border-slate-200 bg-white p-3 text-xs"
+              >
                 <div className="flex justify-between gap-2 text-slate-500">
                   <code className="font-semibold text-brand-700">{event.field_path}</code>
                   <span>{formatDate(event.created_at)}</span>
                 </div>
                 <p className="mt-1 text-slate-700">
-                  <Value value={event.previous_value} /> <span className="text-slate-400">→</span> <Value value={event.corrected_value} />
+                  <Value value={event.previous_value} /> <span className="text-slate-400">→</span>{" "}
+                  <Value value={event.corrected_value} />
                 </p>
                 <p className="mt-1 text-slate-500">Reason: {event.reason}</p>
               </li>
@@ -512,5 +734,9 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 function Value({ value }: { value: unknown }) {
-  return <span className="font-medium">{value == null ? "empty" : typeof value === "string" ? value : JSON.stringify(value)}</span>;
+  return (
+    <span className="font-medium">
+      {value == null ? "empty" : typeof value === "string" ? value : JSON.stringify(value)}
+    </span>
+  );
 }

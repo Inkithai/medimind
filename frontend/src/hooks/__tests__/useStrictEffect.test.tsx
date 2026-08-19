@@ -38,9 +38,12 @@ function Probe({
   reloadKey: number;
 }) {
   // Baseline: a plain useEffect — StrictMode (dev, createRoot) double-invokes this.
+  // onPlainRun is intentionally omitted: this is the control group under test.
+  /* eslint-disable react-hooks/exhaustive-deps */
   useEffect(() => {
     onPlainRun();
   }, [reloadKey]);
+  /* eslint-enable react-hooks/exhaustive-deps */
 
   // The fix: useStrictEffect — should run once per distinct deps.
   useStrictEffect(() => {
@@ -65,12 +68,8 @@ function mountProbe() {
     root = createRoot(container);
     root.render(
       <StrictMode>
-        <Probe
-          onRun={() => runs.push(1)}
-          onPlainRun={() => plainRuns.push(1)}
-          reloadKey={0}
-        />
-      </StrictMode>
+        <Probe onRun={() => runs.push(1)} onPlainRun={() => plainRuns.push(1)} reloadKey={0} />
+      </StrictMode>,
     );
   });
 
@@ -83,7 +82,7 @@ function mountProbe() {
             onPlainRun={() => plainRuns.push(1)}
             reloadKey={reloadKey}
           />
-        </StrictMode>
+        </StrictMode>,
       );
     });
   };
@@ -103,11 +102,11 @@ function mountProbe() {
   const { runs, plainRuns, unmount } = mountProbe();
   assert(
     plainRuns.length === 2,
-    `plain useEffect under StrictMode+createRoot fires 2x (observed ${plainRuns.length}) — this is the duplicate-GET bug`
+    `plain useEffect under StrictMode+createRoot fires 2x (observed ${plainRuns.length}) — this is the duplicate-GET bug`,
   );
   assert(
     runs.length === 1,
-    `useStrictEffect under StrictMode fires exactly 1x (observed ${runs.length})`
+    `useStrictEffect under StrictMode fires exactly 1x (observed ${runs.length})`,
   );
   unmount();
 }
@@ -116,16 +115,13 @@ function mountProbe() {
 {
   const { runs, plainRuns, rerender, unmount } = mountProbe();
   rerender(1);
-  assert(
-    runs.length === 2,
-    `useStrictEffect re-runs when deps change (observed ${runs.length})`
-  );
+  assert(runs.length === 2, `useStrictEffect re-runs when deps change (observed ${runs.length})`);
   // React 18 StrictMode double-invokes only MOUNT effects (2 on mount);
   // update effects run once. Baseline total = 3, our hook = 2 (once per
   // distinct deps value).
   assert(
     plainRuns.length === 3,
-    `plain useEffect fired 2x on mount + 1x on update (observed ${plainRuns.length})`
+    `plain useEffect fired 2x on mount + 1x on update (observed ${plainRuns.length})`,
   );
   unmount();
 }
@@ -136,7 +132,7 @@ function mountProbe() {
   rerender(0); // same reloadKey value — deps unchanged
   assert(
     runs.length === 1,
-    `useStrictEffect does not re-run on same-deps re-render (observed ${runs.length})`
+    `useStrictEffect does not re-run on same-deps re-render (observed ${runs.length})`,
   );
   unmount();
 }

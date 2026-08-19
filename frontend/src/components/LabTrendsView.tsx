@@ -31,10 +31,7 @@ export function LabTrendsView({ report }: { report: LabTrendsReport }) {
         )}
 
         {!hasTrends && !hasSingles && !hasInsufficient && (
-          <EmptyState
-            title={t("labs.noTrends")}
-            description={t("labs.noTrendsBody")}
-          />
+          <EmptyState title={t("labs.noTrends")} description={t("labs.noTrendsBody")} />
         )}
 
         {hasTrends && (
@@ -51,7 +48,9 @@ export function LabTrendsView({ report }: { report: LabTrendsReport }) {
               Single lab results ({formatNumber(singleResults.length)})
             </h3>
             <p className="mb-3 text-xs text-slate-500">
-              These have one usable reading, so no trend is calculated. When safe, the backend compares the value with the printed reference range or a conservative general interval.
+              These have one usable reading, so no trend is calculated. When safe, the backend
+              compares the value with the printed reference range or a conservative general
+              interval.
             </p>
             <div className="grid gap-2 md:grid-cols-2">
               {singleResults.map((item, idx) => (
@@ -68,7 +67,10 @@ export function LabTrendsView({ report }: { report: LabTrendsReport }) {
             </h3>
             <div className="space-y-2">
               {report.insufficient_data.map((item, idx) => (
-                <div key={idx} className="rounded-md border border-slate-200 bg-slate-50/60 px-3 py-2 text-sm">
+                <div
+                  key={idx}
+                  className="rounded-md border border-slate-200 bg-slate-50/60 px-3 py-2 text-sm"
+                >
                   <p className="font-medium text-slate-700">{item.test_name}</p>
                   <p className="text-xs text-slate-500">{item.reason}</p>
                 </div>
@@ -93,7 +95,6 @@ function recovered(trend: LabTrend): boolean {
   return Boolean(trend.crossed_into_abnormal_at) && lastFlag(trend) === "normal";
 }
 
-
 function SingleResultCard({ item }: { item: SingleLabResult }) {
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-3 text-sm">
@@ -105,19 +106,32 @@ function SingleResultCard({ item }: { item: SingleLabResult }) {
             {item.range_source ? ` · range: ${item.range_source}` : ""}
           </p>
         </div>
-        <StatusBadge tone={item.status === "normal" ? "success" : item.status === "high" ? "danger" : item.status === "low" ? "info" : "neutral"}>
+        <StatusBadge
+          tone={
+            item.status === "normal"
+              ? "success"
+              : item.status === "high"
+                ? "danger"
+                : item.status === "low"
+                  ? "info"
+                  : "neutral"
+          }
+        >
           {item.status}
         </StatusBadge>
       </div>
       <p className="mt-2 text-sm text-slate-700">
-        <span className="font-medium">Value:</span> {item.value ?? "—"}{item.unit ? ` ${item.unit}` : ""}
+        <span className="font-medium">Value:</span> {item.value ?? "—"}
+        {item.unit ? ` ${item.unit}` : ""}
       </p>
       {item.reference_range && (
         <p className="mt-1 text-xs text-slate-500">Reference: {item.reference_range}</p>
       )}
       <p className="mt-2 text-xs leading-relaxed text-slate-600">{item.explanation}</p>
       {typeof item.confidence === "number" && (
-        <p className="mt-2 text-[11px] text-slate-500">confidence {formatConfidence(item.confidence)}</p>
+        <p className="mt-2 text-[11px] text-slate-500">
+          confidence {formatConfidence(item.confidence)}
+        </p>
       )}
     </div>
   );
@@ -146,7 +160,9 @@ function TrendCard({ trend }: { trend: LabTrend }) {
                 crossed to {crossed.flag} on {crossed.date || "unknown date"}
               </StatusBadge>
             )}
-            {approaching && !crossed && <StatusBadge tone="warning">{t("labs.approaching")}</StatusBadge>}
+            {approaching && !crossed && (
+              <StatusBadge tone="warning">{t("labs.approaching")}</StatusBadge>
+            )}
             {trend.risk_level && trend.risk_level !== "none" && (
               <StatusBadge tone={trend.risk_level === "high" ? "danger" : "warning"}>
                 {t("labs.risk", { level: trend.risk_level })}
@@ -169,9 +185,15 @@ function TrendCard({ trend }: { trend: LabTrend }) {
       <p className="mt-3 text-sm text-slate-600">{trend.explanation}</p>
       {trend.risk_reason && trend.risk_level !== "none" && (
         <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-          <p><span className="font-semibold">{t("labs.safetyObservation")}:</span> {trend.risk_reason}</p>
+          <p>
+            <span className="font-semibold">{t("labs.safetyObservation")}:</span>{" "}
+            {trend.risk_reason}
+          </p>
           {trend.professional_review_recommended && (
-            <Link to="/find-care?from=lab-trend" className="mt-2 inline-flex font-semibold text-brand-700 hover:underline">
+            <Link
+              to="/find-care?from=lab-trend"
+              className="mt-2 inline-flex font-semibold text-brand-700 hover:underline"
+            >
               {t("safety.findCare")} →
             </Link>
           )}
@@ -179,8 +201,14 @@ function TrendCard({ trend }: { trend: LabTrend }) {
       )}
       {trend.confidence < 0.6 && (
         <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-          <p><span className="font-semibold">{t("labs.lowConfidence")}:</span> {t("common.medicalDisclaimer")}</p>
-          <Link to="/find-care?from=low-confidence-lab" className="mt-2 inline-flex font-semibold text-brand-700 hover:underline">
+          <p>
+            <span className="font-semibold">{t("labs.lowConfidence")}:</span>{" "}
+            {t("common.medicalDisclaimer")}
+          </p>
+          <Link
+            to="/find-care?from=low-confidence-lab"
+            className="mt-2 inline-flex font-semibold text-brand-700 hover:underline"
+          >
             {t("labs.verify")} →
           </Link>
         </div>
@@ -191,10 +219,18 @@ function TrendCard({ trend }: { trend: LabTrend }) {
           <caption className="sr-only">{t("labs.tableCaption", { test: trend.test_name })}</caption>
           <thead>
             <tr className="text-left text-slate-400">
-              <th scope="col" className="py-1 pr-4 font-medium">{t("common.date")}</th>
-              <th scope="col" className="py-1 pr-4 font-medium">{t("common.value")}</th>
-              <th scope="col" className="py-1 pr-4 font-medium">{t("common.flag")}</th>
-              <th scope="col" className="py-1 font-medium">{t("common.source")}</th>
+              <th scope="col" className="py-1 pr-4 font-medium">
+                {t("common.date")}
+              </th>
+              <th scope="col" className="py-1 pr-4 font-medium">
+                {t("common.value")}
+              </th>
+              <th scope="col" className="py-1 pr-4 font-medium">
+                {t("common.flag")}
+              </th>
+              <th scope="col" className="py-1 font-medium">
+                {t("common.source")}
+              </th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
@@ -203,7 +239,12 @@ function TrendCard({ trend }: { trend: LabTrend }) {
                 <td className="py-1 pr-4 text-slate-600">{p.date || "—"}</td>
                 <td className="py-1 pr-4 font-medium text-slate-700">{p.value}</td>
                 <td className="py-1 pr-4">
-                  <span className={classNames("inline-flex rounded-full px-2 py-0.5 ring-1 ring-inset", flagTone(p.flag))}>
+                  <span
+                    className={classNames(
+                      "inline-flex rounded-full px-2 py-0.5 ring-1 ring-inset",
+                      flagTone(p.flag),
+                    )}
+                  >
                     {p.flag}
                   </span>
                 </td>
@@ -233,14 +274,16 @@ function parseLabNumber(value: string): number | null {
   const hasComma = token.includes(",");
   const hasDot = token.includes(".");
   if (hasComma && hasDot) {
-    token = token.lastIndexOf(",") > token.lastIndexOf(".")
-      ? token.replace(/\./g, "").replace(",", ".")
-      : token.replace(/,/g, "");
+    token =
+      token.lastIndexOf(",") > token.lastIndexOf(".")
+        ? token.replace(/\./g, "").replace(",", ".")
+        : token.replace(/,/g, "");
   } else if (hasComma) {
     const parts = token.replace(/^-/, "").split(",");
-    token = parts.length > 1 && parts.slice(1).every((p) => p.length === 3 && /^\d+$/.test(p))
-      ? token.replace(/,/g, "")
-      : token.replace(",", ".").replace(/,/g, "");
+    token =
+      parts.length > 1 && parts.slice(1).every((p) => p.length === 3 && /^\d+$/.test(p))
+        ? token.replace(/,/g, "")
+        : token.replace(",", ".").replace(/,/g, "");
   }
   const n = Number(token);
   return Number.isFinite(n) ? n : null;
@@ -280,7 +323,7 @@ function Sparkline({ trend }: { trend: LabTrend }) {
   } else {
     const m = /(-?\d+(?:\.\d+)?)\s*-\s*(-?\d+(?:\.\d+)?)/.exec(rangeStr);
     if (m) {
-      let low = parseFloat(m[1]);
+      const low = parseFloat(m[1]);
       let high = parseFloat(m[2]);
       if (low >= 0 && high < 0) {
         const cleaned = rangeStr.replace(/\s/g, "");
@@ -307,16 +350,26 @@ function Sparkline({ trend }: { trend: LabTrend }) {
     flag: trend.data_points[i]?.flag || "unknown",
   }));
 
-  const path = points.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(" ");
+  const path = points
+    .map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`)
+    .join(" ");
 
   return (
-    <svg width={W} height={H} className="shrink-0" role="img" aria-labelledby={`${titleId} ${descriptionId}`}>
+    <svg
+      width={W}
+      height={H}
+      className="shrink-0"
+      role="img"
+      aria-labelledby={`${titleId} ${descriptionId}`}
+    >
       <title id={titleId}>{t("labs.chartLabel", { test: trend.test_name })}</title>
-      <desc id={descriptionId}>{t("labs.chartDescription", {
-        count: formatNumber(numericPoints.length),
-        direction: trend.direction,
-        range: trend.reference_range || t("common.notAvailable"),
-      })}</desc>
+      <desc id={descriptionId}>
+        {t("labs.chartDescription", {
+          count: formatNumber(numericPoints.length),
+          direction: trend.direction,
+          range: trend.reference_range || t("common.notAvailable"),
+        })}
+      </desc>
       {!Number.isNaN(refLow) && !Number.isNaN(refHigh) && (
         <rect
           x={PAD}
@@ -327,7 +380,14 @@ function Sparkline({ trend }: { trend: LabTrend }) {
           opacity={0.6}
         />
       )}
-      <path d={path} fill="none" stroke="#26685b" strokeWidth={1.8} strokeLinejoin="round" strokeLinecap="round" />
+      <path
+        d={path}
+        fill="none"
+        stroke="#26685b"
+        strokeWidth={1.8}
+        strokeLinejoin="round"
+        strokeLinecap="round"
+      />
       {points.map((p, i) => (
         <circle
           key={i}

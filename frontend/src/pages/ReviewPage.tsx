@@ -17,10 +17,14 @@ function displayValue(value: unknown): string {
   if (typeof value === "string") return value;
   if (typeof value === "object") {
     const item = value as Record<string, unknown>;
-    if ("test_name" in item) return `${item.test_name}: ${item.value ?? "?"} ${item.unit ?? ""}`.trim();
-    if ("study_type" in item) return `${item.study_type}: ${item.impression ?? item.findings ?? ""}`.trim();
-    if ("name" in item && "value" in item) return `${item.name}: ${item.value ?? "?"} ${item.unit ?? ""}`.trim();
-    if ("name" in item && "dosage" in item) return `${item.name}: ${item.dosage ?? ""} ${item.frequency ?? ""}`.trim();
+    if ("test_name" in item)
+      return `${item.test_name}: ${item.value ?? "?"} ${item.unit ?? ""}`.trim();
+    if ("study_type" in item)
+      return `${item.study_type}: ${item.impression ?? item.findings ?? ""}`.trim();
+    if ("name" in item && "value" in item)
+      return `${item.name}: ${item.value ?? "?"} ${item.unit ?? ""}`.trim();
+    if ("name" in item && "dosage" in item)
+      return `${item.name}: ${item.dosage ?? ""} ${item.frequency ?? ""}`.trim();
     if ("name" in item) return `${item.name}: ${item.status ?? item.severity ?? ""}`.trim();
   }
   return JSON.stringify(value);
@@ -47,7 +51,9 @@ export function ReviewPage() {
     }
   }, [credentials]);
 
-  useStrictEffect(() => { void load(); }, [load]);
+  useStrictEffect(() => {
+    void load();
+  }, [load]);
 
   async function resolve(conflict: RecordConflict) {
     const source = selected[conflict.conflict_id];
@@ -55,7 +61,12 @@ export function ReviewPage() {
     setWorking(conflict.conflict_id);
     setError(null);
     try {
-      await api.resolveConflict(credentials, conflict.conflict_id, source, notes[conflict.conflict_id]);
+      await api.resolveConflict(
+        credentials,
+        conflict.conflict_id,
+        source,
+        notes[conflict.conflict_id],
+      );
       await load();
     } catch (err) {
       setError(err);
@@ -68,7 +79,11 @@ export function ReviewPage() {
     setWorking(conflict.conflict_id);
     setError(null);
     try {
-      await api.reopenConflict(credentials, conflict.conflict_id, "Reopened for another source review");
+      await api.reopenConflict(
+        credentials,
+        conflict.conflict_id,
+        "Reopened for another source review",
+      );
       await load();
     } catch (err) {
       setError(err);
@@ -89,10 +104,13 @@ export function ReviewPage() {
         <div>
           <h1 className="page-title">Trust Review</h1>
           <p className="secondary-text mt-2 max-w-2xl">
-            Resolve competing source facts before MediMind uses them in answers, lab trends, medication safety, or summaries.
+            Resolve competing source facts before MediMind uses them in answers, lab trends,
+            medication safety, or summaries.
           </p>
         </div>
-        <Link to="/documents" className="btn-secondary">Correct an extraction</Link>
+        <Link to="/documents" className="btn-secondary">
+          Correct an extraction
+        </Link>
       </header>
 
       {loading && <LoadingState label="Checking source conflicts" />}
@@ -103,18 +121,27 @@ export function ReviewPage() {
           <div className="grid gap-3 sm:grid-cols-4">
             <Metric label="Needs review" value={unresolved.length} tone="text-amber-700" />
             <Metric label="Resolved" value={resolved.length} tone="text-emerald-700" />
-            <Metric label="Quarantined sources" value={data.trust_summary?.quarantined_documents || 0} tone="text-red-700" />
-            <Metric label="Corrected fields" value={data.trust_summary?.corrected_fields || 0} tone="text-brand-700" />
+            <Metric
+              label="Quarantined sources"
+              value={data.trust_summary?.quarantined_documents || 0}
+              tone="text-red-700"
+            />
+            <Metric
+              label="Corrected fields"
+              value={data.trust_summary?.corrected_fields || 0}
+              tone="text-brand-700"
+            />
           </div>
 
           {unresolved.length > 0 ? (
             <Alert variant="warning" title="Conflicting evidence is quarantined">
-              Unresolved facts stay visible below, but are excluded from retrieval and every derived clinical view.
-              Choose the source that matches the original document; do not guess.
+              Unresolved facts stay visible below, but are excluded from retrieval and every derived
+              clinical view. Choose the source that matches the original document; do not guess.
             </Alert>
           ) : (
             <Alert variant="success" title="No unresolved source conflicts">
-              All currently detected conflicts have an authoritative source, or were removed by a correction.
+              All currently detected conflicts have an authoritative source, or were removed by a
+              correction.
             </Alert>
           )}
 
@@ -134,21 +161,36 @@ export function ReviewPage() {
           </div>
 
           {resolved.length > 0 && (
-            <details className="rounded-xl border border-slate-200 bg-white p-4" open={unresolved.length === 0}>
-              <summary className="cursor-pointer font-semibold text-slate-800">Resolved conflicts ({resolved.length})</summary>
+            <details
+              className="rounded-xl border border-slate-200 bg-white p-4"
+              open={unresolved.length === 0}
+            >
+              <summary className="cursor-pointer font-semibold text-slate-800">
+                Resolved conflicts ({resolved.length})
+              </summary>
               <div className="mt-3 space-y-3">
                 {resolved.map((conflict) => {
-                  const chosen = conflict.items.find((item) => item.document_id === conflict.authoritative_document_id);
+                  const chosen = conflict.items.find(
+                    (item) => item.document_id === conflict.authoritative_document_id,
+                  );
                   return (
-                    <div key={conflict.conflict_id} className="rounded-lg border border-emerald-200 bg-emerald-50/50 p-3">
+                    <div
+                      key={conflict.conflict_id}
+                      className="rounded-lg border border-emerald-200 bg-emerald-50/50 p-3"
+                    >
                       <div className="flex items-start justify-between gap-3">
                         <div>
                           <p className="text-sm font-semibold text-slate-800">{conflict.summary}</p>
                           <p className="mt-1 text-xs text-slate-600">
-                            Authoritative: {chosen?.source_file || conflict.authoritative_document_id}
+                            Authoritative:{" "}
+                            {chosen?.source_file || conflict.authoritative_document_id}
                             {chosen?.page ? `, page ${chosen.page}` : ""}
                           </p>
-                          {conflict.resolution_note && <p className="mt-1 text-xs text-slate-500">{conflict.resolution_note}</p>}
+                          {conflict.resolution_note && (
+                            <p className="mt-1 text-xs text-slate-500">
+                              {conflict.resolution_note}
+                            </p>
+                          )}
                         </div>
                         <button
                           className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700"
@@ -171,7 +213,9 @@ export function ReviewPage() {
                 Superseded audit records ({superseded.length})
               </summary>
               <ul className="mt-3 space-y-2 text-xs text-slate-500">
-                {superseded.map((item) => <li key={item.conflict_id}>{item.summary}</li>)}
+                {superseded.map((item) => (
+                  <li key={item.conflict_id}>{item.summary}</li>
+                ))}
               </ul>
             </details>
           )}
@@ -183,12 +227,23 @@ export function ReviewPage() {
 
 function Metric({ label, value, tone }: { label: string; value: number; tone: string }) {
   return (
-    <Card><CardBody><p className={`text-2xl font-bold ${tone}`}>{value}</p><p className="mt-1 text-xs font-medium text-slate-500">{label}</p></CardBody></Card>
+    <Card>
+      <CardBody>
+        <p className={`text-2xl font-bold ${tone}`}>{value}</p>
+        <p className="mt-1 text-xs font-medium text-slate-500">{label}</p>
+      </CardBody>
+    </Card>
   );
 }
 
 function ConflictCard({
-  conflict, selected, note, working, onSelect, onNote, onResolve,
+  conflict,
+  selected,
+  note,
+  working,
+  onSelect,
+  onNote,
+  onResolve,
 }: {
   conflict: RecordConflict;
   selected: string;
@@ -208,9 +263,13 @@ function ConflictCard({
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="text-base font-semibold text-slate-900">{conflict.summary}</h2>
-              <StatusBadge tone={conflict.kind === "identity" ? "danger" : "warning"}>{conflict.kind.replace(/_/g, " ")}</StatusBadge>
+              <StatusBadge tone={conflict.kind === "identity" ? "danger" : "warning"}>
+                {conflict.kind.replace(/_/g, " ")}
+              </StatusBadge>
             </div>
-            <p className="mt-1 text-xs text-slate-500">Select the source that exactly matches the original record.</p>
+            <p className="mt-1 text-xs text-slate-500">
+              Select the source that exactly matches the original record.
+            </p>
 
             <div className="mt-4 grid gap-2">
               {conflict.items.map((item, index) => (
@@ -228,11 +287,16 @@ function ConflictCard({
                   />
                   <span className="min-w-0 flex-1">
                     <span className="block text-sm font-semibold text-slate-800">
-                      {item.source_file}{item.page ? ` · page ${item.page}` : ""}
+                      {item.source_file}
+                      {item.page ? ` · page ${item.page}` : ""}
                     </span>
-                    <span className="mt-1 block text-sm text-slate-700">{displayValue(item.value)}</span>
+                    <span className="mt-1 block text-sm text-slate-700">
+                      {displayValue(item.value)}
+                    </span>
                     <span className="mt-1 block text-xs text-slate-400">
-                      {item.confidence != null ? `Extraction confidence ${formatConfidence(item.confidence)}` : "Confidence unavailable"}
+                      {item.confidence != null
+                        ? `Extraction confidence ${formatConfidence(item.confidence)}`
+                        : "Confidence unavailable"}
                     </span>
                   </span>
                 </label>

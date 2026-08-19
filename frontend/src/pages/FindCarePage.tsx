@@ -36,7 +36,11 @@ const FILTERS: Array<{ value: SearchKind; labelKey: string }> = [
   { value: "doctor", labelKey: "care.doctors" },
 ];
 
-function readPreferences(): { specialty: string; availability: CareAvailability; radiusKm: number } {
+function readPreferences(): {
+  specialty: string;
+  availability: CareAvailability;
+  radiusKm: number;
+} {
   try {
     const value = JSON.parse(localStorage.getItem(PREFERENCES_KEY) || "null") as {
       specialty?: unknown;
@@ -44,13 +48,16 @@ function readPreferences(): { specialty: string; availability: CareAvailability;
       radiusKm?: unknown;
     } | null;
     const allowed = new Set<CareAvailability>(["any", "today", "this_week", "evening", "weekend"]);
-    const radius = typeof value?.radiusKm === "number" && SEARCH_RADII.includes(value.radiusKm as typeof SEARCH_RADII[number])
-      ? value.radiusKm
-      : 5;
+    const radius =
+      typeof value?.radiusKm === "number" &&
+      SEARCH_RADII.includes(value.radiusKm as (typeof SEARCH_RADII)[number])
+        ? value.radiusKm
+        : 5;
     return {
       specialty: typeof value?.specialty === "string" ? value.specialty.slice(0, 80) : "",
       availability:
-        typeof value?.availability === "string" && allowed.has(value.availability as CareAvailability)
+        typeof value?.availability === "string" &&
+        allowed.has(value.availability as CareAvailability)
           ? (value.availability as CareAvailability)
           : "any",
       radiusKm: radius,
@@ -104,7 +111,9 @@ export function FindCarePage() {
   const [searchKind, setSearchKind] = useState<SearchKind>("all");
   const [filter, setFilter] = useState<FacilityFilter>("all");
   const [specialty, setSpecialty] = useState(() => readPreferences().specialty);
-  const [availability, setAvailability] = useState<CareAvailability>(() => readPreferences().availability);
+  const [availability, setAvailability] = useState<CareAvailability>(
+    () => readPreferences().availability,
+  );
   const [radiusKm, setRadiusKm] = useState(() => readPreferences().radiusKm);
   const [recommendation, setRecommendation] = useState<CareRecommendation | null>(null);
   const [suggestion, setSuggestion] = useState<CareSuggestion | null>(null);
@@ -132,7 +141,8 @@ export function FindCarePage() {
 
   useStrictEffect(() => {
     let cancelled = false;
-    api.getCareRecommendation(credentials)
+    api
+      .getCareRecommendation(credentials)
       .then((value) => {
         if (cancelled) return;
         setRecommendation(value);
@@ -149,7 +159,8 @@ export function FindCarePage() {
     // combobox. The page still works without them.
     setSuggestionLoading(true);
     setSuggestionError(null);
-    api.getCareSuggestion(credentials)
+    api
+      .getCareSuggestion(credentials)
       .then((value) => {
         if (cancelled) return;
         setSuggestion(value);
@@ -215,7 +226,7 @@ export function FindCarePage() {
 
   const visibleFacilities = useMemo(
     () => facilities.filter((facility) => filter === "all" || facility.kind === filter),
-    [facilities, filter]
+    [facilities, filter],
   );
 
   async function handleConfirm(location: ConfirmedLocation) {
@@ -223,11 +234,14 @@ export function FindCarePage() {
     setSavedLocation(location);
     setFilter(searchKind);
     window.setTimeout(
-      () => resultsRef.current?.scrollIntoView({
-        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
-        block: "start",
-      }),
-      150
+      () =>
+        resultsRef.current?.scrollIntoView({
+          behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+            ? "auto"
+            : "smooth",
+          block: "start",
+        }),
+      150,
     );
     // Let LocationPicker keep its action disabled until this search settles;
     // otherwise repeated clicks abort and restart the same request.
@@ -239,7 +253,7 @@ export function FindCarePage() {
     requestedKind: SearchKind,
     requestedSpecialty = specialty,
     requestedAvailability = availability,
-    requestedRadiusKm = radiusKm
+    requestedRadiusKm = radiusKm,
   ) {
     requestRef.current?.abort();
     const controller = new AbortController();
@@ -271,7 +285,7 @@ export function FindCarePage() {
       setError(
         requestError instanceof Error
           ? requestError.message
-          : "We couldn't load nearby facilities. Please try again."
+          : "We couldn't load nearby facilities. Please try again.",
       );
       setStatus("error");
     }
@@ -332,7 +346,8 @@ export function FindCarePage() {
           </div>
           <h1 className="page-title">Find care based on your records</h1>
           <p className="secondary-text mt-2 max-w-2xl leading-relaxed">
-            MediMind found care options that may be relevant to the information in your medical records.
+            MediMind found care options that may be relevant to the information in your medical
+            records.
           </p>
         </div>
         {savedLocation && (
@@ -349,10 +364,15 @@ export function FindCarePage() {
 
       {/* ─── Scored care recommendations (percentage relevance) ────────── */}
       {recsLoading ? (
-        <section aria-busy="true" className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <section
+          aria-busy="true"
+          className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"
+        >
           <div className="flex items-center gap-3">
             <span className="h-5 w-5 animate-spin rounded-full border-2 border-brand-200 border-t-brand-600" />
-            <p className="text-sm font-medium text-slate-600">Analysing your records for care options…</p>
+            <p className="text-sm font-medium text-slate-600">
+              Analysing your records for care options…
+            </p>
           </div>
           <div className="mt-4 space-y-3">
             <div className="h-32 animate-pulse rounded-2xl bg-slate-100" />
@@ -406,12 +426,9 @@ export function FindCarePage() {
                 {(showAllRecs ? otherRecommendations : otherRecommendations.slice(0, 3)).map(
                   (rec, idx) => (
                     <li key={`${rec.specialty_key}-${idx}`}>
-                      <OtherCareCard
-                        rec={rec}
-                        onFindNearby={() => handleUseRecommendation(rec)}
-                      />
+                      <OtherCareCard rec={rec} onFindNearby={() => handleUseRecommendation(rec)} />
                     </li>
-                  )
+                  ),
                 )}
               </ul>
               {otherRecommendations.length > 3 && (
@@ -435,9 +452,12 @@ export function FindCarePage() {
           <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-brand-50 text-brand-700">
             <SparkleIcon className="h-6 w-6" />
           </span>
-          <h2 className="mt-4 text-lg font-semibold text-slate-900">No specific care needs detected</h2>
+          <h2 className="mt-4 text-lg font-semibold text-slate-900">
+            No specific care needs detected
+          </h2>
           <p className="mx-auto mt-1 max-w-md text-sm text-slate-500">
-            Upload medical records to receive personalised care recommendations based on your health history.
+            Upload medical records to receive personalised care recommendations based on your health
+            history.
           </p>
           <Link to="/upload" className="btn-primary mt-5">
             Upload Documents
@@ -449,24 +469,35 @@ export function FindCarePage() {
         <section className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-900">
           <p className="font-semibold">{t("care.lowConfidence")}</p>
           <p className="mt-1">
-            The previous result was uncertain. Use the location, availability, and specialty fields below to find a real professional who can check it against the original records.
+            The previous result was uncertain. Use the location, availability, and specialty fields
+            below to find a real professional who can check it against the original records.
           </p>
         </section>
       )}
 
       {recommendation && (
-        <section className={classNames(
-          "rounded-2xl border px-5 py-4 text-sm",
-          recommendation.triggered ? "border-red-200 bg-red-50 text-red-900" : "border-sky-200 bg-sky-50 text-sky-900"
-        )}>
+        <section
+          className={classNames(
+            "rounded-2xl border px-5 py-4 text-sm",
+            recommendation.triggered
+              ? "border-red-200 bg-red-50 text-red-900"
+              : "border-sky-200 bg-sky-50 text-sky-900",
+          )}
+        >
           <p className="font-semibold">
-            {recommendation.triggered ? t("care.recommendation") : t("care.startingSpecialty")}: {recommendation.specialty}
+            {recommendation.triggered ? t("care.recommendation") : t("care.startingSpecialty")}:{" "}
+            {recommendation.specialty}
           </p>
           <p className="mt-1">{recommendation.reason}</p>
           <p className="mt-2 text-xs opacity-80">{recommendation.disclaimer}</p>
           {recommendation.evidence.length > 0 && (
             <p className="mt-2 text-xs font-medium">
-              Evidence: {recommendation.evidence.map((item) => `${item.source_file || "record"}${item.page ? ` p.${item.page}` : ""}`).join(", ")}
+              Evidence:{" "}
+              {recommendation.evidence
+                .map(
+                  (item) => `${item.source_file || "record"}${item.page ? ` p.${item.page}` : ""}`,
+                )
+                .join(", ")}
             </p>
           )}
         </section>
@@ -494,7 +525,9 @@ export function FindCarePage() {
               className="mt-2 min-h-[48px] w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-800 outline-none focus:border-brand-500 focus:ring-4 focus:ring-brand-100"
             >
               {FILTERS.map((option) => (
-                <option key={option.value} value={option.value}>{t(option.labelKey)}</option>
+                <option key={option.value} value={option.value}>
+                  {t(option.labelKey)}
+                </option>
               ))}
             </select>
           </label>
@@ -505,7 +538,9 @@ export function FindCarePage() {
               setSpecialty(id);
               if (savedLocation) void loadFacilities(savedLocation, searchKind, id, availability);
             }}
-            suggestions={suggestion ? [suggestion.suggested, ...suggestion.alternatives] : undefined}
+            suggestions={
+              suggestion ? [suggestion.suggested, ...suggestion.alternatives] : undefined
+            }
             allSpecialties={suggestion?.all ?? []}
             label="What type of care do you need?"
             placeholder="Search specialty or type of care…"
@@ -541,12 +576,15 @@ export function FindCarePage() {
               onChange={(event) => {
                 const next = Number(event.target.value);
                 setRadiusKm(next);
-                if (savedLocation) void loadFacilities(savedLocation, searchKind, specialty, availability, next);
+                if (savedLocation)
+                  void loadFacilities(savedLocation, searchKind, specialty, availability, next);
               }}
               className="mt-2 min-h-[48px] w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-800 outline-none focus:border-brand-500 focus:ring-4 focus:ring-brand-100"
             >
               {SEARCH_RADII.map((radius) => (
-                <option key={radius} value={radius}>{formatNumber(radius)} km</option>
+                <option key={radius} value={radius}>
+                  {formatNumber(radius)} km
+                </option>
               ))}
             </select>
           </label>
@@ -571,10 +609,15 @@ export function FindCarePage() {
               <CareIcon className="h-6 w-6" />
             </span>
             <h2 className="mt-4 text-lg font-semibold text-slate-900">{t("care.selectArea")}</h2>
-            <p className="mx-auto mt-1 max-w-md text-sm text-slate-600">{t("care.selectAreaBody")}</p>
+            <p className="mx-auto mt-1 max-w-md text-sm text-slate-600">
+              {t("care.selectAreaBody")}
+            </p>
           </section>
         ) : status === "loading" ? (
-          <FacilityLoading locationName={savedLocation?.name || "your location"} radiusKm={radiusKm} />
+          <FacilityLoading
+            locationName={savedLocation?.name || "your location"}
+            radiusKm={radiusKm}
+          />
         ) : status === "error" ? (
           <section className="rounded-2xl border border-red-200 bg-red-50 p-6 text-center">
             <h2 className="text-lg font-semibold text-red-900">{t("care.searchFailed")}</h2>
@@ -619,11 +662,16 @@ export function FindCarePage() {
 function FacilityLoading({ locationName, radiusKm }: { locationName: string; radiusKm: number }) {
   const { t, formatNumber } = useI18n();
   return (
-    <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm" aria-live="polite">
+    <section
+      className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"
+      aria-live="polite"
+    >
       <div className="flex items-center gap-3">
         <span className="h-5 w-5 animate-spin rounded-full border-2 border-brand-200 border-t-brand-600" />
         <div>
-          <h2 className="font-semibold text-slate-900">{t("care.finding")} {locationName}</h2>
+          <h2 className="font-semibold text-slate-900">
+            {t("care.finding")} {locationName}
+          </h2>
           <p className="text-sm text-slate-600">{formatNumber(radiusKm)} km</p>
         </div>
       </div>
@@ -664,7 +712,8 @@ function FacilityResults({
       <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
         <div>
           <p className="text-sm font-medium text-brand-700">
-            <LocationIcon className="mr-1 inline h-4 w-4" /> Near {location?.name || "selected location"}
+            <LocationIcon className="mr-1 inline h-4 w-4" /> Near{" "}
+            {location?.name || "selected location"}
           </p>
           <h2 className="section-title mt-1">
             {facilities.length
@@ -674,7 +723,8 @@ function FacilityResults({
         </div>
         {facilities.length > 0 && (
           <p className="max-w-xl text-xs text-slate-400">
-            {t("care.ranked")} {t("common.source")}: {sources || t("common.notAvailable")} · {t("care.notRecommendation")}
+            {t("care.ranked")} {t("common.source")}: {sources || t("common.notAvailable")} ·{" "}
+            {t("care.notRecommendation")}
           </p>
         )}
       </div>
@@ -695,10 +745,13 @@ function FacilityResults({
                   "min-h-[40px] shrink-0 rounded-full px-4 py-2 text-sm font-semibold transition",
                   filter === item.value
                     ? "bg-slate-900 text-white"
-                    : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                    : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50",
                 )}
               >
-                {t(item.labelKey)} <span className={filter === item.value ? "text-slate-300" : "text-slate-400"}>{count}</span>
+                {t(item.labelKey)}{" "}
+                <span className={filter === item.value ? "text-slate-300" : "text-slate-400"}>
+                  {count}
+                </span>
               </button>
             );
           })}
@@ -751,7 +804,12 @@ function FacilityCard({ facility }: { facility: CareFacility }) {
   return (
     <article className="flex flex-col rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
       <div className="flex items-start gap-3">
-        <span className={classNames("flex h-11 w-11 shrink-0 items-center justify-center rounded-xl", kindTone(facility.kind))}>
+        <span
+          className={classNames(
+            "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl",
+            kindTone(facility.kind),
+          )}
+        >
           <CareIcon className="h-5 w-5" />
         </span>
         <div className="min-w-0 flex-1">
@@ -763,7 +821,9 @@ function FacilityCard({ facility }: { facility: CareFacility }) {
               <span
                 className={classNames(
                   "rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider",
-                  facility.openNow ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"
+                  facility.openNow
+                    ? "bg-emerald-50 text-emerald-700"
+                    : "bg-slate-100 text-slate-500",
                 )}
               >
                 {facility.openNow ? t("care.openNow") : t("care.closedNow")}
@@ -778,13 +838,18 @@ function FacilityCard({ facility }: { facility: CareFacility }) {
           )}
           <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
             {facility.distanceKm !== null && (
-              <span className="font-semibold text-brand-700">{distanceLabel(facility.distanceKm, formatNumber)}</span>
+              <span className="font-semibold text-brand-700">
+                {distanceLabel(facility.distanceKm, formatNumber)}
+              </span>
             )}
             {facility.rating !== undefined && (
               <span className="text-amber-700">
                 ★ {formatNumber(facility.rating, { maximumFractionDigits: 1 })}
                 {facility.userRatingCount !== undefined && (
-                  <span className="text-slate-400"> ({formatNumber(facility.userRatingCount)})</span>
+                  <span className="text-slate-400">
+                    {" "}
+                    ({formatNumber(facility.userRatingCount)})
+                  </span>
                 )}
               </span>
             )}
@@ -796,22 +861,30 @@ function FacilityCard({ facility }: { facility: CareFacility }) {
         <p>{facility.address || t("care.addressMissing")}</p>
         {Boolean(facility.openingHours?.length) && (
           <details>
-            <summary className="cursor-pointer font-medium text-slate-800">{t("care.openingHours")}</summary>
+            <summary className="cursor-pointer font-medium text-slate-800">
+              {t("care.openingHours")}
+            </summary>
             <ul className="mt-1 space-y-0.5 text-xs">
-              {facility.openingHours?.map((hours) => <li key={hours}>{hours}</li>)}
+              {facility.openingHours?.map((hours) => (
+                <li key={hours}>{hours}</li>
+              ))}
             </ul>
           </details>
         )}
         {facility.phone && (
           <p>
-            <a href={`tel:${facility.phone}`} className="font-medium text-brand-700 hover:underline">
+            <a
+              href={`tel:${facility.phone}`}
+              className="font-medium text-brand-700 hover:underline"
+            >
               {facility.phone}
             </a>
           </p>
         )}
         {facility.rankingReason && (
           <p className="rounded-md bg-slate-50 px-2.5 py-2 text-xs text-slate-500">
-            <span className="font-semibold text-slate-800">{t("care.whyRanked")}:</span> {facility.rankingReason}
+            <span className="font-semibold text-slate-800">{t("care.whyRanked")}:</span>{" "}
+            {facility.rankingReason}
           </p>
         )}
       </div>
@@ -837,8 +910,14 @@ function FacilityCard({ facility }: { facility: CareFacility }) {
           </a>
         )}
         {facility.website && (
-          <a href={facility.website} target="_blank" rel="noreferrer" className="btn-ghost min-h-[40px] px-4 py-2 text-sm">
-            {t("care.website")}<span className="sr-only"> ({t("common.opensNewWindow")})</span>
+          <a
+            href={facility.website}
+            target="_blank"
+            rel="noreferrer"
+            className="btn-ghost min-h-[40px] px-4 py-2 text-sm"
+          >
+            {t("care.website")}
+            <span className="sr-only"> ({t("common.opensNewWindow")})</span>
           </a>
         )}
       </div>
@@ -868,7 +947,7 @@ function kindTone(kind: FacilityKind): string {
 
 function distanceLabel(
   distanceKm: number,
-  formatNumber: (value: number, options?: Intl.NumberFormatOptions) => string
+  formatNumber: (value: number, options?: Intl.NumberFormatOptions) => string,
 ): string {
   if (distanceKm < 1) return `${formatNumber(Math.max(1, Math.round(distanceKm * 1_000)))} m`;
   return `${formatNumber(distanceKm, { maximumFractionDigits: distanceKm < 10 ? 1 : 0 })} km`;
@@ -890,7 +969,9 @@ function SpecialtySuggestionsSection({
       <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
         <div className="flex items-center gap-3">
           <span className="h-5 w-5 animate-spin rounded-full border-2 border-brand-200 border-t-brand-600" />
-          <p className="text-sm font-medium text-slate-600">Analysing your records for care options…</p>
+          <p className="text-sm font-medium text-slate-600">
+            Analysing your records for care options…
+          </p>
         </div>
         <div className="mt-4 grid gap-3 md:grid-cols-2">
           {[0, 1, 2].map((i) => (
@@ -920,9 +1001,12 @@ function SpecialtySuggestionsSection({
         <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-brand-50 text-brand-700">
           <SparkleIcon className="h-6 w-6" />
         </span>
-        <h2 className="mt-4 text-lg font-semibold text-slate-900">No specific care needs detected</h2>
+        <h2 className="mt-4 text-lg font-semibold text-slate-900">
+          No specific care needs detected
+        </h2>
         <p className="mx-auto mt-1 max-w-md text-sm text-slate-500">
-          Upload medical records to receive personalised care recommendations based on your health history.
+          Upload medical records to receive personalised care recommendations based on your health
+          history.
         </p>
       </section>
     );
@@ -963,7 +1047,9 @@ function SpecialtySuggestionsSection({
               <ul className="mt-3 flex-1 space-y-1 text-sm leading-relaxed text-slate-500">
                 {option.reasons.slice(0, 3).map((reason, i) => (
                   <li key={i} className="flex gap-2">
-                    <span aria-hidden="true" className="select-none text-brand-500">•</span>
+                    <span aria-hidden="true" className="select-none text-brand-500">
+                      •
+                    </span>
                     <span>{reason}</span>
                   </li>
                 ))}
@@ -1030,14 +1116,14 @@ function RelevanceBadge({
     size === "lg"
       ? "px-3 py-1 text-sm"
       : size === "sm"
-      ? "px-2 py-0.5 text-[11px]"
-      : "px-2.5 py-0.5 text-xs";
+        ? "px-2 py-0.5 text-[11px]"
+        : "px-2.5 py-0.5 text-xs";
   return (
     <span
       className={classNames(
         "inline-flex items-center gap-1.5 rounded-full font-bold uppercase tracking-wide ring-1",
         relevanceTone(relevance),
-        sizeClasses
+        sizeClasses,
       )}
     >
       <span>{scoredRelevanceLabel(relevance)}</span>
@@ -1054,11 +1140,13 @@ function HowIsRelevanceCalculated() {
       aria-label="How relevance is calculated"
     >
       <p>
-        <strong className="text-slate-800">Relevance is an informational ranking, not a medical
-        probability or diagnosis.</strong> MediMind considers documented diagnoses, medications,
-        allergies, laboratory trends, explicit safety flags, and the strength of supporting evidence in
-        your records. Each recommendation's percentage is the sum of points from its contributing
-        factors (visible when you click <em>View supporting records</em>).
+        <strong className="text-slate-800">
+          Relevance is an informational ranking, not a medical probability or diagnosis.
+        </strong>{" "}
+        MediMind considers documented diagnoses, medications, allergies, laboratory trends, explicit
+        safety flags, and the strength of supporting evidence in your records. Each recommendation's
+        percentage is the sum of points from its contributing factors (visible when you click{" "}
+        <em>View supporting records</em>).
       </p>
       <p className="mt-2 text-xs text-slate-500">
         Top suggestion picks the highest-scoring record-backed care type. Safety-flagged findings
@@ -1156,7 +1244,9 @@ function TopRecommendationCard({
                       <li key={i} className="flex items-baseline justify-between gap-3 text-sm">
                         <span className="text-slate-700">
                           <span className="font-semibold">{f.label}</span>
-                          {f.note && <span className="ml-1.5 text-xs text-slate-500">— {f.note}</span>}
+                          {f.note && (
+                            <span className="ml-1.5 text-xs text-slate-500">— {f.note}</span>
+                          )}
                         </span>
                         <span className="shrink-0 font-mono text-xs font-semibold text-brand-700">
                           +{f.points}
@@ -1201,7 +1291,7 @@ function OtherCareCard({
     <div
       className={classNames(
         "group rounded-2xl border bg-white p-4 shadow-sm transition hover:border-brand-200 hover:shadow-md",
-        rec.has_safety_signal ? "border-amber-200" : "border-slate-200"
+        rec.has_safety_signal ? "border-amber-200" : "border-slate-200",
       )}
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -1227,7 +1317,9 @@ function OtherCareCard({
           className="inline-flex min-h-[40px] shrink-0 items-center gap-1.5 rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:border-brand-300 hover:bg-brand-50 hover:text-brand-800"
         >
           <LocationIcon className="h-4 w-4" /> Find nearby
-          <span className="text-slate-400 group-hover:text-brand-600" aria-hidden="true">›</span>
+          <span className="text-slate-400 group-hover:text-brand-600" aria-hidden="true">
+            ›
+          </span>
         </button>
       </div>
     </div>
@@ -1264,8 +1356,7 @@ function googleMapsUrl(facility: CareFacility): string {
   const isGoogleHost = /^https?:\/\/([a-z0-9-]+\.)*(google\.[a-z.]+|goo\.gl)(\/|$)/i;
   if (facility.mapsUrl && isGoogleHost.test(facility.mapsUrl)) return facility.mapsUrl;
 
-  const hasCoordinates =
-    Number.isFinite(facility.latitude) && Number.isFinite(facility.longitude);
+  const hasCoordinates = Number.isFinite(facility.latitude) && Number.isFinite(facility.longitude);
   const query = [facility.name, facility.address].filter(Boolean).join(", ");
   if (!query && hasCoordinates) {
     return `https://www.google.com/maps/search/?api=1&query=${facility.latitude},${facility.longitude}`;

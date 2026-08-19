@@ -22,7 +22,9 @@ export function SymptomCheckerPage() {
     setLoading(true);
     setError(null);
     try {
-      setResult(await api.analyseSymptom(credentials, symptom.trim(), duration.trim() || undefined));
+      setResult(
+        await api.analyseSymptom(credentials, symptom.trim(), duration.trim() || undefined),
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Analysis failed");
     } finally {
@@ -41,7 +43,9 @@ export function SymptomCheckerPage() {
         <CardBody>
           <form onSubmit={run} className="space-y-3">
             <label className="block text-sm">
-              <span className="font-medium text-slate-700">Describe a symptom in your own words</span>
+              <span className="font-medium text-slate-700">
+                Describe a symptom in your own words
+              </span>
               <textarea
                 value={symptom}
                 onChange={(e) => setSymptom(e.target.value)}
@@ -86,7 +90,10 @@ export function SymptomCheckerPage() {
               <>
                 <div className="flex flex-wrap gap-2">
                   {result.matched_symptoms?.map((s) => (
-                    <span key={s} className="rounded-full bg-brand-50 px-2.5 py-0.5 text-xs font-medium text-brand-700">
+                    <span
+                      key={s}
+                      className="rounded-full bg-brand-50 px-2.5 py-0.5 text-xs font-medium text-brand-700"
+                    >
                       {s}
                     </span>
                   ))}
@@ -94,8 +101,11 @@ export function SymptomCheckerPage() {
                 <p className="whitespace-pre-line text-sm leading-relaxed text-slate-700">
                   {result.summary}
                 </p>
-                {result.findings?.some((f) => f.relevant_medications_on_record.length === 0 &&
-                  f.relevant_abnormal_labs.length === 0) && (
+                {result.findings?.some(
+                  (f) =>
+                    f.relevant_medications_on_record.length === 0 &&
+                    f.relevant_abnormal_labs.length === 0,
+                ) && (
                   <p className="text-xs text-slate-400">
                     No medications or abnormal labs on your record matched this symptom.
                   </p>

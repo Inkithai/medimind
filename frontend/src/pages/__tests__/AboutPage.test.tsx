@@ -19,14 +19,11 @@ const html = renderToStaticMarkup(
     <I18nProvider>
       <AboutPage />
     </I18nProvider>
-  </MemoryRouter>
+  </MemoryRouter>,
 );
 
 const pageSource = readFileSync(new URL("../AboutPage.tsx", import.meta.url), "utf8");
-const layoutSource = readFileSync(
-  new URL("../../components/Layout.tsx", import.meta.url),
-  "utf8"
-);
+const layoutSource = readFileSync(new URL("../../components/Layout.tsx", import.meta.url), "utf8");
 
 /** React escapes text nodes; compare against the escaped form. */
 function escapeHtml(value: string): string {
@@ -88,17 +85,22 @@ const tests: Array<[string, () => void]> = [
       // Desktop bar: labelled nav with one in-page anchor per section.
       assert.ok(
         html.includes(`aria-label="${escapeHtml(about.sectionNav)}"`),
-        "section nav has an accessible name"
+        "section nav has an accessible name",
       );
-      for (const id of ["overview", "features", "how-it-works", "safety-intelligence", "security", "interoperability", "api"]) {
+      for (const id of [
+        "overview",
+        "features",
+        "how-it-works",
+        "safety-intelligence",
+        "security",
+        "interoperability",
+        "api",
+      ]) {
         assert.ok(html.includes(`href="#${id}"`), `missing section anchor #${id}`);
       }
       assert.ok(pageSource.includes("sticky top-0"), "the section bar is sticky");
       // The old left-hand contents column is gone.
-      assert.ok(
-        !pageSource.includes("lg:grid-cols-[15rem"),
-        "no secondary side contents column"
-      );
+      assert.ok(!pageSource.includes("lg:grid-cols-[15rem"), "no secondary side contents column");
       // Mobile gets an "On this page" select instead of the bar.
       assert.ok(html.includes(escapeHtml(about.onThisPage)), "mobile dropdown labelled");
       assert.ok(html.includes("<select"), "mobile section control is a select");
@@ -108,12 +110,15 @@ const tests: Array<[string, () => void]> = [
     "in-app navigation only: no Back to dashboard, no account actions",
     () => {
       assert.ok(!html.includes('href="/dashboard"'), "no dashboard link");
-      assert.ok(
-        !html.includes(escapeHtml("Back to dashboard")),
-        "back-to-dashboard copy removed"
-      );
+      assert.ok(!html.includes(escapeHtml("Back to dashboard")), "back-to-dashboard copy removed");
       const lowered = html.toLowerCase();
-      for (const banned of ["sign in", "log in", "create account", "register", "start free trial"]) {
+      for (const banned of [
+        "sign in",
+        "log in",
+        "create account",
+        "register",
+        "start free trial",
+      ]) {
         assert.ok(!lowered.includes(banned), `account-pattern text present: ${banned}`);
       }
       // The anonymous-workspace trust statement is present instead.
@@ -126,7 +131,7 @@ const tests: Array<[string, () => void]> = [
       for (const label of [about.archDiagram, about.pipeDiagram, about.flowDiagram]) {
         assert.ok(
           html.includes(`aria-label="${escapeHtml(label)}"`),
-          `missing diagram label: ${label}`
+          `missing diagram label: ${label}`,
         );
       }
       // The same information exists as real text, not only inside the figure.
@@ -137,7 +142,13 @@ const tests: Array<[string, () => void]> = [
   [
     "how it works defaults to five steps with technical detail collapsed",
     () => {
-      for (const key of [about.hw1Title, about.hw2Title, about.hw3Title, about.hw4Title, about.hw5Title]) {
+      for (const key of [
+        about.hw1Title,
+        about.hw2Title,
+        about.hw3Title,
+        about.hw4Title,
+        about.hw5Title,
+      ]) {
         assert.ok(html.includes(escapeHtml(key)), `missing step ${key}`);
       }
       // The deep dives render inside collapsed <details> blocks…
@@ -174,7 +185,7 @@ const tests: Array<[string, () => void]> = [
       // Each collapsed group shows its endpoint count.
       assert.ok(
         html.includes(escapeHtml(translate("en", "about.apiEndpoints", { count: 3 }))),
-        "endpoint counts rendered"
+        "endpoint counts rendered",
       );
     },
   ],
@@ -207,7 +218,7 @@ const tests: Array<[string, () => void]> = [
         if (lowered.includes(term)) {
           assert.ok(
             /not hipaa or gdpr certified/i.test(html),
-            `${term} mentioned without the "not certified" qualifier`
+            `${term} mentioned without the "not certified" qualifier`,
           );
         }
       }
@@ -235,8 +246,12 @@ const tests: Array<[string, () => void]> = [
       assert.ok(html.includes(escapeHtml(about.secNotClaimed)));
       // A planned item must never be rendered inside the implemented list.
       const implementedTitles: string[] = [
-        about.i1Title, about.i2Title, about.i3Title,
-        about.i4Title, about.i5Title, about.i6Title,
+        about.i1Title,
+        about.i2Title,
+        about.i3Title,
+        about.i4Title,
+        about.i5Title,
+        about.i6Title,
       ];
       for (const planned of [about.pl1, about.pl2, about.pl3] as string[]) {
         assert.ok(!implementedTitles.includes(planned), `"${planned}" listed as implemented`);
@@ -250,7 +265,7 @@ const tests: Array<[string, () => void]> = [
     "no visible copy is hardcoded in the component",
     () => {
       // Long prose in JSX text position would bypass the i18n dictionary.
-      const jsxText = pageSource.match(/>[^<>\{\}\n]{25,}</g) || [];
+      const jsxText = pageSource.match(/>[^<>{}\n]{25,}</g) || [];
       const offenders = jsxText.filter((t) => /[a-z]{4,}\s+[a-z]{4,}\s+[a-z]{4,}/i.test(t));
       assert.deepEqual(offenders, [], `hardcoded prose found: ${offenders.join(" | ")}`);
     },
@@ -262,14 +277,18 @@ const tests: Array<[string, () => void]> = [
       // Patient workflow items live in the NAV array; About must not be there.
       const navArray = layoutSource.slice(
         layoutSource.indexOf("const NAV:"),
-        layoutSource.indexOf("export function Layout")
+        layoutSource.indexOf("export function Layout"),
       );
       assert.ok(!navArray.includes("/about"), "About must not be in the workflow NAV array");
-      assert.equal((navArray.match(/to: "/g) || []).length, 22, "all 22 workflow items are present");
+      assert.equal(
+        (navArray.match(/to: "/g) || []).length,
+        22,
+        "all 22 workflow items are present",
+      );
       // The tagline is the only content the sidebar redesign removes.
       assert.ok(
         !layoutSource.includes('t("common.tagline")'),
-        "sidebar header no longer renders the tagline"
+        "sidebar header no longer renders the tagline",
       );
     },
   ],
@@ -278,8 +297,14 @@ const tests: Array<[string, () => void]> = [
     () => {
       const linkBlock = layoutSource.slice(layoutSource.indexOf('to="/about"'));
       assert.ok(linkBlock.includes("focus-visible:ring"), "visible focus state");
-      assert.ok(linkBlock.includes('aria-label={collapsed ? t("about.nav")'), "accessible label from i18n");
-      assert.ok(linkBlock.includes('t("nav.descriptions.about")'), "collapsed tooltip explains the destination");
+      assert.ok(
+        linkBlock.includes('aria-label={collapsed ? t("about.nav")'),
+        "accessible label from i18n",
+      );
+      assert.ok(
+        linkBlock.includes('t("nav.descriptions.about")'),
+        "collapsed tooltip explains the destination",
+      );
       assert.ok(linkBlock.includes("min-h-[44px]"), "44px touch target");
       // Collapses to an icon on main's desktop rail, like the other items.
       assert.ok(linkBlock.includes('collapsed && "lg:hidden"'), "label hides when collapsed");
@@ -293,13 +318,19 @@ const tests: Array<[string, () => void]> = [
       const activeClass = "bg-[#eaf6f4]";
       assert.ok(
         occurrences(layoutSource, activeClass) >= 2,
-        "nav rows and About row share the active treatment"
+        "nav rows and About row share the active treatment",
       );
       assert.ok(layoutSource.includes("shadow-[inset_3px_0_0_#0F766E]"), "teal edge marker");
       // Destructive deletion no longer sits beside New workspace in the
       // sidebar; it lives behind the explicit confirmation flow in Settings.
-      assert.ok(!layoutSource.includes('t("nav.resetData")'), "no casual destructive sidebar action");
-      assert.ok(layoutSource.includes("Permanent deletion is available in Settings"), "points to safe deletion flow");
+      assert.ok(
+        !layoutSource.includes('t("nav.resetData")'),
+        "no casual destructive sidebar action",
+      );
+      assert.ok(
+        layoutSource.includes("Permanent deletion is available in Settings"),
+        "points to safe deletion flow",
+      );
     },
   ],
   [
@@ -311,17 +342,20 @@ const tests: Array<[string, () => void]> = [
       // state; only the logo/name block may hide.
       const toggleBlock = layoutSource.slice(
         layoutSource.indexOf("setCollapsed((value) => !value)") - 200,
-        layoutSource.indexOf("setCollapsed((value) => !value)") + 700
+        layoutSource.indexOf("setCollapsed((value) => !value)") + 700,
       );
       assert.ok(toggleBlock.includes("nav.expandSidebar"), "toggle carries the expand label");
       assert.ok(
         !toggleBlock.includes("lg:hidden"),
-        "the expand/collapse toggle must never hide when collapsed"
+        "the expand/collapse toggle must never hide when collapsed",
       );
-      const brandBlock = layoutSource.slice(layoutSource.indexOf("<Logo />") - 200, layoutSource.indexOf("<Logo />") + 300);
+      const brandBlock = layoutSource.slice(
+        layoutSource.indexOf("<Logo />") - 200,
+        layoutSource.indexOf("<Logo />") + 300,
+      );
       assert.ok(
         brandBlock.includes('collapsed && "lg:hidden"'),
-        "the logo/name block hides on the collapsed rail instead"
+        "the logo/name block hides on the collapsed rail instead",
       );
     },
   ],
@@ -335,13 +369,13 @@ const tests: Array<[string, () => void]> = [
         assert.notEqual(
           translate(language, "about.title"),
           translate("en", "about.title"),
-          `${language} about.title is untranslated`
+          `${language} about.title is untranslated`,
         );
         // The safety section must not ship English copy in si/ta.
         assert.notEqual(
           translate(language, "about.safetyIntelligenceTitle"),
           translate("en", "about.safetyIntelligenceTitle"),
-          `${language} safety title is untranslated`
+          `${language} safety title is untranslated`,
         );
       }
     },

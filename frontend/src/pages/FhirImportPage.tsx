@@ -44,7 +44,9 @@ export function FhirImportPage() {
     try {
       bundle = JSON.parse(text);
     } catch (e) {
-      setError("That isn't valid JSON. Paste a FHIR R4 Bundle (a JSON object with a `resourceType` of `Bundle` and an `entry` array).");
+      setError(
+        "That isn't valid JSON. Paste a FHIR R4 Bundle (a JSON object with a `resourceType` of `Bundle` and an `entry` array).",
+      );
       return;
     }
     setBusy(true);
@@ -143,7 +145,7 @@ export function FhirImportPage() {
                     <div className="font-medium text-slate-600">{COUNT_LABELS[k] || k}</div>
                     <div className="text-lg font-semibold text-slate-800">{v}</div>
                   </div>
-                ) : null
+                ) : null,
               )}
             </div>
 
@@ -155,8 +157,8 @@ export function FhirImportPage() {
 
             {result.persistence_error && (
               <div className="rounded-md border border-amber-200 bg-amber-50/60 p-2 text-xs text-amber-800">
-                The bundle parsed correctly, but it could not be saved to the workspace
-                ({result.persistence_error}). The backend needs Supabase configured to persist an
+                The bundle parsed correctly, but it could not be saved to the workspace (
+                {result.persistence_error}). The backend needs Supabase configured to persist an
                 import — the preview above shows what was understood.
               </div>
             )}

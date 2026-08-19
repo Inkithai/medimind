@@ -56,7 +56,7 @@ async function renderPage(Page: typeof MedicinesPage | typeof DocumentsPage): Pr
             </AuthProvider>
           </I18nProvider>
         </MemoryRouter>
-      </StrictMode>
+      </StrictMode>,
     );
     await new Promise((resolve) => window.setTimeout(resolve, 10));
   });
@@ -88,29 +88,29 @@ async function main() {
     const medicinesHtml = await renderPage(MedicinesPage);
     assert(
       medicinesHtml.includes("No medicines found"),
-      "Medicines: 404 renders the empty state, not an error"
+      "Medicines: 404 renders the empty state, not an error",
     );
     assert(
       medicinesHtml.includes("Upload documents"),
-      "Medicines: 404 empty state links to the upload page"
+      "Medicines: 404 empty state links to the upload page",
     );
     assert(
       !medicinesHtml.includes("Something went wrong"),
-      "Medicines: 404 does NOT render the generic error screen"
+      "Medicines: 404 does NOT render the generic error screen",
     );
 
     const documentsHtml = await renderPage(DocumentsPage);
     assert(
       documentsHtml.includes("No documents yet"),
-      "Documents: 404 renders the empty state, not an error"
+      "Documents: 404 renders the empty state, not an error",
     );
     assert(
       documentsHtml.includes("Upload documents"),
-      "Documents: 404 empty state links to the upload page"
+      "Documents: 404 empty state links to the upload page",
     );
     assert(
       !documentsHtml.includes("Something went wrong"),
-      "Documents: 404 does NOT render the generic error screen"
+      "Documents: 404 does NOT render the generic error screen",
     );
 
     // --- Real failures still surface as errors ---------------------------
@@ -121,13 +121,13 @@ async function main() {
     const medicinesErrorHtml = await renderPage(MedicinesPage);
     assert(
       medicinesErrorHtml.includes("Something went wrong"),
-      "Medicines: a 500 still renders the error screen"
+      "Medicines: a 500 still renders the error screen",
     );
 
     const documentsErrorHtml = await renderPage(DocumentsPage);
     assert(
       documentsErrorHtml.includes("Something went wrong"),
-      "Documents: a 500 still renders the error screen"
+      "Documents: a 500 still renders the error screen",
     );
   } finally {
     api.healthUnauthenticated = originalHealth;

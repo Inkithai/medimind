@@ -59,18 +59,20 @@ export function HistoryPage() {
       map.get(year)!.push(v);
     }
     // sort years desc, unknown last
-    return Array.from(map.entries())
-      .sort((a, b) => {
-        if (a[0] === t("common.unknownYear")) return 1;
-        if (b[0] === t("common.unknownYear")) return -1;
-        return parseInt(b[0], 10) - parseInt(a[0], 10);
-      })
-      // Keep backend chronological order (oldest first). localeCompare on
-      // mixed formats ("5 Jan 2026" vs "20 Apr 2026") is not chronological.
-      .map(([year, visits]) => ({
-        year,
-        visits,
-      }));
+    return (
+      Array.from(map.entries())
+        .sort((a, b) => {
+          if (a[0] === t("common.unknownYear")) return 1;
+          if (b[0] === t("common.unknownYear")) return -1;
+          return parseInt(b[0], 10) - parseInt(a[0], 10);
+        })
+        // Keep backend chronological order (oldest first). localeCompare on
+        // mixed formats ("5 Jan 2026" vs "20 Apr 2026") is not chronological.
+        .map(([year, visits]) => ({
+          year,
+          visits,
+        }))
+    );
   })();
 
   return (
@@ -90,7 +92,9 @@ export function HistoryPage() {
             <Card>
               <CardBody className="py-12 text-center">
                 <p className="text-sm font-semibold text-slate-800">
-                  {timeline.trust_summary?.unresolved_conflicts ? "History withheld pending source review" : t("history.empty")}
+                  {timeline.trust_summary?.unresolved_conflicts
+                    ? "History withheld pending source review"
+                    : t("history.empty")}
                 </p>
                 <p className="mt-1 text-xs text-slate-600">
                   {timeline.trust_summary?.unresolved_conflicts
@@ -111,72 +115,86 @@ export function HistoryPage() {
               <ClinicalEventsTimeline timeline={timeline} />
               <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
                 <div className="space-y-8">
-                {grouped.map((g) => (
-                  <div key={g.year}>
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-8 w-12 items-center justify-center rounded-full bg-slate-900 text-xs font-bold text-white">
-                        {g.year}
+                  {grouped.map((g) => (
+                    <div key={g.year}>
+                      <div className="flex items-center gap-3">
+                        <div className="flex h-8 w-12 items-center justify-center rounded-full bg-slate-900 text-xs font-bold text-white">
+                          {g.year}
+                        </div>
+                        <div className="h-px flex-1 bg-slate-200" />
+                        <span className="text-xs text-slate-600">
+                          {t("history.events", { count: formatNumber(g.visits.length) })}
+                        </span>
                       </div>
-                      <div className="h-px flex-1 bg-slate-200" />
-                      <span className="text-xs text-slate-600">{t("history.events", { count: formatNumber(g.visits.length) })}</span>
-                    </div>
 
-                    <div className="mt-4 space-y-4 border-l-2 border-slate-100 pl-6">
-                      {g.visits.map((visit, idx) => (
-                        <button
-                          key={`${visit._source.file}-${idx}`}
-                          type="button"
-                          onClick={() => setSelected(visit)}
-                          aria-pressed={selected === visit}
-                          aria-label={`${formatDate(visit.date)} — ${documentTypeLabel(visit.document_type)} — ${visit._source.file}`}
-                          className="group relative w-full rounded-xl border border-slate-200 bg-white p-4 text-left shadow-sm hover:border-brand-200 hover:shadow"
-                        >
-                          <span className="absolute -left-[29px] top-5 flex h-4 w-4 items-center justify-center rounded-full bg-brand-600 ring-4 ring-white">
-                            <span className="h-1.5 w-1.5 rounded-full bg-white" />
-                          </span>
-                          <div className="flex items-start justify-between gap-2">
-                            <div>
-                              <p className="text-sm font-semibold text-slate-900">
-                                {formatDate(visit.date)} — {iconForDoc(visit.document_type)} {documentTypeLabel(visit.document_type)}
-                              </p>
-                              {visit.provider_or_doctor && (
-                                <p className="text-xs text-slate-500">{visit.provider_or_doctor}</p>
-                              )}
-                              <p className="mt-1 line-clamp-2 text-xs text-slate-600">
-                                {visitSummary(visit)}
-                              </p>
-                            </div>
-                            <span className="max-w-full shrink-0 truncate rounded-full bg-slate-50 px-2 py-0.5 text-[11px] text-slate-500 ring-1 ring-slate-200 sm:max-w-[45%]" title={visit._source.file}>
-                              {visit._source.file}
+                      <div className="mt-4 space-y-4 border-l-2 border-slate-100 pl-6">
+                        {g.visits.map((visit, idx) => (
+                          <button
+                            key={`${visit._source.file}-${idx}`}
+                            type="button"
+                            onClick={() => setSelected(visit)}
+                            aria-pressed={selected === visit}
+                            aria-label={`${formatDate(visit.date)} — ${documentTypeLabel(visit.document_type)} — ${visit._source.file}`}
+                            className="group relative w-full rounded-xl border border-slate-200 bg-white p-4 text-left shadow-sm hover:border-brand-200 hover:shadow"
+                          >
+                            <span className="absolute -left-[29px] top-5 flex h-4 w-4 items-center justify-center rounded-full bg-brand-600 ring-4 ring-white">
+                              <span className="h-1.5 w-1.5 rounded-full bg-white" />
                             </span>
-                          </div>
-                        </button>
-                      ))}
+                            <div className="flex items-start justify-between gap-2">
+                              <div>
+                                <p className="text-sm font-semibold text-slate-900">
+                                  {formatDate(visit.date)} — {iconForDoc(visit.document_type)}{" "}
+                                  {documentTypeLabel(visit.document_type)}
+                                </p>
+                                {visit.provider_or_doctor && (
+                                  <p className="text-xs text-slate-500">
+                                    {visit.provider_or_doctor}
+                                  </p>
+                                )}
+                                <p className="mt-1 line-clamp-2 text-xs text-slate-600">
+                                  {visitSummary(visit)}
+                                </p>
+                              </div>
+                              <span
+                                className="max-w-full shrink-0 truncate rounded-full bg-slate-50 px-2 py-0.5 text-[11px] text-slate-500 ring-1 ring-slate-200 sm:max-w-[45%]"
+                                title={visit._source.file}
+                              >
+                                {visit._source.file}
+                              </span>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  ))}
 
-                <div className="pt-4">
-                  <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-600">{t("history.full")}</h2>
-                  <div className="mt-3">
-                    <TimelineView timeline={timeline} />
+                  <div className="pt-4">
+                    <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-600">
+                      {t("history.full")}
+                    </h2>
+                    <div className="mt-3">
+                      <TimelineView timeline={timeline} />
+                    </div>
                   </div>
                 </div>
-              </div>
 
-              <div className="lg:sticky lg:top-6">
-                {selected ? (
-                  <DocumentViewer visit={selected} onClose={() => setSelected(null)} />
-                ) : (
-                  <Card>
-                    <CardBody className="py-12 text-center">
-                      <h2 className="text-sm font-medium text-slate-800">{t("history.select")}</h2>
-                      <p className="mx-auto mt-1 max-w-sm text-xs text-slate-600">{t("history.selectBody")}</p>
-                    </CardBody>
-                  </Card>
-                )}
+                <div className="lg:sticky lg:top-6">
+                  {selected ? (
+                    <DocumentViewer visit={selected} onClose={() => setSelected(null)} />
+                  ) : (
+                    <Card>
+                      <CardBody className="py-12 text-center">
+                        <h2 className="text-sm font-medium text-slate-800">
+                          {t("history.select")}
+                        </h2>
+                        <p className="mx-auto mt-1 max-w-sm text-xs text-slate-600">
+                          {t("history.selectBody")}
+                        </p>
+                      </CardBody>
+                    </Card>
+                  )}
+                </div>
               </div>
-            </div>
             </div>
           )}
         </>
@@ -187,11 +205,16 @@ export function HistoryPage() {
 
 function visitSummary(visit: Visit): string {
   if (visit.clinical_notes) return visit.clinical_notes;
-  if (visit.diagnoses?.length) return `Diagnoses: ${visit.diagnoses.map((item) => item.name).join(", ")}`;
-  if (visit.procedures?.length) return `Procedures: ${visit.procedures.map((item) => item.name).join(", ")}`;
-  if (visit.imaging_results?.length) return `Imaging: ${visit.imaging_results.map((item) => item.study_type).join(", ")}`;
-  if (visit.symptoms?.length) return `Symptoms: ${visit.symptoms.map((item) => item.name).join(", ")}`;
-  if (visit.vital_signs?.length) return `Vitals: ${visit.vital_signs.map((item) => `${item.name} ${item.value}`).join(", ")}`;
+  if (visit.diagnoses?.length)
+    return `Diagnoses: ${visit.diagnoses.map((item) => item.name).join(", ")}`;
+  if (visit.procedures?.length)
+    return `Procedures: ${visit.procedures.map((item) => item.name).join(", ")}`;
+  if (visit.imaging_results?.length)
+    return `Imaging: ${visit.imaging_results.map((item) => item.study_type).join(", ")}`;
+  if (visit.symptoms?.length)
+    return `Symptoms: ${visit.symptoms.map((item) => item.name).join(", ")}`;
+  if (visit.vital_signs?.length)
+    return `Vitals: ${visit.vital_signs.map((item) => `${item.name} ${item.value}`).join(", ")}`;
   if (visit.medications.length) return visit.medications.map((item) => item.name).join(", ");
   if (visit.lab_results.length) return visit.lab_results.map((item) => item.test_name).join(", ");
   return "No extracted summary";

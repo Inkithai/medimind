@@ -40,7 +40,7 @@ function mount(): { container: HTMLElement; root: Root } {
     root.render(
       <MemoryRouter>
         <JudgePrepPage />
-      </MemoryRouter>
+      </MemoryRouter>,
     );
   });
   return { container, root };
@@ -68,7 +68,7 @@ const tests: Array<[string, () => void]> = [
       assert.doesNotMatch(landingSource, /ygc-prep/);
       const navArray = layoutSource.slice(
         layoutSource.indexOf("const NAV:"),
-        layoutSource.indexOf("export function Layout")
+        layoutSource.indexOf("export function Layout"),
       );
       assert.doesNotMatch(navArray, /ygc-prep/);
       assert.doesNotMatch(navArray, /JudgePrep/);
@@ -101,7 +101,7 @@ const tests: Array<[string, () => void]> = [
       assert.equal(
         container.querySelectorAll('button[aria-expanded="true"]').length,
         0,
-        "answers stay collapsed"
+        "answers stay collapsed",
       );
       assert.ok(!html.includes("tracking-wider text-teal-300"), "spoken-line chip stays hidden");
       unmount(root, container);
@@ -113,7 +113,7 @@ const tests: Array<[string, () => void]> = [
       const { container, root } = mount();
       const first = PREP_ITEMS[0];
       const button = Array.from(container.querySelectorAll("button")).find((el) =>
-        el.textContent?.includes(first.q)
+        el.textContent?.includes(first.q),
       );
       assert.ok(button, "question button exists");
       act(() => {
@@ -132,39 +132,45 @@ const tests: Array<[string, () => void]> = [
         (item) =>
           item.q.toLowerCase().includes(needle) ||
           item.say.toLowerCase().includes(needle) ||
-          item.answer.toLowerCase().includes(needle)
+          item.answer.toLowerCase().includes(needle),
       );
-      assert.ok(matches.some((item) => item.id === "v3"), "HIPAA question exists");
+      assert.ok(
+        matches.some((item) => item.id === "v3"),
+        "HIPAA question exists",
+      );
       assert.ok(
         matches.every(
           (item) =>
             item.q.toLowerCase().includes(needle) ||
             item.say.toLowerCase().includes(needle) ||
-            item.answer.toLowerCase().includes(needle)
-        )
+            item.answer.toLowerCase().includes(needle),
+        ),
       );
       assert.ok(
         !matches.some((item) => item.id === "p1"),
-        "unrelated product cards are not in the HIPAA set"
+        "unrelated product cards are not in the HIPAA set",
       );
 
       const { container, root } = mount();
       assert.ok(container.querySelector("input"), "search field present");
       const privacy = Array.from(container.querySelectorAll("button")).find((el) =>
-        el.textContent?.startsWith("Privacy")
+        el.textContent?.startsWith("Privacy"),
       );
       assert.ok(privacy, "privacy category chip exists");
       act(() => {
         privacy!.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
       });
       const privacyItems = PREP_ITEMS.filter((item) => item.category === "privacy");
-      assert.match(container.innerHTML, new RegExp(`${privacyItems.length} / ${PREP_ITEMS.length} questions`));
+      assert.match(
+        container.innerHTML,
+        new RegExp(`${privacyItems.length} / ${PREP_ITEMS.length} questions`),
+      );
       for (const item of privacyItems) {
         assert.ok(container.innerHTML.includes(item.q), `privacy card ${item.id} stays visible`);
       }
       assert.ok(
         !container.innerHTML.includes("What is MediMind, in one sentence?"),
-        "other categories hide when a chip is selected"
+        "other categories hide when a chip is selected",
       );
       unmount(root, container);
     },
