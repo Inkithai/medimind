@@ -5,12 +5,14 @@ import { ErrorState } from "../components/ErrorState";
 import { LoadingState } from "../components/Spinner";
 import { EmptyState } from "../components/EmptyState";
 import { SendIcon, RefreshIcon } from "../components/icons";
+import { toastMessage, useToast } from "../components/Toast";
 import { useAuth } from "../context/AuthContext";
 import { useStrictEffect } from "../hooks/useStrictEffect";
 import { useI18n } from "../i18n/I18nContext";
 import type { ProviderThread, ProviderMessage } from "../types/api";
 
 export function MessagesPage() {
+  const { toastSuccess, toastError } = useToast();
   const { credentials } = useAuth();
   const { t } = useI18n();
   const [threads, setThreads] = useState<ProviderThread[]>([]);
@@ -67,6 +69,9 @@ export function MessagesPage() {
       }
       await load();
       if (msg.thread_id) await openThread(msg.thread_id);
+      toastSuccess("Message saved", "It is stored securely with your records.");
+    } catch (err) {
+      toastError("Message not sent", toastMessage(err));
     } finally {
       setSending(false);
     }

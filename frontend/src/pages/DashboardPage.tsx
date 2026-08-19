@@ -16,6 +16,7 @@ import {
   TimelineIcon,
   ChangesIcon,
   ReminderIcon,
+  StethoscopeIcon,
 } from "../components/icons";
 import { useAuth } from "../context/AuthContext";
 import { useStrictEffect } from "../hooks/useStrictEffect";
@@ -343,7 +344,25 @@ export function DashboardPage() {
             Useful next steps
           </h2>
         </div>
-        <div className="grid gap-4 lg:grid-cols-3">
+        <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
+          <Link
+            to="/who-to-see"
+            className="group flex flex-col gap-4 rounded-2xl border border-amber-200 bg-white p-5 shadow-sm transition hover:border-amber-300 hover:shadow-md sm:flex-row sm:items-center lg:flex-col lg:items-start"
+          >
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-amber-700 text-white shadow-sm">
+              <StethoscopeIcon className="h-6 w-6" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-bold uppercase tracking-[0.12em] text-amber-800">Decide</p>
+              <h2 className="mt-1 text-lg font-bold text-slate-900">Who should I talk to?</h2>
+              <p className="mt-1 text-sm text-slate-600">
+                See whether a pharmacist or a doctor should look at what was found, and how soon.
+              </p>
+              <p className="mt-2 text-sm font-semibold text-amber-800 transition group-hover:translate-x-1">
+                See the suggestion →
+              </p>
+            </div>
+          </Link>
           <Link
             to="/appointment-prep"
             className="group flex flex-col gap-4 rounded-2xl border border-cyan-200 bg-white p-5 shadow-sm transition hover:border-cyan-300 hover:shadow-md sm:flex-row sm:items-center lg:flex-col lg:items-start"

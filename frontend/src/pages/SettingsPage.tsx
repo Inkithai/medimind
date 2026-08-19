@@ -1,8 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { api, type PatientProfileInput } from "../api/client";
+import { ApiError, api, type PatientProfileInput } from "../api/client";
 import { Alert } from "../components/Alert";
 import { Spinner } from "../components/Spinner";
-import { SettingsIcon } from "../components/icons";
+import { StatusBadge } from "../components/StatusBadge";
+import { toastMessage, useToast } from "../components/Toast";
+import { DownloadIcon, SettingsIcon, ShieldIcon } from "../components/icons";
+import { downloadJsonFile, todayStamp } from "../utils/download";
+import type { FhirValidationReport } from "../types/api";
 import { useAuth } from "../context/AuthContext";
 import { useI18n } from "../i18n/I18nContext";
 import { LanguageSelector } from "../components/LanguageSelector";
@@ -17,6 +21,7 @@ export function SettingsPage() {
     clearCredentials,
   } = useAuth();
   const { t } = useI18n();
+  const { toastSuccess, toastError, toastInfo } = useToast();
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -134,8 +139,10 @@ export function SettingsPage() {
                 const saved = await api.updateProfile(credentials, profile);
                 setProfile(saved);
                 setProfileNotice("Profile saved securely.");
+                toastSuccess("Profile saved", "Your details are stored with your private records.");
               } catch (error) {
                 setProfileNotice(error instanceof Error ? error.message : String(error));
+                toastError("Profile not saved", toastMessage(error));
               } finally {
                 setProfileSaving(false);
               }
@@ -204,6 +211,14 @@ export function SettingsPage() {
           </form>
         )}
       </section>
+
+      <RecordExportSection
+        onSuccess={toastSuccess}
+        onError={toastError}
+        onInfo={toastInfo}
+        disabled={!isConfigured}
+        credentials={credentials}
+      />
 
       <section
         aria-labelledby="workspace-settings-title"
@@ -415,5 +430,220 @@ export function SettingsPage() {
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * "Take a copy of your records with you."
+ *
+ * Exposes the export endpoints the backend already serves
+ * (GET /api/v1/export and /api/v1/export/validation). Both formats are
+ * described by what the user would do with them rather than by their
+ * technical name, and the FHIR file can be checked before it is handed to
+ * a clinic so nobody discovers a broken file at the reception desk.
+ */
+function RecordExportSection({
+  credentials,
+  disabled,
+  onSuccess,
+  onError,
+  onInfo,
+}: {
+  credentials: Parameters<typeof api.exportRecord>[0];
+  disabled: boolean;
+  onSuccess: (title: string, description?: string) => void;
+  onError: (title: string, description?: string) => void;
+  onInfo: (title: string, description?: string) => void;
+}) {
+  const [busy, setBusy] = useState<"json" | "fhir" | "check" | null>(null);
+  const [validation, setValidation] = useState<FhirValidationReport | null>(null);
+
+  const noRecordsYet = (error: unknown) => error instanceof ApiError && error.status === 404;
+
+  async function handleDownload(format: "json" | "fhir") {
+    setBusy(format);
+    try {
+      const data = await api.exportRecord(credentials, format);
+      const filename =
+        format === "fhir"
+          ? `medimind-records-for-clinic-${todayStamp()}.json`
+          : `medimind-records-${todayStamp()}.json`;
+      if (downloadJsonFile(filename, data)) {
+        onSuccess(
+          "Download started",
+          `Saved as ${filename}. Check your browser's Downloads folder.`,
+        );
+      } else {
+        onError(
+          "Download blocked",
+          "Your browser stopped the download. Allow downloads and retry.",
+        );
+      }
+    } catch (error) {
+      if (noRecordsYet(error)) {
+        onInfo("Nothing to download yet", "Upload a document first, then try again.");
+      } else {
+        onError("Download failed", toastMessage(error));
+      }
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleValidate() {
+    setBusy("check");
+    setValidation(null);
+    try {
+      const report = await api.validateRecordExport(credentials);
+      setValidation(report);
+      if (report.valid) {
+        onSuccess("The clinic file is ready", "It passed the structure check.");
+      } else {
+        onError(
+          "The clinic file has problems",
+          `${report.errors?.length || 0} issue(s) were found. See the details below.`,
+        );
+      }
+    } catch (error) {
+      if (noRecordsYet(error)) {
+        onInfo("Nothing to check yet", "Upload a document first, then try again.");
+      } else {
+        onError("Check failed", toastMessage(error));
+      }
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <section
+      aria-labelledby="record-export-title"
+      className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"
+    >
+      <div className="flex items-center gap-3">
+        <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-brand-50 text-brand-600">
+          <DownloadIcon className="h-6 w-6" aria-hidden="true" />
+        </div>
+        <div>
+          <h2 id="record-export-title" className="card-title">
+            Take a copy of your records
+          </h2>
+          <p className="secondary-text">
+            Download everything MediMind has read from your documents. Nothing is deleted by
+            downloading.
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-5 grid gap-4 sm:grid-cols-2">
+        <div className="flex flex-col justify-between rounded-xl border border-slate-200 p-4">
+          <div>
+            <h3 className="text-base font-semibold text-slate-900">A copy for yourself</h3>
+            <p className="mt-1 text-sm leading-relaxed text-slate-600">
+              Your timeline, medicine checks and lab trends in one file you can keep or email to
+              family.
+            </p>
+          </div>
+          <button
+            type="button"
+            className="btn-secondary mt-4 w-full"
+            disabled={disabled || busy !== null}
+            onClick={() => void handleDownload("json")}
+          >
+            {busy === "json" ? (
+              <Spinner className="h-5 w-5" />
+            ) : (
+              <DownloadIcon className="h-5 w-5" />
+            )}
+            {busy === "json" ? "Preparing your file…" : "Download my copy"}
+          </button>
+        </div>
+
+        <div className="flex flex-col justify-between rounded-xl border border-slate-200 p-4">
+          <div>
+            <h3 className="text-base font-semibold text-slate-900">A copy for a clinic</h3>
+            <p className="mt-1 text-sm leading-relaxed text-slate-600">
+              The same record in the standard format (FHIR) hospitals and clinics can import into
+              their own system.
+            </p>
+          </div>
+          <div className="mt-4 space-y-2">
+            <button
+              type="button"
+              className="btn-secondary w-full"
+              disabled={disabled || busy !== null}
+              onClick={() => void handleDownload("fhir")}
+            >
+              {busy === "fhir" ? (
+                <Spinner className="h-5 w-5" />
+              ) : (
+                <DownloadIcon className="h-5 w-5" />
+              )}
+              {busy === "fhir" ? "Preparing your file…" : "Download clinic copy"}
+            </button>
+            <button
+              type="button"
+              className="btn-ghost w-full"
+              disabled={disabled || busy !== null}
+              onClick={() => void handleValidate()}
+              title="Checks that the clinic file has the right structure before you send it."
+            >
+              {busy === "check" ? (
+                <Spinner className="h-5 w-5" />
+              ) : (
+                <ShieldIcon className="h-5 w-5" />
+              )}
+              {busy === "check" ? "Checking…" : "Check the clinic copy first"}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {validation && (
+        <div className="mt-4">
+          <Alert
+            variant={validation.valid ? "success" : "danger"}
+            title={
+              validation.valid
+                ? "This file is ready to share with a clinic"
+                : "This file needs attention before sharing"
+            }
+          >
+            <div className="space-y-2 text-sm">
+              <div className="flex flex-wrap gap-2">
+                <StatusBadge tone={validation.valid ? "success" : "danger"}>
+                  {validation.valid ? "✓ Structure check passed" : "✗ Structure check failed"}
+                </StatusBadge>
+                {validation.resource_counts &&
+                  Object.entries(validation.resource_counts).map(([kind, count]) => (
+                    <StatusBadge key={kind} tone="neutral">
+                      {kind}: {count}
+                    </StatusBadge>
+                  ))}
+              </div>
+              {validation.errors && validation.errors.length > 0 && (
+                <ul className="list-disc space-y-1 pl-5">
+                  {validation.errors.map((issue) => (
+                    <li key={issue}>{issue}</li>
+                  ))}
+                </ul>
+              )}
+              {validation.warnings && validation.warnings.length > 0 && (
+                <details>
+                  <summary className="cursor-pointer font-semibold">
+                    Notes ({validation.warnings.length})
+                  </summary>
+                  <ul className="mt-1 list-disc space-y-1 pl-5">
+                    {validation.warnings.map((warning) => (
+                      <li key={warning}>{warning}</li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+            </div>
+          </Alert>
+        </div>
+      )}
+    </section>
   );
 }

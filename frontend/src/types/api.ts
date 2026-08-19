@@ -71,6 +71,13 @@ export interface Medication {
   confidence: number;
   evidence?: EvidenceRegion[];
   _trust?: TrustMetadata;
+  /**
+   * False when the drug name could not be converted to its standard English
+   * (INN) name, so this medicine cannot be matched against the rest of the
+   * record for duplicates or interactions (see language_guard.py).
+   */
+  cross_check_eligible?: boolean;
+  unmatched_reason?: string;
 }
 
 export interface LabResult {
@@ -501,6 +508,22 @@ export interface DuplicateDocumentGroup {
   documents: DuplicateDocumentInfo[];
 }
 
+/**
+ * A page kept despite incomplete drug-name translation. The medications
+ * named here are stored, but cannot be compared against the rest of the
+ * record for duplicates or interactions.
+ */
+export interface LanguageDegradation {
+  degraded: boolean;
+  file?: string;
+  problems: string[];
+  unmatched_medications: string[];
+  languages?: string[];
+  confidence?: number;
+  message: string;
+  advice?: string;
+}
+
 export interface DuplicateFileSkipped {
   filename: string;
   reason: string;
@@ -915,10 +938,44 @@ export interface PatientSnapshot {
 
 // ---- AI analysis logs -----------------------------------------------------
 
+/** Entity counts persisted for one document extraction. */
+export interface AnalysisPersistedCounts {
+  medications?: number;
+  lab_results?: number;
+  allergies?: number;
+  findings?: number;
+  events?: number;
+}
+
+/**
+ * Result payload of a `document_extraction` entry. One entry covers one
+ * uploaded document — `page_count` / `document_ids` describe the extracted
+ * page rows that were merged into it.
+ */
+export interface DocumentExtractionResult {
+  summary?: string | null;
+  document_type_detected?: string | null;
+  confidence_score?: number | null;
+  persisted_counts?: AnalysisPersistedCounts;
+  source_file?: string | null;
+  document_id?: string | null;
+  document_ids?: string[];
+  page_count?: number;
+  raw_text_processing?: Record<string, unknown> | null;
+}
+
+/** Result payload of a saved `qa` entry. */
+export interface QaAnalysisResult {
+  paragraphs?: string[];
+  citations?: Array<Record<string, unknown>>;
+  confidence?: number | null;
+  guidance?: string | null;
+}
+
 export interface AnalysisLogRecord {
   id: string;
   analysis_type: "document_extraction" | "qa" | string;
-  result: Record<string, unknown>;
+  result: Record<string, unknown> & Partial<DocumentExtractionResult> & Partial<QaAnalysisResult>;
   confidence?: number | null;
   summary?: string | null;
   created_at?: string | null;
@@ -971,6 +1028,8 @@ export interface UploadResponse {
   failed_files?: FailedFile[];
   // Re-uploads recognised as byte-for-byte duplicates and not added again.
   duplicate_files_skipped?: DuplicateFileSkipped[];
+  /** Files accepted at reduced confidence because some drug names could not be normalized. */
+  language_degradations?: LanguageDegradation[];
   // True when every file in the batch was an already-uploaded duplicate.
   all_files_duplicate?: boolean;
 }
@@ -1329,6 +1388,161 @@ export interface GuidelinesSource {
   age_days: number | null;
   stale: boolean;
 }
+// ---- Consult triage (GET /api/v1/consult-triage) --------------------------
+
+export interface TriageAction {
+  /** Rule that fired, e.g. "drug_interaction". */
+  trigger: string;
+  /** What the finding is about, e.g. "Warfarin + Ibuprofen". */
+  subject: string;
+  /** Plain-language explanation of the finding. */
+  detail: string;
+  /** "pharmacist" or "doctor". */
+  route: string;
+  urgency: string;
+  urgency_meaning?: string | null;
+  /** Why this was routed to a pharmacist rather than a doctor, or vice versa. */
+  why_this_route?: string | null;
+  confidence?: number | null;
+  confidence_caveat?: string | null;
+  category?: string | null;
+  specialty?: { key: string; label: string } | null;
+  timing?: { status?: string | null; explanation?: string | null } | null;
+  is_historical?: boolean;
+}
+
+export interface TriageSpecialty {
+  key: string;
+  label: string;
+  urgency: string;
+  confidence?: number | null;
+  triggered_by?: string[];
+}
+
+export interface ConsultTriageReport {
+  output_version?: string;
+  consult_needed: boolean;
+  consult_type?: string | null;
+  urgency?: string | null;
+  urgency_meaning?: string | null;
+  confidence?: number | null;
+  recommended_specialties: TriageSpecialty[];
+  pharmacist_actions: TriageAction[];
+  doctor_actions: TriageAction[];
+  referral_items?: TriageAction[];
+  document_quality_notices?: Array<Record<string, unknown>>;
+  document_quality_note?: string | null;
+  summary: string;
+  emergency_advice: string;
+  note: string;
+}
+
+// ---- Medication reconciliation (GET /api/v1/medications/reconciliation) ---
+
+export type ReconciledState =
+  "active" | "duplicate" | "dose_conflict" | "discontinued" | "single_supply" | string;
+
+export interface ReconciledMedication {
+  ingredient: string;
+  display_name: string;
+  state: ReconciledState;
+  is_active: boolean;
+  sources: Array<{
+    name?: string;
+    date?: string | null;
+    source_file?: string | null;
+    dose?: string | null;
+  }>;
+  supply_count: number;
+  active_supply_count: number;
+  doses: string[];
+  dose_conflict: boolean;
+  duplicate: boolean;
+  notes: string[];
+}
+
+export interface MedicationReconciliationReport {
+  reference_date: string;
+  reconciled_medications: ReconciledMedication[];
+  summary: {
+    total_ingredients: number;
+    active: number;
+    discontinued: number;
+    duplicates: number;
+    dose_conflicts: number;
+  };
+  note: string;
+}
+
+// ---- Deterioration trajectory (GET /api/v1/deterioration) -----------------
+
+export interface DeteriorationPoint {
+  date?: string | null;
+  score: number;
+  risk_band: string;
+  components?: Record<string, number | null>;
+  source_file?: string | null;
+}
+
+export interface DeteriorationReport {
+  trajectory: DeteriorationPoint[];
+  point_count: number;
+  latest_score: number;
+  latest_band: string;
+  previous_score?: number | null;
+  peak_score: number;
+  trend: string;
+  sustained_high: boolean;
+  worsening_signals: string[];
+  deteriorating: boolean;
+  note: string;
+}
+
+// ---- Record export (GET /api/v1/export, /api/v1/export/validation) --------
+
+export interface FhirValidationReport {
+  valid: boolean;
+  format?: string;
+  bundle_type?: string;
+  errors?: string[];
+  warnings?: string[];
+  resource_counts?: Record<string, number>;
+  [key: string]: unknown;
+}
+
+// ---- Finding history (GET /api/v1/findings/history/change-log) ------------
+
+export interface FindingChangeLogEntry {
+  finding_key: string;
+  kind?: string | null;
+  severity?: string | null;
+  rule?: string | null;
+  subject?: string | null;
+  first_seen: string;
+  last_seen: string;
+  seen_in_runs: number;
+  absent_then_recurred: boolean;
+}
+
+export interface FindingChangeLog {
+  snapshots: number;
+  findings: FindingChangeLogEntry[];
+}
+
+// ---- Guidelines refresh (POST /api/v1/guidelines/refresh) -----------------
+
+export interface GuidelinesRefreshResult {
+  applied: Array<{ key: string; version: string }>;
+  applied_count?: number;
+  checked?: boolean;
+  checked_at?: string | null;
+  manifest_url?: string | null;
+  new_sources_in_manifest?: string[] | null;
+  reason?: string | null;
+  note?: string | null;
+  [key: string]: unknown;
+}
+
 export interface GuidelinesStatus {
   sources: GuidelinesSource[];
   total: number;

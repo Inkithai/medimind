@@ -439,6 +439,50 @@ def delete_document_group(
 
 
 @_translate_missing_schema
+def load_document_rows(user_id: str) -> List[Dict[str, Any]]:
+    """Raw document rows (Postgres id + stored JSON) for this user.
+
+    load_documents() intentionally hides the storage identity and replays
+    corrections; maintenance tooling needs the untouched rows, including
+    the row id, to be able to report on and remove exact duplicates.
+    """
+    response = (
+        _documents()
+        .select("id, user_id, uploaded_at, data")
+        .eq("user_id", user_id)
+        .order("uploaded_at")
+        .order("id")
+        .execute()
+    )
+    rows: List[Dict[str, Any]] = []
+    for row in response.data or []:
+        data = row.get("data") if isinstance(row.get("data"), dict) else {}
+        rows.append(
+            {
+                "id": row["id"],
+                "uploaded_at": row.get("uploaded_at"),
+                "data": dict(data),
+            }
+        )
+    return rows
+
+
+@_translate_missing_schema
+def delete_document_rows(user_id: str, row_ids: Sequence[Any]) -> int:
+    """Delete specific document rows by storage id, scoped to this user.
+
+    Used only by maintenance tooling that has already decided which rows
+    are exact duplicates; normal deletion goes through
+    delete_document_group() so a whole physical upload is removed at once.
+    """
+    ids = [row_id for row_id in row_ids if row_id is not None]
+    if not ids:
+        return 0
+    _documents().delete().eq("user_id", user_id).in_("id", ids).execute()
+    return len(ids)
+
+
+@_translate_missing_schema
 def delete_document_corrections(user_id: str, document_ids: Sequence[str]) -> None:
     """Remove correction events whose source document has been deleted."""
     ids = [str(value) for value in document_ids if value]

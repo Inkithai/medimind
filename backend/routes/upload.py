@@ -41,6 +41,7 @@ import graph_db  # noqa: E402
 import jobs  # noqa: E402
 import storage  # noqa: E402
 import vector_store  # noqa: E402
+from analysis_log import build_extraction_analyses  # noqa: E402
 from auth import get_current_user  # noqa: E402
 from document_filter import NonMedicalDocumentError, assert_medical_document  # noqa: E402
 from document_processing import process_raw_text  # noqa: E402
@@ -48,8 +49,7 @@ from document_types import normalize_document_type, summarize_document_types  # 
 from identity_guard import build_identity_review, check_batch_identity  # noqa: E402
 from lab_trends import track_lab_trends  # noqa: E402
 from language_guard import (  # noqa: E402
-    LanguageNormalizationError,
-    assert_language_normalized,
+    apply_language_degradation,
     assess_documents_translation_risk,
 )
 from medical_extractor import (  # noqa: E402
@@ -490,6 +490,9 @@ async def _execute_upload_pipeline(
         # the response or mismatch duplicate-looking filenames.
         extracted: Dict[int, Tuple[Path, str, List[Dict[str, Any]], Dict[str, Any]]] = {}
         extraction_errors: Dict[int, Dict[str, Any]] = {}
+        # Pages kept despite incomplete drug-name translation, so the response
+        # can name the medications that will not take part in cross-checking.
+        language_degradations: List[Dict[str, Any]] = []
         queue: asyncio.Queue[Optional[Tuple[int, str, Path]]] = asyncio.Queue()
         for item in work_items:
             queue.put_nowait(item)
@@ -632,7 +635,7 @@ async def _execute_upload_pipeline(
                     pages = result["pages"] if result.get("multi_page") else [result]
                     kept_pages: List[Dict[str, Any]] = []
                     rejected = False
-                    language_rejected_info: Optional[Dict[str, Any]] = None
+                    page_degradations: List[Dict[str, Any]] = []
                     for page_num, page in enumerate(pages, start=1):
                         label = (
                             original_name
@@ -665,35 +668,35 @@ async def _execute_upload_pipeline(
                             )
                             rejected = True
                             break
-                        try:
-                            assert_language_normalized(page, label)
-                        except LanguageNormalizationError as exc:
+                        # A page whose drug names could not all be normalized
+                        # is KEPT at a lowered confidence with the unmatchable
+                        # medications marked, instead of failing the whole
+                        # file. Rejecting discarded the medications that HAD
+                        # resolved; for a photographed non-English
+                        # prescription partial translation is the normal
+                        # result, so refusing made the common case the failing
+                        # case. The gap is now recorded ON the record
+                        # (cross_check_eligible=False) rather than implied by
+                        # the document's absence from it.
+                        degraded = apply_language_degradation(page, label)
+                        if degraded["degraded"]:
                             logger.warning(
-                                "upload: user=%s language guard rejected '%s': %s",
+                                "upload: user=%s accepted '%s' at reduced confidence %.2f "
+                                "(languages=%s): %d medication(s) cannot be cross-checked: %s",
                                 user_id,
-                                original_name,
-                                exc.reason,
+                                label,
+                                degraded["confidence"],
+                                ", ".join(degraded["languages"]) or "unreported",
+                                len(degraded["unmatched_medications"]),
+                                "; ".join(degraded["unmatched_medications"]),
                             )
-                            language_rejected_info = {
-                                "file": original_name,
-                                "file_id": f"file-{file_index}",
-                                "file_index": file_index,
-                                "error": str(exc),
-                                "kind": "language_normalization",
-                                "code": "language_normalization_failed",
-                                "retryable": False,
-                                "retry_after_seconds": None,
-                            }
-                            rejected = True
-                            break
+                            page_degradations.append(degraded)
                         if isinstance(page.get("_source"), dict):
                             page["_source"]["file"] = original_name
                         kept_pages.append(page)
 
                     if rejected or not kept_pages:
-                        # The language guard produces a specific, actionable
-                        # error; the generic not-medical message covers the rest.
-                        info = language_rejected_info or {
+                        info = {
                             "file": original_name,
                             "file_id": f"file-{file_index}",
                             "file_index": file_index,
@@ -713,6 +716,10 @@ async def _execute_upload_pipeline(
                         )
                         continue
 
+                    # Only report degradations for a file that survived the
+                    # rest of the checks — a page dropped as non-medical must
+                    # not also be announced as "kept with a translation gap".
+                    language_degradations.extend(page_degradations)
                     extracted[file_index] = (
                         tmp_path,
                         original_name,
@@ -803,7 +810,12 @@ async def _execute_upload_pipeline(
             if held:
                 held_files = {f for h in held for f in h["source_files"]}
                 for file_index in sorted(extracted):
-                    _tmp, original_name, _pages = extracted[file_index]
+                    # `extracted` holds 4-tuples (tmp_path, original_name,
+                    # kept_pages, raw_text_processing). Unpacking three here
+                    # raised ValueError, so every identity-mismatch hold
+                    # crashed the whole upload with a 500 instead of
+                    # returning the 409 "confirm to add anyway" review.
+                    _tmp, original_name, _pages, _raw = extracted[file_index]
                     if original_name in held_files:
                         del extracted[file_index]
                         _file_progress(
@@ -1174,7 +1186,17 @@ async def _execute_upload_pipeline(
         # Present (and non-empty) when a re-uploaded file was recognised and
         # not added a second time.
         "duplicate_files_skipped": duplicate_files_skipped,
+        # Non-empty when a document was accepted at reduced confidence
+        # because some drug names could not be normalized. Each entry names
+        # the file, the medications that cannot be cross-checked, and why.
+        "language_degradations": language_degradations,
     }
+    if language_degradations:
+        logger.info(
+            "upload: user=%s accepted %d page(s) with incomplete drug-name translation",
+            user_id,
+            len(language_degradations),
+        )
     if duplicate_files_skipped:
         logger.info(
             "upload: user=%s skipped %d duplicate re-upload(s): %s",
@@ -2067,39 +2089,12 @@ async def list_ai_analyses(
         docs = db.load_documents(user_id)
     except Exception:
         docs = []
-    for doc in docs:
-        doc_id = trust_document_id(doc)
-        source_file = ((doc.get("_source") or {}).get("file")) or "uploaded document"
-        counts = {
-            "medications": len(doc.get("medications") or []),
-            "lab_results": len(doc.get("lab_results") or []),
-            "allergies": len(doc.get("allergies_noted") or []),
-            "findings": len(doc.get("diagnoses") or []) + len(doc.get("symptoms") or []),
-            "events": len(doc.get("procedures") or [])
-            + len(doc.get("vital_signs") or [])
-            + len(doc.get("imaging_results") or []),
-        }
-        summary = doc.get("clinical_notes") or (
-            f"Extracted {counts['medications']} medication(s), {counts['lab_results']} lab result(s), "  # noqa: E501
-            f"and {counts['findings']} clinical finding(s) from {source_file}."
-        )
-        records.append(
-            {
-                "id": f"document_extraction:{doc_id}",
-                "analysis_type": "document_extraction",
-                "result": {
-                    "summary": summary,
-                    "document_type_detected": doc.get("document_type"),
-                    "persisted_counts": counts,
-                    "source_file": source_file,
-                    "document_id": doc_id,
-                    "raw_text_processing": doc.get("raw_text_processing"),
-                },
-                "confidence": doc.get("overall_confidence"),
-                "summary": summary,
-                "created_at": doc.get("uploaded_at") or doc.get("date") or "",
-            }
-        )
+    # Documents are persisted one row per extracted PAGE. Emitting one card
+    # per row showed a multi-page (or re-extracted) file as several separate
+    # extractions of the same document, with its medications and labs counted
+    # once per page. build_extraction_analyses() collapses the page rows back
+    # into the physical upload they came from — see analysis_log.py.
+    records.extend(build_extraction_analyses(docs))
 
     # Best-effort Q&A log from persisted conversation sessions. Older/local
     # deployments may not have the table; extraction logs still return.

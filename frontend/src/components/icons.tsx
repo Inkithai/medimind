@@ -234,3 +234,22 @@ export const CloseIcon = (p: IconProps) => (
     <path d="m6 6 12 12M18 6 6 18" />
   </svg>
 );
+
+/** Stethoscope — "who should I talk to" (consult routing). */
+export const StethoscopeIcon = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M6 3v5a4 4 0 0 0 8 0V3" />
+    <path d="M4 3h3M13 3h3" />
+    <path d="M10 12v3a5 5 0 0 0 10 0v-1" />
+    <circle cx="20" cy="11" r="2" />
+  </svg>
+);
+
+/** Download — exporting a copy of the record. */
+export const DownloadIcon = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+    <polyline points="7 10 12 15 17 10" />
+    <line x1="12" y1="3" x2="12" y2="15" />
+  </svg>
+);

@@ -2,6 +2,9 @@ import { useCallback, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import { Card, CardBody } from "../components/Card";
+import { Spinner } from "../components/Spinner";
+import { StatusBadge } from "../components/StatusBadge";
+import { toastMessage, useToast } from "../components/Toast";
 import { ErrorState } from "../components/ErrorState";
 import { LoadingState } from "../components/Spinner";
 import {
@@ -15,19 +18,38 @@ import {
 } from "../components/icons";
 import { useAuth } from "../context/AuthContext";
 import { useStrictEffect } from "../hooks/useStrictEffect";
-import type { RecordChange, RecordChangesReport, RecordComparison } from "../types/api";
+import type {
+  FindingChangeLog,
+  RecordChange,
+  RecordChangesReport,
+  RecordComparison,
+} from "../types/api";
 import { formatDate } from "../utils/format";
 
 export function ChangesPage() {
   const { credentials } = useAuth();
+  const { toastSuccess, toastError } = useToast();
   const [report, setReport] = useState<RecordChangesReport | null>(null);
+  const [changeLog, setChangeLog] = useState<FindingChangeLog | null>(null);
+  const [savingSnapshot, setSavingSnapshot] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
 
+  const loadChangeLog = useCallback(async () => {
+    // Independent of the record comparison above: the safety-finding log
+    // exists as soon as one analysis has run, even with a single document.
+    try {
+      setChangeLog(await api.getFindingChangeLog(credentials));
+    } catch {
+      setChangeLog(null);
+    }
+  }, [credentials]);
+
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
+    void loadChangeLog();
     try {
       setReport(await api.getRecordChanges(credentials));
       setSelectedIndex(0);
@@ -37,7 +59,23 @@ export function ChangesPage() {
     } finally {
       setLoading(false);
     }
-  }, [credentials]);
+  }, [credentials, loadChangeLog]);
+
+  async function handleSaveSnapshot() {
+    setSavingSnapshot(true);
+    try {
+      await api.captureFindingSnapshot(credentials);
+      await loadChangeLog();
+      toastSuccess(
+        "Snapshot saved",
+        "Today's safety findings were recorded so future changes can be compared against them.",
+      );
+    } catch (err) {
+      toastError("Snapshot not saved", toastMessage(err));
+    } finally {
+      setSavingSnapshot(false);
+    }
+  }
 
   useStrictEffect(() => {
     void load();
@@ -162,6 +200,14 @@ export function ChangesPage() {
             </p>
           </div>
         </>
+      )}
+
+      {!loading && error === null && (
+        <FindingChangeLogSection
+          changeLog={changeLog}
+          onSaveSnapshot={() => void handleSaveSnapshot()}
+          saving={savingSnapshot}
+        />
       )}
     </div>
   );
@@ -364,4 +410,123 @@ function importanceStyle(importance: RecordChange["importance"]) {
     icon: "bg-slate-100 text-slate-600",
     badge: "bg-slate-100 text-slate-600",
   };
+}
+
+/**
+ * Safety-finding history (GET /api/v1/findings/history/change-log,
+ * POST /api/v1/findings/history/snapshot).
+ *
+ * The comparison above answers "what changed between two documents".
+ * This answers the different and equally important question "is this
+ * warning new, or has it been there for months — and did one I thought
+ * was gone come back?". Recurrence is called out in words, because a
+ * finding that disappears and returns is the pattern most likely to be
+ * dismissed as already handled.
+ */
+function FindingChangeLogSection({
+  changeLog,
+  onSaveSnapshot,
+  saving,
+}: {
+  changeLog: FindingChangeLog | null;
+  onSaveSnapshot: () => void;
+  saving: boolean;
+}) {
+  const findings = changeLog?.findings || [];
+  return (
+    <section
+      aria-labelledby="finding-change-log-title"
+      className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+    >
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="max-w-2xl">
+          <h2 id="finding-change-log-title" className="card-title">
+            How your safety warnings changed
+          </h2>
+          <p className="secondary-text mt-1">
+            Each time your records are analysed, MediMind stores which warnings were present. This
+            shows when each one first appeared, when it was last seen, and whether it went away and
+            came back.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onSaveSnapshot}
+          disabled={saving}
+          className="btn-secondary"
+          title="Records today's warnings so you can see later what changed."
+        >
+          {saving ? <Spinner className="h-5 w-5" /> : <ChangesIcon className="h-5 w-5" />}
+          {saving ? "Saving snapshot…" : "Save today's snapshot"}
+        </button>
+      </div>
+
+      {findings.length === 0 ? (
+        <p className="mt-4 text-base text-slate-600">
+          No warning history has been recorded yet. Use{" "}
+          <span className="font-semibold">Save today&apos;s snapshot</span> after an analysis, and
+          future changes will be listed here.
+        </p>
+      ) : (
+        <div className="mt-4 overflow-x-auto rounded-xl border border-slate-200">
+          <table className="min-w-full text-left text-base">
+            <caption className="sr-only">Safety findings with first and last seen dates</caption>
+            <thead className="bg-slate-50 text-sm uppercase tracking-wide text-slate-600">
+              <tr>
+                <th scope="col" className="px-4 py-3 font-semibold">
+                  Warning
+                </th>
+                <th scope="col" className="px-4 py-3 font-semibold">
+                  First seen
+                </th>
+                <th scope="col" className="px-4 py-3 font-semibold">
+                  Last seen
+                </th>
+                <th scope="col" className="px-4 py-3 font-semibold">
+                  Pattern
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {findings.map((finding) => (
+                <tr key={finding.finding_key} className="align-top hover:bg-slate-50">
+                  <th scope="row" className="px-4 py-3 text-left font-medium text-slate-800">
+                    {finding.subject || finding.rule || finding.finding_key}
+                    {finding.kind && (
+                      <span className="mt-1 block text-sm font-normal text-slate-600">
+                        {finding.kind.replace(/_/g, " ")}
+                      </span>
+                    )}
+                  </th>
+                  <td className="px-4 py-3 text-slate-700">{formatDate(finding.first_seen)}</td>
+                  <td className="px-4 py-3 text-slate-700">{formatDate(finding.last_seen)}</td>
+                  <td className="px-4 py-3">
+                    {finding.absent_then_recurred ? (
+                      <StatusBadge tone="warning">
+                        <span aria-hidden="true" className="font-bold">
+                          ↻
+                        </span>
+                        Went away and came back
+                      </StatusBadge>
+                    ) : (
+                      <StatusBadge tone="neutral">
+                        Seen in {finding.seen_in_runs} analysis
+                        {finding.seen_in_runs === 1 ? "" : "es"}
+                      </StatusBadge>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {changeLog && (
+        <p className="mt-3 text-sm text-slate-600">
+          Based on {changeLog.snapshots} recorded analysis
+          {changeLog.snapshots === 1 ? "" : "es"}.
+        </p>
+      )}
+    </section>
+  );
 }

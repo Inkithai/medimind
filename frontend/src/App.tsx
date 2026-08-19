@@ -26,6 +26,7 @@ import { FhirImportPage } from "./pages/FhirImportPage";
 import { ChangesPage } from "./pages/ChangesPage";
 import { AppointmentPrepPage } from "./pages/AppointmentPrepPage";
 import { AnalysesPage } from "./pages/AnalysesPage";
+import { WhoToSeePage } from "./pages/WhoToSeePage";
 import { RecordIntegrityPage } from "./pages/RecordIntegrityPage";
 import { FollowUpPage } from "./pages/FollowUpPage";
 import { ReviewPage } from "./pages/ReviewPage";
@@ -183,6 +184,14 @@ export default function App() {
           element={
             <RequireAuth>
               <AppointmentPrepPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/who-to-see"
+          element={
+            <RequireAuth>
+              <WhoToSeePage />
             </RequireAuth>
           }
         />

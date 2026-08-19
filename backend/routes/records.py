@@ -38,7 +38,10 @@ from lab_trends import track_lab_trends  # noqa: E402
 from medical_extractor import (  # noqa: E402
     build_patient_timeline,
 )
-from medication_safety import analyze_medication_safety  # noqa: E402
+
+# analyze_medication_safety is intentionally NOT imported here: the safety
+# analysis is resolved through api.cross_check_prescriptions at call time
+# so it stays patchable (see _cross_check_trusted_timeline).
 from record_integrity import check_record_integrity  # noqa: E402
 from record_trust import (  # noqa: E402
     apply_conflict_quarantine,
@@ -263,7 +266,16 @@ async def _cross_check_trusted_timeline(
         )
 
     def _run() -> Dict[str, Any]:
-        return analyze_medication_safety(timeline, graph_backed_findings=graph_backed_findings)
+        # Resolved through the `api` module at call time, like every other
+        # heavy dependency in this file (see "Patchable indirection" below).
+        # Calling medication_safety.analyze_medication_safety directly meant
+        # a test patching api.cross_check_prescriptions — which api.py
+        # imports for exactly that purpose — did not intercept the safety
+        # analysis, so the upload tests reached the real LLM provider:
+        # slow and non-deterministic online, and a hard failure offline.
+        import api as _api
+
+        return _api.cross_check_prescriptions(timeline, graph_backed_findings=graph_backed_findings)
 
     return await asyncio.get_running_loop().run_in_executor(_DOCUMENT_EXECUTOR, _run)
 

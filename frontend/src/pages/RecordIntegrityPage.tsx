@@ -14,12 +14,18 @@ import {
 } from "../components/icons";
 import { useAuth } from "../context/AuthContext";
 import { useStrictEffect } from "../hooks/useStrictEffect";
-import type { IntegrityEvidence, IntegrityIssue, RecordIntegrityReport } from "../types/api";
+import type {
+  CorrectionEvent,
+  IntegrityEvidence,
+  IntegrityIssue,
+  RecordIntegrityReport,
+} from "../types/api";
 import { formatDate } from "../utils/format";
 
 export function RecordIntegrityPage() {
   const { credentials } = useAuth();
   const [report, setReport] = useState<RecordIntegrityReport | null>(null);
+  const [corrections, setCorrections] = useState<CorrectionEvent[]>([]);
   const [reviewed, setReviewed] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
@@ -27,6 +33,12 @@ export function RecordIntegrityPage() {
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
+    // The correction history is an independent audit view: it must still
+    // load when the integrity check itself has nothing to report.
+    void api
+      .listCorrections(credentials)
+      .then((response) => setCorrections(response.corrections || []))
+      .catch(() => setCorrections([]));
     try {
       setReport(await api.getRecordIntegrity(credentials));
       setReviewed(new Set());
@@ -131,6 +143,8 @@ export function RecordIntegrityPage() {
               ))}
             </section>
           )}
+
+          <CorrectionHistorySection corrections={corrections} />
 
           <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
             <h2 className="text-sm font-bold text-slate-900">Checks performed</h2>
@@ -305,4 +319,120 @@ function IntegrityError({ error, onRetry }: { error: unknown; onRetry: () => voi
       </Card>
     );
   return <ErrorState error={error} onRetry={onRetry} />;
+}
+
+/**
+ * Corrections you have made (GET /api/v1/corrections).
+ *
+ * Every fix a user makes to an extracted field is stored as an
+ * append-only audit event, but until now that history was only visible
+ * one document at a time. Showing the whole list here answers "what have
+ * I already corrected, and why?" — the question that decides whether a
+ * disagreement between documents is new or already dealt with.
+ */
+function CorrectionHistorySection({ corrections }: { corrections: CorrectionEvent[] }) {
+  const [showAll, setShowAll] = useState(false);
+  const ordered = [...corrections].sort((a, b) =>
+    String(b.created_at || "").localeCompare(String(a.created_at || "")),
+  );
+  const visible = showAll ? ordered : ordered.slice(0, 5);
+
+  const describeValue = (value: unknown): string => {
+    if (value === null || value === undefined || value === "") return "(empty)";
+    if (typeof value === "object") return JSON.stringify(value);
+    return String(value);
+  };
+  const describeField = (path: string): string =>
+    path
+      .replace(/\[(\d+)\]/g, (_match, index) => ` #${Number(index) + 1}`)
+      .replace(/[._]/g, " ")
+      .trim();
+
+  return (
+    <section
+      aria-labelledby="correction-history-title"
+      className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+    >
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 id="correction-history-title" className="card-title">
+            Corrections you have made
+          </h2>
+          <p className="secondary-text mt-1">
+            Every fix is kept with the reason you gave. The original document is never changed.
+          </p>
+        </div>
+        <span className="rounded-full bg-slate-100 px-3 py-1.5 text-sm font-semibold text-slate-700">
+          {ordered.length} correction{ordered.length === 1 ? "" : "s"}
+        </span>
+      </div>
+
+      {ordered.length === 0 ? (
+        <p className="mt-4 text-base text-slate-600">
+          You have not corrected anything yet. If MediMind reads a value wrongly, open the document
+          and use <span className="font-semibold">Correct this</span> — your change is recorded
+          here.
+        </p>
+      ) : (
+        <>
+          <div className="mt-4 overflow-x-auto rounded-xl border border-slate-200">
+            <table className="min-w-full text-left text-base">
+              <caption className="sr-only">History of field corrections</caption>
+              <thead className="bg-slate-50 text-sm uppercase tracking-wide text-slate-600">
+                <tr>
+                  <th scope="col" className="px-4 py-3 font-semibold">
+                    What you changed
+                  </th>
+                  <th scope="col" className="px-4 py-3 font-semibold">
+                    Was
+                  </th>
+                  <th scope="col" className="px-4 py-3 font-semibold">
+                    Now
+                  </th>
+                  <th scope="col" className="px-4 py-3 font-semibold">
+                    Why / when
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {visible.map((event) => (
+                  <tr key={event.id} className="align-top hover:bg-slate-50">
+                    <th scope="row" className="px-4 py-3 text-left font-medium text-slate-800">
+                      {describeField(event.field_path)}
+                    </th>
+                    <td className="px-4 py-3 text-slate-600 line-through decoration-slate-400">
+                      {describeValue(event.previous_value)}
+                    </td>
+                    <td className="px-4 py-3 font-semibold text-slate-900">
+                      {describeValue(event.corrected_value)}
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">
+                      <p>{event.reason}</p>
+                      <p className="text-sm text-slate-500">{formatDate(event.created_at)}</p>
+                      <Link
+                        to={`/documents?document=${encodeURIComponent(event.document_id)}`}
+                        className="text-sm font-semibold text-brand-700 hover:underline"
+                      >
+                        Open the document
+                      </Link>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {ordered.length > 5 && (
+            <button
+              type="button"
+              onClick={() => setShowAll((value) => !value)}
+              className="btn-secondary mt-3"
+              aria-expanded={showAll}
+            >
+              {showAll ? "Show only the latest 5" : `Show all ${ordered.length} corrections`}
+            </button>
+          )}
+        </>
+      )}
+    </section>
+  );
 }

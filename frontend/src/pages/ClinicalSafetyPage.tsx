@@ -11,13 +11,25 @@ import { RefreshIcon, UploadIcon } from "../components/icons";
 import { useAuth } from "../context/AuthContext";
 import { useStrictEffect } from "../hooks/useStrictEffect";
 import { useI18n } from "../i18n/I18nContext";
-import type { ManagedAlertsReport, FeedbackMetrics } from "../types/api";
+import { StatusBadge } from "../components/StatusBadge";
+import type {
+  FindingFeedbackEntry,
+  ManagedAlertsReport,
+  FeedbackMetrics,
+  FindingLifecycleOverview,
+  FindingLifecycleState,
+} from "../types/api";
 
 export function ClinicalSafetyPage() {
   const { credentials } = useAuth();
   const { t } = useI18n();
   const [alerts, setAlerts] = useState<ManagedAlertsReport | null>(null);
   const [metrics, setMetrics] = useState<FeedbackMetrics | null>(null);
+  // finding_key -> lifecycle state, so each card knows what has already
+  // been reviewed, dismissed or resolved (GET /api/v1/findings/lifecycle).
+  const [lifecycle, setLifecycle] = useState<Record<string, FindingLifecycleState>>({});
+  const [lifecycleSummary, setLifecycleSummary] = useState<FindingLifecycleOverview | null>(null);
+  const [pastFeedback, setPastFeedback] = useState<FindingFeedbackEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
   const [reloadKey, setReloadKey] = useState(0);
@@ -26,12 +38,22 @@ export function ClinicalSafetyPage() {
     setLoading(true);
     setError(null);
     try {
-      const [a, m] = await Promise.all([
+      const [a, m, lc, fb] = await Promise.all([
         api.getManagedAlerts(credentials),
         api.getFeedbackMetrics(credentials).catch(() => null),
+        api.getFindingLifecycle(credentials).catch(() => null),
+        // Your own past answers — the other half of the feedback loop.
+        api.listFindingFeedback(credentials).catch(() => ({ feedback: [] })),
       ]);
       setAlerts(a);
       setMetrics(m);
+      setLifecycleSummary(lc);
+      setPastFeedback(fb?.feedback || []);
+      const states: Record<string, FindingLifecycleState> = {};
+      for (const finding of lc?.findings || []) {
+        if (finding.finding_key) states[finding.finding_key] = finding.lifecycle_state;
+      }
+      setLifecycle(states);
     } catch (err) {
       setAlerts(null);
       setError(err);
@@ -79,12 +101,52 @@ export function ClinicalSafetyPage() {
             </Card>
           )}
 
+          {lifecycleSummary && lifecycleSummary.open_count + lifecycleSummary.closed_count > 0 && (
+            <Card>
+              <CardHeader
+                title="Your progress on these warnings"
+                description="Marking a warning as read, sorted out or not relevant keeps this list manageable. Nothing is deleted."
+              />
+              <CardBody>
+                <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                  <ProgressTile
+                    label="Still open"
+                    value={lifecycleSummary.open_count}
+                    tone="warning"
+                  />
+                  <ProgressTile
+                    label="Dealt with"
+                    value={lifecycleSummary.closed_count}
+                    tone="success"
+                  />
+                  <ProgressTile
+                    label="You have read"
+                    value={lifecycleSummary.by_state?.reviewed || 0}
+                    tone="info"
+                  />
+                  <ProgressTile
+                    label="Not relevant to you"
+                    value={lifecycleSummary.by_state?.dismissed || 0}
+                    tone="neutral"
+                  />
+                </dl>
+              </CardBody>
+            </Card>
+          )}
+
           {alerts.active_count > 0 && (
             <div>
               <h2 className="section-title">Active findings ({alerts.active_count})</h2>
               <div className="grid gap-3 sm:grid-cols-2">
                 {alerts.active_findings.map((f, i) => (
-                  <ClinicalFindingCard key={f.finding_key || i} finding={f} />
+                  <ClinicalFindingCard
+                    key={f.finding_key || i}
+                    finding={f}
+                    lifecycleState={f.finding_key ? lifecycle[f.finding_key] : undefined}
+                    onLifecycleChange={(key, state) =>
+                      setLifecycle((current) => ({ ...current, [key]: state }))
+                    }
+                  />
                 ))}
               </div>
               {alerts.collapsed_duplicates > 0 && (
@@ -100,11 +162,20 @@ export function ClinicalSafetyPage() {
               <h2 className="section-title">Overridden / suppressed ({alerts.suppressed_count})</h2>
               <div className="grid gap-3 sm:grid-cols-2">
                 {alerts.suppressed_findings.map((f, i) => (
-                  <ClinicalFindingCard key={f.finding_key || i} finding={f} />
+                  <ClinicalFindingCard
+                    key={f.finding_key || i}
+                    finding={f}
+                    lifecycleState={f.finding_key ? lifecycle[f.finding_key] : undefined}
+                    onLifecycleChange={(key, state) =>
+                      setLifecycle((current) => ({ ...current, [key]: state }))
+                    }
+                  />
                 ))}
               </div>
             </div>
           )}
+
+          {pastFeedback.length > 0 && <PastFeedbackSection entries={pastFeedback} />}
 
           {metrics && metrics.total > 0 && (
             <Card>
@@ -159,4 +230,80 @@ function ErrorOrEmpty({ error, onRetry }: { error: unknown; onRetry: () => void 
     );
   }
   return <ErrorState error={error} onRetry={onRetry} />;
+}
+
+/** One counter in the review-progress summary (label + number, no colour-only meaning). */
+function ProgressTile({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: number;
+  tone: "warning" | "success" | "info" | "neutral";
+}) {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+      <dt className="text-sm font-medium text-slate-600">{label}</dt>
+      <dd className="mt-1 flex items-center gap-2">
+        <span className="text-2xl font-bold text-slate-900">{value}</span>
+        <StatusBadge tone={tone}>{label}</StatusBadge>
+      </dd>
+    </div>
+  );
+}
+
+/**
+ * Your past answers (GET /api/v1/findings/feedback).
+ *
+ * The app asks "was this warning helpful?" on every finding, but until
+ * now there was nowhere to see what you had already answered. Without
+ * that, the same question feels like it is being asked again and again.
+ */
+function PastFeedbackSection({ entries }: { entries: FindingFeedbackEntry[] }) {
+  const VERDICT_TEXT: Record<string, string> = {
+    confirmed: "You said this looks right",
+    false_positive: "You said this is wrong",
+    needs_change: "You said this is partly right",
+    overridden: "You asked to hide this warning",
+  };
+  const ordered = [...entries].sort((a, b) =>
+    String(b.created_at || "").localeCompare(String(a.created_at || "")),
+  );
+  return (
+    <Card>
+      <CardHeader
+        title="Your past answers"
+        description="What you told MediMind about earlier warnings. Nothing here changes your medical record."
+      />
+      <CardBody>
+        <ul className="divide-y divide-slate-100">
+          {ordered.slice(0, 8).map((entry, index) => (
+            <li
+              key={`${entry.finding_key}-${entry.created_at}-${index}`}
+              className="flex flex-wrap items-center justify-between gap-2 py-3"
+            >
+              <div className="min-w-0">
+                <p className="text-base font-medium text-slate-800">
+                  {VERDICT_TEXT[entry.verdict] || entry.verdict}
+                </p>
+                <p className="text-sm text-slate-600">
+                  {entry.rule ? entry.rule.replace(/_/g, " ") : entry.finding_key}
+                  {entry.reason ? ` — “${entry.reason}”` : ""}
+                </p>
+              </div>
+              <span className="text-sm text-slate-500">
+                {entry.created_at ? entry.created_at.slice(0, 10) : ""}
+              </span>
+            </li>
+          ))}
+        </ul>
+        {ordered.length > 8 && (
+          <p className="mt-2 text-sm text-slate-600">
+            Showing the 8 most recent of {ordered.length} answers.
+          </p>
+        )}
+      </CardBody>
+    </Card>
+  );
 }
