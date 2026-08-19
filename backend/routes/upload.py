@@ -89,6 +89,7 @@ from routes.records import (  # noqa: E402
     _attach_eml_age_safety,
     _cross_check_trusted_timeline,
     _derive_record,
+    _openfda_label_context,
     _prepare_current_trust_state,
     _rebuild_after_document_deletion,
     _replace_index,
@@ -1010,6 +1011,11 @@ async def _execute_upload_pipeline(
         graph_backed_findings, antidote_reference_notes = _antidote_context(
             timeline, user_id, "upload_documents"
         )
+        # Warm the openFDA label cache BEFORE the cross-check so interaction
+        # findings can be corroborated by FDA Structured Product Labels. Fail-
+        # open: a cold cache or a failed fetch just means findings grade as
+        # model knowledge, exactly as they did before this feature existed.
+        _openfda_label_context(timeline, user_id, "upload_documents")
         # Safety is another provider call, so it shares the same bounded pool
         # as extraction instead of bypassing load control or blocking polling.
         cross_check = await _cross_check_trusted_timeline(timeline, graph_backed_findings)

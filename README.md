@@ -51,6 +51,7 @@ The system is designed to be evidence-based and conservative: it explains what u
 - Drug-lab, renal/hepatic, and condition-contraindication checks.
 - Published guidance enrichment for opioid/depressant safety.
 - WHO/EML-backed poisoning and age-restriction reference logic.
+- Optional openFDA-backed FDA Structured Product Label citations for interaction findings (evidence-backed, not model recall).
 - Evidence grading: deterministic, reference-backed, or model-knowledge with confidence caps.
 - Treatment-window risk timeline: concurrent, possible, historical, and unknown risk timing.
 
@@ -298,6 +299,7 @@ Zero matches return an empty list plus a widening-search suggestion. Missing pho
 | `backend/record_trust.py` | Correction replay, deterministic conflict detection, authoritative-source state, fail-closed quarantine. |
 | `backend/evidence.py` | Page/quote/bounding-box provenance and exact text-region resolution. |
 | `backend/evidence_grading.py` | Finding evidence source classification and model-knowledge confidence caps. |
+| `backend/openfda_reference.py` | Optional openFDA adapter: FDA Structured Product Labels cited behind interaction findings (cache-first, fail-open, keyed by ingredient). |
 | `backend/risk_timeline.py` | Timing windows for safety findings and double-dosing exposure periods. |
 | `backend/vector_store.py` | Chroma/Supabase vector-store abstraction. |
 | `backend/storage.py` | Cloudinary default storage, optional Supabase private storage, signed URL helpers, storage deletion/download abstraction. |
@@ -359,6 +361,7 @@ JWT_SECRET=some-long-random-string  # openssl rand -hex 32
 
 # optional
 OPENAI_API_KEY=sk-...   # only for embeddings, else local ONNX
+OPENFDA_API_KEY=...     # openFDA label citations for interaction findings (US-market data) — https://open.fda.gov/apis/authentication/
 VECTOR_STORE=supabase   # or chroma — supabase uses Supabase `chunks` table (no volume, recommended for Railway)
 CHROMA_DIR=./chroma_db   # only for VECTOR_STORE=chroma, override to /data/chroma_db on Railway volume
 USE_BACKGROUND_JOBS=true # async 202 + polling for uploads

@@ -52,6 +52,9 @@ def _seed() -> None:
         "reference_library_samhsa": "SAMHSA Overdose Prevention & Response Toolkit (PEP23-03-00-001)",  # noqa: E501
         "preventive_care": "General adult preventive-care / screening reminders",
         "who_eml_graph": "WHO Model List of Essential Medicines (EML/EMLc) graph",
+        "openfda_labels": (
+            "FDA Structured Product Labels (openFDA drug/label API; US-market data)"
+        ),
     }.items():
         register(key, version="initial", reviewed=today, description=desc, _seed=True)
 

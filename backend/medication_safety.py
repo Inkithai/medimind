@@ -465,9 +465,14 @@ def cross_check_prescriptions(
     # already tells users it is (a reasoning layer, not a validated
     # drug-interaction database).
     from evidence_grading import grade_cross_check
+    from openfda_reference import openfda_claim_reference
     from reference_library import samhsa_claim_reference
 
-    grade_cross_check(result, graph_backed_findings, claim_reference=samhsa_claim_reference)
+    grade_cross_check(
+        result,
+        graph_backed_findings,
+        claim_reference=(samhsa_claim_reference, openfda_claim_reference),
+    )
 
     # Place every finding in time. Within the active set all courses overlap
     # at the reference date; timing still documents each finding's window

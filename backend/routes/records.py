@@ -212,6 +212,63 @@ def _antidote_context(
     return graph_backed_findings_from_antidotes(references), notes
 
 
+def _openfda_label_context(
+    timeline: Dict[str, Any], user_id: str, operation: str
+) -> Dict[str, Dict[str, Any]]:
+    """Warm the openFDA label cache for this record's ingredients, BEFORE the
+    safety cross-check runs.
+
+    Fail-open by design: without an OPENFDA_API_KEY, or on any fetch failure,
+    this returns {} and the grading is unchanged — findings simply do not
+    carry an FDA label citation and grade as model_knowledge (the honest
+    default). The per-finding claim hook (openfda_claim_reference) reads only
+    from this in-process cache, so warming here keeps network I/O out of the
+    grading loop.
+    """
+    import openfda_reference
+
+    if not openfda_reference.is_configured():
+        logger.debug(
+            "%s: user=%s openFDA not configured (OPENFDA_API_KEY unset) — "
+            "skipping label reference warm",
+            operation,
+            user_id,
+        )
+        return {}
+
+    ingredients = sorted(
+        {
+            str(ingredient).strip()
+            for medication in timeline.get("medications_timeline") or []
+            for ingredient in medication.get("ingredients") or []
+            if str(ingredient).strip()
+        }
+    )
+    if not ingredients:
+        return {}
+
+    try:
+        refs = openfda_reference.prefetch_labels(ingredients)
+    except Exception as e:  # defensive — the adapter is fail-open, but never let it block a record
+        logger.warning(
+            "%s: user=%s openFDA label warm failed, continuing without FDA "
+            "citations (findings grade as unverified model knowledge): %s",
+            operation,
+            user_id,
+            e,
+        )
+        return {}
+    if refs:
+        logger.info(
+            "%s: user=%s warmed openFDA labels for %d of %d ingredient(s)",
+            operation,
+            user_id,
+            len(refs),
+            len(ingredients),
+        )
+    return refs
+
+
 def _attach_eml_age_safety(
     cross_check: Dict[str, Any], timeline: Dict[str, Any], user_id: Optional[str] = None
 ) -> None:
@@ -376,6 +433,7 @@ async def _derive_record_impl(
     graph_backed_findings, antidote_reference_notes = _antidote_context(
         timeline, user_id, "record_rebuild"
     )
+    _openfda_label_context(timeline, user_id, "record_rebuild")
     cross_check = await _cross_check_trusted_timeline(timeline, graph_backed_findings)
     _attach_eml_age_safety(cross_check, timeline, user_id)
     cross_check["antidote_reference_notes"] = antidote_reference_notes
