@@ -9,8 +9,9 @@ import { RiskTimelineView } from "../components/RiskTimelineView";
 import { useAuth } from "../context/AuthContext";
 import { useStrictEffect } from "../hooks/useStrictEffect";
 import type { RiskTimelineReport } from "../types/api";
+import type { EmbeddedPageProps } from "../components/TabBar";
 
-export function RiskTimelinePage() {
+export function RiskTimelinePage({ embedded }: EmbeddedPageProps = {}) {
   const { credentials } = useAuth();
   const [report, setReport] = useState<RiskTimelineReport | null>(null);
   const [loading, setLoading] = useState(true);
@@ -38,14 +39,18 @@ export function RiskTimelinePage() {
   return (
     <div className="space-y-6">
       <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="page-title">Risk Timeline</h1>
-          <p className="secondary-text mt-2 max-w-2xl">
-            When was each safety finding actually live? Two medicines only interact if they were
-            taken at the same time — findings whose courses never overlapped are shown as history,
-            not current risk.
-          </p>
-        </div>
+        {embedded ? (
+          <div />
+        ) : (
+          <div>
+            <h1 className="page-title">Risk Timeline</h1>
+            <p className="secondary-text mt-2 max-w-2xl">
+              When was each safety finding actually live? Two medicines only interact if they were
+              taken at the same time — findings whose courses never overlapped are shown as history,
+              not current risk.
+            </p>
+          </div>
+        )}
         <button
           onClick={() => setReloadKey((k) => k + 1)}
           className="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"

@@ -228,7 +228,7 @@ export function DashboardPage() {
               derived views.
             </p>
           </div>
-          <Link to="/record-integrity?tab=conflicts" className="btn-secondary">
+          <Link to="/record-check?tab=conflicts" className="btn-secondary">
             Review sources
           </Link>
         </div>
@@ -259,7 +259,7 @@ export function DashboardPage() {
             icon={<TimelineIcon className="h-6 w-6" />}
             label="Clinical Events"
             value={clinicalEventCount}
-            to="/history"
+            to="/documents?tab=timeline"
             chip="bg-indigo-50 text-indigo-600"
             sub="Diagnoses, symptoms & more"
           />
@@ -307,7 +307,7 @@ export function DashboardPage() {
             </h2>
           </div>
           <Link
-            to="/changes"
+            to="/record-check?tab=changes"
             className="group flex flex-col gap-4 overflow-hidden rounded-2xl border border-indigo-200 bg-gradient-to-r from-indigo-50 via-white to-sky-50 p-5 shadow-sm transition hover:border-indigo-300 hover:shadow-md sm:flex-row sm:items-center"
           >
             <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-indigo-600 text-white shadow-sm">
@@ -346,7 +346,7 @@ export function DashboardPage() {
         </div>
         <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
           <Link
-            to="/who-to-see"
+            to="/care?tab=who"
             className="group flex flex-col gap-4 rounded-2xl border border-amber-200 bg-white p-5 shadow-sm transition hover:border-amber-300 hover:shadow-md sm:flex-row sm:items-center lg:flex-col lg:items-start"
           >
             <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-amber-700 text-white shadow-sm">
@@ -384,7 +384,7 @@ export function DashboardPage() {
             </div>
           </Link>
           <Link
-            to="/follow-up"
+            to="/appointment-prep?tab=queue"
             className="group flex flex-col gap-4 rounded-2xl border border-fuchsia-200 bg-white p-5 shadow-sm transition hover:border-fuchsia-300 hover:shadow-md sm:flex-row sm:items-center lg:flex-col lg:items-start"
           >
             <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-fuchsia-700 text-white shadow-sm">
@@ -429,7 +429,10 @@ export function DashboardPage() {
         <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <div className="flex items-center justify-between">
             <h2 className="card-title">{t("dashboard.recent")}</h2>
-            <Link to="/history" className="text-sm font-medium text-brand-600 hover:text-brand-700">
+            <Link
+              to="/documents?tab=timeline"
+              className="text-sm font-medium text-brand-600 hover:text-brand-700"
+            >
               {t("dashboard.viewTimeline")} →
             </Link>
           </div>

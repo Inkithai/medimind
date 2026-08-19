@@ -43,7 +43,7 @@ export function LandingPage() {
           <LanguageSelector compact />
           <button
             type="button"
-            onClick={() => navigate("/find-care")}
+            onClick={() => navigate("/care?tab=map")}
             className="hidden min-h-[44px] rounded-full border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 sm:block"
           >
             {t("landing.findCare")}

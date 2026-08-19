@@ -18,8 +18,9 @@ import {
   dedupeAnalyses,
 } from "../utils/analyses";
 import { classNames, confidenceTone, formatConfidence, formatDate } from "../utils/format";
+import type { EmbeddedPageProps } from "../components/TabBar";
 
-export function AnalysesPage() {
+export function AnalysesPage({ embedded }: EmbeddedPageProps = {}) {
   const { credentials } = useAuth();
   const [records, setRecords] = useState<AnalysisLogRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -45,7 +46,11 @@ export function AnalysesPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="page-title">AI analysis logs</h1>
+        {embedded ? (
+          <h2 className="section-title">AI analysis logs</h2>
+        ) : (
+          <h1 className="page-title">AI analysis logs</h1>
+        )}
         <p className="secondary-text mt-2">
           Patient-scoped records of document extraction summaries and saved Q&A answers. These are
           audit/display logs, not model reasoning.

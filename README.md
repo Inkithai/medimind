@@ -449,19 +449,42 @@ Zero-login anonymous model:
 
 - **Landing** `/` — hero, anonymous session explanation, Start My Health Record → auto-creates workspace via `POST /anonymous/session` (token stored in `localStorage.medimind.session.v1`).
 - **Overview / Dashboard** `/dashboard` — documents / clinical events / medicines / labs / safety counts, latest safety warnings, recent history, pipeline hint.
-- **Upload** `/upload` — drag-drop and dedup (`name-size-lastModified`); shows each document's independent queue/read/extract/save state, then clearly separates the one-time record finalization steps (history → safety → search).
-- **My Documents** `/documents` — original and structured extraction plus **Correct & Audit**. “View evidence” beside dates, identities, medicines, labs, allergies, and notes opens the cited page and draws the saved region when exact geometry exists. The raw text/OCR processing panel shows reusable extracted text, method, page count, and confidence. Corrections are append-only and preserve every original/before/after value.
-- **Trust Review** `/review` — quarantines conflicting evidence, records an authoritative source decision, supports reopening, and rebuilds all derived views.
-- **My History** `/history` — event-date-specific longitudinal diagnoses, symptoms, procedures, vital signs, and imaging with evidence deep links, plus the year-grouped source-document timeline and full `TimelineView`.
-- **My Medicines** `/medicines` — current per ingredient (most recent) + historical log table, filterable, source file traceable (now fixed to original filename, not temp sanitized path).
-- **Test Results / Lab Trends** `/labs` — per-test direction, flag sequence, crossing / recovery badge (green when the latest reading is back to normal), approaching-threshold, single-result lab classification, SVG sparkline with reference band. Thousands-aware values; mixed units (`mg/dL` vs `mmol/L`) are declined rather than trended.
-- **Safety** `/safety` — allergy conflicts (danger), interactions with severity, dosage conflicts, duplicates, overall recommendation.
-- **What Changed** `/changes` — deterministic consecutive-record comparisons with before/after source evidence.
-- **Appointment Prep** `/appointment-prep` — printable handoff and prioritized record-grounded clinician questions.
-- **Action Center** `/follow-up` — combined follow-up queue with browser-only completion state, user-selected reminder dates, and `.ics` calendar export.
-- **Record Check** `/record-integrity` — side-by-side identity, allergy, same-date lab, and medication-instruction discrepancies.
-- **Ask** `/ask` — intent-routed RAG plus complete-record retrieval for list/completeness questions, evidence sufficiency, verbatim source quotes, exact-highlight deep links, injection resistance, citation validation, and confidence caps.
-- **AI Analysis Logs** `/analyses` — patient-scoped document extraction and Q&A analysis history without exposing hidden model reasoning.
+- **Upload** `/upload` — drag-drop and dedup (`name-size-lastModified`); shows each document's independent queue/read/extract/save state, then clearly separates the one-time record finalization steps (history → safety → search). Second tab: **FHIR file** — import an R4 bundle exported from another system.
+- **My Record** `/documents` — original and structured extraction plus **Correct & Audit**. “View evidence” beside dates, identities, medicines, labs, allergies, and notes opens the cited page and draws the saved region when exact geometry exists. Corrections are append-only and preserve every original/before/after value. Second tab: **Timeline** — event-date-specific longitudinal diagnoses, symptoms, procedures, vital signs, and imaging with evidence deep links.
+- **My Medicines** `/medicines` — current per ingredient (most recent) + historical log table, filterable, source file traceable.
+- **Labs & Vitals** `/labs` — per-test direction, flag sequence, crossing / recovery badge, approaching-threshold, SVG sparkline with reference band. Mixed units (`mg/dL` vs `mmol/L`) are declined rather than trended. Second tab: **Home vitals** — self-recorded BP / weight / sugar, early-warning screen and adherence signals.
+- **Safety** `/safety` — three views of one question. **Alerts**: allergy conflicts (danger), interactions with severity, dosage conflicts, duplicates, overall recommendation, and re-run analysis. **Clinical** (`?tab=clinical`): drug–lab, organ-function and contraindication findings with the reviewer workflow. **Over time** (`?tab=timeline`): when each finding was actually live, so two medicines are only treated as interacting if their courses overlapped.
+- **Record Check** `/record-check` — **Discrepancies**: side-by-side identity, allergy, same-date lab and medication-instruction conflicts. **Conflicts** (`?tab=conflicts`): quarantine conflicting evidence, record an authoritative source, reopen, and rebuild derived views. **What changed** (`?tab=changes`): deterministic consecutive-record comparisons with before/after source evidence.
+- **Ask AI** `/ask` — intent-routed RAG plus complete-record retrieval for list/completeness questions, evidence sufficiency, verbatim source quotes, exact-highlight deep links, injection resistance, citation validation, and confidence caps. Tabs: **Ask a question**, **Check a symptom** (`?tab=symptoms`), **Conversation** (`?tab=chat`, multi-turn with memory).
+- **Find Care** `/care` — **Find local care** (default): pick a safety flag, get the matching specialty, and search live listings near you. **Who to see** (`?tab=who`): pharmacist-vs-doctor triage with urgency. **Browse nearby** (`?tab=map`): the Leaflet facility directory, lazily loaded so the map bundle only downloads on this tab.
+- **Next Steps** `/appointment-prep` — **Appointment prep** (default): printable handoff and prioritized record-grounded clinician questions. **Action Center** (`?tab=queue`): follow-up queue with browser-only completion state, user-selected reminder dates and `.ics` export. **Preventive** (`?tab=preventive`): screening/immunisation prompts. **Messages** (`?tab=messages`): dated notes for a provider, explicitly not delivered anywhere.
+- **About & Settings** `/about` — **How it works**, **Guidelines** (`?tab=guidelines`, the curated clinical sources and their review status), **Settings** (`?tab=settings`, language, profile, JSON/FHIR export, health passport, workspace name and deletion), **Advanced** (`?tab=advanced`, the AI analysis audit log).
+
+#### Navigation: eleven destinations, nothing removed
+
+The sidebar names the eleven jobs a patient has, not the twenty-odd screens that exist. Sibling screens that answered the same question became tabs, and **every previous URL still resolves** — it redirects onto the tab that now holds that screen, so older links, bookmarks and slides do not 404:
+
+| Old path | Now |
+| --- | --- |
+| `/cross-check` | `/safety` |
+| `/clinical-safety` | `/safety?tab=clinical` |
+| `/risk-timeline` | `/safety?tab=timeline` |
+| `/changes` | `/record-check?tab=changes` |
+| `/review` | `/record-check?tab=conflicts` |
+| `/symptoms` | `/ask?tab=symptoms` |
+| `/conversations`, `/sessions` | `/ask?tab=chat` |
+| `/who-to-see` | `/care?tab=who` |
+| `/find-care`, `/location-picker` | `/care?tab=map` |
+| `/follow-up` | `/appointment-prep?tab=queue` |
+| `/preventive-care` | `/appointment-prep?tab=preventive` |
+| `/messages` | `/appointment-prep?tab=messages` |
+| `/history`, `/timeline` | `/documents?tab=timeline` |
+| `/vitals` | `/labs?tab=vitals` |
+| `/lab-trends` | `/labs` |
+| `/import` | `/upload?tab=fhir` |
+| `/guidelines` | also a tab at `/about?tab=guidelines` (the route still stands alone) |
+
+Two routes are deliberately reachable but unlisted: **`/analyses`** (the AI analysis audit log — a transparency dump, not a patient task; linked from About → Advanced) and **`/ygc-prep`** (speaker notes). Tab state lives in the query string, the default tab is the *absence* of `?tab=`, an unknown tab value falls back to the default rather than blanking the page, and only the active tab's panel is mounted so a hidden tab never fires its request. Contract tests: `npm run test:navigation` (routing and sidebar shape) and `npm run test:navigation-render` (boots the app at each URL and asserts the landed tab).
 
 ### Ask AI groundedness
 
@@ -739,13 +762,15 @@ Several capabilities the API already served had no screen. They are now surfaced
 
 | Screen | Endpoint(s) | What the user can now do |
 | --- | --- | --- |
-| **Who should I talk to?** (`/who-to-see`, sidebar → Take action) | `GET /api/v1/consult-triage` | See in one sentence whether a pharmacist or doctor should look at their record, how soon, which specialty, and what to ask — with the emergency advice and "no trigger found is not a clean bill of health" caveat shown verbatim. |
+| **Who should I talk to?** (Find care → *Who to see*) | `GET /api/v1/consult-triage` | See in one sentence whether a pharmacist or doctor should look at their record, how soon, which specialty, and what to ask — with the emergency advice and "no trigger found is not a clean bill of health" caveat shown verbatim. |
 | **Medications** → checked medicine list | `GET /api/v1/medications/reconciliation` | See each ingredient as *Taking now / Possible duplicate / Different doses / Stopped / One supply only*, with the source documents behind each row. |
 | **Vitals** → "Is this getting better or worse?" | `GET /api/v1/deterioration` | Compare the early-warning trajectory across every dated reading (trend, sustained-high, which signals worsened). |
 | **Clinical safety** → review workflow | `GET`/`POST /api/v1/findings/lifecycle`, `GET /api/v1/findings/feedback` | Mark a warning as read / sorted out / not relevant / reopened (only transitions the backend allows are offered), see review progress counters, and read back past answers. |
 | **Record check** → corrections history | `GET /api/v1/corrections` | See every field correction made in the workspace, with the reason and a link back to the document. |
 | **Record changes** → warning history | `GET /api/v1/findings/history/change-log`, `POST /api/v1/findings/history/snapshot` | See when each safety warning first appeared, when it was last seen, whether it went away and came back — and record a new snapshot. |
 | **Settings** → take a copy of your records | `GET /api/v1/export`, `GET /api/v1/export/validation` | Download the native JSON copy or the FHIR R4 bundle for a clinic, and structurally validate the bundle before sharing it. |
+| **Preventive care** (Next steps → *Preventive*) | `GET /api/v1/preventive-care` | See age/sex/condition-based screening and immunisation prompts, with an explicit "general guidance, not personal advice" framing and a pointer to Settings when the profile is missing the fields the rules need. |
+| **Provider messages** (Next steps → *Messages*) | `GET`/`POST /api/v1/provider-messages` | Draft and keep dated notes for a clinician. The screen states plainly that nothing is delivered anywhere — MediMind has no transport to a clinic — so the notes are for printing or reading out at the visit. |
 | **Guidelines** → check for newer guidelines | `POST /api/v1/guidelines/refresh` | Check the curated sources for newer published versions and apply them, with the result reported (including the fail-open "reviewed by hand" case). |
 
 ### Interface feedback and accessibility

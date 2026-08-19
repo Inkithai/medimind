@@ -7,22 +7,16 @@ import { useI18n } from "../i18n/I18nContext";
 import { classNames } from "../utils/format";
 import { collectSafetyAlerts } from "../utils/safety";
 import {
-  AlertIcon,
   AppointmentIcon,
   BeakerIcon,
-  ChartIcon,
-  ChangesIcon,
   ChatIcon,
   FileIcon,
   PillIcon,
-  LocationIcon,
   IntegrityIcon,
-  ReminderIcon,
   SettingsIcon,
   ShieldIcon,
   SparkleIcon,
   StethoscopeIcon,
-  TimelineIcon,
   UploadIcon,
 } from "./icons";
 import { LanguageSelector } from "./LanguageSelector";
@@ -43,6 +37,14 @@ interface SidebarTooltipState {
   top: number;
 }
 
+/**
+ * The sidebar is the product's table of contents, so it lists the eleven
+ * things a patient actually does — not every screen that exists. Sibling
+ * screens that answer the same question are tabs inside these entries
+ * (Safety has three, Next steps has four), and a couple of routes are
+ * deliberately unlisted: the analysis audit log, reached from About →
+ * Advanced, and the private speaker sheet.
+ */
 const NAV: NavItem[] = [
   {
     group: "home",
@@ -51,6 +53,14 @@ const NAV: NavItem[] = [
     descriptionKey: "nav.descriptions.dashboard",
     icon: SparkleIcon,
     chip: "bg-brand-50 text-brand-700",
+  },
+  {
+    group: "home",
+    to: "/upload",
+    labelKey: "nav.upload",
+    descriptionKey: "nav.descriptions.upload",
+    icon: UploadIcon,
+    chip: "bg-indigo-50 text-indigo-800",
   },
   {
     group: "records",
@@ -77,71 +87,23 @@ const NAV: NavItem[] = [
     chip: "bg-violet-50 text-violet-800",
   },
   {
-    group: "records",
-    to: "/history",
-    labelKey: "nav.timeline",
-    descriptionKey: "nav.descriptions.timeline",
-    icon: TimelineIcon,
-    chip: "bg-sky-50 text-sky-800",
-  },
-  {
-    group: "records",
-    to: "/import",
-    labelKey: "nav.fhir",
-    descriptionKey: "nav.descriptions.fhir",
-    icon: UploadIcon,
-    chip: "bg-indigo-50 text-indigo-800",
-  },
-  {
     group: "insights",
     to: "/safety",
     labelKey: "nav.safety",
     descriptionKey: "nav.descriptions.safety",
-    icon: AlertIcon,
-    chip: "bg-red-50 text-red-800",
-  },
-  {
-    group: "insights",
-    to: "/vitals",
-    labelKey: "nav.vitals",
-    descriptionKey: "nav.descriptions.vitals",
-    icon: ChartIcon,
-    chip: "bg-teal-50 text-teal-800",
-  },
-  {
-    group: "insights",
-    to: "/risk-timeline",
-    labelKey: "nav.riskTimeline",
-    descriptionKey: "nav.descriptions.riskTimeline",
-    icon: ChartIcon,
-    chip: "bg-rose-50 text-rose-800",
-  },
-  {
-    group: "insights",
-    to: "/clinical-safety",
-    labelKey: "nav.clinicalSafety",
-    descriptionKey: "nav.descriptions.clinicalSafety",
     icon: ShieldIcon,
     chip: "bg-red-50 text-red-800",
   },
   {
     group: "insights",
-    to: "/changes",
-    labelKey: "nav.changes",
-    descriptionKey: "nav.descriptions.changes",
-    icon: ChangesIcon,
-    chip: "bg-indigo-50 text-indigo-800",
-  },
-  {
-    group: "insights",
-    to: "/record-integrity",
+    to: "/record-check",
     labelKey: "nav.recordCheck",
     descriptionKey: "nav.descriptions.recordCheck",
     icon: IntegrityIcon,
     chip: "bg-orange-50 text-orange-800",
   },
   {
-    group: "actions",
+    group: "insights",
     to: "/ask",
     labelKey: "nav.ask",
     descriptionKey: "nav.descriptions.ask",
@@ -150,49 +112,25 @@ const NAV: NavItem[] = [
   },
   {
     group: "actions",
-    to: "/who-to-see",
-    labelKey: "nav.whoToSee",
-    descriptionKey: "nav.descriptions.whoToSee",
+    to: "/care",
+    labelKey: "nav.care",
+    descriptionKey: "nav.descriptions.care",
     icon: StethoscopeIcon,
-    chip: "bg-amber-50 text-amber-800",
+    chip: "bg-cyan-50 text-cyan-800",
   },
   {
     group: "actions",
     to: "/appointment-prep",
-    labelKey: "nav.appointmentPrep",
-    descriptionKey: "nav.descriptions.appointmentPrep",
+    labelKey: "nav.nextSteps",
+    descriptionKey: "nav.descriptions.nextSteps",
     icon: AppointmentIcon,
     chip: "bg-teal-50 text-teal-800",
   },
   {
-    group: "actions",
-    to: "/follow-up",
-    labelKey: "nav.actionCenter",
-    descriptionKey: "nav.descriptions.actionCenter",
-    icon: ReminderIcon,
-    chip: "bg-fuchsia-50 text-fuchsia-800",
-  },
-  {
-    group: "actions",
-    to: "/find-care",
-    labelKey: "nav.care",
-    descriptionKey: "nav.descriptions.care",
-    icon: LocationIcon,
-    chip: "bg-cyan-50 text-cyan-800",
-  },
-  {
     group: "utility",
-    to: "/guidelines",
-    labelKey: "nav.guidelines",
-    descriptionKey: "nav.descriptions.guidelines",
-    icon: InfoIcon,
-    chip: "bg-slate-100 text-slate-700",
-  },
-  {
-    group: "utility",
-    to: "/settings",
-    labelKey: "nav.settings",
-    descriptionKey: "nav.descriptions.settings",
+    to: "/about",
+    labelKey: "nav.aboutSettings",
+    descriptionKey: "nav.descriptions.aboutSettings",
     icon: SettingsIcon,
     chip: "bg-slate-100 text-slate-700",
   },
@@ -558,10 +496,12 @@ export function Layout() {
                   {items.map((item) => {
                     const index = NAV.indexOf(item);
                     const Icon = item.icon;
-                    const worksWithoutWorkspace = item.to === "/settings";
+                    /* About & settings carries the settings screen, so it
+                       must stay reachable before a workspace exists. */
+                    const worksWithoutWorkspace = item.to === "/about";
                     const disabled = !worksWithoutWorkspace && !isConfigured;
                     const safetyCount = item.to === "/safety" ? navSignals.safety : 0;
-                    const showNew = item.to === "/changes" && navSignals.hasChanges;
+                    const showNew = item.to === "/record-check" && navSignals.hasChanges;
                     return (
                       <NavLink
                         ref={
@@ -704,53 +644,9 @@ export function Layout() {
               nav above, and available with or without a workspace. Same row
               treatment and active state as the main navigation, so About reads
               as part of the application rather than an unrelated footer box. */}
+          {/* About & settings is a first-class nav row now, so the footer
+              only carries the workspace utilities. */}
           <div className="shrink-0 border-t border-[#e5ebe9] px-2 pb-3 pt-2">
-            <NavLink
-              to="/about"
-              onClick={closeSidebar}
-              onMouseEnter={(event) =>
-                showTooltip(
-                  event.currentTarget,
-                  "sidebar-tooltip-about",
-                  t("about.nav"),
-                  t("nav.descriptions.about"),
-                )
-              }
-              onMouseLeave={() => setTooltip(null)}
-              onFocus={(event) =>
-                showTooltip(
-                  event.currentTarget,
-                  "sidebar-tooltip-about",
-                  t("about.nav"),
-                  t("nav.descriptions.about"),
-                )
-              }
-              onBlur={() => setTooltip(null)}
-              aria-label={collapsed ? t("about.nav") : undefined}
-              aria-describedby={desktop ? "sidebar-tooltip-about" : undefined}
-              className={({ isActive }) =>
-                classNames(
-                  "flex min-h-[44px] items-center gap-2.5 rounded-[9px] px-2.5 text-[15px] font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-offset-1",
-                  collapsed && "lg:justify-center lg:px-0",
-                  isActive
-                    ? "bg-[#eaf6f4] font-semibold text-[#123c3a] shadow-[inset_3px_0_0_#0F766E]"
-                    : "text-slate-600 hover:bg-[#f3f7f6] hover:text-slate-900",
-                )
-              }
-            >
-              {({ isActive }) => (
-                <>
-                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[7px] bg-brand-50 text-brand-700">
-                    <InfoIcon className="h-4 w-4" />
-                  </span>
-                  <span className={classNames("min-w-0 truncate", collapsed && "lg:hidden")}>
-                    {t("about.nav")}
-                  </span>
-                  {isActive && <span className="sr-only">({t("nav.currentPage")})</span>}
-                </>
-              )}
-            </NavLink>
-
             <div className={classNames("px-1", collapsed && "lg:hidden")}>
               <LanguageSelector className="mb-2 hidden lg:block" />
               {isConfigured && (
@@ -822,10 +718,10 @@ export function Layout() {
         >
           {[
             { to: "/dashboard", label: "Home", icon: SparkleIcon },
-            { to: "/documents", label: "Records", icon: FileIcon },
+            { to: "/documents", label: "Record", icon: FileIcon },
             { to: "/upload", label: "Upload", icon: UploadIcon, primary: true },
-            { to: "/safety", label: "Insights", icon: AlertIcon },
-            { to: "/settings", label: "More", icon: SettingsIcon },
+            { to: "/safety", label: "Safety", icon: ShieldIcon },
+            { to: "/about", label: "More", icon: SettingsIcon },
           ].map((item) => {
             const Icon = item.icon;
             return (
@@ -912,23 +808,5 @@ function Logo({ small }: { small?: boolean }) {
         className={classNames("block rounded-[9px]", small ? "h-7 w-7" : "h-9 w-9")}
       />
     </span>
-  );
-}
-
-function InfoIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.8}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-      aria-hidden="true"
-    >
-      <circle cx="12" cy="12" r="10" />
-      <path d="M12 16v-4M12 8h.01" />
-    </svg>
   );
 }

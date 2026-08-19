@@ -11,7 +11,7 @@ export function ConsiderProfessionalCare({ message }: { message?: string }) {
     >
       <p>{message || t("care.discussDefault")}</p>
       <p className="mt-2">
-        <Link to="/find-care" className="font-medium text-brand-700 hover:text-brand-800">
+        <Link to="/care" className="font-medium text-brand-700 hover:text-brand-800">
           {t("care.findNearby")}
         </Link>{" "}
         <span className="text-slate-600">— {t("care.optionalNoChoice")}</span>

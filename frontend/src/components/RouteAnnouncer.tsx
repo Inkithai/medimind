@@ -2,26 +2,26 @@ import { useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { useI18n } from "../i18n/I18nContext";
 
+/* Every hub route, so a screen-reader announcement and the document title
+   name the destination the sidebar names. Old paths redirect before this
+   runs, so only the canonical ones need entries. */
 const routeKeys: Record<string, string> = {
   "/dashboard": "nav.dashboard",
+  "/upload": "nav.upload",
   "/documents": "nav.records",
   "/medicines": "nav.medications",
   "/labs": "nav.labs",
-  "/lab-trends": "nav.labs",
-  "/history": "nav.timeline",
-  "/timeline": "nav.timeline",
   "/safety": "nav.safety",
-  "/cross-check": "nav.safety",
+  "/record-check": "nav.recordCheck",
+  "/record-integrity": "nav.recordCheck",
   "/ask": "nav.ask",
-  "/qa": "nav.ask",
-  "/conversations": "nav.ask",
-  "/sessions": "nav.ask",
-  "/find-care": "nav.care",
   "/care": "nav.care",
+  "/find-care": "nav.care",
+  "/appointment-prep": "nav.nextSteps",
+  "/about": "nav.aboutSettings",
   "/settings": "nav.settings",
-  "/upload": "nav.upload",
+  "/guidelines": "nav.guidelines",
 };
-
 export function RouteAnnouncer() {
   const location = useLocation();
   const { t, language } = useI18n();

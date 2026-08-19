@@ -25,8 +25,9 @@ import type {
   RecordComparison,
 } from "../types/api";
 import { formatDate } from "../utils/format";
+import type { EmbeddedPageProps } from "../components/TabBar";
 
-export function ChangesPage() {
+export function ChangesPage({ embedded }: EmbeddedPageProps = {}) {
   const { credentials } = useAuth();
   const { toastSuccess, toastError } = useToast();
   const [report, setReport] = useState<RecordChangesReport | null>(null);
@@ -86,16 +87,20 @@ export function ChangesPage() {
   return (
     <div className="space-y-6">
       <header className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2 text-sm font-semibold text-brand-700">
-            <ChangesIcon className="h-4 w-4" /> Longitudinal intelligence
+        {embedded ? (
+          <div />
+        ) : (
+          <div>
+            <div className="flex items-center gap-2 text-sm font-semibold text-brand-700">
+              <ChangesIcon className="h-4 w-4" /> Longitudinal intelligence
+            </div>
+            <h1 className="page-title mt-1">What Changed?</h1>
+            <p className="secondary-text mt-2 max-w-2xl">
+              Compare consecutive records, see the exact before and after, and trace every finding
+              back to both source documents.
+            </p>
           </div>
-          <h1 className="page-title mt-1">What Changed?</h1>
-          <p className="secondary-text mt-2 max-w-2xl">
-            Compare consecutive records, see the exact before and after, and trace every finding
-            back to both source documents.
-          </p>
-        </div>
+        )}
         <button
           onClick={() => void load()}
           disabled={loading}

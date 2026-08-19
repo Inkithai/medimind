@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
 import { Alert } from "../components/Alert";
 import { ErrorState } from "../components/ErrorState";
@@ -9,10 +8,12 @@ import { QAResultCard } from "../components/QAResultCard";
 import { MedicalDisclaimer } from "../components/MedicalDisclaimer";
 import { Spinner } from "../components/Spinner";
 import { ChatIcon, SendIcon } from "../components/icons";
+import { HubHeader, TabBar, TabPanel, useTabParam, type TabSpec } from "../components/TabBar";
 import { useAuth } from "../context/AuthContext";
 import { useI18n } from "../i18n/I18nContext";
 import type { QAResponse, QASource, SymptomAnalysis, Timeline, Visit } from "../types/api";
 import { findVisitForSource } from "../utils/sources";
+import { SessionPage } from "./SessionPage";
 
 const SUGGESTION_KEYS = [
   "ask.suggestion1",
@@ -21,13 +22,22 @@ const SUGGESTION_KEYS = [
   "ask.suggestion4",
 ] as const;
 
-type Tab = "question" | "symptom";
+const GROUP = "ask";
 
 export function QAPage() {
   const { credentials } = useAuth();
   const { t } = useI18n();
-  const [searchParams, setSearchParams] = useSearchParams();
-  const tab: Tab = searchParams.get("tab") === "symptoms" ? "symptom" : "question";
+
+  /* One question, a symptom cross-check, or a multi-turn conversation — the
+     same grounded engine, three ways of talking to it. `symptoms` keeps its
+     historic spelling so /ask?tab=symptoms and the old /symptoms redirect
+     both still resolve. */
+  const tabs: TabSpec[] = [
+    { id: "question", label: t("ask.tabQuestion") },
+    { id: "symptoms", label: t("ask.tabSymptom") },
+    { id: "chat", label: t("ask.tabChat") },
+  ];
+  const [tab, setTab] = useTabParam(tabs);
 
   const [question, setQuestion] = useState("");
   const [topK, setTopK] = useState(8);
@@ -109,115 +119,110 @@ export function QAPage() {
     setOpenSource({ source, visit: findVisitForSource(timelineRef.current, source) });
   }
 
-  function setTab(next: Tab) {
-    setSearchParams(next === "symptom" ? { tab: "symptoms" } : {}, { replace: true });
-  }
-
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="page-title">{t("ask.title")}</h1>
-        <p className="secondary-text mt-2 max-w-2xl">{t("ask.subtitle")}</p>
-      </header>
+      <HubHeader
+        eyebrow={t("ask.eyebrow")}
+        icon={<ChatIcon className="h-4 w-4" />}
+        title={t("ask.title")}
+        description={t("ask.subtitle")}
+      />
 
-      <div
-        className="flex gap-1 border-b border-slate-200"
-        role="tablist"
-        aria-label="Ask AI views"
-      >
-        <Tab active={tab === "question"} onClick={() => setTab("question")}>
-          {t("ask.tabQuestion")}
-        </Tab>
-        <Tab active={tab === "symptom"} onClick={() => setTab("symptom")}>
-          {t("ask.tabSymptom")}
-        </Tab>
-      </div>
+      <TabBar tabs={tabs} active={tab} onSelect={setTab} group={GROUP} label={t("ask.tabsLabel")} />
 
-      <div className="rounded-xl border border-sky-100 bg-sky-50/70 px-4 py-3 text-sm leading-relaxed text-sky-900">
-        <span className="font-semibold">{t("ask.scopeLabel")}: </span>
-        {t("ask.scopeHelp", { count: topK })}
-      </div>
+      {tab !== "chat" && (
+        <div className="rounded-xl border border-sky-100 bg-sky-50/70 px-4 py-3 text-sm leading-relaxed text-sky-900">
+          <span className="font-semibold">{t("ask.scopeLabel")}: </span>
+          {t("ask.scopeHelp", { count: topK })}
+        </div>
+      )}
 
-      {tab === "symptom" ? (
-        <Card>
-          <CardHeader
-            title={t("ask.tabSymptom")}
-            description={t("ask.symptomHint")}
-            icon={<ChatIcon className="h-5 w-5" />}
-          />
-          <CardBody>
-            <form onSubmit={runSymptomCheck} className="space-y-3">
-              <label className="block text-sm">
-                <span className="font-medium text-slate-700">{t("symptoms.formLabel")}</span>
-                <textarea
-                  value={symptom}
-                  onChange={(e) => setSymptom(e.target.value)}
-                  placeholder={t("symptoms.formPlaceholder")}
-                  rows={3}
-                  className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                />
-              </label>
-              <label className="block text-sm">
-                <span className="font-medium text-slate-700">{t("symptoms.durationLabel")}</span>
-                <input
-                  value={duration}
-                  onChange={(e) => setDuration(e.target.value)}
-                  placeholder="3 days"
-                  className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm sm:max-w-xs"
-                />
-              </label>
-              <button
-                type="submit"
-                disabled={symptomLoading || !symptom.trim()}
-                className="inline-flex items-center gap-2 rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
-              >
-                {symptomLoading ? (
-                  <Spinner className="h-4 w-4" />
-                ) : (
-                  <SendIcon className="h-4 w-4" />
-                )}
-                {symptomLoading ? t("symptoms.analysing") : t("symptoms.submit")}
-              </button>
-            </form>
+      {tab === "chat" ? (
+        <TabPanel group={GROUP} id="chat" active={tab}>
+          <SessionPage embedded />
+        </TabPanel>
+      ) : tab === "symptoms" ? (
+        <TabPanel group={GROUP} id="symptoms" active={tab}>
+          <Card>
+            <CardHeader
+              title={t("ask.tabSymptom")}
+              description={t("ask.symptomHint")}
+              icon={<ChatIcon className="h-5 w-5" />}
+            />
+            <CardBody>
+              <form onSubmit={runSymptomCheck} className="space-y-3">
+                <label className="block text-sm">
+                  <span className="font-medium text-slate-700">{t("symptoms.formLabel")}</span>
+                  <textarea
+                    value={symptom}
+                    onChange={(e) => setSymptom(e.target.value)}
+                    placeholder={t("symptoms.formPlaceholder")}
+                    rows={3}
+                    className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                  />
+                </label>
+                <label className="block text-sm">
+                  <span className="font-medium text-slate-700">{t("symptoms.durationLabel")}</span>
+                  <input
+                    value={duration}
+                    onChange={(e) => setDuration(e.target.value)}
+                    placeholder="3 days"
+                    className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm sm:max-w-xs"
+                  />
+                </label>
+                <button
+                  type="submit"
+                  disabled={symptomLoading || !symptom.trim()}
+                  className="inline-flex items-center gap-2 rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
+                >
+                  {symptomLoading ? (
+                    <Spinner className="h-4 w-4" />
+                  ) : (
+                    <SendIcon className="h-4 w-4" />
+                  )}
+                  {symptomLoading ? t("symptoms.analysing") : t("symptoms.submit")}
+                </button>
+              </form>
 
-            {symptomError && (
-              <p role="alert" className="mt-3 text-sm text-red-600">
-                {symptomError}
-              </p>
-            )}
+              {symptomError && (
+                <p role="alert" className="mt-3 text-sm text-red-600">
+                  {symptomError}
+                </p>
+              )}
 
-            {symptomResult && (
-              <div className="mt-4 space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-4">
-                {symptomResult.analysed ? (
-                  <>
-                    <div className="flex flex-wrap gap-2">
-                      {symptomResult.matched_symptoms?.map((s) => (
-                        <span
-                          key={s}
-                          className="rounded-full bg-brand-50 px-2.5 py-0.5 text-xs font-medium text-brand-700"
-                        >
-                          {s}
-                        </span>
-                      ))}
-                    </div>
-                    <p className="whitespace-pre-line text-sm leading-relaxed text-slate-700">
-                      {symptomResult.summary}
-                    </p>
-                    {symptomResult.findings?.some(
-                      (f) =>
-                        f.relevant_medications_on_record.length === 0 &&
-                        f.relevant_abnormal_labs.length === 0,
-                    ) && <p className="text-xs text-slate-400">{t("symptoms.noMatch")}</p>}
-                  </>
-                ) : (
-                  <p className="text-sm text-slate-600">{symptomResult.note}</p>
-                )}
-              </div>
-            )}
-          </CardBody>
-        </Card>
+              {symptomResult && (
+                <div className="mt-4 space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-4">
+                  {symptomResult.analysed ? (
+                    <>
+                      <div className="flex flex-wrap gap-2">
+                        {symptomResult.matched_symptoms?.map((s) => (
+                          <span
+                            key={s}
+                            className="rounded-full bg-brand-50 px-2.5 py-0.5 text-xs font-medium text-brand-700"
+                          >
+                            {s}
+                          </span>
+                        ))}
+                      </div>
+                      <p className="whitespace-pre-line text-sm leading-relaxed text-slate-700">
+                        {symptomResult.summary}
+                      </p>
+                      {symptomResult.findings?.some(
+                        (f) =>
+                          f.relevant_medications_on_record.length === 0 &&
+                          f.relevant_abnormal_labs.length === 0,
+                      ) && <p className="text-xs text-slate-400">{t("symptoms.noMatch")}</p>}
+                    </>
+                  ) : (
+                    <p className="text-sm text-slate-600">{symptomResult.note}</p>
+                  )}
+                </div>
+              )}
+            </CardBody>
+          </Card>
+        </TabPanel>
       ) : (
-        <>
+        <TabPanel group={GROUP} id="question" active={tab}>
           <Card>
             <CardHeader
               title={t("ask.question")}
@@ -343,41 +348,19 @@ export function QAPage() {
           )}
 
           <p className="secondary-text text-center">
-            Prefer a back-and-forth chat?{" "}
-            <Link to="/conversations" className="font-medium text-brand-600 hover:text-brand-700">
-              Open Conversations →
-            </Link>
+            {t("ask.preferChat")}{" "}
+            <button
+              type="button"
+              onClick={() => setTab("chat")}
+              className="font-medium text-brand-600 underline-offset-2 hover:text-brand-700 hover:underline"
+            >
+              {t("ask.openChat")}
+            </button>
           </p>
-        </>
+        </TabPanel>
       )}
 
       <MedicalDisclaimer />
     </div>
-  );
-}
-
-function Tab({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      role="tab"
-      aria-selected={active}
-      onClick={onClick}
-      className={`border-b-2 px-4 py-3 text-sm font-semibold transition ${
-        active
-          ? "border-brand-600 text-brand-700"
-          : "border-transparent text-slate-500 hover:text-slate-800"
-      }`}
-    >
-      {children}
-    </button>
   );
 }

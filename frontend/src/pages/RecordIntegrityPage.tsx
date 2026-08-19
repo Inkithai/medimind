@@ -22,11 +22,22 @@ import type {
   RecordIntegrityReport,
 } from "../types/api";
 import { formatDate } from "../utils/format";
+import type { EmbeddedPageProps } from "../components/TabBar";
 
-export function RecordIntegrityPage() {
+export function RecordIntegrityPage({
+  embedded,
+  view,
+}: EmbeddedPageProps & {
+  /**
+   * When the Record check hub owns the tab bar it also owns the selected
+   * view, so the two sub-views are hoisted into the parent tab strip rather
+   * than nesting a second row of tabs inside a tab panel.
+   */
+  view?: "discrepancies" | "conflicts";
+} = {}) {
   const { credentials } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
-  const tab = searchParams.get("tab") === "conflicts" ? "conflicts" : "discrepancies";
+  const tab = view || (searchParams.get("tab") === "conflicts" ? "conflicts" : "discrepancies");
   const [report, setReport] = useState<RecordIntegrityReport | null>(null);
   const [corrections, setCorrections] = useState<CorrectionEvent[]>([]);
   const [reviewed, setReviewed] = useState<Set<string>>(new Set());
@@ -62,16 +73,20 @@ export function RecordIntegrityPage() {
   return (
     <div className="space-y-6">
       <header className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2 text-sm font-semibold text-brand-700">
-            <IntegrityIcon className="h-4 w-4" /> Record integrity
+        {embedded ? (
+          <div />
+        ) : (
+          <div>
+            <div className="flex items-center gap-2 text-sm font-semibold text-brand-700">
+              <IntegrityIcon className="h-4 w-4" /> Record integrity
+            </div>
+            <h1 className="page-title mt-1">Cross-check My Records</h1>
+            <p className="secondary-text mt-2 max-w-2xl">
+              Find facts that disagree across documents, inspect both sources, and verify them
+              before relying on trends or answers.
+            </p>
           </div>
-          <h1 className="page-title mt-1">Cross-check My Records</h1>
-          <p className="secondary-text mt-2 max-w-2xl">
-            Find facts that disagree across documents, inspect both sources, and verify them before
-            relying on trends or answers.
-          </p>
-        </div>
+        )}{" "}
         <button
           type="button"
           onClick={() => void load()}
@@ -82,24 +97,28 @@ export function RecordIntegrityPage() {
         </button>
       </header>
 
-      <div
-        className="flex gap-1 border-b border-slate-200"
-        role="tablist"
-        aria-label="Record check views"
-      >
-        <Tab
-          active={tab === "discrepancies"}
-          onClick={() => setSearchParams({}, { replace: true })}
+      {/* Hidden when the Record check hub already renders these as top-level
+          tabs; kept for the standalone /record-integrity route. */}
+      {!view && (
+        <div
+          className="flex gap-1 border-b border-slate-200"
+          role="tablist"
+          aria-label="Record check views"
         >
-          Discrepancies
-        </Tab>
-        <Tab
-          active={tab === "conflicts"}
-          onClick={() => setSearchParams({ tab: "conflicts" }, { replace: true })}
-        >
-          Conflicts to resolve
-        </Tab>
-      </div>
+          <Tab
+            active={tab === "discrepancies"}
+            onClick={() => setSearchParams({}, { replace: true })}
+          >
+            Discrepancies
+          </Tab>
+          <Tab
+            active={tab === "conflicts"}
+            onClick={() => setSearchParams({ tab: "conflicts" }, { replace: true })}
+          >
+            Conflicts to resolve
+          </Tab>
+        </div>
+      )}
 
       {tab === "conflicts" ? (
         <TrustReview />

@@ -18,6 +18,7 @@ import type { ScoredCareRecommendation } from "../types/recommendations";
 import { finderSpecialtyFor } from "../types/recommendations";
 import type { ConfirmedLocation } from "../types/location";
 import { classNames } from "../utils/format";
+import type { EmbeddedPageProps } from "../components/TabBar";
 
 const STORAGE_KEY = "medimind.find-care.location.v1";
 const PREFERENCES_KEY = "medimind.find-care.preferences.v1";
@@ -98,7 +99,7 @@ function readSavedLocation(): ConfirmedLocation | null {
   return null;
 }
 
-export function FindCarePage() {
+export function FindCarePage({ embedded }: EmbeddedPageProps = {}) {
   const { credentials } = useAuth();
   const { t, formatNumber } = useI18n();
   const referralSource = new URLSearchParams(window.location.search).get("from") || "";
@@ -340,16 +341,23 @@ export function FindCarePage() {
   return (
     <div className="space-y-7">
       <header className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
-        <div>
-          <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-brand-200 bg-brand-50 px-3 py-1 text-xs font-bold uppercase tracking-wider text-brand-700">
-            <CareIcon className="h-3.5 w-3.5" /> Find care
-          </div>
-          <h1 className="page-title">Find care based on your records</h1>
-          <p className="secondary-text mt-2 max-w-2xl leading-relaxed">
+        {embedded ? (
+          <p className="secondary-text max-w-2xl leading-relaxed">
             MediMind found care options that may be relevant to the information in your medical
             records.
           </p>
-        </div>
+        ) : (
+          <div>
+            <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-brand-200 bg-brand-50 px-3 py-1 text-xs font-bold uppercase tracking-wider text-brand-700">
+              <CareIcon className="h-3.5 w-3.5" /> Find care
+            </div>
+            <h1 className="page-title">Find care based on your records</h1>
+            <p className="secondary-text mt-2 max-w-2xl leading-relaxed">
+              MediMind found care options that may be relevant to the information in your medical
+              records.
+            </p>
+          </div>
+        )}
         {savedLocation && (
           <button type="button" onClick={clearLocation} className="btn-secondary shrink-0">
             {t("common.change")}

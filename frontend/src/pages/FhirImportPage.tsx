@@ -9,6 +9,7 @@ import { toastMessage, useToast } from "../components/Toast";
 import { useAuth } from "../context/AuthContext";
 import { useI18n } from "../i18n/I18nContext";
 import type { FhirImportResult } from "../types/api";
+import type { EmbeddedPageProps } from "../components/TabBar";
 
 // NOTE: no sample/mock patient data is bundled here. The import accepts only
 // real, user-provided FHIR Bundles (pasted or uploaded). See project policy:
@@ -23,7 +24,7 @@ const COUNT_LABELS: Record<string, string> = {
   encounters: "Encounters",
 };
 
-export function FhirImportPage() {
+export function FhirImportPage({ embedded }: EmbeddedPageProps = {}) {
   const { credentials } = useAuth();
   const { t } = useI18n();
   const { toastSuccess, toastError, toastInfo } = useToast();
@@ -81,10 +82,14 @@ export function FhirImportPage() {
 
   return (
     <div className="space-y-6">
-      <div className="min-w-0">
-        <h1 className="page-title">{t("fhir.title")}</h1>
-        <p className="secondary-text mt-2 max-w-2xl">{t("fhir.subtitle")}</p>
-      </div>
+      {embedded ? (
+        <p className="secondary-text max-w-2xl">{t("fhir.subtitle")}</p>
+      ) : (
+        <div className="min-w-0">
+          <h1 className="page-title">{t("fhir.title")}</h1>
+          <p className="secondary-text mt-2 max-w-2xl">{t("fhir.subtitle")}</p>
+        </div>
+      )}
 
       <div className="rounded-2xl border border-sky-100 bg-sky-50/70 p-5 text-sm leading-relaxed text-sky-900">
         <p className="font-semibold">{t("fhir.whoForTitle")}</p>
@@ -205,13 +210,13 @@ export function FhirImportPage() {
             {result.persisted && (
               <div className="flex flex-wrap items-center gap-3">
                 <Link
-                  to="/history"
+                  to="/documents?tab=timeline"
                   className="inline-flex items-center gap-2 rounded-md bg-brand-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-brand-700"
                 >
                   View timeline
                 </Link>
                 <Link
-                  to="/clinical-safety"
+                  to="/safety?tab=clinical"
                   className="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50"
                 >
                   Run safety check
