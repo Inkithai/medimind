@@ -18,7 +18,11 @@ def _clear(patient_key, session_id):
 def test_get_session_rehydrates_from_durable_store_on_memory_miss():
     stored_turns = [
         {"role": "user", "content": "What meds am I on?", "timestamp": "2024-01-01T00:00:00+00:00"},
-        {"role": "assistant", "content": "Metformin 500 mg.", "timestamp": "2024-01-01T00:00:05+00:00"},
+        {
+            "role": "assistant",
+            "content": "Metformin 500 mg.",
+            "timestamp": "2024-01-01T00:00:05+00:00",
+        },
     ]
     _clear("u1", "s1")
     with mock.patch.object(conversation, "_load_persisted_session") as load:
@@ -45,8 +49,10 @@ def test_get_session_returns_none_when_nowhere():
 
 def test_get_or_create_persists_new_sessions_at_creation():
     _clear("u3", "s3")
-    with mock.patch.object(conversation, "_load_persisted_session", return_value=None), \
-         mock.patch.object(conversation, "_persist_session") as persist:
+    with (
+        mock.patch.object(conversation, "_load_persisted_session", return_value=None),
+        mock.patch.object(conversation, "_persist_session") as persist,
+    ):
         session = conversation.get_or_create_session("u3", "s3")
         assert session.turns == []
         persist.assert_called_once_with(session)

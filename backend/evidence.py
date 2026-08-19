@@ -22,7 +22,6 @@ except ImportError:  # pragma: no cover - older PyMuPDF
 
 from clinical_events import CLINICAL_EVENT_SEARCH_FIELDS
 
-
 FIELD_EVIDENCE_KEYS = (
     "date",
     "provider_or_doctor",
@@ -104,15 +103,16 @@ def _normalize_regions(
         region = {
             # Preserve IDs generated during the original extraction. This is
             # essential for old Q&A links to survive a database reload.
-            "evidence_id": existing_id if existing_id.startswith("ev_") else _evidence_id(path, page, quote, index),
+            "evidence_id": existing_id
+            if existing_id.startswith("ev_")
+            else _evidence_id(path, page, quote, index),
             "field_path": path,
             "page": page,
             "quote": quote,
             "bbox": bbox,
             "confidence": round(confidence, 4),
-            "locator": existing_locator or (
-                "vision_model" if bbox and vision else "model_quote" if quote else "page_only"
-            ),
+            "locator": existing_locator
+            or ("vision_model" if bbox and vision else "model_quote" if quote else "page_only"),
         }
         # Correction/conflict annotations are server-owned provenance. Keep
         # them when dynamically normalizing persisted records.
@@ -159,11 +159,13 @@ def normalize_document_evidence(
         if not isinstance(medication, dict):
             continue
         fallback = " ".join(
-            part for part in (
+            part
+            for part in (
                 _text(medication.get("name")),
                 _text(medication.get("dosage")),
                 _text(medication.get("frequency")),
-            ) if part
+            )
+            if part
         )
         medication["evidence"] = _normalize_regions(
             medication.get("evidence"),
@@ -177,11 +179,13 @@ def normalize_document_evidence(
         if not isinstance(lab, dict):
             continue
         fallback = " ".join(
-            part for part in (
+            part
+            for part in (
                 _text(lab.get("test_name")),
                 _text(lab.get("value")),
                 _text(lab.get("unit")),
-            ) if part
+            )
+            if part
         )
         lab["evidence"] = _normalize_regions(
             lab.get("evidence"),
@@ -341,7 +345,9 @@ def locate_pdf_text_evidence(pdf_path: str, document: Dict[str, Any]) -> Dict[st
         page_count = len(pdf)
         for region, candidates in iter_document_evidence(document):
             requested_page = max(1, min(page_count, int(region.get("page") or 1)))
-            page_order = [requested_page] + [page for page in range(1, page_count + 1) if page != requested_page]
+            page_order = [requested_page] + [
+                page for page in range(1, page_count + 1) if page != requested_page
+            ]
             found = None
             matched_quote = ""
             matched_page = requested_page
@@ -373,12 +379,14 @@ def locate_pdf_text_evidence(pdf_path: str, document: Dict[str, Any]) -> Dict[st
             page_rect = page.rect
             width, height = float(page_rect.width), float(page_rect.height)
             region["page"] = matched_page
-            region["bbox"] = _normalize_bbox([
-                (display_rect.x0 - page_rect.x0) / width,
-                (display_rect.y0 - page_rect.y0) / height,
-                (display_rect.x1 - page_rect.x0) / width,
-                (display_rect.y1 - page_rect.y0) / height,
-            ])
+            region["bbox"] = _normalize_bbox(
+                [
+                    (display_rect.x0 - page_rect.x0) / width,
+                    (display_rect.y0 - page_rect.y0) / height,
+                    (display_rect.x1 - page_rect.x0) / width,
+                    (display_rect.y1 - page_rect.y0) / height,
+                ]
+            )
             # The displayed quotation must be exactly the text covered by the
             # rectangle, especially when a shorter whitespace-tolerant search
             # was needed for a table row.

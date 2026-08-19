@@ -22,8 +22,8 @@ that way. Deterministic, no LLM, no diagnosis.
 
 from __future__ import annotations
 
-from datetime import date, timedelta
-from typing import Any, Dict, List, Optional, Set, Tuple
+from datetime import date
+from typing import Any, Dict, List, Optional, Set
 
 try:
     from medication_activity import analyze_medication_activity
@@ -57,6 +57,7 @@ def _parse_date(raw: Any) -> Optional[date]:
         return None
     try:
         from datetime import datetime
+
         return datetime.fromisoformat(str(raw)[:10]).date()
     except Exception:
         return None
@@ -68,8 +69,13 @@ def reconcile_medications(timeline: Dict[str, Any], reference_date: Any = None) 
         return {
             "reference_date": str(reference_date or date.today()),
             "reconciled_medications": [],
-            "summary": {"total_ingredients": 0, "active": 0, "discontinued": 0,
-                        "duplicates": 0, "dose_conflicts": 0},
+            "summary": {
+                "total_ingredients": 0,
+                "active": 0,
+                "discontinued": 0,
+                "duplicates": 0,
+                "dose_conflicts": 0,
+            },
             "note": _NOTE,
         }
 
@@ -89,7 +95,9 @@ def reconcile_medications(timeline: Dict[str, Any], reference_date: Any = None) 
         activity = analyze_medication_activity(timeline, reference_date)
         ref_str = activity.get("reference_date")
         active_names = {str(n).strip().lower() for n in (activity.get("active_medications") or [])}
-        inactive_names = {str(n).strip().lower() for n in (activity.get("inactive_medications") or [])}
+        inactive_names = {
+            str(n).strip().lower() for n in (activity.get("inactive_medications") or [])
+        }
     except Exception:
         ref_str = str(reference_date or date.today())
 
@@ -99,23 +107,33 @@ def reconcile_medications(timeline: Dict[str, Any], reference_date: Any = None) 
         if d in active_names or ing in active_names:
             return True
         # tolerate display-name drift: active name contains the ingredient or vice-versa
-        return any(ing and ing in an for an in active_names) or any(d and d in an for an in active_names)
+        return any(ing and ing in an for an in active_names) or any(
+            d and d in an for an in active_names
+        )
 
     def _is_inactive_for(display: str, ingredient: str) -> bool:
         d = display.strip().lower()
         ing = ingredient.strip().lower()
         if d in inactive_names or ing in inactive_names:
             return True
-        return any(ing and ing in an for an in inactive_names) or any(d and d in an for an in inactive_names)
+        return any(ing and ing in an for an in inactive_names) or any(
+            d and d in an for an in inactive_names
+        )
 
     reconciled: List[Dict[str, Any]] = []
     counts = {"active": 0, "discontinued": 0, "duplicates": 0, "dose_conflicts": 0}
 
     for key, entries in groups.items():
         display = _display(entries[0])
-        sources = [{"name": _display(e), "date": e.get("date"),
-                    "source_file": e.get("source_file"), "dose": _dose_signature(e)}
-                   for e in entries]
+        sources = [
+            {
+                "name": _display(e),
+                "date": e.get("date"),
+                "source_file": e.get("source_file"),
+                "dose": _dose_signature(e),
+            }
+            for e in entries
+        ]
         is_active = _is_active_for(display, key)
         active_entries = [e for e in entries if True] if is_active else []
         distinct_active_doses = {_dose_signature(e) for e in active_entries}
@@ -143,30 +161,46 @@ def reconcile_medications(timeline: Dict[str, Any], reference_date: Any = None) 
 
         notes: List[str] = []
         if dose_conflict:
-            notes.append("Different doses for the same active ingredient are recorded concurrently — "
-                         "confirm the intended dose with the patient or prescriber.")
+            notes.append(
+                "Different doses for the same active ingredient are recorded concurrently — "
+                "confirm the intended dose with the patient or prescriber."
+            )
         elif duplicate:
-            notes.append("More than one active supply of this ingredient is on record — possible duplicate prescribing.")
+            notes.append(
+                "More than one active supply of this ingredient is on record — possible duplicate prescribing."  # noqa: E501
+            )
         elif state == "discontinued":
-            notes.append("Previously supplied; no active supply at the reference date. Confirm whether it was stopped deliberately.")
+            notes.append(
+                "Previously supplied; no active supply at the reference date. Confirm whether it was stopped deliberately."  # noqa: E501
+            )
         elif state == "single_supply":
             notes.append("Only one dated supply found — confirm whether it is current.")
 
-        reconciled.append({
-            "ingredient": key,
-            "display_name": _display(entries[0]),
-            "state": state,
-            "is_active": is_active,
-            "sources": sources,
-            "supply_count": len(entries),
-            "active_supply_count": len(active_entries),
-            "doses": sorted(distinct_active_doses) if is_active else sorted({_dose_signature(e) for e in entries}),
-            "dose_conflict": dose_conflict,
-            "duplicate": duplicate,
-            "notes": notes,
-        })
+        reconciled.append(
+            {
+                "ingredient": key,
+                "display_name": _display(entries[0]),
+                "state": state,
+                "is_active": is_active,
+                "sources": sources,
+                "supply_count": len(entries),
+                "active_supply_count": len(active_entries),
+                "doses": sorted(distinct_active_doses)
+                if is_active
+                else sorted({_dose_signature(e) for e in entries}),
+                "dose_conflict": dose_conflict,
+                "duplicate": duplicate,
+                "notes": notes,
+            }
+        )
 
-    reconciled.sort(key=lambda r: (r["state"] != "dose_conflict", r["state"] != "duplicate", r["display_name"].lower()))
+    reconciled.sort(
+        key=lambda r: (
+            r["state"] != "dose_conflict",
+            r["state"] != "duplicate",
+            r["display_name"].lower(),
+        )
+    )
 
     return {
         "reference_date": ref_str,
@@ -183,6 +217,6 @@ def reconcile_medications(timeline: Dict[str, Any], reference_date: Any = None) 
 
 
 _NOTE = (
-    "Reconciliation is inferred from the dated prescriptions on record (supply, not proof of intake). "
-    "A 'duplicate' or 'dose_conflict' is a reason to check with the prescriber, not an error in your record."
+    "Reconciliation is inferred from the dated prescriptions on record (supply, not proof of intake). "  # noqa: E501
+    "A 'duplicate' or 'dose_conflict' is a reason to check with the prescriber, not an error in your record."  # noqa: E501
 )

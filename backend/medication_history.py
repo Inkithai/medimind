@@ -94,8 +94,16 @@ def detect_medication_transitions(timeline: Dict[str, Any]) -> Dict[str, List[Di
     seen_pairs = set()
     for key, occurrences in groups.items():
         for previous, current in zip(occurrences, occurrences[1:], strict=False):
-            previous_source = (previous.get("date"), previous.get("source_file"), previous.get("source_page"))
-            current_source = (current.get("date"), current.get("source_file"), current.get("source_page"))
+            previous_source = (
+                previous.get("date"),
+                previous.get("source_file"),
+                previous.get("source_page"),
+            )
+            current_source = (
+                current.get("date"),
+                current.get("source_file"),
+                current.get("source_page"),
+            )
             pair_key = (key, previous_source, current_source)
             if previous_source == current_source or pair_key in seen_pairs:
                 continue
@@ -117,37 +125,51 @@ def detect_medication_transitions(timeline: Dict[str, Any]) -> Dict[str, List[Di
                 ),
             }
             if changed_fields:
-                changes.append({
-                    **finding,
-                    "changed_fields": changed_fields,
-                    "explanation": (
-                        f"The recorded {' and '.join(changed_fields)} for {medication_name} differs "
-                        "between these visits. This is an observation from the documents, not an "
-                        "instruction to change treatment. Confirm the intended instructions with the "
-                        "prescriber or pharmacist."
-                    ),
-                })
+                changes.append(
+                    {
+                        **finding,
+                        "changed_fields": changed_fields,
+                        "explanation": (
+                            f"The recorded {' and '.join(changed_fields)} for {medication_name} differs "  # noqa: E501
+                            "between these visits. This is an observation from the documents, not an "  # noqa: E501
+                            "instruction to change treatment. Confirm the intended instructions with the "  # noqa: E501
+                            "prescriber or pharmacist."
+                        ),
+                    }
+                )
             else:
-                continuations.append({
-                    **finding,
-                    "explanation": (
-                        f"{medication_name} appears in consecutive visits with the same normalized "
-                        "dose and frequency. This may represent continuation, but the prescriber or "
-                        "pharmacist should confirm whether it remains current."
-                    ),
-                })
+                continuations.append(
+                    {
+                        **finding,
+                        "explanation": (
+                            f"{medication_name} appears in consecutive visits with the same normalized "  # noqa: E501
+                            "dose and frequency. This may represent continuation, but the prescriber or "  # noqa: E501
+                            "pharmacist should confirm whether it remains current."
+                        ),
+                    }
+                )
 
     return {"medication_changes": changes, "medication_continuations": continuations}
 
 
 def _matches_name(entry: Dict[str, Any], names: Iterable[str]) -> bool:
-    haystack = " ".join([
-        str(entry.get("name") or ""),
-        *[str(value) for value in entry.get("ingredients") or []],
-    ]).lower().strip()
+    haystack = (
+        " ".join(
+            [
+                str(entry.get("name") or ""),
+                *[str(value) for value in entry.get("ingredients") or []],
+            ]
+        )
+        .lower()
+        .strip()
+    )
     if not haystack:
         return False
-    return any(str(name).strip().lower() in haystack or haystack in str(name).strip().lower() for name in names if str(name).strip())
+    return any(
+        str(name).strip().lower() in haystack or haystack in str(name).strip().lower()
+        for name in names
+        if str(name).strip()
+    )
 
 
 def _unique_sources(entries: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -185,11 +207,13 @@ def enrich_cross_check_sources(report: Dict[str, Any], timeline: Dict[str, Any])
             noted = [str(value).strip().lower() for value in visit.get("allergies_noted", []) or []]
             if allergy and any(allergy in value or value in allergy for value in noted if value):
                 source = visit.get("_source", {}) or {}
-                allergy_entries.append({
-                    "date": visit.get("date"),
-                    "source_file": source.get("file"),
-                    "source_page": source.get("page"),
-                })
+                allergy_entries.append(
+                    {
+                        "date": visit.get("date"),
+                        "source_file": source.get("file"),
+                        "source_page": source.get("page"),
+                    }
+                )
         resolved = _unique_sources([*medication_entries, *allergy_entries])
         if resolved:
             conflict["sources"] = resolved
@@ -212,10 +236,9 @@ def enrich_cross_check_sources(report: Dict[str, Any], timeline: Dict[str, Any])
 
 def _find_page(entries: List[Dict[str, Any]], source: Dict[str, Any]) -> Optional[int]:
     for entry in entries:
-        if (
-            entry.get("source_file") == source.get("source_file")
-            and entry.get("date") == source.get("date")
-        ):
+        if entry.get("source_file") == source.get("source_file") and entry.get(
+            "date"
+        ) == source.get("date"):
             page = entry.get("source_page")
             return int(page) if isinstance(page, int) else None
     return None

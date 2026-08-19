@@ -29,42 +29,80 @@ from typing import Any, Dict, List, Set, Tuple
 
 _CLASS_MEMBERS: Dict[str, Set[str]] = {
     "nsaid": {
-        "ibuprofen", "naproxen", "diclofenac", "aspirin", "ketorolac",
-        "indomethacin", "celecoxib", "mefenamic acid", "piroxicam", "etoricoxib",
+        "ibuprofen",
+        "naproxen",
+        "diclofenac",
+        "aspirin",
+        "ketorolac",
+        "indomethacin",
+        "celecoxib",
+        "mefenamic acid",
+        "piroxicam",
+        "etoricoxib",
     },
     "anticoagulant": {
-        "warfarin", "apixaban", "rivaroxaban", "dabigatran", "edoxaban",
-        "heparin", "enoxaparin",
+        "warfarin",
+        "apixaban",
+        "rivaroxaban",
+        "dabigatran",
+        "edoxaban",
+        "heparin",
+        "enoxaparin",
     },
     "ace_inhibitor": {
-        "lisinopril", "enalapril", "ramipril", "captopril", "perindopril",
-        "benazepril", "quinapril",
+        "lisinopril",
+        "enalapril",
+        "ramipril",
+        "captopril",
+        "perindopril",
+        "benazepril",
+        "quinapril",
     },
     "arb": {
-        "losartan", "valsartan", "telmisartan", "candesartan", "irbesartan",
+        "losartan",
+        "valsartan",
+        "telmisartan",
+        "candesartan",
+        "irbesartan",
         "olmesartan",
     },
     "potassium_sparing_diuretic": {
-        "spironolactone", "eplerenone", "amiloride", "triamterene",
+        "spironolactone",
+        "eplerenone",
+        "amiloride",
+        "triamterene",
     },
     "nitrate": {
-        "nitroglycerin", "glyceryl trinitrate", "isosorbide dinitrate",
+        "nitroglycerin",
+        "glyceryl trinitrate",
+        "isosorbide dinitrate",
         "isosorbide mononitrate",
     },
     "pde5_inhibitor": {"sildenafil", "tadalafil", "vardenafil", "avanafil"},
     "ssri": {
-        "sertraline", "fluoxetine", "paroxetine", "escitalopram",
-        "citalopram", "fluvoxamine",
+        "sertraline",
+        "fluoxetine",
+        "paroxetine",
+        "escitalopram",
+        "citalopram",
+        "fluvoxamine",
     },
     "triptan": {"sumatriptan", "rizatriptan", "zolmitriptan", "eletriptan"},
     "macrolide": {"clarithromycin", "erythromycin"},
     "cyp3a4_statin": {"simvastatin", "atorvastatin", "lovastatin"},
     "fluoroquinolone": {
-        "ciprofloxacin", "levofloxacin", "moxifloxacin", "norfloxacin",
+        "ciprofloxacin",
+        "levofloxacin",
+        "moxifloxacin",
+        "norfloxacin",
         "ofloxacin",
     },
     "sulfonylurea": {
-        "glimepiride", "gliclazide", "glibenclamide", "glyburide", "glipizide",
+        "glimepiride",
+        "gliclazide",
+        "glibenclamide",
+        "glyburide",
+        "glipizide",
     },
     "potassium_supplement": {"potassium chloride", "potassium citrate"},
 }
@@ -76,71 +114,161 @@ _CLASS_MEMBERS: Dict[str, Set[str]] = {
 # ---------------------------------------------------------------------------
 
 _RULES: List[Tuple[str, str, str, str]] = [
-    ("anticoagulant", "nsaid", "high",
-     "Combining an anticoagulant (blood thinner) with an NSAID significantly "
-     "increases the risk of serious bleeding, including gastrointestinal bleeding."),
-    ("methotrexate", "nsaid", "high",
-     "NSAIDs can reduce the elimination of methotrexate, which can lead to "
-     "methotrexate toxicity (bone marrow suppression, kidney injury)."),
-    ("methotrexate", "trimethoprim", "high",
-     "Trimethoprim and methotrexate are both folate antagonists; together they "
-     "can cause severe bone marrow suppression."),
-    ("nitrate", "pde5_inhibitor", "high",
-     "Nitrates combined with PDE5 inhibitors (e.g. sildenafil) can cause a "
-     "severe, potentially life-threatening drop in blood pressure."),
-    ("warfarin", "metronidazole", "high",
-     "Metronidazole inhibits warfarin metabolism, which can markedly raise INR "
-     "and bleeding risk."),
-    ("ace_inhibitor", "potassium_sparing_diuretic", "moderate",
-     "ACE inhibitors with potassium-sparing diuretics can raise blood potassium "
-     "to dangerous levels (hyperkalemia)."),
-    ("arb", "potassium_sparing_diuretic", "moderate",
-     "ARBs with potassium-sparing diuretics can raise blood potassium to "
-     "dangerous levels (hyperkalemia)."),
-    ("ace_inhibitor", "potassium_supplement", "moderate",
-     "ACE inhibitors reduce potassium excretion; adding a potassium supplement "
-     "can cause hyperkalemia."),
-    ("potassium_sparing_diuretic", "potassium_supplement", "moderate",
-     "A potassium-sparing diuretic plus a potassium supplement can cause "
-     "hyperkalemia."),
-    ("ssri", "tramadol", "moderate",
-     "SSRIs combined with tramadol increase the risk of serotonin syndrome and "
-     "can lower the seizure threshold."),
-    ("ssri", "triptan", "moderate",
-     "SSRIs combined with triptans carry a risk of serotonin syndrome."),
-    ("ssri", "nsaid", "moderate",
-     "SSRIs impair platelet function; with an NSAID this increases the risk of "
-     "gastrointestinal bleeding."),
-    ("macrolide", "cyp3a4_statin", "moderate",
-     "Macrolide antibiotics inhibit the metabolism of these statins, raising "
-     "the risk of muscle toxicity (myopathy/rhabdomyolysis)."),
-    ("macrolide", "digoxin", "moderate",
-     "Macrolides can increase digoxin levels, risking digoxin toxicity."),
-    ("ace_inhibitor", "lithium", "moderate",
-     "ACE inhibitors reduce lithium clearance and can cause lithium toxicity."),
-    ("nsaid", "lithium", "moderate",
-     "NSAIDs reduce lithium clearance and can cause lithium toxicity."),
-    ("fluoroquinolone", "sulfonylurea", "moderate",
-     "Fluoroquinolones can potentiate sulfonylureas, increasing the risk of "
-     "severe hypoglycemia."),
-    ("fluoroquinolone", "theophylline", "moderate",
-     "Some fluoroquinolones inhibit theophylline metabolism, risking "
-     "theophylline toxicity."),
-    ("clopidogrel", "omeprazole", "moderate",
-     "Omeprazole can reduce the antiplatelet effect of clopidogrel by "
-     "inhibiting its activation."),
-    ("warfarin", "ciprofloxacin", "moderate",
-     "Ciprofloxacin can increase warfarin's anticoagulant effect, raising INR "
-     "and bleeding risk; closer monitoring may be needed."),
-    ("lisinopril", "ibuprofen", "moderate",
-     "Ibuprofen can reduce lisinopril's blood-pressure-lowering effect and the "
-     "combination may impair kidney function."),
-    ("digoxin", "furosemide", "moderate",
-     "Furosemide-related potassium loss can increase sensitivity to digoxin and "
-     "the risk of digoxin toxicity."),
-    ("amlodipine", "simvastatin", "moderate",
-     "Amlodipine can increase simvastatin exposure; higher simvastatin doses "
-     "raise the risk of muscle toxicity."),
+    (
+        "anticoagulant",
+        "nsaid",
+        "high",
+        "Combining an anticoagulant (blood thinner) with an NSAID significantly "
+        "increases the risk of serious bleeding, including gastrointestinal bleeding.",
+    ),
+    (
+        "methotrexate",
+        "nsaid",
+        "high",
+        "NSAIDs can reduce the elimination of methotrexate, which can lead to "
+        "methotrexate toxicity (bone marrow suppression, kidney injury).",
+    ),
+    (
+        "methotrexate",
+        "trimethoprim",
+        "high",
+        "Trimethoprim and methotrexate are both folate antagonists; together they "
+        "can cause severe bone marrow suppression.",
+    ),
+    (
+        "nitrate",
+        "pde5_inhibitor",
+        "high",
+        "Nitrates combined with PDE5 inhibitors (e.g. sildenafil) can cause a "
+        "severe, potentially life-threatening drop in blood pressure.",
+    ),
+    (
+        "warfarin",
+        "metronidazole",
+        "high",
+        "Metronidazole inhibits warfarin metabolism, which can markedly raise INR "
+        "and bleeding risk.",
+    ),
+    (
+        "ace_inhibitor",
+        "potassium_sparing_diuretic",
+        "moderate",
+        "ACE inhibitors with potassium-sparing diuretics can raise blood potassium "
+        "to dangerous levels (hyperkalemia).",
+    ),
+    (
+        "arb",
+        "potassium_sparing_diuretic",
+        "moderate",
+        "ARBs with potassium-sparing diuretics can raise blood potassium to "
+        "dangerous levels (hyperkalemia).",
+    ),
+    (
+        "ace_inhibitor",
+        "potassium_supplement",
+        "moderate",
+        "ACE inhibitors reduce potassium excretion; adding a potassium supplement "
+        "can cause hyperkalemia.",
+    ),
+    (
+        "potassium_sparing_diuretic",
+        "potassium_supplement",
+        "moderate",
+        "A potassium-sparing diuretic plus a potassium supplement can cause hyperkalemia.",
+    ),
+    (
+        "ssri",
+        "tramadol",
+        "moderate",
+        "SSRIs combined with tramadol increase the risk of serotonin syndrome and "
+        "can lower the seizure threshold.",
+    ),
+    (
+        "ssri",
+        "triptan",
+        "moderate",
+        "SSRIs combined with triptans carry a risk of serotonin syndrome.",
+    ),
+    (
+        "ssri",
+        "nsaid",
+        "moderate",
+        "SSRIs impair platelet function; with an NSAID this increases the risk of "
+        "gastrointestinal bleeding.",
+    ),
+    (
+        "macrolide",
+        "cyp3a4_statin",
+        "moderate",
+        "Macrolide antibiotics inhibit the metabolism of these statins, raising "
+        "the risk of muscle toxicity (myopathy/rhabdomyolysis).",
+    ),
+    (
+        "macrolide",
+        "digoxin",
+        "moderate",
+        "Macrolides can increase digoxin levels, risking digoxin toxicity.",
+    ),
+    (
+        "ace_inhibitor",
+        "lithium",
+        "moderate",
+        "ACE inhibitors reduce lithium clearance and can cause lithium toxicity.",
+    ),
+    (
+        "nsaid",
+        "lithium",
+        "moderate",
+        "NSAIDs reduce lithium clearance and can cause lithium toxicity.",
+    ),
+    (
+        "fluoroquinolone",
+        "sulfonylurea",
+        "moderate",
+        "Fluoroquinolones can potentiate sulfonylureas, increasing the risk of "
+        "severe hypoglycemia.",
+    ),
+    (
+        "fluoroquinolone",
+        "theophylline",
+        "moderate",
+        "Some fluoroquinolones inhibit theophylline metabolism, risking theophylline toxicity.",
+    ),
+    (
+        "clopidogrel",
+        "omeprazole",
+        "moderate",
+        "Omeprazole can reduce the antiplatelet effect of clopidogrel by "
+        "inhibiting its activation.",
+    ),
+    (
+        "warfarin",
+        "ciprofloxacin",
+        "moderate",
+        "Ciprofloxacin can increase warfarin's anticoagulant effect, raising INR "
+        "and bleeding risk; closer monitoring may be needed.",
+    ),
+    (
+        "lisinopril",
+        "ibuprofen",
+        "moderate",
+        "Ibuprofen can reduce lisinopril's blood-pressure-lowering effect and the "
+        "combination may impair kidney function.",
+    ),
+    (
+        "digoxin",
+        "furosemide",
+        "moderate",
+        "Furosemide-related potassium loss can increase sensitivity to digoxin and "
+        "the risk of digoxin toxicity.",
+    ),
+    (
+        "amlodipine",
+        "simvastatin",
+        "moderate",
+        "Amlodipine can increase simvastatin exposure; higher simvastatin doses "
+        "raise the risk of muscle toxicity.",
+    ),
 ]
 
 KB_CONFIDENCE = 0.97  # exact ingredient-set match against an established rule
@@ -191,14 +319,16 @@ def check_known_interactions(timeline: Dict[str, Any]) -> List[Dict[str, Any]]:
         rule_name = f"{side_a} + {side_b}"
         matches_a = [
             (ing, med)
-            for ing in _expand(side_a) if ing in by_ingredient
+            for ing in _expand(side_a)
+            if ing in by_ingredient
             for med in by_ingredient[ing]
         ]
         if not matches_a:
             continue
         matches_b = [
             (ing, med)
-            for ing in _expand(side_b) if ing in by_ingredient
+            for ing in _expand(side_b)
+            if ing in by_ingredient
             for med in by_ingredient[ing]
         ]
         for ing_a, med_a in matches_a:
@@ -209,19 +339,21 @@ def check_known_interactions(timeline: Dict[str, Any]) -> List[Dict[str, Any]]:
                 if pair_key in seen:
                     continue
                 seen.add(pair_key)
-                findings.append({
-                    "medications_involved": [_med_display(med_a), _med_display(med_b)],
-                    "explanation": (
-                        f"Deterministic knowledge-base check ({rule_name}): "
-                        f"{explanation} Matched on active ingredients "
-                        f"'{ing_a}' and '{ing_b}'. Consult a doctor or "
-                        "pharmacist before making any changes."
-                    ),
-                    "severity": severity,
-                    "confidence": KB_CONFIDENCE,
-                    "source": "curated_knowledge_base",
-                    "rule": rule_name,
-                })
+                findings.append(
+                    {
+                        "medications_involved": [_med_display(med_a), _med_display(med_b)],
+                        "explanation": (
+                            f"Deterministic knowledge-base check ({rule_name}): "
+                            f"{explanation} Matched on active ingredients "
+                            f"'{ing_a}' and '{ing_b}'. Consult a doctor or "
+                            "pharmacist before making any changes."
+                        ),
+                        "severity": severity,
+                        "confidence": KB_CONFIDENCE,
+                        "source": "curated_knowledge_base",
+                        "rule": rule_name,
+                    }
+                )
     return findings
 
 

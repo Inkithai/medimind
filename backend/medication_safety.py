@@ -121,7 +121,7 @@ Rules:
   drug-interaction database. overall_recommendation must state plainly that
   this analysis is not a substitute for a pharmacist or a licensed
   drug-interaction checking tool, in addition to recommending consultation.
-"""
+"""  # noqa: E501
 
 
 CROSS_CHECK_JSON_SCHEMA = {
@@ -211,8 +211,10 @@ CROSS_CHECK_JSON_SCHEMA = {
         "overall_recommendation": {"type": "string"},
     },
     "required": [
-        "potential_drug_interactions", "duplicate_prescriptions",
-        "conflicting_dosage_instructions", "allergy_conflicts",
+        "potential_drug_interactions",
+        "duplicate_prescriptions",
+        "conflicting_dosage_instructions",
+        "allergy_conflicts",
         "overall_recommendation",
     ],
     "additionalProperties": False,
@@ -267,26 +269,31 @@ def detect_exact_duplicate_medications(timeline: Dict[str, Any]) -> List[Dict[st
         # group tag (older timelines) fall back to the (date, source_file)
         # identity, matching the historical behaviour.
         distinct_prescriptions = {
-            m.get("prescription_group") or (m.get("date"), m.get("source_file"))
-            for m in meds
+            m.get("prescription_group") or (m.get("date"), m.get("source_file")) for m in meds
         }
         if len(distinct_prescriptions) < 2:
             continue  # same medication on one prescription is not a duplicate
-        duplicates.append({
-            "medication": " / ".join(ingredients),
-            "occurrences": [
-                {"date": m.get("date"), "source_file": m.get("source_file"), "dosage": m.get("dosage")}
-                for m in meds
-            ],
-            "explanation": (
-                f"Deterministic check: identical active ingredient(s) ({', '.join(ingredients)}) "
-                f"at the same normalized dose ({dosage_value} {dosage_unit}) appear on "
-                f"{len(distinct_prescriptions)} separate prescriptions, regardless of source "
-                "language or printed wording."
-            ),
-            "confidence": 0.95,  # exact numeric/ingredient match, not model inference
-            "evidence_source": "deterministic",
-        })
+        duplicates.append(
+            {
+                "medication": " / ".join(ingredients),
+                "occurrences": [
+                    {
+                        "date": m.get("date"),
+                        "source_file": m.get("source_file"),
+                        "dosage": m.get("dosage"),
+                    }
+                    for m in meds
+                ],
+                "explanation": (
+                    f"Deterministic check: identical active ingredient(s) ({', '.join(ingredients)}) "  # noqa: E501
+                    f"at the same normalized dose ({dosage_value} {dosage_unit}) appear on "
+                    f"{len(distinct_prescriptions)} separate prescriptions, regardless of source "
+                    "language or printed wording."
+                ),
+                "confidence": 0.95,  # exact numeric/ingredient match, not model inference
+                "evidence_source": "deterministic",
+            }
+        )
     return duplicates
 
 
@@ -388,6 +395,7 @@ def cross_check_prescriptions(
     # pass; the KB is the guaranteed floor. Scoped to active prescriptions.
     try:
         from drug_interactions import check_known_interactions, merge_into_report
+
         merge_into_report(result, check_known_interactions(active_timeline))
     except Exception as e:
         # A KB failure must never take down the whole safety report — the
@@ -402,6 +410,7 @@ def cross_check_prescriptions(
     # Scoped to active prescriptions.
     try:
         from drug_allergy_rules import check_allergy_conflicts, merge_allergy_findings
+
         merge_allergy_findings(result, check_allergy_conflicts(active_timeline))
     except Exception as e:
         logger.warning("Deterministic allergy check failed (LLM findings kept): %s", e)
@@ -412,6 +421,7 @@ def cross_check_prescriptions(
     # LLM-dependent; danger decided on positive evidence only.
     try:
         from drug_lab_interactions import check_drug_lab_findings, merge_drug_lab_findings
+
         merge_drug_lab_findings(result, check_drug_lab_findings(active_timeline))
     except Exception as e:
         logger.warning("Deterministic drug-lab check failed (LLM findings kept): %s", e)
@@ -422,6 +432,7 @@ def cross_check_prescriptions(
     # recommend a dose — only surfaces the reason to ask a prescriber.
     try:
         from renal_hepatic_dosing import check_renal_hepatic_findings, merge_renal_hepatic_findings
+
         merge_renal_hepatic_findings(result, check_renal_hepatic_findings(active_timeline))
     except Exception as e:
         logger.warning("Deterministic renal/hepatic check failed (LLM findings kept): %s", e)
@@ -434,7 +445,10 @@ def cross_check_prescriptions(
             check_condition_contraindications,
             merge_condition_contraindications,
         )
-        merge_condition_contraindications(result, check_condition_contraindications(active_timeline))
+
+        merge_condition_contraindications(
+            result, check_condition_contraindications(active_timeline)
+        )
     except Exception as e:
         logger.warning("Deterministic condition check failed (LLM findings kept): %s", e)
 
@@ -452,12 +466,14 @@ def cross_check_prescriptions(
     # drug-interaction database).
     from evidence_grading import grade_cross_check
     from reference_library import samhsa_claim_reference
+
     grade_cross_check(result, graph_backed_findings, claim_reference=samhsa_claim_reference)
 
     # Place every finding in time. Within the active set all courses overlap
     # at the reference date; timing still documents each finding's window
     # from the record's dates/durations.
     from risk_timeline import annotate_findings_with_timing, concurrent_exposure
+
     annotate_findings_with_timing(result, timeline)
     result["concurrent_exposure"] = concurrent_exposure(active_timeline)
 
@@ -465,14 +481,13 @@ def cross_check_prescriptions(
     # dated treatment windows. This produces a separately cited finding only
     # when an opioid and depressant course actually overlap.
     from reference_library import find_concurrent_depressant_risk, find_relevant_guidance
+
     result["guideline_flagged_combinations"] = find_concurrent_depressant_risk(timeline)
     result["published_guidance"] = find_relevant_guidance(active_timeline)
 
     result["reference_date"] = activity["reference_date"]
     result["medication_activity"] = activity
     return result
-
-
 
 
 def analyze_medication_safety(

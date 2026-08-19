@@ -14,6 +14,7 @@ These tests also pin the two mechanism properties that matter:
     name that merely contains a marker's letters is NOT rejected — a false
     rejection of real patient data is worse than admitting a demo doc.
 """
+
 import os
 import sys
 
@@ -56,15 +57,26 @@ class TestStructuralMarker:
 
 
 class TestEnglishMarkers:
-    @pytest.mark.parametrize("name", [
-        "DEMO PATIENT", "Demo Patient", "demo patient",
-        "SAMPLE", "Dummy", "placeholder", "Test Patient", "SPECIMEN",
-    ])
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "DEMO PATIENT",
+            "Demo Patient",
+            "demo patient",
+            "SAMPLE",
+            "Dummy",
+            "placeholder",
+            "Test Patient",
+            "SPECIMEN",
+        ],
+    )
     def test_english_placeholder_names_rejected(self, name):
         assert _is_demo_document(_doc(name)) is True
 
     def test_demo_medication_name_rejected(self):
-        doc = _doc("jane doe", medications=[{"name": "DEMO MEDICINE", "ingredients": ["Metformin"]}])
+        doc = _doc(
+            "jane doe", medications=[{"name": "DEMO MEDICINE", "ingredients": ["Metformin"]}]
+        )
         assert _is_demo_document(doc) is True
 
     def test_real_patient_kept(self):
@@ -76,22 +88,25 @@ class TestMultilingualMarkers:
     """patient_name / medication name are never translated by the
     extractor, so these must be caught in their source script."""
 
-    @pytest.mark.parametrize("name,script", [
-        ("மாதிரி நோயாளி", "Tamil (sample patient)"),
-        ("டெமோ", "Tamil (demo)"),
-        ("නියැදිය", "Sinhala (sample)"),
-        ("ආදර්ශ රෝගියා", "Sinhala (model patient)"),
-        ("डेमो", "Hindi (demo)"),
-        ("नमूना", "Hindi (sample)"),
-        ("MUESTRA", "Spanish (sample)"),
-        ("ejemplo", "Spanish (example)"),
-        ("échantillon", "French (sample)"),
-        ("ÉCHANTILLON", "French (sample, uppercase)"),
-        ("عينة", "Arabic (sample)"),
-        ("تجريبي", "Arabic (trial/demo)"),
-        ("デモ", "Japanese (demo)"),
-        ("サンプル", "Japanese (sample)"),
-    ])
+    @pytest.mark.parametrize(
+        "name,script",
+        [
+            ("மாதிரி நோயாளி", "Tamil (sample patient)"),
+            ("டெமோ", "Tamil (demo)"),
+            ("නියැදිය", "Sinhala (sample)"),
+            ("ආදර්ශ රෝගියා", "Sinhala (model patient)"),
+            ("डेमो", "Hindi (demo)"),
+            ("नमूना", "Hindi (sample)"),
+            ("MUESTRA", "Spanish (sample)"),
+            ("ejemplo", "Spanish (example)"),
+            ("échantillon", "French (sample)"),
+            ("ÉCHANTILLON", "French (sample, uppercase)"),
+            ("عينة", "Arabic (sample)"),
+            ("تجريبي", "Arabic (trial/demo)"),
+            ("デモ", "Japanese (demo)"),
+            ("サンプル", "Japanese (sample)"),
+        ],
+    )
     def test_non_english_placeholder_rejected(self, name, script):
         assert _is_demo_document(_doc(name)) is True, f"missed {script}: {name}"
 
@@ -126,12 +141,15 @@ class TestFalsePositiveGuards:
     """Rejecting a REAL document is worse than admitting a demo one, so
     markers are word-anchored for space-delimited scripts."""
 
-    @pytest.mark.parametrize("name", [
-        "Sampleton",        # contains "sample"
-        "Demopoulos",       # contains "demo"
-        "Muestras Rivera",  # Spanish surname containing "muestra"
-        "Prudence Ejemplar",
-    ])
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "Sampleton",  # contains "sample"
+            "Demopoulos",  # contains "demo"
+            "Muestras Rivera",  # Spanish surname containing "muestra"
+            "Prudence Ejemplar",
+        ],
+    )
     def test_names_merely_containing_a_marker_are_kept(self, name):
         assert _is_demo_document(_doc(name)) is False, f"false-rejected real name: {name}"
 

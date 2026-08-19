@@ -212,9 +212,9 @@ def grade_cross_check(
             "model's own knowledge with nothing in this system confirming them, so "
             f"their confidence is capped at {MODEL_KNOWLEDGE_CONFIDENCE_CEILING} and "
             "each is flagged. A pharmacist can confirm any of them."
-        ) if total else (
-            "No safety findings were reported, so there is nothing to grade."
-        ),
+        )
+        if total
+        else ("No safety findings were reported, so there is nothing to grade."),
     }
     return cross_check
 
@@ -252,28 +252,48 @@ if __name__ == "__main__":
     # Findings shaped like a real cross_check_report.
     report = {
         "potential_drug_interactions": [
-            {"medications_involved": ["Fluconazole", "Montelukast"],
-             "explanation": "Fluconazole inhibits CYP enzymes...",
-             "severity": "moderate", "confidence": 0.65},
-            {"medications_involved": ["Cetirizine", "Chlorpheniramine"],
-             "explanation": "Additive sedation.",
-             "severity": "moderate", "confidence": 0.95},
-            {"medications_involved": ["Fluconazole", "Omeprazole"],
-             "explanation": "Both affect CYP2C19; clinical impact usually small.",
-             "severity": "low", "confidence": 0.45},
+            {
+                "medications_involved": ["Fluconazole", "Montelukast"],
+                "explanation": "Fluconazole inhibits CYP enzymes...",
+                "severity": "moderate",
+                "confidence": 0.65,
+            },
+            {
+                "medications_involved": ["Cetirizine", "Chlorpheniramine"],
+                "explanation": "Additive sedation.",
+                "severity": "moderate",
+                "confidence": 0.95,
+            },
+            {
+                "medications_involved": ["Fluconazole", "Omeprazole"],
+                "explanation": "Both affect CYP2C19; clinical impact usually small.",
+                "severity": "low",
+                "confidence": 0.45,
+            },
         ],
         "duplicate_prescriptions": [
-            {"medication": "Cetirizine", "occurrences": [], "confidence": 0.95,
-             "explanation": "Deterministic check: identical active ingredient(s)...",
-             "evidence_source": DETERMINISTIC},
-            {"medication": "Paracetamol", "occurrences": [], "confidence": 0.9,
-             "explanation": "Model spotted these look similar."},
+            {
+                "medication": "Cetirizine",
+                "occurrences": [],
+                "confidence": 0.95,
+                "explanation": "Deterministic check: identical active ingredient(s)...",
+                "evidence_source": DETERMINISTIC,
+            },
+            {
+                "medication": "Paracetamol",
+                "occurrences": [],
+                "confidence": 0.9,
+                "explanation": "Model spotted these look similar.",
+            },
         ],
         "conflicting_dosage_instructions": [],
         "allergy_conflicts": [
-            {"medication": "Amoxicillin", "allergy": "Penicillin",
-             "explanation": "Amoxicillin is a penicillin-class antibiotic.",
-             "confidence": 0.93},
+            {
+                "medication": "Amoxicillin",
+                "allergy": "Penicillin",
+                "explanation": "Amoxicillin is a penicillin-class antibiotic.",
+                "confidence": 0.93,
+            },
         ],
     }
 
@@ -333,11 +353,15 @@ if __name__ == "__main__":
     }
     graph_report = {
         "potential_drug_interactions": [
-            {"medications_involved": ["Naloxone", "Morphine"],
-             "explanation": "Naloxone reverses opioid effects.",
-             "severity": "high", "confidence": 0.9},
+            {
+                "medications_involved": ["Naloxone", "Morphine"],
+                "explanation": "Naloxone reverses opioid effects.",
+                "severity": "high",
+                "confidence": 0.9,
+            },
         ],
-        "duplicate_prescriptions": [], "conflicting_dosage_instructions": [],
+        "duplicate_prescriptions": [],
+        "conflicting_dosage_instructions": [],
         "allergy_conflicts": [],
     }
     grade_cross_check(graph_report, backed)
@@ -348,8 +372,14 @@ if __name__ == "__main__":
     assert "naloxone" in grounded["reference"]
 
     # --- An empty report grades cleanly ------------------------------------
-    empty = grade_cross_check({"potential_drug_interactions": [], "duplicate_prescriptions": [],
-                               "conflicting_dosage_instructions": [], "allergy_conflicts": []})
+    empty = grade_cross_check(
+        {
+            "potential_drug_interactions": [],
+            "duplicate_prescriptions": [],
+            "conflicting_dosage_instructions": [],
+            "allergy_conflicts": [],
+        }
+    )
     assert empty["evidence_summary"]["total_findings"] == 0
     assert "nothing to grade" in empty["evidence_summary"]["note"]
 
@@ -358,7 +388,9 @@ if __name__ == "__main__":
         for f in report.get(name) or []:
             label = f.get("medication") or " + ".join(f.get("medications_involved") or [])
             was = f.get("model_reported_confidence")
-            print(f"  [{f['evidence_source']:16}] {label:28} confidence={f['confidence']}"
-                  + (f"  (model claimed {was})" if was else ""))
+            print(
+                f"  [{f['evidence_source']:16}] {label:28} confidence={f['confidence']}"
+                + (f"  (model claimed {was})" if was else "")
+            )
     print("\n" + report["evidence_summary"]["note"])
     print("\nAll checks passed.")

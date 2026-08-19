@@ -4,6 +4,7 @@ Verifies that index_patient_timeline() returns 0 (and does NOT touch
 Chroma) when a timeline has nothing retrievable, so upload callers stop
 reporting indexed=True for an empty index.
 """
+
 import os
 import sys
 from unittest import mock
@@ -13,7 +14,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ["GROQ_API_KEY"] = "gsk_test_123"
 
 import retrieval
-
 
 EMPTY_TIMELINE = {
     "visits": [{"document_type": "other", "clinical_notes": None}],
@@ -25,10 +25,20 @@ EMPTY_TIMELINE = {
 FULL_TIMELINE = {
     "visits": [],
     "medications_timeline": [
-        {"name": "Paracetamol", "ingredients": ["Paracetamol"], "dosage": "500 mg",
-         "dosage_value": 500, "dosage_unit": "mg", "frequency": "3x daily",
-         "frequency_per_day": 3, "is_as_needed": False, "duration": "5 days",
-         "date": "2024-01-01", "source_file": "rx1.pdf", "confidence": 0.95}
+        {
+            "name": "Paracetamol",
+            "ingredients": ["Paracetamol"],
+            "dosage": "500 mg",
+            "dosage_value": 500,
+            "dosage_unit": "mg",
+            "frequency": "3x daily",
+            "frequency_per_day": 3,
+            "is_as_needed": False,
+            "duration": "5 days",
+            "date": "2024-01-01",
+            "source_file": "rx1.pdf",
+            "confidence": 0.95,
+        }
     ],
     "lab_results_timeline": [],
     "known_allergies": ["Penicillin"],
@@ -36,8 +46,10 @@ FULL_TIMELINE = {
 
 
 def test_empty_timeline_returns_zero():
-    with mock.patch.object(retrieval, "_get_patient_collection") as get_collection, \
-         mock.patch.object(retrieval, "embed_texts") as embed:
+    with (
+        mock.patch.object(retrieval, "_get_patient_collection") as get_collection,
+        mock.patch.object(retrieval, "embed_texts") as embed,
+    ):
         count = retrieval.index_patient_timeline("anon_test", EMPTY_TIMELINE)
     assert count == 0
     get_collection.assert_not_called()
@@ -46,9 +58,13 @@ def test_empty_timeline_returns_zero():
 
 def test_full_timeline_returns_chunk_count():
     collection = mock.Mock()
-    with mock.patch.object(retrieval, "_get_patient_collection", return_value=collection), \
-         mock.patch.object(retrieval.vector_store, "delete_collection"), \
-         mock.patch.object(retrieval, "embed_texts", side_effect=lambda texts: [[0.1] * 384 for _ in texts]):
+    with (
+        mock.patch.object(retrieval, "_get_patient_collection", return_value=collection),
+        mock.patch.object(retrieval.vector_store, "delete_collection"),
+        mock.patch.object(
+            retrieval, "embed_texts", side_effect=lambda texts: [[0.1] * 384 for _ in texts]
+        ),
+    ):
         count = retrieval.index_patient_timeline("anon_test", FULL_TIMELINE)
     # 1 medication chunk + 1 allergy chunk
     assert count == 2, count
@@ -62,10 +78,20 @@ def _many_medication_timeline(count):
     return {
         "visits": [],
         "medications_timeline": [
-            {"name": f"Drug{i}", "ingredients": [f"Drug{i}"], "dosage": "500 mg",
-             "dosage_value": 500, "dosage_unit": "mg", "frequency": "3x daily",
-             "frequency_per_day": 3, "is_as_needed": False, "duration": "5 days",
-             "date": "2024-01-01", "source_file": f"rx{i}.pdf", "confidence": 0.95}
+            {
+                "name": f"Drug{i}",
+                "ingredients": [f"Drug{i}"],
+                "dosage": "500 mg",
+                "dosage_value": 500,
+                "dosage_unit": "mg",
+                "frequency": "3x daily",
+                "frequency_per_day": 3,
+                "is_as_needed": False,
+                "duration": "5 days",
+                "date": "2024-01-01",
+                "source_file": f"rx{i}.pdf",
+                "confidence": 0.95,
+            }
             for i in range(count)
         ],
         "lab_results_timeline": [],
@@ -89,9 +115,11 @@ def test_indexing_streams_in_bounded_batches():
         batch_sizes.append(len(texts))
         return [[0.1] * 384 for _ in texts]
 
-    with mock.patch.object(retrieval, "_get_patient_collection", return_value=collection), \
-         mock.patch.object(retrieval, "embed_texts", side_effect=fake_embed), \
-         mock.patch.object(retrieval, "EMBEDDING_BATCH_SIZE", 8):
+    with (
+        mock.patch.object(retrieval, "_get_patient_collection", return_value=collection),
+        mock.patch.object(retrieval, "embed_texts", side_effect=fake_embed),
+        mock.patch.object(retrieval, "EMBEDDING_BATCH_SIZE", 8),
+    ):
         count = retrieval.index_patient_timeline("anon_test", _many_medication_timeline(40))
 
     assert count == 40, count
@@ -112,9 +140,15 @@ def test_collection_is_resolved_once_for_all_batches():
     reused across batches — re-resolving it per batch was a per-upload
     allocation of a whole new client in earlier versions."""
     collection = mock.Mock()
-    with mock.patch.object(retrieval, "_get_patient_collection", return_value=collection) as get_collection, \
-         mock.patch.object(retrieval, "embed_texts", side_effect=lambda texts: [[0.1] * 8 for _ in texts]), \
-         mock.patch.object(retrieval, "EMBEDDING_BATCH_SIZE", 4):
+    with (
+        mock.patch.object(
+            retrieval, "_get_patient_collection", return_value=collection
+        ) as get_collection,
+        mock.patch.object(
+            retrieval, "embed_texts", side_effect=lambda texts: [[0.1] * 8 for _ in texts]
+        ),
+        mock.patch.object(retrieval, "EMBEDDING_BATCH_SIZE", 4),
+    ):
         retrieval.index_patient_timeline("anon_test", _many_medication_timeline(20))
     assert get_collection.call_count == 1, get_collection.call_count
 
@@ -134,8 +168,10 @@ def test_embedding_batch_size_env_is_clamped():
 def test_preload_embedding_model_is_a_noop_with_openai_key():
     """Startup preload must not try to build a local ONNX session (nor
     fail the app) when embeddings are served by OpenAI."""
-    with mock.patch.object(retrieval, "_openai_embedding_client", object()), \
-         mock.patch.object(retrieval, "_get_local_embedding_function") as get_local:
+    with (
+        mock.patch.object(retrieval, "_openai_embedding_client", object()),
+        mock.patch.object(retrieval, "_get_local_embedding_function") as get_local,
+    ):
         assert retrieval.preload_embedding_model() is False
     get_local.assert_not_called()
 
@@ -143,9 +179,12 @@ def test_preload_embedding_model_is_a_noop_with_openai_key():
 def test_preload_embedding_model_never_raises():
     """A failed model download at startup must degrade to lazy loading,
     not crash the web process before it can serve /health."""
-    with mock.patch.object(retrieval, "_openai_embedding_client", None), \
-         mock.patch.object(retrieval, "_get_local_embedding_function",
-                           side_effect=RuntimeError("no network")):
+    with (
+        mock.patch.object(retrieval, "_openai_embedding_client", None),
+        mock.patch.object(
+            retrieval, "_get_local_embedding_function", side_effect=RuntimeError("no network")
+        ),
+    ):
         assert retrieval.preload_embedding_model() is False
 
 
@@ -197,10 +236,18 @@ def test_chunk_ids_are_stable_when_timeline_order_changes():
     """IDs must not include the list index — adding an older medication
     used to rename every subsequent chunk and leave the old ids behind."""
     older = {
-        "name": "Aspirin", "ingredients": ["Aspirin"], "dosage": "75 mg",
-        "dosage_value": 75, "dosage_unit": "mg", "frequency": "daily",
-        "frequency_per_day": 1, "is_as_needed": False, "duration": None,
-        "date": "2023-01-01", "source_file": "old.pdf", "confidence": 0.9,
+        "name": "Aspirin",
+        "ingredients": ["Aspirin"],
+        "dosage": "75 mg",
+        "dosage_value": 75,
+        "dosage_unit": "mg",
+        "frequency": "daily",
+        "frequency_per_day": 1,
+        "is_as_needed": False,
+        "duration": None,
+        "date": "2023-01-01",
+        "source_file": "old.pdf",
+        "confidence": 0.9,
     }
     first = retrieval.build_chunks_from_timeline("anon_test", FULL_TIMELINE)
     shifted = {

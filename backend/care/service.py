@@ -9,7 +9,6 @@ from __future__ import annotations
 import os
 from typing import Any, Dict, List, Optional
 
-from care.errors import CareConfigurationError
 from care.models import FACILITY_KINDS, Facility, GeoPoint, haversine_km, pack_facilities
 from care.providers.base import ProviderNotConfiguredError, ProviderUnavailableError
 
@@ -91,7 +90,9 @@ class CareNavigationService:
 
     def calculate_distance(self, origin: GeoPoint, destination: GeoPoint) -> float:
         return round(
-            haversine_km(origin.latitude, origin.longitude, destination.latitude, destination.longitude),
+            haversine_km(
+                origin.latitude, origin.longitude, destination.latitude, destination.longitude
+            ),
             2,
         )
 

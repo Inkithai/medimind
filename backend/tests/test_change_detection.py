@@ -36,12 +36,14 @@ def test_detects_flag_instruction_and_allergy_changes_with_sources():
     timeline = {
         "visits": [
             _visit(
-                "2025-01-10", "old.pdf",
+                "2025-01-10",
+                "old.pdf",
                 medications=[_med("Metformin", "500 mg")],
                 labs=[_lab("Glucose", "95")],
             ),
             _visit(
-                "2025-04-10", "new.pdf",
+                "2025-04-10",
+                "new.pdf",
                 medications=[_med("Metformin", "1000 mg")],
                 labs=[_lab("Glucose", "132", "high")],
                 allergies=["Penicillin"],
@@ -82,8 +84,16 @@ def test_does_not_call_missing_medication_stopped_or_compare_to_lab_only_record(
 def test_matches_medication_by_normalized_ingredient_and_ignores_case():
     timeline = {
         "visits": [
-            _visit("10 Jan 2025", "a.pdf", medications=[_med("Brand A", "5 mg", ingredients=["AMLODIPINE"])]),
-            _visit("11 Feb 2025", "b.pdf", medications=[_med("Brand B", "10 mg", ingredients=["amlodipine"])]),
+            _visit(
+                "10 Jan 2025",
+                "a.pdf",
+                medications=[_med("Brand A", "5 mg", ingredients=["AMLODIPINE"])],
+            ),
+            _visit(
+                "11 Feb 2025",
+                "b.pdf",
+                medications=[_med("Brand B", "10 mg", ingredients=["amlodipine"])],
+            ),
         ]
     }
     changes = detect_record_changes(timeline)["latest"]["changes"]

@@ -42,8 +42,8 @@ from collections import OrderedDict
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
-from medical_extractor import MODEL, _chat_completion
 import retrieval
+from medical_extractor import MODEL, _chat_completion
 
 logger = logging.getLogger("conversation")
 
@@ -52,7 +52,7 @@ logger = logging.getLogger("conversation")
 REWRITE_MODEL = MODEL
 
 SUMMARIZE_AFTER_TOTAL_TURNS = 20  # start summarizing once a session grows past this
-KEEP_RECENT_TURNS_VERBATIM = 6    # ...but always keep this many most-recent turns as-is
+KEEP_RECENT_TURNS_VERBATIM = 6  # ...but always keep this many most-recent turns as-is
 
 # How many turns an entity stays "in focus" after it was last mentioned.
 # Long enough to survive a couple of intervening clarifications, short enough
@@ -69,6 +69,7 @@ def _now_iso() -> str:
 # ---------------------------------------------------------------------------
 # 1. Session management
 # ---------------------------------------------------------------------------
+
 
 class ConversationSession:
     """
@@ -96,12 +97,14 @@ class ConversationSession:
         """Appends a user turn, tagged with the record entities it named.
         Those tags are what get_focus() later reads — resolved once, when
         the vocabulary is at hand, rather than re-derived per turn."""
-        self.turns.append({
-            "role": "user",
-            "content": text,
-            "timestamp": _now_iso(),
-            "entities": entities or {},
-        })
+        self.turns.append(
+            {
+                "role": "user",
+                "content": text,
+                "timestamp": _now_iso(),
+                "entities": entities or {},
+            }
+        )
 
     def add_assistant_turn(self, answer: Dict[str, Any]) -> None:
         """Appends an assistant turn. Stores the "answer" text as the turn's
@@ -116,12 +119,14 @@ class ConversationSession:
                 for s in answer.get("sources") or []
                 if isinstance(s, dict) and s.get("source_file")
             ]
-        self.turns.append({
-            "role": "assistant",
-            "content": content,
-            "timestamp": _now_iso(),
-            "entities": {"source_files": cited_files},
-        })
+        self.turns.append(
+            {
+                "role": "assistant",
+                "content": content,
+                "timestamp": _now_iso(),
+                "entities": {"source_files": cited_files},
+            }
+        )
 
     # -- focus ---------------------------------------------------------
 
@@ -165,10 +170,12 @@ class ConversationSession:
             recent = self.turns[cutoff:]
             if max_turns < len(recent):
                 recent = recent[-max_turns:]
-            formatted = [{
-                "role": "system",
-                "content": f"Conversation summary so far: {self._summary}",
-            }]
+            formatted = [
+                {
+                    "role": "system",
+                    "content": f"Conversation summary so far: {self._summary}",
+                }
+            ]
             formatted.extend({"role": t["role"], "content": t["content"]} for t in recent)
             return formatted
 
@@ -223,6 +230,7 @@ def _evict_locked() -> None:
 # 1b. Durable transcript store (Supabase, optional)
 # ---------------------------------------------------------------------------
 
+
 def _persist_session(session: ConversationSession) -> None:
     """Mirrors the full transcript to Supabase. Best-effort: any failure
     (missing table, network, misconfiguration) is logged once and swallowed
@@ -231,6 +239,7 @@ def _persist_session(session: ConversationSession) -> None:
         return
     try:
         from db import _get_client
+
         _get_client().table("conversation_sessions").upsert(
             {
                 "user_id": session.patient_key,
@@ -252,8 +261,10 @@ def _load_persisted_session(patient_key: str, session_id: str) -> Optional[Conve
         return None
     try:
         from db import _get_client
+
         res = (
-            _get_client().table("conversation_sessions")
+            _get_client()
+            .table("conversation_sessions")
             .select("turns")
             .eq("user_id", patient_key)
             .eq("session_id", session_id)
@@ -278,8 +289,10 @@ def _delete_persisted_session(patient_key: str, session_id: str) -> bool:
         return False
     try:
         from db import _get_client
+
         res = (
-            _get_client().table("conversation_sessions")
+            _get_client()
+            .table("conversation_sessions")
             .delete()
             .eq("user_id", patient_key)
             .eq("session_id", session_id)
@@ -435,13 +448,15 @@ def rewrite_query_with_context(
             if values
         ]
         focus_note = "Currently being discussed — " + "; ".join(parts) + "\n\n"
-    messages.append({
-        "role": "user",
-        "content": (
-            f"{focus_note}New follow-up question to rewrite: {question}\n\n"
-            "Output only the rewritten, self-contained search query."
-        ),
-    })
+    messages.append(
+        {
+            "role": "user",
+            "content": (
+                f"{focus_note}New follow-up question to rewrite: {question}\n\n"
+                "Output only the rewritten, self-contained search query."
+            ),
+        }
+    )
 
     try:
         response = _chat_completion(model=REWRITE_MODEL, messages=messages)
@@ -512,6 +527,7 @@ def summarize_old_turns(turns: List[Dict[str, Any]]) -> str:
 # ---------------------------------------------------------------------------
 # 4. Conversational answer function
 # ---------------------------------------------------------------------------
+
 
 def ask(session: ConversationSession, question: str, top_k: int = 8) -> Dict[str, Any]:
     """

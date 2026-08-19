@@ -60,11 +60,11 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from date_convention import infer_dayfirst, parse_mixed_date
 
 # Overlap verdicts.
-CONCURRENT = "concurrent"          # windows provably overlap
-POSSIBLE = "possible"              # a duration is unknown — cannot rule out
+CONCURRENT = "concurrent"  # windows provably overlap
+POSSIBLE = "possible"  # a duration is unknown — cannot rule out
 NOT_CONCURRENT = "not_concurrent"  # windows provably do not overlap
-UNKNOWN = "unknown"                # dates unusable on one side, or a course
-                                   # length unknown so non-overlap is unprovable
+UNKNOWN = "unknown"  # dates unusable on one side, or a course
+# length unknown so non-overlap is unprovable
 
 _DURATION_UNITS = (
     (r"day", 1),
@@ -125,9 +125,14 @@ def _daily_dose(med: Dict[str, Any]) -> Optional[float]:
 
 _MASS_TO_MG = {
     "mg": 1.0,
-    "g": 1000.0, "gram": 1000.0, "grams": 1000.0,
-    "mcg": 1 / 1000.0, "ug": 1 / 1000.0, "µg": 1 / 1000.0,
-    "microgram": 1 / 1000.0, "micrograms": 1 / 1000.0,
+    "g": 1000.0,
+    "gram": 1000.0,
+    "grams": 1000.0,
+    "mcg": 1 / 1000.0,
+    "ug": 1 / 1000.0,
+    "µg": 1 / 1000.0,
+    "microgram": 1 / 1000.0,
+    "micrograms": 1 / 1000.0,
 }
 
 
@@ -154,9 +159,7 @@ def _ingredient_keys(med: Dict[str, Any]) -> List[str]:
     finding's drug names back to timeline entries."""
     from document_dedup import _base_ingredient
 
-    keys = [
-        _base_ingredient(i) for i in (med.get("ingredients") or []) if i and i.strip()
-    ]
+    keys = [_base_ingredient(i) for i in (med.get("ingredients") or []) if i and i.strip()]
     name = med.get("name")
     if name:
         keys.append(_base_ingredient(name))
@@ -183,19 +186,21 @@ def build_treatment_windows(
     for med in entries:
         start = parse_date(med.get("date"), dayfirst=dayfirst)
         days = parse_duration_days(med.get("duration"))
-        windows.append({
-            "ingredients": _ingredient_keys(med),
-            "name": med.get("name"),
-            "date": med.get("date"),
-            "start": start,
-            "end": start + timedelta(days=days) if (start and days) else None,
-            "duration_days": days,
-            "duration_known": days is not None,
-            "daily_dose": _daily_dose(med),
-            "dosage_unit": med.get("dosage_unit"),
-            "source_file": med.get("source_file"),
-            "prescription_group": med.get("prescription_group"),
-        })
+        windows.append(
+            {
+                "ingredients": _ingredient_keys(med),
+                "name": med.get("name"),
+                "date": med.get("date"),
+                "start": start,
+                "end": start + timedelta(days=days) if (start and days) else None,
+                "duration_days": days,
+                "duration_known": days is not None,
+                "daily_dose": _daily_dose(med),
+                "dosage_unit": med.get("dosage_unit"),
+                "source_file": med.get("source_file"),
+                "prescription_group": med.get("prescription_group"),
+            }
+        )
     return windows
 
 
@@ -301,8 +306,10 @@ def _best_overlap(
                     continue
             result = overlap_of(a, b)
             if result["status"] in (CONCURRENT, POSSIBLE):
-                if best is None or result["days"] > best["days"] or (
-                    best["status"] == POSSIBLE and result["status"] == CONCURRENT
+                if (
+                    best is None
+                    or result["days"] > best["days"]
+                    or (best["status"] == POSSIBLE and result["status"] == CONCURRENT)
                 ):
                     best = result
             elif result["status"] == NOT_CONCURRENT:
@@ -315,7 +322,11 @@ def _best_overlap(
     if saw_unknown:
         return {"status": UNKNOWN, "start": None, "end": None, "days": 0, "gap_days": None}
     return smallest_gap or {
-        "status": UNKNOWN, "start": None, "end": None, "days": 0, "gap_days": None,
+        "status": UNKNOWN,
+        "start": None,
+        "end": None,
+        "days": 0,
+        "gap_days": None,
     }
 
 
@@ -374,8 +385,11 @@ def annotate_findings_with_timing(
     """
     windows = build_treatment_windows(timeline)
 
-    for list_name in ("potential_drug_interactions", "duplicate_prescriptions",
-                      "conflicting_dosage_instructions"):
+    for list_name in (
+        "potential_drug_interactions",
+        "duplicate_prescriptions",
+        "conflicting_dosage_instructions",
+    ):
         for finding in cross_check.get(list_name) or []:
             if not isinstance(finding, dict):
                 continue
@@ -388,13 +402,25 @@ def annotate_findings_with_timing(
                 # One named drug (a duplicate or dosage conflict): the risk is
                 # two of ITS OWN courses running at once.
                 own = groups[0] if groups else []
-                result = _best_overlap([own, own]) if len(own) > 1 else {
-                    "status": UNKNOWN, "start": None, "end": None,
-                    "days": 0, "gap_days": None,
-                }
+                result = (
+                    _best_overlap([own, own])
+                    if len(own) > 1
+                    else {
+                        "status": UNKNOWN,
+                        "start": None,
+                        "end": None,
+                        "days": 0,
+                        "gap_days": None,
+                    }
+                )
             else:
-                result = {"status": UNKNOWN, "start": None, "end": None,
-                          "days": 0, "gap_days": None}
+                result = {
+                    "status": UNKNOWN,
+                    "start": None,
+                    "end": None,
+                    "days": 0,
+                    "gap_days": None,
+                }
 
             finding["timing"] = {
                 "status": result["status"],
@@ -407,8 +433,11 @@ def annotate_findings_with_timing(
 
     statuses = [
         f["timing"]["status"]
-        for name in ("potential_drug_interactions", "duplicate_prescriptions",
-                     "conflicting_dosage_instructions")
+        for name in (
+            "potential_drug_interactions",
+            "duplicate_prescriptions",
+            "conflicting_dosage_instructions",
+        )
         for f in (cross_check.get(name) or [])
         if isinstance(f, dict) and f.get("timing")
     ]
@@ -422,7 +451,9 @@ def annotate_findings_with_timing(
             f"time. {statuses.count(NOT_CONCURRENT)} involve courses that never "
             "overlapped — those are historical pairings kept for the record, not current "
             "risks."
-        ) if statuses else "No findings to place in time.",
+        )
+        if statuses
+        else "No findings to place in time.",
     }
     return cross_check
 
@@ -480,28 +511,37 @@ def concurrent_exposure(timeline: Dict[str, Any]) -> List[Dict[str, Any]]:
                         if mg_a is not None and mg_b is not None:
                             cumulative = round(mg_a + mg_b, 3)
                             unit = "mg"
-                exposures.append({
-                    "ingredient": ingredient,
-                    "status": result["status"],
-                    "window_start": _fmt(result["start"]),
-                    "window_end": _fmt(result["end"]),
-                    "overlap_days": result["days"],
-                    "sources": [
-                        {"name": w["name"], "date": w["date"],
-                         "source_file": w["source_file"], "daily_dose": w["daily_dose"]}
-                        for w in (a, b)
-                    ],
-                    "cumulative_daily_dose": cumulative,
-                    "dosage_unit": unit,
-                    "note": (
-                        f"Between {_fmt(result['start'])} and {_fmt(result['end'])}, two "
-                        f"separate prescriptions supplied {ingredient}"
-                        + (f", totalling {cumulative:g} {unit} per day"
-                           if cumulative is not None and unit else "")
-                        + ". Whether that total is appropriate is for a pharmacist or "
-                          "doctor to judge — this is the arithmetic, not a verdict."
-                    ),
-                })
+                exposures.append(
+                    {
+                        "ingredient": ingredient,
+                        "status": result["status"],
+                        "window_start": _fmt(result["start"]),
+                        "window_end": _fmt(result["end"]),
+                        "overlap_days": result["days"],
+                        "sources": [
+                            {
+                                "name": w["name"],
+                                "date": w["date"],
+                                "source_file": w["source_file"],
+                                "daily_dose": w["daily_dose"],
+                            }
+                            for w in (a, b)
+                        ],
+                        "cumulative_daily_dose": cumulative,
+                        "dosage_unit": unit,
+                        "note": (
+                            f"Between {_fmt(result['start'])} and {_fmt(result['end'])}, two "
+                            f"separate prescriptions supplied {ingredient}"
+                            + (
+                                f", totalling {cumulative:g} {unit} per day"
+                                if cumulative is not None and unit
+                                else ""
+                            )
+                            + ". Whether that total is appropriate is for a pharmacist or "
+                            "doctor to judge — this is the arithmetic, not a verdict."
+                        ),
+                    }
+                )
     return exposures
 
 
@@ -529,20 +569,25 @@ def risk_calendar(cross_check: Dict[str, Any], timeline: Dict[str, Any]) -> List
                 continue
             timing = finding.get("timing") or {}
             key = (timing.get("window_start"), timing.get("window_end"))
-            entry = periods.setdefault(key, {
-                "window_start": key[0],
-                "window_end": key[1],
-                "overlap_days": timing.get("overlap_days", 0),
-                "risks": [],
-            })
-            entry["risks"].append({
-                "kind": kind,
-                "subjects": _finding_subjects(finding),
-                "severity": finding.get("severity"),
-                "confidence": finding.get("confidence"),
-                "status": timing.get("status", UNKNOWN),
-                "evidence_source": finding.get("evidence_source"),
-            })
+            entry = periods.setdefault(
+                key,
+                {
+                    "window_start": key[0],
+                    "window_end": key[1],
+                    "overlap_days": timing.get("overlap_days", 0),
+                    "risks": [],
+                },
+            )
+            entry["risks"].append(
+                {
+                    "kind": kind,
+                    "subjects": _finding_subjects(finding),
+                    "severity": finding.get("severity"),
+                    "confidence": finding.get("confidence"),
+                    "status": timing.get("status", UNKNOWN),
+                    "evidence_source": finding.get("evidence_source"),
+                }
+            )
 
     dated = [p for p in periods.values() if p["window_start"]]
     undated = [p for p in periods.values() if not p["window_start"]]
@@ -581,35 +626,56 @@ if __name__ == "__main__":
 
     # --- The real record ---------------------------------------------------
     def med(name, ingredient, d, duration, value=None, unit=None, per_day=None, group=None):
-        return {"name": name, "ingredients": [ingredient], "date": d,
-                "duration": duration, "dosage_value": value, "dosage_unit": unit,
-                "frequency_per_day": per_day, "source_file": f"{name}.png",
-                "prescription_group": group}
+        return {
+            "name": name,
+            "ingredients": [ingredient],
+            "date": d,
+            "duration": duration,
+            "dosage_value": value,
+            "dosage_unit": unit,
+            "frequency_per_day": per_day,
+            "source_file": f"{name}.png",
+            "prescription_group": group,
+        }
 
-    timeline = {"medications_timeline": [
-        med("Paracetamol", "Paracetamol", "09/11/2025", "14 days", 1000, "mg", 3, "rx-0"),
-        med("Diclofenac sodium", "Diclofenac", "09/11/2025", "14 days", None, None, 2, "rx-0"),
-        med("Omeprazole", "Omeprazole", "09/11/2025", "14 days", 20, "mg", 1, "rx-0"),
-        med("Fluconazole", "Fluconazole", "27/03/2025", "4 weeks", 150, "mg", 0.14, "rx-1"),
-        med("Cetirizine", "Cetirizine", "26/02/2026", "14 days", 10, "mg", 1, "rx-2"),
-        med("Montelukast", "Montelukast", "26/02/2026", "14 days", 10, "mg", 1, "rx-2"),
-        med("Chlorpheniramine", "Chlorpheniramine", "14/10/2023", "5 days", 4, "mg", 1, "rx-3"),
-    ]}
+    timeline = {
+        "medications_timeline": [
+            med("Paracetamol", "Paracetamol", "09/11/2025", "14 days", 1000, "mg", 3, "rx-0"),
+            med("Diclofenac sodium", "Diclofenac", "09/11/2025", "14 days", None, None, 2, "rx-0"),
+            med("Omeprazole", "Omeprazole", "09/11/2025", "14 days", 20, "mg", 1, "rx-0"),
+            med("Fluconazole", "Fluconazole", "27/03/2025", "4 weeks", 150, "mg", 0.14, "rx-1"),
+            med("Cetirizine", "Cetirizine", "26/02/2026", "14 days", 10, "mg", 1, "rx-2"),
+            med("Montelukast", "Montelukast", "26/02/2026", "14 days", 10, "mg", 1, "rx-2"),
+            med("Chlorpheniramine", "Chlorpheniramine", "14/10/2023", "5 days", 4, "mg", 1, "rx-3"),
+        ]
+    }
 
     report = {
         "potential_drug_interactions": [
-            {"medications_involved": ["Paracetamol", "Diclofenac"],
-             "explanation": "Additive GI/renal risk.", "severity": "moderate",
-             "confidence": 0.6},
-            {"medications_involved": ["Fluconazole", "Montelukast"],
-             "explanation": "CYP inhibition raises montelukast levels.",
-             "severity": "moderate", "confidence": 0.6},
-            {"medications_involved": ["Cetirizine", "Chlorpheniramine"],
-             "explanation": "Additive sedation.", "severity": "moderate",
-             "confidence": 0.6},
-            {"medications_involved": ["Cetirizine", "Montelukast"],
-             "explanation": "Both prescribed together for rhinitis.",
-             "severity": "low", "confidence": 0.5},
+            {
+                "medications_involved": ["Paracetamol", "Diclofenac"],
+                "explanation": "Additive GI/renal risk.",
+                "severity": "moderate",
+                "confidence": 0.6,
+            },
+            {
+                "medications_involved": ["Fluconazole", "Montelukast"],
+                "explanation": "CYP inhibition raises montelukast levels.",
+                "severity": "moderate",
+                "confidence": 0.6,
+            },
+            {
+                "medications_involved": ["Cetirizine", "Chlorpheniramine"],
+                "explanation": "Additive sedation.",
+                "severity": "moderate",
+                "confidence": 0.6,
+            },
+            {
+                "medications_involved": ["Cetirizine", "Montelukast"],
+                "explanation": "Both prescribed together for rhinitis.",
+                "severity": "low",
+                "confidence": 0.5,
+            },
         ],
         "duplicate_prescriptions": [],
         "conflicting_dosage_instructions": [],
@@ -628,8 +694,10 @@ if __name__ == "__main__":
     assert by_pair["Paracetamol + Diclofenac"]["overlap_days"] == 15
 
     # Never concurrent — these are the false alarms this module exists for.
-    for pair, expected_gap in (("Fluconazole + Montelukast", 300),
-                               ("Cetirizine + Chlorpheniramine", 800)):
+    for pair, expected_gap in (
+        ("Fluconazole + Montelukast", 300),
+        ("Cetirizine + Chlorpheniramine", 800),
+    ):
         timing = by_pair[pair]
         assert timing["status"] == NOT_CONCURRENT, (pair, timing)
         assert timing["gap_days"] > expected_gap, (pair, timing["gap_days"])
@@ -643,23 +711,34 @@ if __name__ == "__main__":
     assert summary["not_concurrent"] == 2, summary
 
     # --- Unknown duration is "possible", never "concurrent" ----------------
-    open_ended = {"medications_timeline": [
-        med("DrugA", "druga", "01/01/2026", "As required", 10, "mg", 1, "g1"),
-        med("DrugB", "drugb", "05/01/2026", "14 days", 10, "mg", 1, "g2"),
-    ]}
-    open_report = {"potential_drug_interactions": [
-        {"medications_involved": ["DrugA", "DrugB"], "explanation": "x",
-         "severity": "low", "confidence": 0.5}]}
+    open_ended = {
+        "medications_timeline": [
+            med("DrugA", "druga", "01/01/2026", "As required", 10, "mg", 1, "g1"),
+            med("DrugB", "drugb", "05/01/2026", "14 days", 10, "mg", 1, "g2"),
+        ]
+    }
+    open_report = {
+        "potential_drug_interactions": [
+            {
+                "medications_involved": ["DrugA", "DrugB"],
+                "explanation": "x",
+                "severity": "low",
+                "confidence": 0.5,
+            }
+        ]
+    }
     annotate_findings_with_timing(open_report, open_ended)
     assert open_report["potential_drug_interactions"][0]["timing"]["status"] == POSSIBLE
 
     # --- Concurrent double-dosing exposure ---------------------------------
-    doubled = {"medications_timeline": [
-        med("Panadol", "Paracetamol", "09/11/2025", "14 days", 1000, "mg", 3, "rx-A"),
-        med("Calpol", "Paracetamol", "12/11/2025", "10 days", 500, "mg", 4, "rx-B"),
-        # Same prescription uploaded twice must NOT count as a second course.
-        med("Panadol", "Paracetamol", "09/11/2025", "14 days", 1000, "mg", 3, "rx-A"),
-    ]}
+    doubled = {
+        "medications_timeline": [
+            med("Panadol", "Paracetamol", "09/11/2025", "14 days", 1000, "mg", 3, "rx-A"),
+            med("Calpol", "Paracetamol", "12/11/2025", "10 days", 500, "mg", 4, "rx-B"),
+            # Same prescription uploaded twice must NOT count as a second course.
+            med("Panadol", "Paracetamol", "09/11/2025", "14 days", 1000, "mg", 3, "rx-A"),
+        ]
+    }
     exposures = concurrent_exposure(doubled)
     assert len(exposures) == 2, [e["sources"] for e in exposures]
     assert all(e["ingredient"] == "paracetamol" for e in exposures)
@@ -669,8 +748,16 @@ if __name__ == "__main__":
     assert "for a pharmacist or doctor to judge" in top["note"]
 
     # A single course produces no exposure finding.
-    assert concurrent_exposure({"medications_timeline": [
-        med("Panadol", "Paracetamol", "09/11/2025", "14 days", 1000, "mg", 3, "rx-A")]}) == []
+    assert (
+        concurrent_exposure(
+            {
+                "medications_timeline": [
+                    med("Panadol", "Paracetamol", "09/11/2025", "14 days", 1000, "mg", 3, "rx-A")
+                ]
+            }
+        )
+        == []
+    )
 
     # --- Calendar ----------------------------------------------------------
     calendar = risk_calendar(report, timeline)
@@ -684,14 +771,16 @@ if __name__ == "__main__":
     print("\nInteraction findings placed in time:")
     for f in report["potential_drug_interactions"]:
         t = f["timing"]
-        mark = {CONCURRENT: "LIVE", POSSIBLE: "MAYBE", NOT_CONCURRENT: "past",
-                UNKNOWN: "?"}[t["status"]]
+        mark = {CONCURRENT: "LIVE", POSSIBLE: "MAYBE", NOT_CONCURRENT: "past", UNKNOWN: "?"}[
+            t["status"]
+        ]
         print(f"  [{mark:5}] {' + '.join(f['medications_involved'])}")
         print(f"          {t['note']}")
 
     print("\nRisk calendar:")
     for period in calendar:
-        print(f"  {period['label']}: "
-              + ", ".join(" + ".join(r["subjects"]) for r in period["risks"]))
+        print(
+            f"  {period['label']}: " + ", ".join(" + ".join(r["subjects"]) for r in period["risks"])
+        )
 
     print("\nAll checks passed.")

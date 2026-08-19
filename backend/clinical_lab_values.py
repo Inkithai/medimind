@@ -24,7 +24,8 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 try:  # reuse the already-hardened parser from lab_trends
-    from lab_trends import _parse_value as _lt_parse_value, _parse_date as _lt_parse_date
+    from lab_trends import _parse_date as _lt_parse_date
+    from lab_trends import _parse_value as _lt_parse_value
 except Exception:  # pragma: no cover - lab_trends always present in-tree
     _lt_parse_value = None
     _lt_parse_date = None
@@ -153,9 +154,8 @@ def latest_lab_value(timeline: Dict[str, Any], analyte: str) -> Optional[LabValu
     aliases = _LAB_ALIASES.get(analyte)
     if aliases is None:
         return None
-    labs: List[Dict[str, Any]] = (
-        list(timeline.get("lab_results_timeline") or [])
-        + list(timeline.get("lab_results") or [])
+    labs: List[Dict[str, Any]] = list(timeline.get("lab_results_timeline") or []) + list(
+        timeline.get("lab_results") or []
     )
 
     best: Optional[Tuple[Optional[datetime], LabValue]] = None
@@ -171,9 +171,7 @@ def latest_lab_value(timeline: Dict[str, Any], analyte: str) -> Optional[LabValu
         if value is None:
             continue
         date = _parse_lab_date(entry)
-        candidate = LabValue(
-            analyte, value, entry.get("unit"), entry.get("flag"), entry, date
-        )
+        candidate = LabValue(analyte, value, entry.get("unit"), entry.get("flag"), entry, date)
         # most recent wins; undated entries are kept only if nothing dated exists
         if best is None:
             best = (date, candidate)
@@ -199,6 +197,7 @@ def collect_lab_values(timeline: Dict[str, Any], analytes: List[str]) -> Dict[st
 #   2. the extractor's `flag` field is high/low.
 # Both must be satisfied conservatively where a unit is ambiguous.
 # --------------------------------------------------------------------------- #
+
 
 def is_high(lv: LabValue, threshold: Optional[float], unit_fragments: Tuple[str, ...] = ()) -> bool:
     """True if the value provably exceeds `threshold` (when the unit is known

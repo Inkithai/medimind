@@ -46,7 +46,14 @@ def _dedup_sig(finding: Dict[str, Any]) -> Tuple[Any, ...]:
     cond = str(finding.get("condition") or "").lower()
     organ = str(finding.get("organ") or "").lower()
     lab_sig = (lab.get("test"), lab.get("value")) if isinstance(lab, dict) else ()
-    return (finding.get("finding_kind") or "finding", finding.get("rule") or "", meds, cond, organ, lab_sig)
+    return (
+        finding.get("finding_kind") or "finding",
+        finding.get("rule") or "",
+        meds,
+        cond,
+        organ,
+        lab_sig,
+    )
 
 
 def manage_alerts(report: Dict[str, Any], user_id: str) -> Dict[str, Any]:
@@ -58,7 +65,7 @@ def manage_alerts(report: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     merge_log: List[Dict[str, Any]] = []
 
     for list_key in FINDING_LISTS:
-        for finding in (report.get(list_key) or []):
+        for finding in report.get(list_key) or []:
             finding = dict(finding)
             finding["_source_list"] = list_key
             fkey = finding_key(finding)
@@ -71,8 +78,9 @@ def manage_alerts(report: Dict[str, Any], user_id: str) -> Dict[str, Any]:
             if sig in seen:
                 master = seen[sig]
                 master["_merged_count"] = master.get("_merged_count", 1) + 1
-                merge_log.append({"collapsed_into": master["finding_key"],
-                                  "rule": finding.get("rule")})
+                merge_log.append(
+                    {"collapsed_into": master["finding_key"], "rule": finding.get("rule")}
+                )
                 continue
             finding["_merged_count"] = 1
             seen[sig] = finding
@@ -80,8 +88,12 @@ def manage_alerts(report: Dict[str, Any], user_id: str) -> Dict[str, Any]:
 
     # rank: high > moderate > low, then overridden-last already removed
     rank = {"high": 0, "moderate": 1, "low": 2}
-    active.sort(key=lambda f: (rank.get(str(f.get("severity") or "moderate"), 1),
-                               -(f.get("_merged_count") or 1)))
+    active.sort(
+        key=lambda f: (
+            rank.get(str(f.get("severity") or "moderate"), 1),
+            -(f.get("_merged_count") or 1),
+        )
+    )
 
     return {
         "active_findings": active,

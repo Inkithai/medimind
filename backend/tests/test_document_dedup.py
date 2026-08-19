@@ -10,9 +10,10 @@ Two layers are covered:
 
 Mocks the ML pipeline, storage and Supabase so no network is involved.
 """
+
+import hashlib
 import os
 import sys
-import hashlib
 from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -30,12 +31,15 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 import api  # noqa: E402
 import document_dedup  # noqa: E402
-from medical_extractor import build_patient_timeline, detect_exact_duplicate_medications  # noqa: E402
-
+from medical_extractor import (  # noqa: E402
+    build_patient_timeline,
+    detect_exact_duplicate_medications,
+)
 
 # ---------------------------------------------------------------------------
 # 1. Same-prescription grouping (document_dedup.py)
 # ---------------------------------------------------------------------------
+
 
 def _rx(source, date, patient="RAMESH", doctor="Dr. K. Jayasuriya"):
     return {
@@ -44,12 +48,22 @@ def _rx(source, date, patient="RAMESH", doctor="Dr. K. Jayasuriya"):
         "patient_name": patient,
         "provider_or_doctor": doctor,
         "medications": [
-            {"name": "Paracetamol", "ingredients": ["Paracetamol"],
-             "dosage_value": 1000, "dosage_unit": "mg", "frequency_per_day": 3,
-             "is_as_needed": False},
-            {"name": "Omeprazole", "ingredients": ["Omeprazole"],
-             "dosage_value": 20, "dosage_unit": "mg", "frequency_per_day": 1,
-             "is_as_needed": False},
+            {
+                "name": "Paracetamol",
+                "ingredients": ["Paracetamol"],
+                "dosage_value": 1000,
+                "dosage_unit": "mg",
+                "frequency_per_day": 3,
+                "is_as_needed": False,
+            },
+            {
+                "name": "Omeprazole",
+                "ingredients": ["Omeprazole"],
+                "dosage_value": 20,
+                "dosage_unit": "mg",
+                "frequency_per_day": 1,
+                "is_as_needed": False,
+            },
         ],
         "_source": {"file": source},
     }
@@ -73,18 +87,30 @@ def test_salt_forms_do_not_split_one_prescription():
     a = _rx("scan.png", "09/11/2025")
     a["medications"][0]["ingredients"] = ["Paracetamol"]
     b = _rx("photo.jpeg", "09/11/2025")
-    b["medications"][0] = {**b["medications"][0],
-                           "name": "Paracetamol sodium",
-                           "ingredients": ["Paracetamol sodium"]}
+    b["medications"][0] = {
+        **b["medications"][0],
+        "name": "Paracetamol sodium",
+        "ingredients": ["Paracetamol sodium"],
+    }
     document_dedup.annotate_prescription_groups([a, b])
     assert a["prescription_group"] == b["prescription_group"]
 
 
 def test_lab_reports_never_merge_on_empty_medication_set():
-    a = {"document_type": "lab_report", "date": "01/01/2026",
-         "patient_name": "R", "medications": [], "_source": {"file": "CBC_Report.pdf"}}
-    b = {"document_type": "lab_report", "date": "01/01/2026",
-         "patient_name": "R", "medications": [], "_source": {"file": "CBC_Report (1).pdf"}}
+    a = {
+        "document_type": "lab_report",
+        "date": "01/01/2026",
+        "patient_name": "R",
+        "medications": [],
+        "_source": {"file": "CBC_Report.pdf"},
+    }
+    b = {
+        "document_type": "lab_report",
+        "date": "01/01/2026",
+        "patient_name": "R",
+        "medications": [],
+        "_source": {"file": "CBC_Report (1).pdf"},
+    }
     document_dedup.annotate_prescription_groups([a, b])
     assert a["prescription_group"] != b["prescription_group"]
     assert document_dedup.find_duplicate_document_groups([a, b]) == []
@@ -94,18 +120,22 @@ def test_timeline_reupload_does_not_flag_duplicate_medication():
     """The clinically-consequential case: one prescription uploaded twice
     must not make its drugs look 'prescribed twice' to the deterministic
     duplicate detector."""
-    timeline = build_patient_timeline([_rx("scan.png", "2025-11-09"),
-                                       _rx("scan (1).png", "2025-11-09")])
+    timeline = build_patient_timeline(
+        [_rx("scan.png", "2025-11-09"), _rx("scan (1).png", "2025-11-09")]
+    )
     assert timeline["medications_timeline"], "timeline keeps every entry"
     assert len(timeline["duplicate_document_groups"]) == 1, (
-        "the two files are reported as one prescription for review")
+        "the two files are reported as one prescription for review"
+    )
     assert detect_exact_duplicate_medications(timeline) == [], (
-        "no duplicate-prescription finding may be manufactured by a re-upload")
+        "no duplicate-prescription finding may be manufactured by a re-upload"
+    )
 
 
 def test_genuine_repeat_still_flagged_deterministically():
-    timeline = build_patient_timeline([_rx("scan.png", "2025-11-09"),
-                                       _rx("repeat.png", "2026-02-26")])
+    timeline = build_patient_timeline(
+        [_rx("scan.png", "2025-11-09"), _rx("repeat.png", "2026-02-26")]
+    )
     dups = detect_exact_duplicate_medications(timeline)
     # One finding per duplicated ingredient (both drugs were re-prescribed).
     assert len(dups) == 2
@@ -124,10 +154,16 @@ EXTRACTED_DOC = {
     "provider_or_doctor": "Dr. Smith",
     "patient_name": "John Doe",
     "medications": [],
-    "lab_results": [{
-        "test_name": "Hemoglobin", "value": "13.2", "unit": "g/dL",
-        "reference_range": "13-17", "flag": "normal", "confidence": 0.95,
-    }],
+    "lab_results": [
+        {
+            "test_name": "Hemoglobin",
+            "value": "13.2",
+            "unit": "g/dL",
+            "reference_range": "13-17",
+            "flag": "normal",
+            "confidence": 0.95,
+        }
+    ],
     "allergies_noted": [],
     "clinical_notes": None,
     "illegible_or_low_confidence_fields": [],
@@ -144,24 +180,39 @@ def _make_client(existing_docs, process_document_mock, insert_side_effect=None):
     app.dependency_overrides[api.get_current_user] = override_user
 
     patchers = [
-        mock.patch.object(api.storage, "upload_patient_document",
-                          return_value={"document_url": "https://cloud/x.pdf",
-                                        "cloudinary_public_id": "x"}),
+        mock.patch.object(
+            api.storage,
+            "upload_patient_document",
+            return_value={"document_url": "https://cloud/x.pdf", "cloudinary_public_id": "x"},
+        ),
         mock.patch.object(api.db, "load_documents", return_value=list(existing_docs)),
-        mock.patch.object(api.db, "insert_documents",
-                          **( {"side_effect": insert_side_effect} if insert_side_effect else {})),
+        mock.patch.object(
+            api.db,
+            "insert_documents",
+            **({"side_effect": insert_side_effect} if insert_side_effect else {}),
+        ),
         mock.patch.object(api.db, "save_patient_snapshot"),
-        mock.patch.object(api.db, "load_patient_snapshot", return_value={
-            "patient_timeline": {"visits": []},
-            "cross_check_report": {},
-            "lab_trends": {"trends": [], "insufficient_data": []},
-        }),
+        mock.patch.object(
+            api.db,
+            "load_patient_snapshot",
+            return_value={
+                "patient_timeline": {"visits": []},
+                "cross_check_report": {},
+                "lab_trends": {"trends": [], "insufficient_data": []},
+            },
+        ),
         mock.patch.object(api, "process_document", side_effect=process_document_mock),
-        mock.patch.object(api, "cross_check_prescriptions", return_value={
-            "potential_drug_interactions": [], "duplicate_prescriptions": [],
-            "conflicting_dosage_instructions": [], "allergy_conflicts": [],
-            "overall_recommendation": "Consult a professional.",
-        }),
+        mock.patch.object(
+            api,
+            "cross_check_prescriptions",
+            return_value={
+                "potential_drug_interactions": [],
+                "duplicate_prescriptions": [],
+                "conflicting_dosage_instructions": [],
+                "allergy_conflicts": [],
+                "overall_recommendation": "Consult a professional.",
+            },
+        ),
         mock.patch.object(api, "index_patient_timeline", return_value=2),
     ]
     for p in patchers:
@@ -173,12 +224,14 @@ def test_identical_reupload_skipped_before_extraction():
     """Uploading a file whose bytes match one already on file must add
     nothing, call the extractor zero times, and explain itself."""
     content = b"%PDF-1.4 the exact same CBC report bytes"
-    existing = [{
-        **EXTRACTED_DOC,
-        "content_sha256": hashlib.sha256(content).hexdigest(),
-        "_source": {"file": "CBC_Report.pdf"},
-        "uploaded_at": "2026-08-01T00:00:00+00:00",
-    }]
+    existing = [
+        {
+            **EXTRACTED_DOC,
+            "content_sha256": hashlib.sha256(content).hexdigest(),
+            "_source": {"file": "CBC_Report.pdf"},
+            "uploaded_at": "2026-08-01T00:00:00+00:00",
+        }
+    ]
     process_document = mock.MagicMock()
     app, patchers = _make_client(existing, process_document)
     try:
@@ -257,12 +310,14 @@ def test_new_upload_persists_content_sha256():
 
 def test_different_bytes_same_name_not_treated_as_duplicate():
     """A same-named file with different content is a genuine new document."""
-    existing = [{
-        **EXTRACTED_DOC,
-        "content_sha256": hashlib.sha256(b"old bytes").hexdigest(),
-        "_source": {"file": "CBC_Report.pdf"},
-        "uploaded_at": "2026-08-01T00:00:00+00:00",
-    }]
+    existing = [
+        {
+            **EXTRACTED_DOC,
+            "content_sha256": hashlib.sha256(b"old bytes").hexdigest(),
+            "_source": {"file": "CBC_Report.pdf"},
+            "uploaded_at": "2026-08-01T00:00:00+00:00",
+        }
+    ]
     process_document = mock.MagicMock(return_value=dict(EXTRACTED_DOC))
     app, patchers = _make_client(existing, process_document)
     try:
@@ -289,6 +344,7 @@ def test_different_bytes_same_name_not_treated_as_duplicate():
 # ("2025-11-09" vs "2025-09-11") intersected on the phantom day and could
 # merge two genuinely separate repeat prescriptions into one group.
 # ---------------------------------------------------------------------------
+
 
 def test_iso_dates_have_a_single_reading():
     assert sorted(str(d) for d in document_dedup.plausible_dates("2025-11-09")) == ["2025-11-09"]

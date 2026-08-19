@@ -27,12 +27,12 @@ Env:
   SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY (only for supabase)
 """
 
-import os
 import hashlib
-import re
-import math
 import logging
-from typing import Any, Dict, List, Tuple, Optional
+import math
+import os
+import re
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger("vector_store")
 
@@ -63,6 +63,7 @@ _VECTOR_STORE_SCHEMA_MSG = (
 
 _chroma_client = None
 
+
 def _get_chroma_client():
     global _chroma_client
     if _chroma_client is None:
@@ -78,12 +79,14 @@ def _get_chroma_client():
         _chroma_client = chromadb.PersistentClient(path=CHROMA_DIR)
     return _chroma_client
 
+
 def get_chroma_client():
     """Public alias so sibling modules (retrieval.py) share this process's
     single, lazily-constructed Chroma client — and its one actionable
     'chromadb not installed' message — instead of each constructing their
     own PersistentClient per call."""
     return _get_chroma_client()
+
 
 def _sanitize_collection_name(patient_key: str) -> str:
     """Chroma-safe collection name that is stable and UNIQUE per patient.
@@ -124,14 +127,23 @@ def _sanitize_collection_name(patient_key: str) -> str:
     return name
 
 
-def _chroma_upsert(patient_key: str, ids: List[str], embeddings: List[List[float]], documents: List[str], metadatas: List[Dict[str, Any]]):
+def _chroma_upsert(
+    patient_key: str,
+    ids: List[str],
+    embeddings: List[List[float]],
+    documents: List[str],
+    metadatas: List[Dict[str, Any]],
+):
     db = _get_chroma_client()
     name = _sanitize_collection_name(patient_key)
     col = db.get_or_create_collection(name=name, metadata={"patient_key": patient_key})
     col.upsert(ids=ids, embeddings=embeddings, documents=documents, metadatas=metadatas)
     logger.info("Chroma upsert %d chunks for %s", len(ids), patient_key)
 
-def _chroma_query(patient_key: str, query_embedding: List[float], n_results: int) -> Tuple[List[str], List[str], List[Dict[str, Any]]]:
+
+def _chroma_query(
+    patient_key: str, query_embedding: List[float], n_results: int
+) -> Tuple[List[str], List[str], List[Dict[str, Any]]]:
     db = _get_chroma_client()
     name = _sanitize_collection_name(patient_key)
     try:
@@ -146,6 +158,7 @@ def _chroma_query(patient_key: str, query_embedding: List[float], n_results: int
     metas = (res.get("metadatas") or [[]])[0]
     return ids, docs, metas
 
+
 def _chroma_count(patient_key: str) -> int:
     db = _get_chroma_client()
     name = _sanitize_collection_name(patient_key)
@@ -154,6 +167,7 @@ def _chroma_count(patient_key: str) -> int:
         return col.count()
     except Exception:
         return 0
+
 
 def _chroma_delete(patient_key: str):
     db = _get_chroma_client()
@@ -166,7 +180,10 @@ def _chroma_delete(patient_key: str):
         # otherwise do not hide a failed security-sensitive delete.
         if _chroma_count(patient_key) == 0:
             return
-        raise RuntimeError(f"Could not clear stale vector index for '{patient_key}': {exc}") from exc
+        raise RuntimeError(
+            f"Could not clear stale vector index for '{patient_key}': {exc}"
+        ) from exc
+
 
 def _chroma_fingerprint(patient_key: str) -> Optional[str]:
     db = _get_chroma_client()
@@ -183,23 +200,34 @@ def _chroma_fingerprint(patient_key: str) -> Optional[str]:
         # index as stale; callers can rebuild from immutable documents.
         return None
 
+
 # --- Supabase backend (brute-force) ---
+
 
 def _supabase_client():
     # Import lazily to avoid circular import with db.py
     from db import _get_client
+
     return _get_client()
+
 
 def _cosine(a: List[float], b: List[float]) -> float:
     # Returns similarity (1 = identical, -1 = opposite). Handles zero vectors.
-    dot = sum(x*y for x, y in zip(a, b))
-    na = math.sqrt(sum(x*x for x in a))
-    nb = math.sqrt(sum(x*x for x in b))
+    dot = sum(x * y for x, y in zip(a, b))
+    na = math.sqrt(sum(x * x for x in a))
+    nb = math.sqrt(sum(x * x for x in b))
     if na == 0 or nb == 0:
         return -1.0
     return dot / (na * nb)
 
-def _supabase_upsert(patient_key: str, ids: List[str], embeddings: List[Any], documents: List[str], metadatas: List[Dict[str, Any]]):
+
+def _supabase_upsert(
+    patient_key: str,
+    ids: List[str],
+    embeddings: List[Any],
+    documents: List[str],
+    metadatas: List[Dict[str, Any]],
+):
     client = _supabase_client()
     # Upsert per chunk. Supabase doesn't have bulk upsert with jsonb vector easily,
     # so we do per-row upsert. Chunk counts are small (20-30), so fine.
@@ -229,14 +257,22 @@ def _supabase_upsert(patient_key: str, ids: List[str], embeddings: List[Any], do
                 raise
     logger.info("Supabase upsert %d chunks for %s", len(ids), patient_key)
 
-def _supabase_query(patient_key: str, query_embedding: Any, n_results: int) -> Tuple[List[str], List[str], List[Dict[str, Any]]]:
+
+def _supabase_query(
+    patient_key: str, query_embedding: Any, n_results: int
+) -> Tuple[List[str], List[str], List[Dict[str, Any]]]:
     if hasattr(query_embedding, "tolist"):
         query_embedding = query_embedding.tolist()
     elif not isinstance(query_embedding, list):
         query_embedding = list(query_embedding)
     client = _supabase_client()
     try:
-        res = client.table("chunks").select("id, text, metadata, embedding").eq("patient_key", patient_key).execute()
+        res = (
+            client.table("chunks")
+            .select("id, text, metadata, embedding")
+            .eq("patient_key", patient_key)
+            .execute()
+        )
     except Exception as e:
         # A missing table is a deployment error (supabase_schema.sql not
         # run / run before the `chunks` table was added) — surface it
@@ -265,15 +301,20 @@ def _supabase_query(patient_key: str, query_embedding: Any, n_results: int) -> T
     ids = [r["id"] for _, r in top]
     docs = [r["text"] for _, r in top]
     metas = [
-        {**(r["metadata"] or {}), "semantic_score": float(similarity)}
-        for similarity, r in top
+        {**(r["metadata"] or {}), "semantic_score": float(similarity)} for similarity, r in top
     ]
     return ids, docs, metas
+
 
 def _supabase_count(patient_key: str) -> int:
     client = _supabase_client()
     try:
-        res = client.table("chunks").select("id", count="exact").eq("patient_key", patient_key).execute()
+        res = (
+            client.table("chunks")
+            .select("id", count="exact")
+            .eq("patient_key", patient_key)
+            .execute()
+        )
         # supabase-py returns count in res.count
         if hasattr(res, "count") and res.count is not None:
             return res.count
@@ -287,6 +328,7 @@ def _supabase_count(patient_key: str) -> int:
             raise VectorStoreSchemaError(_VECTOR_STORE_SCHEMA_MSG) from e
         raise
 
+
 def _supabase_delete(patient_key: str):
     client = _supabase_client()
     try:
@@ -295,6 +337,7 @@ def _supabase_delete(patient_key: str):
         if "chunks" in str(e).lower() or "PGRST205" in str(e):
             raise VectorStoreSchemaError(_VECTOR_STORE_SCHEMA_MSG) from e
         raise RuntimeError(f"Could not clear stale vector index for '{patient_key}': {e}") from e
+
 
 def _supabase_fingerprint(patient_key: str) -> Optional[str]:
     client = _supabase_client()
@@ -316,32 +359,47 @@ def _supabase_fingerprint(patient_key: str) -> Optional[str]:
     value = (rows[0].get("metadata") or {}).get("record_fingerprint")
     return str(value) if value else None
 
+
 # --- Public facade ---
 
-def upsert(patient_key: str, ids: List[str], embeddings: List[List[float]], documents: List[str], metadatas: List[Dict[str, Any]]):
+
+def upsert(
+    patient_key: str,
+    ids: List[str],
+    embeddings: List[List[float]],
+    documents: List[str],
+    metadatas: List[Dict[str, Any]],
+):
     if VECTOR_STORE == "supabase":
         return _supabase_upsert(patient_key, ids, embeddings, documents, metadatas)
     return _chroma_upsert(patient_key, ids, embeddings, documents, metadatas)
 
-def query(patient_key: str, query_embedding: List[float], n_results: int) -> Tuple[List[str], List[str], List[Dict[str, Any]]]:
+
+def query(
+    patient_key: str, query_embedding: List[float], n_results: int
+) -> Tuple[List[str], List[str], List[Dict[str, Any]]]:
     if VECTOR_STORE == "supabase":
         return _supabase_query(patient_key, query_embedding, n_results)
     return _chroma_query(patient_key, query_embedding, n_results)
+
 
 def count(patient_key: str) -> int:
     if VECTOR_STORE == "supabase":
         return _supabase_count(patient_key)
     return _chroma_count(patient_key)
 
+
 def delete_collection(patient_key: str):
     if VECTOR_STORE == "supabase":
         return _supabase_delete(patient_key)
     return _chroma_delete(patient_key)
 
+
 def get_index_fingerprint(patient_key: str) -> Optional[str]:
     if VECTOR_STORE == "supabase":
         return _supabase_fingerprint(patient_key)
     return _chroma_fingerprint(patient_key)
+
 
 def get_store_name() -> str:
     return VECTOR_STORE

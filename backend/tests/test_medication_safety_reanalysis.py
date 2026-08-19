@@ -14,6 +14,7 @@ os.environ.setdefault("CLOUDINARY_API_SECRET", "dummy")
 os.environ.setdefault("JWT_SECRET", "dummy")
 
 from fastapi.testclient import TestClient  # noqa: E402
+
 import api  # noqa: E402
 
 
@@ -35,17 +36,35 @@ def test_reanalysis_rebuilds_persists_indexes_and_reports_counts():
         "allergy_conflicts": [],
     }
     timeline = {
-        "visits": [], "medications_timeline": [], "lab_results_timeline": [],
+        "visits": [],
+        "medications_timeline": [],
+        "lab_results_timeline": [],
         "known_allergies": [],
     }
-    with mock.patch.object(api, "_workspace_has_active_upload", return_value=False), \
-         mock.patch.object(api.db, "load_documents", return_value=[{"patient_name": "A"}]), \
-         mock.patch.object(api.db, "load_patient_snapshot", return_value={"cross_check_report": old}), \
-         mock.patch.object(api, "_prepare_current_trust_state", return_value=([], [], {}, [])), \
-         mock.patch.object(api, "_derive_record", new=mock.AsyncMock(return_value=(timeline, clean, {"trends": []}))), \
-         mock.patch.object(api.db, "save_patient_snapshot", return_value={"available": True, "tables": {}, "safety_findings": {"created": 0, "updated": 0, "unchanged": 0, "removed": 1}}) as save, \
-         mock.patch.object(api, "_replace_index", new=mock.AsyncMock(return_value=(True, None, 2))), \
-         mock.patch.object(api.audit, "record"):
+    with (
+        mock.patch.object(api, "_workspace_has_active_upload", return_value=False),
+        mock.patch.object(api.db, "load_documents", return_value=[{"patient_name": "A"}]),
+        mock.patch.object(
+            api.db, "load_patient_snapshot", return_value={"cross_check_report": old}
+        ),
+        mock.patch.object(api, "_prepare_current_trust_state", return_value=([], [], {}, [])),
+        mock.patch.object(
+            api,
+            "_derive_record",
+            new=mock.AsyncMock(return_value=(timeline, clean, {"trends": []})),
+        ),
+        mock.patch.object(
+            api.db,
+            "save_patient_snapshot",
+            return_value={
+                "available": True,
+                "tables": {},
+                "safety_findings": {"created": 0, "updated": 0, "unchanged": 0, "removed": 1},
+            },
+        ) as save,
+        mock.patch.object(api, "_replace_index", new=mock.AsyncMock(return_value=(True, None, 2))),
+        mock.patch.object(api.audit, "record"),
+    ):
         with TestClient(api.app) as client:
             response = client.post("/api/v1/medication-safety/reanalyze")
 

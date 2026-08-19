@@ -27,6 +27,7 @@ def _doc(medications=None, ocr=None, translation=None, language=None):
 
 # --- hard rejection: only on demonstrated normalization failure --------------
 
+
 def test_normalized_foreign_document_passes():
     # A Japanese prescription whose ingredient resolved to an INN passes.
     doc = _doc(
@@ -70,6 +71,7 @@ def test_accented_latin_ingredient_passes():
 
 
 # --- graded risk: OCR confidence x translation confidence --------------------
+
 
 def test_no_confidence_metadata_stays_silent():
     risk = assess_translation_risk(_doc())

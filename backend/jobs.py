@@ -21,7 +21,7 @@ import logging
 import os
 import threading
 import uuid
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("jobs")
@@ -114,7 +114,7 @@ def create_job(user_id: str, file_names: List[str]) -> Dict[str, Any]:
             "index": index,
             "name": name,
             "status": "queued",  # queued | processing | completed | failed
-            "step": "upload",    # upload | reading | extracting | saving | ready | failed
+            "step": "upload",  # upload | reading | extracting | saving | ready | failed
             "message": "Uploaded and waiting for a processing slot",
             "error": None,
             "error_code": None,

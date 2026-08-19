@@ -27,10 +27,16 @@ from clinical_events import CLINICAL_EVENT_COLLECTIONS
 # clinical. "other" is the extractor's catch-all for anything that isn't
 # one of these — which is exactly what a boarding pass / receipt / random
 # photo will come back as.
-RECOGNIZED_MEDICAL_TYPES = frozenset({
-    "prescription", "lab_report", "discharge_summary", "imaging_report",
-    "consultation_note", "procedure_report",
-})
+RECOGNIZED_MEDICAL_TYPES = frozenset(
+    {
+        "prescription",
+        "lab_report",
+        "discharge_summary",
+        "imaging_report",
+        "consultation_note",
+        "procedure_report",
+    }
+)
 
 # Below this, an "other"-typed extraction with no clinical content is
 # treated as noise rather than a low-confidence-but-real medical document.
@@ -197,7 +203,7 @@ if __name__ == "__main__":
         "medications": [],
         "lab_results": [],
         "allergies_noted": [],
-        "clinical_notes": "Presentation slide: 'Welcome Note VarDial 2026'. Zoom meeting participant panel visible.",
+        "clinical_notes": "Presentation slide: 'Welcome Note VarDial 2026'. Zoom meeting participant panel visible.",  # noqa: E501
         "overall_confidence": 0.78,
     }
 

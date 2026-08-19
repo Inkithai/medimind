@@ -4,6 +4,7 @@ These tests inject a fake provider. They never call OSM/Mapbox/Google and
 they never import the extraction or lab-trend modules as a dependency of
 the search path.
 """
+
 import os
 import sys
 from dataclasses import replace

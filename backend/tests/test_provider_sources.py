@@ -25,7 +25,12 @@ def test_google_places_uses_explicit_field_mask_and_location_bias():
         side_effect=[
             {
                 "status": "OK",
-                "results": [{"formatted_address": "Resolved Area", "geometry": {"location": {"lat": 1.2, "lng": 3.4}}}],
+                "results": [
+                    {
+                        "formatted_address": "Resolved Area",
+                        "geometry": {"location": {"lat": 1.2, "lng": 3.4}},
+                    }
+                ],
             },
             {"places": []},
         ],
@@ -39,19 +44,25 @@ def test_google_places_uses_explicit_field_mask_and_location_bias():
     assert "X-Goog-Api-Key" in search_kwargs["headers"]
     assert "places.businessStatus" not in search_kwargs["headers"]["X-Goog-FieldMask"]
     assert "places.displayName" in search_kwargs["headers"]["X-Goog-FieldMask"]
-    assert search_kwargs["body"]["locationBias"]["circle"]["center"] == {"latitude": 1.2, "longitude": 3.4}
+    assert search_kwargs["body"]["locationBias"]["circle"]["center"] == {
+        "latitude": 1.2,
+        "longitude": 3.4,
+    }
 
 
 def test_osm_uses_identifying_user_agent_spacing_and_bounded_form_query():
     osm = sources.OpenStreetMapSource("MediMindTests/1.0 (contact: test@example.invalid)")
-    with mock.patch.object(sources, "_respect_osm_request_spacing") as spacing, mock.patch.object(
-        sources,
-        "_read_json",
-        side_effect=[
-            [{"display_name": "Resolved Area", "lat": "1.2", "lon": "3.4"}],
-            {"elements": []},
-        ],
-    ) as request:
+    with (
+        mock.patch.object(sources, "_respect_osm_request_spacing") as spacing,
+        mock.patch.object(
+            sources,
+            "_read_json",
+            side_effect=[
+                [{"display_name": "Resolved Area", "lat": "1.2", "lon": "3.4"}],
+                {"elements": []},
+            ],
+        ) as request,
+    ):
         payload = osm.search("Example Area", {"provider_query": "pharmacy"})
 
     assert payload.records == []
@@ -66,7 +77,11 @@ def test_osm_uses_identifying_user_agent_spacing_and_bounded_form_query():
 
 
 def test_http_or_network_timeouts_remain_distinct_from_zero_results():
-    with mock.patch.object(sources, "urlopen", side_effect=HTTPError("https://example.test", 504, "timeout", None, None)):
+    with mock.patch.object(
+        sources,
+        "urlopen",
+        side_effect=HTTPError("https://example.test", 504, "timeout", None, None),
+    ):
         try:
             sources._read_json("https://example.test")
             raise AssertionError("expected ProviderSearchError")
@@ -94,7 +109,11 @@ def test_auto_source_uses_geoapify_when_keyed_and_osm_otherwise():
             "_read_json",
             side_effect=[
                 {"results": [{"formatted": "Kandy", "lat": 7.29, "lon": 80.63}]},
-                {"features": [{"type": "Feature", "properties": {"name": "Clinic", "place_id": "x"}}]},
+                {
+                    "features": [
+                        {"type": "Feature", "properties": {"name": "Clinic", "place_id": "x"}}
+                    ]
+                },
             ],
         ):
             payload = source.search("Kandy", {"id": "cardiology", "provider_query": "cardiologist"})
@@ -107,10 +126,16 @@ def test_auto_source_uses_geoapify_when_keyed_and_osm_otherwise():
     os.environ.pop("GEOAPIFY_API_KEY", None)
     source = sources.get_provider_source()
     assert isinstance(source, sources.HybridDirectorySource)
-    with mock.patch.object(sources, "_respect_osm_request_spacing"), mock.patch.object(
-        sources,
-        "_read_json",
-        side_effect=[[{"display_name": "Kandy", "lat": "7.29", "lon": "80.63"}], {"elements": []}],
+    with (
+        mock.patch.object(sources, "_respect_osm_request_spacing"),
+        mock.patch.object(
+            sources,
+            "_read_json",
+            side_effect=[
+                [{"display_name": "Kandy", "lat": "7.29", "lon": "80.63"}],
+                {"elements": []},
+            ],
+        ),
     ):
         payload = source.search("Kandy", {"id": "cardiology", "provider_query": "cardiologist"})
     assert payload.source_id == "openstreetmap"

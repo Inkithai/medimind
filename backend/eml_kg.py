@@ -49,7 +49,7 @@ Usage:
 import logging
 import re
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List
 
 import pdfplumber
 
@@ -186,11 +186,13 @@ def extract_age_restrictions(pdf: "pdfplumber.PDF") -> List[Dict[str, str]]:
                 name, restriction = non_empty
                 if name.lower().startswith("table") or "restriction" in name.lower():
                     continue
-                restrictions.append({
-                    "name": _medicine_name(name),
-                    "restriction": restriction,
-                    "source_page": page.page_number,
-                })
+                restrictions.append(
+                    {
+                        "name": _medicine_name(name),
+                        "restriction": restriction,
+                        "source_page": page.page_number,
+                    }
+                )
     return restrictions
 
 
@@ -215,7 +217,10 @@ def extract_full_list(pdf_path: str) -> Dict[str, Any]:
         population = _detect_population(pdf)
         list_title = (pdf.pages[2].extract_text() or "").split("\n")[0].strip()
         logger.info(
-            "extract: '%s' — %d page(s), population=%s", pdf_path, len(pdf.pages), population,
+            "extract: '%s' — %d page(s), population=%s",
+            pdf_path,
+            len(pdf.pages),
+            population,
         )
 
         for page in pdf.pages[:MAX_PAGES]:
@@ -239,8 +244,11 @@ def extract_full_list(pdf_path: str) -> Dict[str, Any]:
                             section_number, section_title = sub_match.groups()
                             list_type = "core"
                             aware_group = next(
-                                (label for key, label in AWARE_GROUPS.items()
-                                 if f"{key} group antibiotics" in section_title.lower()),
+                                (
+                                    label
+                                    for key, label in AWARE_GROUPS.items()
+                                    if f"{key} group antibiotics" in section_title.lower()
+                                ),
                                 None,
                             )
                             continue
@@ -271,27 +279,31 @@ def extract_full_list(pdf_path: str) -> Dict[str, Any]:
                     if not name or len(name) > 120:
                         continue
 
-                    entries.append({
-                        "name": name,
-                        "dosage_form": _clean(" ".join(non_empty[1:]))[:900],
-                        "section": section_number,
-                        "section_title": _clean(section_title or ""),
-                        "list_type": list_type,
-                        "alternatives": _alternatives(raw_name),
-                        "aware_group": aware_group,
-                        "first_choice": [],
-                        "second_choice": [],
-                        "source_page": page.page_number,
-                    })
+                    entries.append(
+                        {
+                            "name": name,
+                            "dosage_form": _clean(" ".join(non_empty[1:]))[:900],
+                            "section": section_number,
+                            "section_title": _clean(section_title or ""),
+                            "list_type": list_type,
+                            "alternatives": _alternatives(raw_name),
+                            "aware_group": aware_group,
+                            "first_choice": [],
+                            "second_choice": [],
+                            "source_page": page.page_number,
+                        }
+                    )
 
         age_restrictions = extract_age_restrictions(pdf)
 
     sections = sorted({e["section"] for e in entries})
     logger.info(
-        "extract: '%s' done in %.0fms — %d entrie(s) across %d section(s), "
-        "%d age restriction(s)",
-        pdf_path, (time.perf_counter() - started) * 1000,
-        len(entries), len(sections), len(age_restrictions),
+        "extract: '%s' done in %.0fms — %d entrie(s) across %d section(s), %d age restriction(s)",
+        pdf_path,
+        (time.perf_counter() - started) * 1000,
+        len(entries),
+        len(sections),
+        len(age_restrictions),
     )
     return {
         "population": population,
@@ -310,12 +322,16 @@ def ingest_full_list(parsed: Dict[str, Any], source_document: str) -> Dict[str, 
 
     logger.info(
         "ingest: writing %d medicine listing(s) from '%s' (population=%s)",
-        len(entries), source_document, parsed["population"],
+        len(entries),
+        source_document,
+        parsed["population"],
     )
 
     with session_scope("ingest_full_eml") as session:
         run_write(
-            session, "ingest_full_eml", f"MERGE source '{source_document}'",
+            session,
+            "ingest_full_eml",
+            f"MERGE source '{source_document}'",
             """
             MERGE (s:SourceDocument {filename: $source_document})
               SET s.population = $population, s.list_title = $list_title
@@ -326,7 +342,9 @@ def ingest_full_list(parsed: Dict[str, Any], source_document: str) -> Dict[str, 
         )
 
         run_write(
-            session, "ingest_full_eml", f"MERGE {len(entries)} listing(s) + sections",
+            session,
+            "ingest_full_eml",
+            f"MERGE {len(entries)} listing(s) + sections",
             """
             MATCH (s:SourceDocument {filename: $source_document})
             UNWIND $rows AS row
@@ -351,7 +369,9 @@ def ingest_full_list(parsed: Dict[str, Any], source_document: str) -> Dict[str, 
         alt_rows = [e for e in entries if e["alternatives"]]
         if alt_rows:
             run_write(
-                session, "ingest_full_eml", f"link alternatives for {len(alt_rows)} medicine(s)",
+                session,
+                "ingest_full_eml",
+                f"link alternatives for {len(alt_rows)} medicine(s)",
                 """
                 UNWIND $rows AS row
                 MATCH (m:Medicine {name: toLower(row.name)})
@@ -366,7 +386,9 @@ def ingest_full_list(parsed: Dict[str, Any], source_document: str) -> Dict[str, 
         aware_rows = [e for e in entries if e["aware_group"]]
         if aware_rows:
             run_write(
-                session, "ingest_full_eml", f"link AWaRe group for {len(aware_rows)} antibiotic(s)",
+                session,
+                "ingest_full_eml",
+                f"link AWaRe group for {len(aware_rows)} antibiotic(s)",
                 """
                 UNWIND $rows AS row
                 MATCH (m:Medicine {name: toLower(row.name)})
@@ -376,13 +398,16 @@ def ingest_full_list(parsed: Dict[str, Any], source_document: str) -> Dict[str, 
                 rows=aware_rows,
             )
 
-        for field, relationship in (("first_choice", "FIRST_CHOICE_FOR"),
-                                    ("second_choice", "SECOND_CHOICE_FOR")):
+        for field, relationship in (
+            ("first_choice", "FIRST_CHOICE_FOR"),
+            ("second_choice", "SECOND_CHOICE_FOR"),
+        ):
             rows = [e for e in entries if e[field]]
             if not rows:
                 continue
             run_write(
-                session, "ingest_full_eml",
+                session,
+                "ingest_full_eml",
                 f"link {relationship} for {len(rows)} medicine(s)",
                 f"""
                 UNWIND $rows AS row
@@ -398,7 +423,8 @@ def ingest_full_list(parsed: Dict[str, Any], source_document: str) -> Dict[str, 
         restrictions = parsed["age_restrictions"]
         if restrictions:
             run_write(
-                session, "ingest_full_eml",
+                session,
+                "ingest_full_eml",
                 f"MERGE {len(restrictions)} age/weight restriction(s)",
                 """
                 UNWIND $rows AS row
@@ -415,9 +441,11 @@ def ingest_full_list(parsed: Dict[str, Any], source_document: str) -> Dict[str, 
             )
 
     logger.info(
-        "ingest: '%s' complete — %d listing(s), %d alternative link(s), "
-        "%d restriction(s)",
-        source_document, len(entries), len(alt_rows), len(parsed["age_restrictions"]),
+        "ingest: '%s' complete — %d listing(s), %d alternative link(s), %d restriction(s)",
+        source_document,
+        len(entries),
+        len(alt_rows),
+        len(parsed["age_restrictions"]),
     )
     return {
         "entries": len(entries),
@@ -430,6 +458,7 @@ def ingest_full_list(parsed: Dict[str, Any], source_document: str) -> Dict[str, 
 # Lookups
 # ---------------------------------------------------------------------------
 
+
 def medicines_in_section(section_title_fragment: str) -> List[Dict[str, Any]]:
     """
     Every medicine WHO files under a section whose title contains the given
@@ -438,7 +467,9 @@ def medicines_in_section(section_title_fragment: str) -> List[Dict[str, Any]]:
     """
     with session_scope("medicines_in_section") as session:
         return run_read(
-            session, "medicines_in_section", f"section like '{section_title_fragment}'",
+            session,
+            "medicines_in_section",
+            f"section like '{section_title_fragment}'",
             """
             MATCH (m:Medicine)-[:IN_SECTION]->(s:Section)
             WHERE toLower(s.title) CONTAINS toLower($fragment)
@@ -457,7 +488,9 @@ def lookup_age_restrictions(drug_names: List[str]) -> List[Dict[str, Any]]:
         return []
     with session_scope("lookup_age_restrictions") as session:
         return run_read(
-            session, "lookup_age_restrictions", f"check {len(names)} drug name(s)",
+            session,
+            "lookup_age_restrictions",
+            f"check {len(names)} drug name(s)",
             """
             UNWIND $names AS wanted
             MATCH (m:Medicine {name: toLower(wanted)})-[:HAS_RESTRICTION]->(r:AgeRestriction)
@@ -508,8 +541,11 @@ def corroborate_class_membership() -> Dict[str, Dict[str, List[str]]]:
             for row in medicines_in_section(fragment):
                 with session_scope("corroborate") as session:
                     who_names.update(
-                        alt["name"] for alt in run_read(
-                            session, "corroborate", f"alternatives to {row['name']}",
+                        alt["name"]
+                        for alt in run_read(
+                            session,
+                            "corroborate",
+                            f"alternatives to {row['name']}",
                             """
                             MATCH (:Medicine {name: $name})-[:HAS_ALTERNATIVE]->(a:Medicine)
                             RETURN a.name AS name
@@ -527,11 +563,15 @@ def corroborate_class_membership() -> Dict[str, Dict[str, List[str]]]:
 def loaded_summary() -> Dict[str, Any]:
     with session_scope("eml_summary") as session:
         counts = run_read(
-            session, "eml_summary", "node counts",
+            session,
+            "eml_summary",
+            "node counts",
             "MATCH (n) RETURN labels(n)[0] AS label, count(*) AS n ORDER BY n DESC",
         )
         sections = run_read(
-            session, "eml_summary", "sections",
+            session,
+            "eml_summary",
+            "sections",
             """
             MATCH (s:Section)
             RETURN s.number AS number, s.title AS title, s.population AS population,
@@ -557,10 +597,12 @@ if __name__ == "__main__":
     logging.getLogger("pdfminer").setLevel(logging.ERROR)
 
     parser = argparse.ArgumentParser(description="Ingest or inspect a full WHO EML in Neo4j.")
-    parser.add_argument("--ingest", nargs="+", metavar="PDF",
-                        help="one or more EML PDFs to load (idempotent)")
-    parser.add_argument("--dry-run", action="store_true",
-                        help="parse and report, without writing to Neo4j")
+    parser.add_argument(
+        "--ingest", nargs="+", metavar="PDF", help="one or more EML PDFs to load (idempotent)"
+    )
+    parser.add_argument(
+        "--dry-run", action="store_true", help="parse and report, without writing to Neo4j"
+    )
     args = parser.parse_args()
 
     if args.ingest:

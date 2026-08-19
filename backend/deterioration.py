@@ -26,14 +26,22 @@ from datetime import date, datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 from clinical_lab_values import _parse_numeric, latest_lab_value
-from vital_trends import _series_for, _VITALS
-from early_warning import _points_for, _latest_numeric_vital  # reuse bands + helpers
+from early_warning import _latest_numeric_vital, _points_for  # reuse bands + helpers
+from vital_trends import _VITALS, _series_for
 
 
-def _vital_series_dates(timeline: Dict[str, Any]) -> Dict[str, List[Tuple[Optional[date], Optional[float]]]]:
+def _vital_series_dates(
+    timeline: Dict[str, Any],
+) -> Dict[str, List[Tuple[Optional[date], Optional[float]]]]:
     """For each vital type, a chronological list of (date, numeric value)."""
     out: Dict[str, List[Tuple[Optional[date], Optional[float]]]] = {}
-    for key in ("respiratory_rate", "oxygen_saturation", "heart_rate", "blood_pressure", "temperature"):
+    for key in (
+        "respiratory_rate",
+        "oxygen_saturation",
+        "heart_rate",
+        "blood_pressure",
+        "temperature",
+    ):
         series = _series_for(timeline, key, _VITALS[key][1])
         pts: List[Tuple[Optional[date], Optional[float]]] = []
         for r in series:
@@ -45,10 +53,13 @@ def _vital_series_dates(timeline: Dict[str, Any]) -> Dict[str, List[Tuple[Option
     return out
 
 
-def _lab_series_dates(timeline: Dict[str, Any], analyte: str) -> List[Tuple[Optional[date], Optional[float]]]:
-    labs = list(timeline.get("lab_results_timeline") or []) + list(timeline.get("lab_results") or [])
+def _lab_series_dates(
+    timeline: Dict[str, Any], analyte: str
+) -> List[Tuple[Optional[date], Optional[float]]]:
+    labs = list(timeline.get("lab_results_timeline") or []) + list(
+        timeline.get("lab_results") or []
+    )
     pts: List[Tuple[Optional[date], Optional[float]]] = []
-    aliases = ("potassium",)  # only K+ used in the score
     for entry in labs:
         if not isinstance(entry, dict):
             continue
@@ -70,7 +81,9 @@ def _to_date(raw: Any) -> Optional[date]:
         return None
 
 
-def _value_as_of(series: List[Tuple[Optional[date], Optional[float]]], as_of: Optional[date]) -> Optional[float]:
+def _value_as_of(
+    series: List[Tuple[Optional[date], Optional[float]]], as_of: Optional[date]
+) -> Optional[float]:
     """Most recent value on or before `as_of` (inclusive)."""
     candidate = None
     cand_date = None
@@ -88,9 +101,22 @@ def _value_as_of(series: List[Tuple[Optional[date], Optional[float]]], as_of: Op
 _BANDS = {
     "respiratory_rate": [(0, 8, 3), (8, 12, 1), (12, 21, 0), (21, 25, 2), (25, 10_000, 3)],
     "oxygen_saturation": [(0, 92, 3), (92, 94, 2), (94, 96, 1), (96, 101, 0)],
-    "heart_rate": [(0, 41, 3), (41, 51, 1), (51, 91, 0), (91, 111, 1), (111, 131, 2), (131, 10_000, 3)],
+    "heart_rate": [
+        (0, 41, 3),
+        (41, 51, 1),
+        (51, 91, 0),
+        (91, 111, 1),
+        (111, 131, 2),
+        (131, 10_000, 3),
+    ],
     "systolic_bp": [(0, 91, 3), (91, 101, 2), (101, 111, 1), (111, 220, 0), (220, 10_000, 3)],
-    "temperature": [(0, 35.0, 3), (35.0, 36.0, 1), (36.0, 38.0, 0), (38.0, 39.0, 1), (39.0, 100, 2)],
+    "temperature": [
+        (0, 35.0, 3),
+        (35.0, 36.0, 1),
+        (36.0, 38.0, 0),
+        (38.0, 39.0, 1),
+        (39.0, 100, 2),
+    ],
     "potassium": [(0, 3.0, 3), (3.0, 3.5, 2), (3.5, 5.5, 0), (5.5, 6.0, 1), (6.0, 100, 3)],
 }
 
@@ -138,12 +164,14 @@ def deterioration_trajectory(timeline: Dict[str, Any]) -> Dict[str, Any]:
             pts = _points_for(val, _BANDS[signal])
             total += pts
             per_signal_history[signal].append(pts)
-        points.append({
-            "date": as_of.isoformat(),
-            "score": total,
-            "risk_band": _band_for(total),
-            "components": {k: v for k, v in comps.items() if v is not None},
-        })
+        points.append(
+            {
+                "date": as_of.isoformat(),
+                "score": total,
+                "risk_band": _band_for(total),
+                "components": {k: v for k, v in comps.items() if v is not None},
+            }
+        )
 
     scores = [p["score"] for p in points]
     latest = points[-1] if points else None
@@ -152,7 +180,9 @@ def deterioration_trajectory(timeline: Dict[str, Any]) -> Dict[str, Any]:
     # trend across the whole series
     if len(scores) >= 2:
         first_half = sum(scores[: len(scores) // 2 or 1]) / max(1, len(scores) // 2 or 1)
-        second_half = sum(scores[len(scores) // 2 or 1:]) / max(1, len(scores) - (len(scores) // 2 or 1))
+        second_half = sum(scores[len(scores) // 2 or 1 :]) / max(
+            1, len(scores) - (len(scores) // 2 or 1)
+        )
         if second_half - first_half >= 1.5:
             trend = "worsening"
         elif first_half - second_half >= 1.5:
@@ -201,9 +231,13 @@ def deterioration_trajectory(timeline: Dict[str, Any]) -> Dict[str, Any]:
 def _single_point_fallback(timeline: Dict[str, Any]) -> Dict[str, Any]:
     score = 0
     comps: Dict[str, Optional[float]] = {}
-    for key, signal in (("respiratory_rate", "respiratory_rate"), ("oxygen_saturation", "oxygen_saturation"),
-                        ("heart_rate", "heart_rate"), ("blood_pressure", "systolic_bp"),
-                        ("temperature", "temperature")):
+    for key, signal in (
+        ("respiratory_rate", "respiratory_rate"),
+        ("oxygen_saturation", "oxygen_saturation"),
+        ("heart_rate", "heart_rate"),
+        ("blood_pressure", "systolic_bp"),
+        ("temperature", "temperature"),
+    ):
         v = _latest_numeric_vital(timeline, key)
         comps[signal] = v
         score += _points_for(v, _BANDS[signal])

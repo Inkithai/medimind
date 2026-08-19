@@ -17,10 +17,9 @@ from provider_normalizer import normalize_provider_records
 from provider_ranking import rank_providers, ranking_method_description
 from provider_sources import ProviderSearchError, get_provider_source
 
-
 MEDICAL_DISCLAIMER = (
-    "MediMind does not diagnose medical conditions. It identifies potential issues and confidence limits in uploaded records. "
-    "These provider suggestions are intended only to help find an appropriate healthcare professional; review the information with a licensed clinician or pharmacist."
+    "MediMind does not diagnose medical conditions. It identifies potential issues and confidence limits in uploaded records. "  # noqa: E501
+    "These provider suggestions are intended only to help find an appropriate healthcare professional; review the information with a licensed clinician or pharmacist."  # noqa: E501
 )
 
 
@@ -45,7 +44,7 @@ def recommendation_context(snapshot: Dict[str, Any]) -> Dict[str, Any]:
         "flags": flags,
         "disclaimer": MEDICAL_DISCLAIMER,
         "message": (
-            "A local-care search is available because MediMind found an existing high-risk or low-confidence flag."
+            "A local-care search is available because MediMind found an existing high-risk or low-confidence flag."  # noqa: E501
             if flags
             else "No high-risk or low-confidence flag is currently available for local-care search."
         ),
@@ -63,7 +62,9 @@ def search_live_providers(
     flags = flags_from_snapshot(snapshot)
     selected_flag = find_flag(flags, flag_id)
     if selected_flag is None:
-        raise ValueError("The selected clinical flag is unavailable. Refresh the care recommendations and select a current flag.")
+        raise ValueError(
+            "The selected clinical flag is unavailable. Refresh the care recommendations and select a current flag."  # noqa: E501
+        )
 
     # This pack is built solely from the selected patient's snapshot and
     # Phase 1 evidence. It deliberately remains independent of provider data.
@@ -79,9 +80,7 @@ def search_live_providers(
     ranked = rank_providers(normalized, selected_flag["specialty"], availability)
     no_results_message = payload.no_results_message
     if not ranked and not no_results_message:
-        no_results_message = (
-            "No suitable live provider records were found for this search. Try a broader city/area or use the broader provider category."
-        )
+        no_results_message = "No suitable live provider records were found for this search. Try a broader city/area or use the broader provider category."  # noqa: E501
 
     return {
         "clinical_flag": selected_flag,

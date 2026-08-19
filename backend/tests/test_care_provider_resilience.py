@@ -7,11 +7,10 @@ retries, in-process caching, and a clean 503 mapping in the service layer.
 They inject fakes — they never touch the network.
 """
 
-import urllib.error
-from unittest import mock
-
 import os
 import sys
+import urllib.error
+from unittest import mock
 
 import pytest
 

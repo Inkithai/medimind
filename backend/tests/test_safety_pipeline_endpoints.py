@@ -37,16 +37,20 @@ def _extracted_doc(patient_name="John Doe", overdose=False):
         "additional_languages": [],
         "ocr_confidence": 0.95,
         "translation_confidence": 0.95,
-        "medications": [{
-            "name": "Paracetamol", "ingredients": ["Paracetamol"],
-            "dosage": "1500 mg" if overdose else "500 mg",
-            "frequency": "4x daily" if overdose else "3x daily",
-            "duration": "5 days",
-            "dosage_value": 1500 if overdose else 500,
-            "dosage_unit": "mg",
-            "frequency_per_day": 4 if overdose else 3,
-            "is_as_needed": False, "confidence": 0.95,
-        }],
+        "medications": [
+            {
+                "name": "Paracetamol",
+                "ingredients": ["Paracetamol"],
+                "dosage": "1500 mg" if overdose else "500 mg",
+                "frequency": "4x daily" if overdose else "3x daily",
+                "duration": "5 days",
+                "dosage_value": 1500 if overdose else 500,
+                "dosage_unit": "mg",
+                "frequency_per_day": 4 if overdose else 3,
+                "is_as_needed": False,
+                "confidence": 0.95,
+            }
+        ],
         "lab_results": [],
         "allergies_noted": [],
         "clinical_notes": None,
@@ -56,8 +60,10 @@ def _extracted_doc(patient_name="John Doe", overdose=False):
 
 
 CLEAN_CROSS_CHECK = {
-    "potential_drug_interactions": [], "duplicate_prescriptions": [],
-    "conflicting_dosage_instructions": [], "allergy_conflicts": [],
+    "potential_drug_interactions": [],
+    "duplicate_prescriptions": [],
+    "conflicting_dosage_instructions": [],
+    "allergy_conflicts": [],
     "overall_recommendation": "Consult a professional.",
 }
 
@@ -68,9 +74,11 @@ def _client_with_pipeline(extract_result, existing_docs=None):
 
     api.app.dependency_overrides[api.get_current_user] = override_user
     patchers = [
-        mock.patch.object(api.storage, "upload_patient_document",
-                          return_value={"document_url": "https://cloud/x.pdf",
-                                        "cloudinary_public_id": "x"}),
+        mock.patch.object(
+            api.storage,
+            "upload_patient_document",
+            return_value={"document_url": "https://cloud/x.pdf", "cloudinary_public_id": "x"},
+        ),
         mock.patch.object(api.db, "load_documents", return_value=existing_docs or []),
         mock.patch.object(api.db, "insert_documents"),
         mock.patch.object(api.db, "save_patient_snapshot"),
@@ -133,11 +141,17 @@ def test_overdose_flows_from_dosage_rules_into_triage():
 
 
 def test_identity_mismatch_holds_document_with_409():
-    existing = [{
-        "patient_name": "Ramesh Kumar", "patient_age": 48, "patient_gender": "male",
-        "date": "2023-05-01",
-    }]
-    patchers = _client_with_pipeline(_extracted_doc(patient_name="Suresh Babu"), existing_docs=existing)
+    existing = [
+        {
+            "patient_name": "Ramesh Kumar",
+            "patient_age": 48,
+            "patient_gender": "male",
+            "date": "2023-05-01",
+        }
+    ]
+    patchers = _client_with_pipeline(
+        _extracted_doc(patient_name="Suresh Babu"), existing_docs=existing
+    )
     try:
         with TestClient(api.app) as client:
             resp = _upload(client, filename="not_mine.pdf")
@@ -149,11 +163,17 @@ def test_identity_mismatch_holds_document_with_409():
 
 
 def test_identity_mismatch_confirmed_proceeds():
-    existing = [{
-        "patient_name": "Ramesh Kumar", "patient_age": 48, "patient_gender": "male",
-        "date": "2023-05-01",
-    }]
-    patchers = _client_with_pipeline(_extracted_doc(patient_name="Suresh Babu"), existing_docs=existing)
+    existing = [
+        {
+            "patient_name": "Ramesh Kumar",
+            "patient_age": 48,
+            "patient_gender": "male",
+            "date": "2023-05-01",
+        }
+    ]
+    patchers = _client_with_pipeline(
+        _extracted_doc(patient_name="Suresh Babu"), existing_docs=existing
+    )
     try:
         with TestClient(api.app) as client:
             resp = _upload(client, filename="not_mine.pdf", confirm=True)
@@ -165,11 +185,17 @@ def test_identity_mismatch_confirmed_proceeds():
 
 
 def test_matching_identity_passes_without_confirmation():
-    existing = [{
-        "patient_name": "John Doe", "patient_age": 48, "patient_gender": "male",
-        "date": "2023-05-01",
-    }]
-    patchers = _client_with_pipeline(_extracted_doc(patient_name="John Doe"), existing_docs=existing)
+    existing = [
+        {
+            "patient_name": "John Doe",
+            "patient_age": 48,
+            "patient_gender": "male",
+            "date": "2023-05-01",
+        }
+    ]
+    patchers = _client_with_pipeline(
+        _extracted_doc(patient_name="John Doe"), existing_docs=existing
+    )
     try:
         with TestClient(api.app) as client:
             resp = _upload(client)
@@ -183,12 +209,20 @@ def test_matching_identity_passes_without_confirmation():
 SNAPSHOT = {
     "patient_timeline": {
         "visits": [],
-        "medications_timeline": [{
-            "name": "Paracetamol", "ingredients": ["paracetamol"],
-            "dosage_value": 1500, "dosage_unit": "mg", "frequency_per_day": 4,
-            "is_as_needed": False, "date": "2024-03-15", "source_file": "rx.pdf",
-        }],
-        "lab_results_timeline": [], "known_allergies": [],
+        "medications_timeline": [
+            {
+                "name": "Paracetamol",
+                "ingredients": ["paracetamol"],
+                "dosage_value": 1500,
+                "dosage_unit": "mg",
+                "frequency_per_day": 4,
+                "is_as_needed": False,
+                "date": "2024-03-15",
+                "source_file": "rx.pdf",
+            }
+        ],
+        "lab_results_timeline": [],
+        "known_allergies": [],
     },
     "cross_check_report": dict(CLEAN_CROSS_CHECK),
     "lab_trends": {"trends": [], "insufficient_data": []},
@@ -199,14 +233,17 @@ SNAPSHOT = {
 def _plain_client():
     async def override_user():
         return "anon_safety_user"
+
     api.app.dependency_overrides[api.get_current_user] = override_user
     return TestClient(api.app)
 
 
 def test_consult_triage_endpoint_recomputes_for_old_snapshots():
-    with mock.patch.object(api.db, "load_patient_snapshot", return_value=dict(SNAPSHOT)), \
-         mock.patch.object(api.db, "load_documents", return_value=[]), \
-         mock.patch.object(api.audit, "record"):
+    with (
+        mock.patch.object(api.db, "load_patient_snapshot", return_value=dict(SNAPSHOT)),
+        mock.patch.object(api.db, "load_documents", return_value=[]),
+        mock.patch.object(api.audit, "record"),
+    ):
         with _plain_client() as client:
             resp = client.get("/api/v1/consult-triage")
         assert resp.status_code == 200, resp.text
@@ -216,9 +253,11 @@ def test_consult_triage_endpoint_recomputes_for_old_snapshots():
 
 
 def test_dosage_report_endpoint_recomputes_for_old_snapshots():
-    with mock.patch.object(api.db, "load_patient_snapshot", return_value=dict(SNAPSHOT)), \
-         mock.patch.object(api.db, "load_documents", return_value=[]), \
-         mock.patch.object(api.audit, "record"):
+    with (
+        mock.patch.object(api.db, "load_patient_snapshot", return_value=dict(SNAPSHOT)),
+        mock.patch.object(api.db, "load_documents", return_value=[]),
+        mock.patch.object(api.audit, "record"),
+    ):
         with _plain_client() as client:
             resp = client.get("/api/v1/dosage-report")
         assert resp.status_code == 200, resp.text
@@ -227,9 +266,11 @@ def test_dosage_report_endpoint_recomputes_for_old_snapshots():
 
 
 def test_patient_snapshot_includes_derived_safety_reports():
-    with mock.patch.object(api.db, "load_patient_snapshot", return_value=dict(SNAPSHOT)), \
-         mock.patch.object(api.db, "load_documents", return_value=[]), \
-         mock.patch.object(api.audit, "record"):
+    with (
+        mock.patch.object(api.db, "load_patient_snapshot", return_value=dict(SNAPSHOT)),
+        mock.patch.object(api.db, "load_documents", return_value=[]),
+        mock.patch.object(api.audit, "record"),
+    ):
         with _plain_client() as client:
             resp = client.get("/api/v1/patient-snapshot")
         assert resp.status_code == 200, resp.text
@@ -239,8 +280,10 @@ def test_patient_snapshot_includes_derived_safety_reports():
 
 
 def test_triage_endpoint_404_without_records():
-    with mock.patch.object(api.db, "load_patient_snapshot", return_value=None), \
-         mock.patch.object(api.db, "load_documents", return_value=[]):
+    with (
+        mock.patch.object(api.db, "load_patient_snapshot", return_value=None),
+        mock.patch.object(api.db, "load_documents", return_value=[]),
+    ):
         with _plain_client() as client:
             assert client.get("/api/v1/consult-triage").status_code == 404
             assert client.get("/api/v1/dosage-report").status_code == 404

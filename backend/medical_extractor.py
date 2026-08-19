@@ -23,37 +23,43 @@ Install:
 Env (pick one provider):
     export GROQ_API_KEY="gsk_..."        (https://console.groq.com/keys)        # LLM_PROVIDER=groq
     export GEMINI_API_KEY="AIza..."      (https://aistudio.google.com/app/apikey) # LLM_PROVIDER=gemini
-"""
+"""  # noqa: E501
 
-import os
-import io
-import re
-import json
-import copy
-import time
 import base64
+import copy
+import io
+import json
+import os
+import re
 import threading
+import time
 from collections import deque
 from datetime import timezone
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Tuple, Callable
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import pdfplumber
+
 try:
     import pymupdf  # PyMuPDF >= 1.24 exposes the modern module name (no deprecation warning)
 except ImportError:  # older PyMuPDF releases only ship the legacy `fitz` module name
     import fitz as pymupdf
-from PIL import Image, ImageOps
-from openai import (
-    OpenAI,
-    NotFoundError,
-    APIError,
-    APIConnectionError,
-)
-from dotenv import load_dotenv
 import logging
 
-from clinical_events import CLINICAL_EVENT_COLLECTIONS, CLINICAL_EVENT_DATE_FIELDS, CLINICAL_TIMELINE_KEYS
+from dotenv import load_dotenv
+from openai import (
+    APIConnectionError,
+    APIError,
+    NotFoundError,
+    OpenAI,
+)
+from PIL import Image, ImageOps
+
+from clinical_events import (
+    CLINICAL_EVENT_COLLECTIONS,
+    CLINICAL_EVENT_DATE_FIELDS,
+    CLINICAL_TIMELINE_KEYS,
+)
 from evidence import (
     first_evidence,
     locate_ocr_text_evidence,
@@ -78,137 +84,20 @@ logger = logging.getLogger("medical_extractor")
 # ---------------------------------------------------------------------------
 # LLM provider layer — OpenAI-compatible via LLM_PROVIDER
 # ---------------------------------------------------------------------------
-# LLM_PROVIDER selects the backend (default "groq" for backward compat).
-# All providers use the OpenAI SDK; only base_url / api_key / model names
-# differ. Provider quotas vary by project and model, so the upload worker pool
-# (api.py) deliberately keeps LLM concurrency bounded instead of assuming a
-# fixed free-tier allowance.
-LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "groq").strip().lower() or "groq"
-
-_PROVIDER_DEFAULTS = {
-    "groq": {
-        "api_key_env": "GROQ_API_KEY",
-        "api_key_alts": (),
-        "base_url_default": "https://api.groq.com/openai/v1",
-        "base_url_env": "GROQ_BASE_URL",
-        "model_default": "openai/gpt-oss-120b",
-        "model_env": "GROQ_MODEL",
-        "vision_default": "qwen/qwen3.6-27b",
-        "vision_env": "GROQ_VISION_MODEL",
-        "fallback_default": "openai/gpt-oss-20b",
-        "fallback_env": "GROQ_FALLBACK_MODEL",
-        "key_url": "https://console.groq.com/keys",
-        "docs_url": "https://console.groq.com/docs/deprecations",
-    },
-    "gemini": {
-        "api_key_env": "GEMINI_API_KEY",
-        "api_key_alts": ("GOOGLE_API_KEY",),
-        "base_url_default": "https://generativelanguage.googleapis.com/v1beta/openai/",
-        "base_url_env": "GEMINI_BASE_URL",
-        # Gemini 2.0 Flash was shut down on 2026-06-01. Google may report
-        # requests to that retired model as quota limit=0 / HTTP 429 rather
-        # than model_not_found, so keeping the retired ID here causes an
-        # endless-looking rate-limit failure. 3.6 Flash is Google's stable
-        # replacement and supports image input + structured output.
-        "model_default": "gemini-3.6-flash",
-        "model_env": "GEMINI_MODEL",
-        "vision_default": "gemini-3.6-flash",
-        "vision_env": "GEMINI_VISION_MODEL",
-        "fallback_default": "gemini-3.5-flash-lite",
-        "fallback_env": "GEMINI_FALLBACK_MODEL",
-        "key_url": "https://aistudio.google.com/app/apikey",
-        "docs_url": "https://ai.google.dev/gemini-api/docs/deprecations",
-    },
-}
-
-
-def _resolve_provider_config(provider: str) -> Dict[str, Any]:
-    cfg = _PROVIDER_DEFAULTS.get(provider)
-    if cfg is not None:
-        return dict(cfg)
-    # Generic OpenAI-compatible (cerebras, openrouter, openai, custom) via LLM_* env vars
-    return {
-        "api_key_env": "LLM_API_KEY",
-        "api_key_alts": ("OPENAI_API_KEY",),
-        "base_url_default": os.environ.get("LLM_BASE_URL", "https://api.openai.com/v1"),
-        "base_url_env": "LLM_BASE_URL",
-        "model_default": os.environ.get("LLM_MODEL", "gpt-4o-mini"),
-        "model_env": "LLM_MODEL",
-        "vision_default": os.environ.get("LLM_VISION_MODEL", os.environ.get("LLM_MODEL", "gpt-4o-mini")),
-        "vision_env": "LLM_VISION_MODEL",
-        "fallback_default": os.environ.get("LLM_FALLBACK_MODEL", ""),
-        "fallback_env": "LLM_FALLBACK_MODEL",
-        "key_url": "https://platform.openai.com/api-keys",
-        "docs_url": "",
-    }
-
-
-_PROVIDER_CFG = _resolve_provider_config(LLM_PROVIDER)
-
-
-def _resolve_api_key(cfg: Dict[str, Any]) -> Optional[str]:
-    for env in (cfg["api_key_env"],) + tuple(cfg.get("api_key_alts", ())):
-        val = os.environ.get(env)
-        if not val or not val.strip():
-            continue
-        stripped = val.strip()
-        if stripped in ("your-groq-api-key", "your-gemini-api-key", "your-api-key", "your-openai-api-key") or stripped.startswith("your-"):
-            continue
-        return stripped
-    # Fallback to generic LLM_API_KEY for known providers too
-    if cfg["api_key_env"] != "LLM_API_KEY":
-        val = os.environ.get("LLM_API_KEY")
-        if val and val.strip() and not val.strip().startswith("your-"):
-            return val.strip()
-    return None
-
-
-_PROVIDER_API_KEY = _resolve_api_key(_PROVIDER_CFG)
-if not _PROVIDER_API_KEY:
-    _env = _PROVIDER_CFG["api_key_env"]
-    _alts = ", ".join(_PROVIDER_CFG.get("api_key_alts", ()))
-    _alts_msg = f" or {_alts}" if _alts else ""
-    _url = _PROVIDER_CFG["key_url"]
-    raise RuntimeError(
-        f"{_env} is not set for LLM_PROVIDER='{LLM_PROVIDER}' (still placeholder or missing) — "
-        f"copy .env.example to .env and add your API key{_alts_msg} (create a free one at {_url}). "
-        f"Or set LLM_PROVIDER=groq|gemini and the matching key env var. "
-        f"For generic providers set LLM_API_KEY + LLM_BASE_URL + LLM_MODEL."
-    )
-
-# Keep legacy GROQ_API_KEY name for backward compat (tests / external imports)
-_raw_groq = os.environ.get("GROQ_API_KEY", "")
-if _raw_groq.strip() in ("", "your-groq-api-key") or _raw_groq.strip().startswith("your-"):
-    _raw_groq = ""
-GROQ_API_KEY = _raw_groq or (_PROVIDER_API_KEY if LLM_PROVIDER == "groq" else "")
-# Also expose provider-resolved key under a generic name
-LLM_API_KEY = _PROVIDER_API_KEY
-
-_PROVIDER_BASE_URL = os.environ.get(_PROVIDER_CFG["base_url_env"], _PROVIDER_CFG["base_url_default"])
-# LLM_BASE_URL overrides any provider when explicitly set (custom endpoint)
-if os.environ.get("LLM_BASE_URL"):
-    _PROVIDER_BASE_URL = os.environ["LLM_BASE_URL"]
-
-client = OpenAI(
-    api_key=_PROVIDER_API_KEY,
-    base_url=_PROVIDER_BASE_URL,
-    # Retries are handled inside _completion_resilient() so one SDK call is
-    # exactly one HTTP request. With the SDK's own retry loop enabled (the
-    # default max_retries=2), a rate-limited call used to stack Retry-After
-    # waits (28s, 37s, 45s ...) on top of our ladder retries, turning a
-    # single upload into a multi-minute stall. Now 429s surface immediately
-    # and _completion_resilient() paces them deliberately.
-    max_retries=0,
+# Provider resolution (LLM_PROVIDER, _PROVIDER_DEFAULTS, _resolve_provider_config,
+# _resolve_api_key, client, ...) lives in llm_provider.py so the same
+# configuration is shared by every module that talks to the LLM. Re-export
+# the legacy names here so existing `from medical_extractor import ...`
+# callers keep working unchanged.
+from llm_provider import (  # noqa: E402
+    _PROVIDER_CFG,
+    _PROVIDER_DEFAULTS,  # noqa: F401  (re-exported for test compatibility)
+    GROQ_API_KEY,  # noqa: F401  (re-exported for backward compatibility)
+    LLM_API_KEY,  # noqa: F401  (re-exported for backward compatibility)
+    LLM_PROVIDER,
+    _configured_secret,
+    client,
 )
-
-# Optional failover for a *hard* primary-provider quota outage. It is off by
-# default because medical documents are sensitive and enabling it sends the
-# same request to OpenRouter, a separate service. Set the explicit opt-in plus
-# an OpenRouter key and models to enable it.
-def _configured_secret(name: str) -> str:
-    value = os.environ.get(name, "").strip()
-    return "" if not value or value.startswith("your-") else value
-
 
 _openrouter_fallback_lock = threading.Lock()
 _openrouter_fallback_active = False
@@ -274,10 +163,7 @@ def _ensure_openrouter_fallback_client() -> Optional[OpenAI]:
             enabled_raw in {"1", "true", "yes", "on"}
             or os.environ.get("FALLBACK_PROVIDER", "").strip().lower() == "openrouter"
             or os.environ.get("LLM_FALLBACK_PROVIDER", "").strip().lower() == "openrouter"
-            or (
-                enabled_raw not in {"0", "false", "no", "off"}
-                and bool(api_key and model)
-            )
+            or (enabled_raw not in {"0", "false", "no", "off"} and bool(api_key and model))
         )
 
         if enabled and api_key and model:
@@ -294,7 +180,7 @@ def _ensure_openrouter_fallback_client() -> Optional[OpenAI]:
 
         if enabled_raw in {"1", "true", "yes", "on"} and (not api_key or not model):
             logger.warning(
-                "OpenRouter fallback explicitly enabled but missing OPENROUTER_API_KEY or OPENROUTER_FALLBACK_MODEL; fallback disabled."
+                "OpenRouter fallback explicitly enabled but missing OPENROUTER_API_KEY or OPENROUTER_FALLBACK_MODEL; fallback disabled."  # noqa: E501
             )
             _OPENROUTER_FALLBACK_ENABLED = False
 
@@ -316,7 +202,7 @@ def _activate_openrouter_fallback() -> bool:
         _openrouter_fallback_active = True
     if newly_activated:
         logger.warning(
-            "Primary provider '%s' has no usable quota; switching new LLM calls to configured OpenRouter fallback.",
+            "Primary provider '%s' has no usable quota; switching new LLM calls to configured OpenRouter fallback.",  # noqa: E501
             LLM_PROVIDER,
         )
     return True
@@ -325,16 +211,28 @@ def _activate_openrouter_fallback() -> bool:
 def _openrouter_fallback_is_active() -> bool:
     if not _openrouter_fallback_active:
         return False
-    return openrouter_fallback_client is not None or _ensure_openrouter_fallback_client() is not None
+    return (
+        openrouter_fallback_client is not None or _ensure_openrouter_fallback_client() is not None
+    )
 
 
 # Model defaults — provider-specific, overridable via env vars. LLM_* generic
 # vars take precedence so a single .env swap can retarget any provider.
-MODEL = os.environ.get("LLM_MODEL") or os.environ.get(_PROVIDER_CFG["model_env"], _PROVIDER_CFG["model_default"])
-VISION_MODEL = os.environ.get("LLM_VISION_MODEL") or os.environ.get(_PROVIDER_CFG["vision_env"], _PROVIDER_CFG["vision_default"])
-FALLBACK_MODEL = os.environ.get("LLM_FALLBACK_MODEL") or os.environ.get(_PROVIDER_CFG["fallback_env"], _PROVIDER_CFG["fallback_default"]) or ""
+MODEL = os.environ.get("LLM_MODEL") or os.environ.get(
+    _PROVIDER_CFG["model_env"], _PROVIDER_CFG["model_default"]
+)
+VISION_MODEL = os.environ.get("LLM_VISION_MODEL") or os.environ.get(
+    _PROVIDER_CFG["vision_env"], _PROVIDER_CFG["vision_default"]
+)
+FALLBACK_MODEL = (
+    os.environ.get("LLM_FALLBACK_MODEL")
+    or os.environ.get(_PROVIDER_CFG["fallback_env"], _PROVIDER_CFG["fallback_default"])
+    or ""
+)
 if not VISION_MODEL:
-    VISION_MODEL = MODEL  # providers without a distinct vision model (e.g. Cerebras) reuse text model
+    VISION_MODEL = (
+        MODEL  # providers without a distinct vision model (e.g. Cerebras) reuse text model
+    )
 
 # Groq retires hosted models on a schedule — keep an eye on
 # https://console.groq.com/docs/deprecations and override the models above
@@ -348,11 +246,13 @@ if not VISION_MODEL:
 # gpt-oss family (https://console.groq.com/docs/structured-outputs). Every
 # other model — including qwen vision and all Gemini models — gets JSON
 # Object Mode instead (valid JSON guaranteed; schema adherence via inlined prompt).
-_STRICT_SCHEMA_MODELS = frozenset({
-    "openai/gpt-oss-20b",
-    "openai/gpt-oss-120b",
-    "openai/gpt-oss-safeguard-20b",
-})
+_STRICT_SCHEMA_MODELS = frozenset(
+    {
+        "openai/gpt-oss-20b",
+        "openai/gpt-oss-120b",
+        "openai/gpt-oss-safeguard-20b",
+    }
+)
 
 
 # ---------------------------------------------------------------------------
@@ -361,6 +261,7 @@ _STRICT_SCHEMA_MODELS = frozenset({
 # more but still benefits from pacing when multiple files are uploaded.
 # Configurable via LLM_MAX_RPM (0 disables pacing).
 # ---------------------------------------------------------------------------
+
 
 class _CallPacer:
     """Thread-safe sliding-window rate limiter for LLM API calls.
@@ -418,8 +319,8 @@ def _pacer_max_rpm() -> int:
             pass
     # Sensible provider defaults for free-tier quotas
     _provider_defaults = {
-        "gemini": 4,   # Gemini free tier is 5 RPM; use 4 for safety margin
-        "groq": 0,     # Groq free tier is generous (30 RPM); no pacing needed
+        "gemini": 4,  # Gemini free tier is 5 RPM; use 4 for safety margin
+        "groq": 0,  # Groq free tier is generous (30 RPM); no pacing needed
     }
     return _provider_defaults.get(LLM_PROVIDER, 0)
 
@@ -449,23 +350,19 @@ def _chat_completion(**kwargs) -> Any:
         # the transport boundary so extraction/cross-check code remains
         # provider-agnostic. Image calls use the separately configured vision model.
         kwargs = dict(kwargs)
-        is_vision = (
-            (kwargs.get("model") == VISION_MODEL and VISION_MODEL != MODEL)
-            or any(
-                isinstance(msg.get("content"), list)
-                and any(isinstance(part, dict) and part.get("type") == "image_url" for part in msg["content"])
-                for msg in kwargs.get("messages", [])
-                if isinstance(msg, dict)
+        is_vision = (kwargs.get("model") == VISION_MODEL and VISION_MODEL != MODEL) or any(
+            isinstance(msg.get("content"), list)
+            and any(
+                isinstance(part, dict) and part.get("type") == "image_url"
+                for part in msg["content"]
             )
+            for msg in kwargs.get("messages", [])
+            if isinstance(msg, dict)
         )
-        kwargs["model"] = (
-            _OPENROUTER_VISION_MODEL
-            if is_vision
-            else _OPENROUTER_MODEL
-        )
+        kwargs["model"] = _OPENROUTER_VISION_MODEL if is_vision else _OPENROUTER_MODEL
     try:
         return active_client.chat.completions.create(**kwargs)
-    except NotFoundError as e:
+    except NotFoundError:
         # OpenRouter model slugs are not permanent. A configured :free model
         # can disappear (or be unavailable at a particular provider) while
         # OpenRouter's dynamic router remains available. Retry the request once
@@ -569,7 +466,9 @@ class ProviderRateLimitError(RuntimeError):
                 if retry_after_seconds
                 else " Please wait a minute before trying again."
             )
-            message = f"The {provider} document-reading service is temporarily busy (HTTP 429).{wait}"
+            message = (
+                f"The {provider} document-reading service is temporarily busy (HTTP 429).{wait}"
+            )
         super().__init__(message)
 
 
@@ -642,12 +541,15 @@ def _is_token_budget_error(exc: Exception) -> bool:
         except (TypeError, ValueError):
             parts.append(str(body))
     text = " ".join(parts).lower()
-    return any(marker in text for marker in (
-        "tokens per minute",
-        "tpm",
-        "rate_limit_exceeded",
-        "request too large for model",
-    ))
+    return any(
+        marker in text
+        for marker in (
+            "tokens per minute",
+            "tpm",
+            "rate_limit_exceeded",
+            "request too large for model",
+        )
+    )
 
 
 def _is_json_validation_failure(exc: Exception) -> bool:
@@ -752,8 +654,8 @@ def _retry_after_seconds(exc: Exception, fallback: float) -> float:
     text = _provider_error_text(exc)
     body_patterns = (
         r'retrydelay["\'\s:]+([0-9]+(?:\.[0-9]+)?)\s*s',
-        r'please\s+retry\s+in\s+([0-9]+(?:\.[0-9]+)?)\s*s',
-        r'retry\s+in\s+([0-9]+(?:\.[0-9]+)?)\s*seconds?',
+        r"please\s+retry\s+in\s+([0-9]+(?:\.[0-9]+)?)\s*s",
+        r"retry\s+in\s+([0-9]+(?:\.[0-9]+)?)\s*seconds?",
     )
     for pattern in body_patterns:
         match = re.search(pattern, text, flags=re.IGNORECASE)
@@ -767,8 +669,7 @@ def _retry_after_seconds(exc: Exception, fallback: float) -> float:
 
 def _is_vision_content(user_content: Any) -> bool:
     return isinstance(user_content, list) and any(
-        isinstance(part, dict) and part.get("type") == "image_url"
-        for part in user_content
+        isinstance(part, dict) and part.get("type") == "image_url" for part in user_content
     )
 
 
@@ -784,6 +685,7 @@ def _completion_token_budget(user_content: Any) -> int:
     Vision requests consume substantially more input tokens than text calls,
     so vision defaults are capped lower on constrained providers.
     """
+
     def _int_env(names: List[str], default: int) -> int:
         for n in names:
             v = os.environ.get(n)
@@ -796,7 +698,12 @@ def _completion_token_budget(user_content: Any) -> int:
         return default
 
     global_budget = _int_env(
-        [f"{LLM_PROVIDER.upper()}_MAX_TOKENS", "LLM_MAX_TOKENS", "GROQ_MAX_TOKENS", "GEMINI_MAX_TOKENS"],
+        [
+            f"{LLM_PROVIDER.upper()}_MAX_TOKENS",
+            "LLM_MAX_TOKENS",
+            "GROQ_MAX_TOKENS",
+            "GEMINI_MAX_TOKENS",
+        ],
         4096,
     )
 
@@ -804,7 +711,12 @@ def _completion_token_budget(user_content: Any) -> int:
         return global_budget
 
     # Vision-specific override if set
-    for n in [f"{LLM_PROVIDER.upper()}_VISION_MAX_TOKENS", "LLM_VISION_MAX_TOKENS", "GROQ_VISION_MAX_TOKENS", "GEMINI_VISION_MAX_TOKENS"]:
+    for n in [
+        f"{LLM_PROVIDER.upper()}_VISION_MAX_TOKENS",
+        "LLM_VISION_MAX_TOKENS",
+        "GROQ_VISION_MAX_TOKENS",
+        "GEMINI_VISION_MAX_TOKENS",
+    ]:
         v = os.environ.get(n)
         if v is not None:
             try:
@@ -818,9 +730,12 @@ def _completion_token_budget(user_content: Any) -> int:
     # default floor is 8192. An explicit global budget override still wins,
     # and if a tier rejects the budget the token-budget error path halves it.
     _global_override_set = any(
-        os.environ.get(n) for n in (
-            f"{LLM_PROVIDER.upper()}_MAX_TOKENS", "LLM_MAX_TOKENS",
-            "GROQ_MAX_TOKENS", "GEMINI_MAX_TOKENS",
+        os.environ.get(n)
+        for n in (
+            f"{LLM_PROVIDER.upper()}_MAX_TOKENS",
+            "LLM_MAX_TOKENS",
+            "GROQ_MAX_TOKENS",
+            "GEMINI_MAX_TOKENS",
         )
     )
     if LLM_PROVIDER == "gemini":
@@ -968,7 +883,9 @@ def _suppression_candidates(model: str) -> List[Tuple[Optional[int], Optional[Di
     good = st.get("good")
     if good is not None and good not in st["dead"]:
         order.append(good)
-    order.extend(i for i in range(len(_REASONING_SUPPRESS_PROBES)) if i not in order and i not in st["dead"])
+    order.extend(
+        i for i in range(len(_REASONING_SUPPRESS_PROBES)) if i not in order and i not in st["dead"]
+    )
     return [(i, _REASONING_SUPPRESS_PROBES[i]) for i in order] + [(None, None)]
 
 
@@ -987,8 +904,14 @@ def _contains_reasoning_dump(text: str) -> bool:
     head = text[:4000].lower()
     return any(
         marker in head
-        for marker in ("<think", "<reasoning", "<thought", "<analysis",
-                       "&lt;think", "&lt;reasoning")
+        for marker in (
+            "<think",
+            "<reasoning",
+            "<thought",
+            "<analysis",
+            "&lt;think",
+            "&lt;reasoning",
+        )
     )
 
 
@@ -1036,10 +959,18 @@ def _is_unsupported_param_error(exc: Exception, extra_body: Optional[Dict[str, A
             parts.append(str(body))
     text = " ".join(parts).lower()
     markers = (
-        "unknown field", "unrecognized request argument", "unsupported parameter",
-        "unsupported param", "unknown parameter", "unknown argument",
-        "extraneous field", "not supported", "invalid parameter",
-        "extra inputs are not permitted", "additional properties", "unexpected keyword",
+        "unknown field",
+        "unrecognized request argument",
+        "unsupported parameter",
+        "unsupported param",
+        "unknown parameter",
+        "unknown argument",
+        "extraneous field",
+        "not supported",
+        "invalid parameter",
+        "extra inputs are not permitted",
+        "additional properties",
+        "unexpected keyword",
     )
     if any(m in text for m in markers):
         return True
@@ -1068,23 +999,23 @@ def _format_ladder(
     """
     schema = strict_format["json_schema"]["schema"]
     schema_suffix = (
-        "\n\nCRITICAL OUTPUT RULES — you MUST follow every single one — VIOLATION WILL CAUSE SYSTEM FAILURE:\n"
-        "1. Output **ONLY** a single valid JSON object as the entire response — no other text, ever.\n"
+        "\n\nCRITICAL OUTPUT RULES — you MUST follow every single one — VIOLATION WILL CAUSE SYSTEM FAILURE:\n"  # noqa: E501
+        "1. Output **ONLY** a single valid JSON object as the entire response — no other text, ever.\n"  # noqa: E501
         "2. The VERY FIRST character you emit must be '{' and the VERY LAST must be '}'.\n"
-        "3. No markdown, no ``` or ```json fences, no bullet points, no analysis, no preamble, no apologies, no explanations.\n"
-        "4. **ABSOLUTELY NO** <think>, </think>, <thought>, <reasoning>, or any reasoning/chain-of-thought tags or hidden thinking. "
+        "3. No markdown, no ``` or ```json fences, no bullet points, no analysis, no preamble, no apologies, no explanations.\n"  # noqa: E501
+        "4. **ABSOLUTELY NO** <think>, </think>, <thought>, <reasoning>, or any reasoning/chain-of-thought tags or hidden thinking. "  # noqa: E501
         "Your internal reasoning MUST remain hidden and MUST NOT appear in the output. "
-        "Do NOT output any step-by-step, do NOT describe the document structure, do NOT say 'The user wants...'.\n"
+        "Do NOT output any step-by-step, do NOT describe the document structure, do NOT say 'The user wants...'.\n"  # noqa: E501
         "5. Do NOT prefix with 'Here is the JSON:' or similar — start immediately with '{'.\n"
         "6. Conform EXACTLY to this JSON Schema (all required fields present, no extra fields):\n"
         # Compact JSON materially reduces prompt tokens on the 8K TPM tier.
         f"{json.dumps(schema, separators=(',', ':'))}\n"
         "Example of the required shape (illustrative values, adapt to the actual document):\n"
-        '{\n  "document_type": "prescription",\n  "date": "2024-03-15",\n  "provider_or_doctor": "Dr. Smith",\n  "patient_name": "John Doe",\n  "medications": [],\n  "lab_results": [],\n  "diagnoses": [],\n  "symptoms": [],\n  "procedures": [],\n  "vital_signs": [],\n  "imaging_results": [],\n  "allergies_noted": [],\n  "diagnoses_or_conditions": [],\n  "clinical_notes": null,\n  "field_evidence": {"date": [], "provider_or_doctor": [], "patient_name": [], "allergies_noted": [], "clinical_notes": []},\n  "illegible_or_low_confidence_fields": [],\n  "overall_confidence": 0.92\n}\n'
+        '{\n  "document_type": "prescription",\n  "date": "2024-03-15",\n  "provider_or_doctor": "Dr. Smith",\n  "patient_name": "John Doe",\n  "medications": [],\n  "lab_results": [],\n  "diagnoses": [],\n  "symptoms": [],\n  "procedures": [],\n  "vital_signs": [],\n  "imaging_results": [],\n  "allergies_noted": [],\n  "diagnoses_or_conditions": [],\n  "clinical_notes": null,\n  "field_evidence": {"date": [], "provider_or_doctor": [], "patient_name": [], "allergies_noted": [], "clinical_notes": []},\n  "illegible_or_low_confidence_fields": [],\n  "overall_confidence": 0.92\n}\n'  # noqa: E501
     )
     if model in _STRICT_SCHEMA_MODELS:
         return [
-            (strict_format, ""),   # Groq enforces the schema server-side
+            (strict_format, ""),  # Groq enforces the schema server-side
             ({"type": "json_object"}, schema_suffix),
             (None, schema_suffix),  # raw text — we parse the JSON ourselves
         ]
@@ -1162,9 +1093,14 @@ def _completion_resilient(
     total_attempts = 0
     rate_limit_waits = 0
     last_retry_after: Optional[float] = None
-    # Provider-aware rate-limit cap: check {PROVIDER}_MAX_RATE_LIMIT_RETRIES, LLM_*, then legacy GROQ_*
+    # Provider-aware rate-limit cap: check {PROVIDER}_MAX_RATE_LIMIT_RETRIES, LLM_*, then legacy GROQ_*  # noqa: E501
     _rate_limit_cap_env = None
-    for _env in [f"{LLM_PROVIDER.upper()}_MAX_RATE_LIMIT_RETRIES", "LLM_MAX_RATE_LIMIT_RETRIES", "GROQ_MAX_RATE_LIMIT_RETRIES", "GEMINI_MAX_RATE_LIMIT_RETRIES"]:
+    for _env in [
+        f"{LLM_PROVIDER.upper()}_MAX_RATE_LIMIT_RETRIES",
+        "LLM_MAX_RATE_LIMIT_RETRIES",
+        "GROQ_MAX_RATE_LIMIT_RETRIES",
+        "GEMINI_MAX_RATE_LIMIT_RETRIES",
+    ]:
         if os.environ.get(_env) is not None:
             _rate_limit_cap_env = _env
             break
@@ -1200,7 +1136,9 @@ def _completion_resilient(
     rung_index = 0
     while level < len(formats):
         response_format, prompt_suffix = formats[level]
-        candidates = _suppression_candidates(model)  # recomputed per format: probes crossed off earlier are skipped
+        candidates = _suppression_candidates(
+            model
+        )  # recomputed per format: probes crossed off earlier are skipped
         ci = 0
         while ci < len(candidates):
             probe_idx, probe_extra = candidates[ci]
@@ -1253,9 +1191,10 @@ def _completion_resilient(
                             # Probe proven to work — lead with it from now on.
                             suppress_state["good"] = probe_idx
                             logger.info(
-                                "_completion_resilient: model='%s' clean JSON with suppression probe '%s' — "
+                                "_completion_resilient: model='%s' clean JSON with suppression probe '%s' — "  # noqa: E501
                                 "using it as the default for this model",
-                                model, probe_label,
+                                model,
+                                probe_label,
                             )
                         return raw
                     if truncated:
@@ -1271,34 +1210,54 @@ def _completion_resilient(
                         # once the ceiling or escalation cap is reached.
                         last_error = ValueError(
                             "model output was truncated at the provider's token limit "
-                            f"(finish_reason={_finish_reason_text(response)}) before the JSON completed"
+                            f"(finish_reason={_finish_reason_text(response)}) before the JSON completed"  # noqa: E501
                         )
                         raised_budget = min(max_tokens * 2, completion_ceiling)
-                        if raised_budget > max_tokens and budget_escalations < _MAX_BUDGET_ESCALATIONS:
+                        if (
+                            raised_budget > max_tokens
+                            and budget_escalations < _MAX_BUDGET_ESCALATIONS
+                        ):
                             budget_escalations += 1
                             logger.warning(
-                                "_completion_resilient: model='%s' level=%d attempt=%d (%s) output was "
-                                "TRUNCATED at max_tokens=%d before the JSON completed — retrying this "
+                                "_completion_resilient: model='%s' level=%d attempt=%d (%s) output was "  # noqa: E501
+                                "TRUNCATED at max_tokens=%d before the JSON completed — retrying this "  # noqa: E501
                                 "rung with max_tokens=%d (escalation %d/%d)",
-                                model, level, attempt, probe_label, max_tokens, raised_budget,
-                                budget_escalations, _MAX_BUDGET_ESCALATIONS,
+                                model,
+                                level,
+                                attempt,
+                                probe_label,
+                                max_tokens,
+                                raised_budget,
+                                budget_escalations,
+                                _MAX_BUDGET_ESCALATIONS,
                             )
                             max_tokens = raised_budget
                             continue
                         logger.warning(
                             "_completion_resilient: model='%s' level=%d attempt=%d (%s) output was "
-                            "TRUNCATED (finish_reason=%s) and the completion budget cannot be raised "
+                            "TRUNCATED (finish_reason=%s) and the completion budget cannot be raised "  # noqa: E501
                             "further (max_tokens=%d, ceiling=%d) — advancing to the next rung: %s",
-                            model, level, attempt, probe_label, _finish_reason_text(response),
-                            max_tokens, completion_ceiling, parse_err or last_error,
+                            model,
+                            level,
+                            attempt,
+                            probe_label,
+                            _finish_reason_text(response),
+                            max_tokens,
+                            completion_ceiling,
+                            parse_err or last_error,
                         )
                         break
                     if not raw or not raw.strip():
-                        last_error = ValueError("model returned an empty response — no JSON to parse")
+                        last_error = ValueError(
+                            "model returned an empty response — no JSON to parse"
+                        )
                         logger.warning(
-                            "_completion_resilient: model='%s' level=%d attempt=%d (%s) returned an EMPTY "
+                            "_completion_resilient: model='%s' level=%d attempt=%d (%s) returned an EMPTY "  # noqa: E501
                             "response — advancing to the next rung",
-                            model, level, attempt, probe_label,
+                            model,
+                            level,
+                            attempt,
+                            probe_label,
                         )
                         # An empty generation is a model-side hiccup; retrying the
                         # exact same request usually repeats it, so move on to the
@@ -1314,16 +1273,21 @@ def _completion_resilient(
                             # no later format or later call wastes a request on it.
                             suppress_state["dead"].add(probe_idx)
                             logger.warning(
-                                "_completion_resilient: model='%s' suppression probe '%s' did not stop "
+                                "_completion_resilient: model='%s' suppression probe '%s' did not stop "  # noqa: E501
                                 "the model emitting <think> — crossing the probe off",
-                                model, probe_label,
+                                model,
+                                probe_label,
                             )
                         else:
                             logger.warning(
-                                "_completion_resilient: model='%s' level=%d attempt=%d (%s) returned non-JSON "
+                                "_completion_resilient: model='%s' level=%d attempt=%d (%s) returned non-JSON "  # noqa: E501
                                 "(snippet %r) — advancing to the next rung: %s",
-                                model, level, attempt, probe_label,
-                                raw[:250].replace(chr(10), " "), parse_err,
+                                model,
+                                level,
+                                attempt,
+                                probe_label,
+                                raw[:250].replace(chr(10), " "),
+                                parse_err,
                             )
                         break
                 except APIError as e:
@@ -1337,17 +1301,21 @@ def _completion_resilient(
                         suppress_state["dead"].add(probe_idx)
                         last_error = e
                         logger.warning(
-                            "_completion_resilient: provider '%s' does not accept suppression probe '%s' "
+                            "_completion_resilient: provider '%s' does not accept suppression probe '%s' "  # noqa: E501
                             "for model='%s' (HTTP %s) — crossing the probe off: %s",
-                            LLM_PROVIDER, probe_label, model,
-                            getattr(e, "status_code", "?"), _error_detail(e),
+                            LLM_PROVIDER,
+                            probe_label,
+                            model,
+                            getattr(e, "status_code", "?"),
+                            _error_detail(e),
                         )
                         break
                     _note_status(e)
                     if not _is_retryable_api_error(e):
                         logger.error(
-                            f"Provider '{LLM_PROVIDER}' request failed for model='%s' (non-retryable, not retrying): %s",
-                            model, _error_detail(e),
+                            f"Provider '{LLM_PROVIDER}' request failed for model='%s' (non-retryable, not retrying): %s",  # noqa: E501
+                            model,
+                            _error_detail(e),
                         )
                         raise
                     if _is_json_validation_failure(e):
@@ -1365,14 +1333,17 @@ def _completion_resilient(
                             # and the answer JSON failed for another reason.)
                             suppress_state["dead"].add(probe_idx)
                             logger.warning(
-                                "_completion_resilient: model='%s' discarded generation still contains "
+                                "_completion_resilient: model='%s' discarded generation still contains "  # noqa: E501
                                 "<think> despite suppression probe '%s' — crossing the probe off",
-                                model, probe_label,
+                                model,
+                                probe_label,
                             )
                         logger.warning(
-                            f"Provider '{LLM_PROVIDER}' rejected model='%s' generation server-side (JSON validation) — "
+                            f"Provider '{LLM_PROVIDER}' rejected model='%s' generation server-side (JSON validation) — "  # noqa: E501
                             "advancing to the next rung (%s): %s",
-                            model, probe_label, _error_detail(e),
+                            model,
+                            probe_label,
+                            _error_detail(e),
                         )
                         break
                     if _is_token_budget_error(e):
@@ -1383,9 +1354,12 @@ def _completion_resilient(
                         reduced_budget = max(256, max_tokens // 2)
                         if reduced_budget < max_tokens:
                             logger.warning(
-                                f"Provider '{LLM_PROVIDER}' token budget rejected model='%s' request; "
+                                f"Provider '{LLM_PROVIDER}' token budget rejected model='%s' request; "  # noqa: E501
                                 "reducing max_tokens from %d to %d: %s",
-                                model, max_tokens, reduced_budget, _error_detail(e),
+                                model,
+                                max_tokens,
+                                reduced_budget,
+                                _error_detail(e),
                             )
                             max_tokens = reduced_budget
                         if is_last_rung and attempt == attempts:
@@ -1409,18 +1383,26 @@ def _completion_resilient(
                             # used only for unrecoverable quota/model failures,
                             # never routine short-lived 429s. Re-run this exact
                             # ladder rung through the fallback client.
-                            if not _openrouter_fallback_is_active() and _activate_openrouter_fallback():
+                            if (
+                                not _openrouter_fallback_is_active()
+                                and _activate_openrouter_fallback()
+                            ):
                                 logger.warning(
-                                    "Retrying model='%s' through OpenRouter fallback after primary hard quota failure.",
+                                    "Retrying model='%s' through OpenRouter fallback after primary hard quota failure.",  # noqa: E501
                                     model,
                                 )
                                 continue
-                            provider_name = "openrouter" if _openrouter_fallback_is_active() else LLM_PROVIDER
+                            provider_name = (
+                                "openrouter" if _openrouter_fallback_is_active() else LLM_PROVIDER
+                            )
                             logger.error(
                                 "Provider '%s' has no usable quota for model='%s' "
                                 "(hard_quota=%s retired=%s); not retrying: %s",
                                 provider_name,
-                                model, hard_quota, retired_model, _error_detail(e),
+                                model,
+                                hard_quota,
+                                retired_model,
+                                _error_detail(e),
                             )
                             raise ProviderRateLimitError(
                                 provider=provider_name,
@@ -1432,14 +1414,21 @@ def _completion_resilient(
 
                         if rate_limit_waits >= max_rate_limit_waits:
                             raise ProviderRateLimitError(
-                                provider="openrouter" if _openrouter_fallback_is_active() else LLM_PROVIDER,
+                                provider="openrouter"
+                                if _openrouter_fallback_is_active()
+                                else LLM_PROVIDER,
                                 model=model,
                                 retry_after_seconds=sleep_s,
                             ) from e
                         logger.warning(
-                            "Provider '%s' rate-limited (429) model='%s' — sleeping %.0fs before retry "
+                            "Provider '%s' rate-limited (429) model='%s' — sleeping %.0fs before retry "  # noqa: E501
                             "(wait %d/%d): %s",
-                            LLM_PROVIDER, model, sleep_s, rate_limit_waits, max_rate_limit_waits, _error_detail(e),
+                            LLM_PROVIDER,
+                            model,
+                            sleep_s,
+                            rate_limit_waits,
+                            max_rate_limit_waits,
+                            _error_detail(e),
                         )
                         if is_last_rung and attempt == attempts:
                             break
@@ -1449,8 +1438,11 @@ def _completion_resilient(
                     # blips — these are worth retrying on the same rung.
                     last_error = e
                     logger.warning(
-                        f"Provider '{LLM_PROVIDER}' transient error for model='%s', retrying (attempt %d/%d): %s",
-                        model, attempt, attempts, _error_detail(e),
+                        f"Provider '{LLM_PROVIDER}' transient error for model='%s', retrying (attempt %d/%d): %s",  # noqa: E501
+                        model,
+                        attempt,
+                        attempts,
+                        _error_detail(e),
                     )
                     if is_last_rung and attempt == attempts:
                         break  # last rung exhausted — no point sleeping first
@@ -1461,7 +1453,9 @@ def _completion_resilient(
                     last_error = e
                     if "empty response" in str(e):
                         logger.warning(
-                            "_completion_resilient: model='%s' empty response on attempt %d", model, attempt
+                            "_completion_resilient: model='%s' empty response on attempt %d",
+                            model,
+                            attempt,
                         )
                     if is_last_rung and attempt == attempts:
                         break
@@ -1488,23 +1482,33 @@ def _completion_resilient(
     ):
         if _is_vision_content(user_content):
             try:
-                logger.info("Attempting vision repair retry with explicit JSON-only instruction for model=%s", model)
+                logger.info(
+                    "Attempting vision repair retry with explicit JSON-only instruction for model=%s",  # noqa: E501
+                    model,
+                )
                 repair_system_vision = (
-                    "You are a medical document extraction engine. Your previous response was INVALID because it contained "
-                    "reasoning, analysis, or <think> tags instead of ONLY JSON. Now you MUST output ONLY a single valid JSON object. "
-                    "The very first character must be '{' and the last must be '}'. No <think>, no markdown, no explanations. "
+                    "You are a medical document extraction engine. Your previous response was INVALID because it contained "  # noqa: E501
+                    "reasoning, analysis, or <think> tags instead of ONLY JSON. Now you MUST output ONLY a single valid JSON object. "  # noqa: E501
+                    "The very first character must be '{' and the last must be '}'. No <think>, no markdown, no explanations. "  # noqa: E501
                     "Conform exactly to the provided JSON Schema."
                 )
-                # Build repair user content: keep the original image but replace text with repair instruction
+                # Build repair user content: keep the original image but replace text with repair instruction  # noqa: E501
                 repair_text = (
-                    f"Previous attempt failed: {str(last_error)[:300]}. Last snippet: {last_raw_snippet[:400]!r}. "
-                    "Now extract structured data from this medical document image and output ONLY the JSON object, starting with '{'."
+                    f"Previous attempt failed: {str(last_error)[:300]}. Last snippet: {last_raw_snippet[:400]!r}. "  # noqa: E501
+                    "Now extract structured data from this medical document image and output ONLY the JSON object, starting with '{'."  # noqa: E501
                 )
                 # Preserve image_url entries from original user_content
-                image_parts = [c for c in user_content if isinstance(c, dict) and c.get("type") == "image_url"]
+                image_parts = [
+                    c for c in user_content if isinstance(c, dict) and c.get("type") == "image_url"
+                ]
                 repair_user_content = [{"type": "text", "text": repair_text}] + image_parts
                 repair_messages = [
-                    {"role": "system", "content": repair_system_vision + "\nSchema: " + json.dumps(strict_format["json_schema"]["schema"], indent=2)},
+                    {
+                        "role": "system",
+                        "content": repair_system_vision
+                        + "\nSchema: "
+                        + json.dumps(strict_format["json_schema"]["schema"], indent=2),
+                    },
                     {"role": "user", "content": repair_user_content},
                 ]
                 repair_kwargs: Dict[str, Any] = {
@@ -1513,7 +1517,7 @@ def _completion_resilient(
                     "temperature": 0,
                     "top_p": 1,
                     "max_tokens": max_tokens,
-                    # No response_format — use plain text so we can parse ourselves even if model adds stray text
+                    # No response_format — use plain text so we can parse ourselves even if model adds stray text  # noqa: E501
                 }
                 best_extra = _best_suppression_extra_body(model)
                 if best_extra is not None:
@@ -1526,7 +1530,11 @@ def _completion_resilient(
                         logger.info("Vision repair retry succeeded")
                         return raw_repair_vision
                     except ValueError as ve:
-                        logger.warning("Vision repair also not parseable: %s (snippet %r)", ve, raw_repair_vision[:250])
+                        logger.warning(
+                            "Vision repair also not parseable: %s (snippet %r)",
+                            ve,
+                            raw_repair_vision[:250],
+                        )
                         last_error = ve
                         last_raw_snippet = raw_repair_vision[:500]
             except Exception as repair_e:
@@ -1566,7 +1574,7 @@ def _completion_resilient(
         )
     elif last_error is not None and "could not be parsed" in str(last_error):
         cause_bits.append(
-            "the model kept emitting reasoning/non-JSON instead of the required JSON across all output modes"
+            "the model kept emitting reasoning/non-JSON instead of the required JSON across all output modes"  # noqa: E501
         )
     cause = (" Root cause hint: " + "; ".join(cause_bits) + ".") if cause_bits else ""
 
@@ -1594,13 +1602,17 @@ _THINK_BLOCK_RE = re.compile(
     r"<\s*(think|thinking|thought|reasoning|analysis)\s*>.*?<\s*/\s*(think|thinking|thought|reasoning|analysis)\s*>",
     flags=re.DOTALL | re.IGNORECASE,
 )
-_THINK_OPEN_RE = re.compile(r"<\s*(think|thinking|thought|reasoning|analysis)\s*>", flags=re.IGNORECASE)
+_THINK_OPEN_RE = re.compile(
+    r"<\s*(think|thinking|thought|reasoning|analysis)\s*>", flags=re.IGNORECASE
+)
 # Also handle HTML-entity encoded tags that sometimes surface in logging/transport
 _THINK_ENCODED_BLOCK_RE = re.compile(
     r"&lt;\s*(think|thinking|thought|reasoning|analysis)\s*&gt;.*?&lt;\s*/\s*(think|thinking|thought|reasoning|analysis)\s*&gt;",
     flags=re.DOTALL | re.IGNORECASE,
 )
-_THINK_ENCODED_OPEN_RE = re.compile(r"&lt;\s*(think|thinking|thought|reasoning|analysis)\s*&gt;", flags=re.IGNORECASE)
+_THINK_ENCODED_OPEN_RE = re.compile(
+    r"&lt;\s*(think|thinking|thought|reasoning|analysis)\s*&gt;", flags=re.IGNORECASE
+)
 
 
 def _strip_reasoning(text: str) -> str:
@@ -1627,14 +1639,26 @@ def _strip_reasoning(text: str) -> str:
         while pattern.search(cleaned):
             m = pattern.search(cleaned)
             assert m is not None
-            tail = cleaned[m.end():]
+            tail = cleaned[m.end() :]
             # Check if there's a closer of either form after opener
-            closer = re.search(r"<\s*/\s*(think|thinking|thought|reasoning|analysis)\s*>", tail, flags=re.IGNORECASE)
-            closer_enc = re.search(r"&lt;\s*/\s*(think|thinking|thought|reasoning|analysis)\s*&gt;", tail, flags=re.IGNORECASE)
+            closer = re.search(
+                r"<\s*/\s*(think|thinking|thought|reasoning|analysis)\s*>",
+                tail,
+                flags=re.IGNORECASE,
+            )
+            closer_enc = re.search(
+                r"&lt;\s*/\s*(think|thinking|thought|reasoning|analysis)\s*&gt;",
+                tail,
+                flags=re.IGNORECASE,
+            )
             closer_pos = None
             if closer and closer_enc:
-                closer_pos = closer.start() if closer.start() < closer_enc.start() else closer_enc.start()
-                closer_end = closer.end() if closer.start() < closer_enc.start() else closer_enc.end()
+                closer_pos = (
+                    closer.start() if closer.start() < closer_enc.start() else closer_enc.start()
+                )
+                closer_end = (
+                    closer.end() if closer.start() < closer_enc.start() else closer_enc.end()
+                )
             elif closer:
                 closer_pos = closer.start()
                 closer_end = closer.end()
@@ -1652,7 +1676,7 @@ def _strip_reasoning(text: str) -> str:
                     # No JSON at all after <think> — drop the opener and rest
                     # so downstream parsers raise appropriate error
                     tail = ""
-            cleaned = cleaned[:m.start()] + tail
+            cleaned = cleaned[: m.start()] + tail
     return cleaned
 
 
@@ -1782,6 +1806,7 @@ def _try_repair_json(candidate: str) -> Optional[Dict[str, Any]]:
     if "'" in cleaned and '"' not in cleaned[:500]:
         try:
             import ast
+
             obj = ast.literal_eval(cleaned)
             if isinstance(obj, dict):
                 return json.loads(json.dumps(obj))
@@ -1833,7 +1858,9 @@ def _parse_json_object(raw: str) -> Dict[str, Any]:
         return obj
 
     for source in (text, raw_stripped):
-        fenced = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", source, flags=re.DOTALL | re.IGNORECASE)
+        fenced = re.search(
+            r"```(?:json)?\s*\n?(.*?)\n?```", source, flags=re.DOTALL | re.IGNORECASE
+        )
         if fenced:
             candidate = fenced.group(1).strip()
             candidate = candidate.replace("&lt;", "<").replace("&gt;", ">")
@@ -1850,7 +1877,7 @@ def _parse_json_object(raw: str) -> Dict[str, Any]:
 
     start, end = text.find("{"), text.rfind("}")
     if start != -1 and end > start:
-        span = text[start:end + 1]
+        span = text[start : end + 1]
         span = _strip_reasoning(span)
         span = span.replace("&lt;", "<").replace("&gt;", ">")
         try:
@@ -1874,7 +1901,7 @@ def _parse_json_object(raw: str) -> Dict[str, Any]:
 
     s_idx, e_idx = raw_decoded.find("{"), raw_decoded.rfind("}")
     if s_idx != -1 and e_idx > s_idx:
-        candidate = raw_decoded[s_idx:e_idx+1]
+        candidate = raw_decoded[s_idx : e_idx + 1]
         repaired4 = _try_repair_json(candidate)
         if repaired4 is not None:
             return repaired4
@@ -1885,7 +1912,8 @@ def _parse_json_object(raw: str) -> Dict[str, Any]:
     snippet = raw_stripped[:350].replace("\n", " ").replace("\r", "")
     raise ValueError(f"model output could not be parsed as JSON (starts with: {snippet!r})")
 
-#---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
 # 1. Extraction schema — keeps every document's output shape consistent
 # ---------------------------------------------------------------------------
 
@@ -2107,7 +2135,15 @@ PROCEDURE_JSON_SCHEMA = {
         "confidence": {"type": "number", "minimum": 0, "maximum": 1},
         "evidence": CLINICAL_EVIDENCE_LIST_JSON_SCHEMA,
     },
-    "required": ["name", "procedure_date", "body_site", "status", "outcome", "confidence", "evidence"],
+    "required": [
+        "name",
+        "procedure_date",
+        "body_site",
+        "status",
+        "outcome",
+        "confidence",
+        "evidence",
+    ],
     "additionalProperties": False,
 }
 
@@ -2137,7 +2173,13 @@ IMAGING_RESULT_JSON_SCHEMA = {
         "evidence": CLINICAL_EVIDENCE_LIST_JSON_SCHEMA,
     },
     "required": [
-        "study_type", "body_site", "study_date", "findings", "impression", "confidence", "evidence",
+        "study_type",
+        "body_site",
+        "study_date",
+        "findings",
+        "impression",
+        "confidence",
+        "evidence",
     ],
     "additionalProperties": False,
 }
@@ -2150,8 +2192,13 @@ EXTRACTION_JSON_SCHEMA = {
         "document_type": {
             "type": "string",
             "enum": [
-                "prescription", "lab_report", "discharge_summary", "imaging_report",
-                "consultation_note", "procedure_report", "other",
+                "prescription",
+                "lab_report",
+                "discharge_summary",
+                "imaging_report",
+                "consultation_note",
+                "procedure_report",
+                "other",
             ],
         },
         "date": {"type": ["string", "null"]},
@@ -2181,9 +2228,17 @@ EXTRACTION_JSON_SCHEMA = {
                     "evidence": EVIDENCE_LIST_JSON_SCHEMA,
                 },
                 "required": [
-                    "name", "ingredients", "dosage", "frequency", "duration",
-                    "dosage_value", "dosage_unit", "frequency_per_day", "is_as_needed",
-                    "confidence", "evidence",
+                    "name",
+                    "ingredients",
+                    "dosage",
+                    "frequency",
+                    "duration",
+                    "dosage_value",
+                    "dosage_unit",
+                    "frequency_per_day",
+                    "is_as_needed",
+                    "confidence",
+                    "evidence",
                 ],
                 "additionalProperties": False,
             },
@@ -2201,7 +2256,15 @@ EXTRACTION_JSON_SCHEMA = {
                     "confidence": {"type": "number"},
                     "evidence": EVIDENCE_LIST_JSON_SCHEMA,
                 },
-                "required": ["test_name", "value", "unit", "reference_range", "flag", "confidence", "evidence"],
+                "required": [
+                    "test_name",
+                    "value",
+                    "unit",
+                    "reference_range",
+                    "flag",
+                    "confidence",
+                    "evidence",
+                ],
                 "additionalProperties": False,
             },
         },
@@ -2223,8 +2286,11 @@ EXTRACTION_JSON_SCHEMA = {
                 "clinical_notes": EVIDENCE_LIST_JSON_SCHEMA,
             },
             "required": [
-                "date", "provider_or_doctor", "patient_name",
-                "allergies_noted", "clinical_notes",
+                "date",
+                "provider_or_doctor",
+                "patient_name",
+                "allergies_noted",
+                "clinical_notes",
             ],
             "additionalProperties": False,
         },
@@ -2232,13 +2298,29 @@ EXTRACTION_JSON_SCHEMA = {
         "overall_confidence": {"type": "number"},
     },
     "required": [
-        "document_type", "date", "provider_or_doctor", "patient_name",
-        "patient_age", "patient_gender",
-        "document_language", "additional_languages",
-        "ocr_confidence", "translation_confidence",
-        "medications", "lab_results", "diagnoses", "symptoms", "procedures",
-        "vital_signs", "imaging_results", "allergies_noted", "diagnoses_or_conditions",
-        "clinical_notes", "field_evidence", "illegible_or_low_confidence_fields", "overall_confidence",
+        "document_type",
+        "date",
+        "provider_or_doctor",
+        "patient_name",
+        "patient_age",
+        "patient_gender",
+        "document_language",
+        "additional_languages",
+        "ocr_confidence",
+        "translation_confidence",
+        "medications",
+        "lab_results",
+        "diagnoses",
+        "symptoms",
+        "procedures",
+        "vital_signs",
+        "imaging_results",
+        "allergies_noted",
+        "diagnoses_or_conditions",
+        "clinical_notes",
+        "field_evidence",
+        "illegible_or_low_confidence_fields",
+        "overall_confidence",
     ],
     "additionalProperties": False,
 }
@@ -2256,6 +2338,7 @@ EXTRACTION_RESPONSE_FORMAT = {
 # ---------------------------------------------------------------------------
 # 2. File-type detection and preprocessing
 # ---------------------------------------------------------------------------
+
 
 def pdf_has_text_layer(pdf_path: str, min_chars: int = 30) -> bool:
     """Quick check: does this PDF have a usable embedded text layer?"""
@@ -2347,7 +2430,8 @@ def _ocr_scan_pdf_pages(
         return None, None, []
     try:
         _emit_document_progress(
-            progress_callback, "reading",
+            progress_callback,
+            "reading",
             f"Reading scanned page(s) with offline OCR ({len(page_indices)} page(s))",
         )
         results = ocr_pdf_pages(file_path, page_indices)
@@ -2355,19 +2439,25 @@ def _ocr_scan_pdf_pages(
         if not usable:
             logger.info(
                 "ocr: '%s' transcript not trusted (avg confidence=%s); using vision for %d page(s)",
-                Path(file_path).name, avg, len(page_indices),
+                Path(file_path).name,
+                avg,
+                len(page_indices),
             )
             return None, None, []
         logger.info(
             "ocr: '%s' transcript usable (avg confidence=%s) for %d scanned page(s) — text path",
-            Path(file_path).name, avg, len(page_indices),
+            Path(file_path).name,
+            avg,
+            len(page_indices),
         )
         return joined, avg, [r.page for r in results if r.text and r.text.strip()]
     except (TesseractNotFoundError, InvalidPDFError, OCRError) as exc:
         logger.warning("ocr: '%s' skipped (%s); using vision", Path(file_path).name, exc)
         return None, None, []
     except Exception as exc:  # defensive — OCR must never take down extraction
-        logger.warning("ocr: '%s' failed unexpectedly (%s); using vision", Path(file_path).name, exc)
+        logger.warning(
+            "ocr: '%s' failed unexpectedly (%s); using vision", Path(file_path).name, exc
+        )
         return None, None, []
 
 
@@ -2387,11 +2477,15 @@ def _ocr_image_file(file_path: str) -> Tuple[Optional[str], Optional[float]]:
         logger.warning("ocr: '%s' skipped (%s); using vision", Path(file_path).name, exc)
         return None, None
     except Exception as exc:
-        logger.warning("ocr: '%s' failed unexpectedly (%s); using vision", Path(file_path).name, exc)
+        logger.warning(
+            "ocr: '%s' failed unexpectedly (%s); using vision", Path(file_path).name, exc
+        )
         return None, None
 
 
-def image_to_base64(img: Image.Image) -> str:    # Downscale image if too large to prevent huge base64 payload size and potential network/timeout/size issues.
+def image_to_base64(
+    img: Image.Image,
+) -> str:  # Downscale image if too large to prevent huge base64 payload size and potential network/timeout/size issues.  # noqa: E501
     # 1600px is more than enough for medical document OCR.
     max_side = 1600
     if max(img.size) > max_side:
@@ -2413,6 +2507,7 @@ def image_to_base64(img: Image.Image) -> str:    # Downscale image if too large 
 # 3. Vision extraction call
 # ---------------------------------------------------------------------------
 
+
 def _normalize_extraction_result(result: Dict[str, Any]) -> Dict[str, Any]:
     """Backfill fields and enforce deterministic clinical-date admission."""
     diagnoses = result.get("diagnoses_or_conditions")
@@ -2426,8 +2521,14 @@ def _normalize_extraction_result(result: Dict[str, Any]) -> Dict[str, Any]:
     from date_convention import sanitize_clinical_date
 
     date_fields = {
-        "date", "onset_date", "procedure_date", "study_date", "measured_at",
-        "start_date", "end_date", "result_date",
+        "date",
+        "onset_date",
+        "procedure_date",
+        "study_date",
+        "measured_at",
+        "start_date",
+        "end_date",
+        "result_date",
     }
 
     def sanitize(value: Any) -> None:
@@ -2519,50 +2620,99 @@ def looks_like_medical_text(text: str, filename: str) -> bool:
     """
     text_lower = text.lower()
     fn_lower = filename.lower()
-    
+
     # 1. Filename-based non-medical indicators.
     # Must be token-aware: a substring check for "cv" falsely flags
     # cardiovascular_report.pdf, recovery.pdf, coverage.pdf, etc.
-    has_cv_filename = bool(re.search(
-        r"(?:^|[^a-z0-9])(cv|resume|curriculum|portfolio)(?:[^a-z0-9]|$)",
-        fn_lower,
-    ))
-    
+    has_cv_filename = bool(
+        re.search(
+            r"(?:^|[^a-z0-9])(cv|resume|curriculum|portfolio)(?:[^a-z0-9]|$)",
+            fn_lower,
+        )
+    )
+
     # 2. Text-based non-medical indicators (e.g. CV / Resume keywords)
     cv_keywords = [
-        "curriculum vitae", "education", "experience", "skills", "projects", 
-        "languages", "publications", "employment", "work history", "hobbies", 
-        "interests", "about me", "academic history", "professional summary"
+        "curriculum vitae",
+        "education",
+        "experience",
+        "skills",
+        "projects",
+        "languages",
+        "publications",
+        "employment",
+        "work history",
+        "hobbies",
+        "interests",
+        "about me",
+        "academic history",
+        "professional summary",
     ]
     cv_matches = 0
     for kw in cv_keywords:
-        if re.search(r'\b' + re.escape(kw) + r'\b', text_lower):
+        if re.search(r"\b" + re.escape(kw) + r"\b", text_lower):
             cv_matches += 1
-    
+
     # 3. Medical keyword density
     medical_keywords = [
-        "prescription", "rx", "medication", "medicine", "drug", "tablet", "capsule",
-        "dosage", "dose", "frequency", "mg", "g", "ml", "lab", "laboratory", "report",
-        "test", "results", "analysis", "allergy", "allergies", "clinical", "hospital",
-        "clinic", "treatment", "diagnosis", "symptom", "procedure", "surgery", "discharge",
-        "summary", "patient", "doctor", "physician", "imaging", "radiology", "x-ray", "ultrasound",
-        "blood pressure", "pulse", "temperature", "oxygen saturation"
+        "prescription",
+        "rx",
+        "medication",
+        "medicine",
+        "drug",
+        "tablet",
+        "capsule",
+        "dosage",
+        "dose",
+        "frequency",
+        "mg",
+        "g",
+        "ml",
+        "lab",
+        "laboratory",
+        "report",
+        "test",
+        "results",
+        "analysis",
+        "allergy",
+        "allergies",
+        "clinical",
+        "hospital",
+        "clinic",
+        "treatment",
+        "diagnosis",
+        "symptom",
+        "procedure",
+        "surgery",
+        "discharge",
+        "summary",
+        "patient",
+        "doctor",
+        "physician",
+        "imaging",
+        "radiology",
+        "x-ray",
+        "ultrasound",
+        "blood pressure",
+        "pulse",
+        "temperature",
+        "oxygen saturation",
     ]
     medical_matches = 0
     for kw in medical_keywords:
-        if re.search(r'\b' + re.escape(kw) + r'\b', text_lower):
+        if re.search(r"\b" + re.escape(kw) + r"\b", text_lower):
             medical_matches += 1
-    
-    # If the filename or the text has strong CV indicators and very low medical keyword matches, it is rejected.
+
+    # If the filename or the text has strong CV indicators and very low medical keyword matches, it is rejected.  # noqa: E501
     if has_cv_filename and medical_matches < 3:
         return False
-        
-    if re.search(r'\bcurriculum vitae\b|\bresume\b', text_lower) and medical_matches < 3:
+
+    if re.search(r"\bcurriculum vitae\b|\bresume\b", text_lower) and medical_matches < 3:
         return False
-        
+
     if cv_matches >= 3 and medical_matches < 2:
         return False
-        
+
     return True
 
 
@@ -2572,11 +2722,11 @@ def assert_text_looks_medical(text: str, filename: str) -> None:
     if the raw text does not appear to be a medical document.
     """
     from document_filter import NonMedicalDocumentError
-    
+
     if not looks_like_medical_text(text, filename):
         raise NonMedicalDocumentError(
             filename,
-            "raw text analysis indicates this is a non-medical document (e.g. CV/Resume) with low medical relevance."
+            "raw text analysis indicates this is a non-medical document (e.g. CV/Resume) with low medical relevance.",  # noqa: E501
         )
 
 
@@ -2630,8 +2780,8 @@ def process_document(
             f"Path does not exist: {file_path}\n"
             "  Common causes: the .zip wasn't extracted yet, a typo in the "
             "path, or a trailing backslash right before a closing quote "
-            "(e.g. \"...\\Year 1\\\" breaks Windows' command-line parsing — "
-            "remove the final backslash so it ends \"...\\Year 1\")."
+            '(e.g. "...\\Year 1\\" breaks Windows\' command-line parsing — '
+            'remove the final backslash so it ends "...\\Year 1").'
         )
     if path.is_dir():
         raise IsADirectoryError(
@@ -2659,7 +2809,9 @@ def process_document(
             text = extract_text_from_pdf(file_path)
             # deterministic check on the text layer before calling the LLM
             assert_text_looks_medical(text, path.name)
-            _emit_document_progress(progress_callback, "extracting", "Finding medical details in the text")
+            _emit_document_progress(
+                progress_callback, "extracting", "Finding medical details in the text"
+            )
             result = extract_from_text(text, model=model)
             result = normalize_document_evidence(result, default_page=1, vision=False)
             try:
@@ -2668,7 +2820,9 @@ def process_document(
                 # Evidence enrichment must never discard an otherwise valid
                 # extraction. Keep its page/quote fallback if PDF geometry
                 # cannot be resolved (encrypted/irregular PDFs, etc.).
-                logger.warning("Could not locate PDF evidence rectangles for '%s': %s", path.name, exc)
+                logger.warning(
+                    "Could not locate PDF evidence rectangles for '%s': %s", path.name, exc
+                )
             result["_source"] = {"file": path.name, "method": "text_layer"}
             return result
 
@@ -2688,7 +2842,9 @@ def process_document(
                     # may still be one — the vision model gets to judge.
                     ocr_text = None
             if ocr_text is not None:
-                _emit_document_progress(progress_callback, "extracting", "Finding medical details in the OCR text")
+                _emit_document_progress(
+                    progress_callback, "extracting", "Finding medical details in the OCR text"
+                )
                 result = extract_from_text(ocr_text, model=model)
                 result = normalize_document_evidence(result, default_page=1, vision=False)
                 result = locate_ocr_text_evidence(ocr_text, result)
@@ -2723,9 +2879,7 @@ def process_document(
         # vision — with the same offline OCR pre-pass for the scanned part.
         page_results = []
         if text_idx:
-            combined = "\n\n".join(
-                f"--- Page {i + 1} ---\n{page_texts[i]}" for i in text_idx
-            )
+            combined = "\n\n".join(f"--- Page {i + 1} ---\n{page_texts[i]}" for i in text_idx)
             assert_text_looks_medical(combined, path.name)
             _emit_document_progress(
                 progress_callback,
@@ -2766,7 +2920,7 @@ def process_document(
                     _emit_document_progress(
                         progress_callback,
                         "extracting",
-                        f"Finding medical details on scanned page {page_i + 1} of {len(page_texts)}",
+                        f"Finding medical details on scanned page {page_i + 1} of {len(page_texts)}",  # noqa: E501
                     )
                     res = extract_from_image(img, model=vision_model)
                     res = _apply_confidence_ceiling(res, VISION_OCR_CONFIDENCE_CEILING)
@@ -2790,7 +2944,9 @@ def process_document(
             except Exception:
                 ocr_text = None
         if ocr_text is not None:
-            _emit_document_progress(progress_callback, "extracting", "Finding medical details in the OCR text")
+            _emit_document_progress(
+                progress_callback, "extracting", "Finding medical details in the OCR text"
+            )
             result = extract_from_text(ocr_text, model=model)
             result = normalize_document_evidence(result, default_page=1, vision=False)
             result = locate_ocr_text_evidence(ocr_text, result)
@@ -2810,7 +2966,9 @@ def process_document(
         # present; never pass that through to extract_from_image.
         transposed = ImageOps.exif_transpose(img)
         img = transposed if transposed is not None else img
-        _emit_document_progress(progress_callback, "extracting", "Finding medical details in the image")
+        _emit_document_progress(
+            progress_callback, "extracting", "Finding medical details in the image"
+        )
         result = extract_from_image(img, model=vision_model)
         result = _apply_confidence_ceiling(result, VISION_OCR_CONFIDENCE_CEILING)
         result = normalize_document_evidence(result, default_page=1, vision=True)
@@ -2834,10 +2992,7 @@ def process_patient_folder(
     if not folder.exists():
         raise FileNotFoundError(f"Folder not found: {folder_path}")
 
-    files = sorted(
-        p for p in folder.rglob("*")
-        if p.is_file() and p.suffix.lower() in supported
-    )
+    files = sorted(p for p in folder.rglob("*") if p.is_file() and p.suffix.lower() in supported)
 
     if not files:
         print(f"No supported documents found in {folder_path}")
@@ -2858,6 +3013,7 @@ def process_patient_folder(
 # ---------------------------------------------------------------------------
 # 5. Timeline builder — merge multiple documents into one patient timeline
 # ---------------------------------------------------------------------------
+
 
 def _flatten_documents(raw_results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Multi-page scanned PDFs return {'multi_page': True, 'pages': [...]}.
@@ -2904,20 +3060,40 @@ def _flatten_documents(raw_results: List[Dict[str, Any]]) -> List[Dict[str, Any]
 # language. The structural `_source.method == "synthetic"` check below is
 # the reliable signal; these markers are the best-effort fallback for
 # vendor sample packs we did not generate ourselves.
-_DEMO_MARKERS_WORD = frozenset({
-    "demo", "sample", "dummy", "placeholder", "specimen",   # English
-    "test patient", "demo patient", "sample patient",        # English phrases
-    "மாதிரி", "டெமோ",                                        # Tamil (sample / demo)
-    "නියැදිය", "ආදර්ශ",                                       # Sinhala (sample / model-example)
-    "डेमो", "नमूना", "उदाहरण",                                 # Hindi (demo / sample / example)
-    "muestra", "ejemplo", "prueba",                          # Spanish
-    "exemple", "échantillon",                                # French
-    "تجريبي", "عينة", "نموذج",                                # Arabic (trial / sample / model)
-})
+_DEMO_MARKERS_WORD = frozenset(
+    {
+        "demo",
+        "sample",
+        "dummy",
+        "placeholder",
+        "specimen",  # English
+        "test patient",
+        "demo patient",
+        "sample patient",  # English phrases
+        "மாதிரி",
+        "டெமோ",  # Tamil (sample / demo)
+        "නියැදිය",
+        "ආදර්ශ",  # Sinhala (sample / model-example)
+        "डेमो",
+        "नमूना",
+        "उदाहरण",  # Hindi (demo / sample / example)
+        "muestra",
+        "ejemplo",
+        "prueba",  # Spanish
+        "exemple",
+        "échantillon",  # French
+        "تجريبي",
+        "عينة",
+        "نموذج",  # Arabic (trial / sample / model)
+    }
+)
 
-_DEMO_MARKERS_SUBSTRING = frozenset({
-    "デモ", "サンプル",                                        # Japanese (demo / sample)
-})
+_DEMO_MARKERS_SUBSTRING = frozenset(
+    {
+        "デモ",
+        "サンプル",  # Japanese (demo / sample)
+    }
+)
 
 # Built once at import: alternation of word-boundary-anchored markers.
 # re.UNICODE \b is script-aware, so it works for Tamil/Sinhala/Hindi/Arabic
@@ -3027,6 +3203,7 @@ def _parse_timeline_date(date_str: Optional[str], dayfirst: bool = True):
         return None
     try:
         from date_convention import parse_mixed_datetime
+
         parsed = parse_mixed_datetime(date_str, dayfirst=dayfirst)
         if parsed is None:
             return None
@@ -3059,6 +3236,7 @@ def build_patient_timeline(raw_results: List[Dict[str, Any]]) -> Dict[str, Any]:
     # twice makes every drug on it look prescribed twice. See
     # document_dedup.py.
     from document_dedup import annotate_prescription_groups
+
     annotate_prescription_groups(docs)
 
     # One day/month convention for the whole record, inferred from all its
@@ -3066,6 +3244,7 @@ def build_patient_timeline(raw_results: List[Dict[str, Any]]) -> Dict[str, Any]:
     # Shared with lab trends / change detection / risk windows so no two
     # features read the same ambiguous date as different days.
     from date_convention import infer_dayfirst
+
     dayfirst = infer_dayfirst([d.get("date") for d in docs])
 
     # Sort by parsed date; undated/unparseable docs go to the end.
@@ -3105,7 +3284,8 @@ def build_patient_timeline(raw_results: List[Dict[str, Any]]) -> Dict[str, Any]:
         )
         for collection in fact_collections:
             safe_visit[collection] = [
-                fact for fact in safe_visit.get(collection, [])
+                fact
+                for fact in safe_visit.get(collection, [])
                 if isinstance(fact, dict) and not (fact.get("_trust") or {}).get("quarantined")
             ]
         if has_quarantined_fact:
@@ -3120,49 +3300,57 @@ def build_patient_timeline(raw_results: List[Dict[str, Any]]) -> Dict[str, Any]:
             if not isinstance(med, dict) or (med.get("_trust") or {}).get("quarantined"):
                 continue
             medication_evidence = first_evidence(med) or {}
-            all_medications.append({
-                **med,
-                "date": visit_date,
-                "source_file": source_file,
-                "source_page": medication_evidence.get("page") or source_page,
-                "source_method": source.get("method"),
-                "document_id": doc_id,
-                "fact_path": f"/medications/{index}",
-                "document_type": d.get("document_type"),
-                "prescription_group": d.get("prescription_group"),
-            })
+            all_medications.append(
+                {
+                    **med,
+                    "date": visit_date,
+                    "source_file": source_file,
+                    "source_page": medication_evidence.get("page") or source_page,
+                    "source_method": source.get("method"),
+                    "document_id": doc_id,
+                    "fact_path": f"/medications/{index}",
+                    "document_type": d.get("document_type"),
+                    "prescription_group": d.get("prescription_group"),
+                }
+            )
 
         for index, lab in enumerate(d.get("lab_results", [])):
             if not isinstance(lab, dict) or (lab.get("_trust") or {}).get("quarantined"):
                 continue
             lab_evidence = first_evidence(lab) or {}
-            all_lab_results.append({
-                **lab,
-                "date": visit_date,
-                "source_file": source_file,
-                "source_page": lab_evidence.get("page") or source_page,
-                "source_method": source.get("method"),
-                "document_id": doc_id,
-                "fact_path": f"/lab_results/{index}",
-                "document_type": d.get("document_type"),
-            })
-
-        # Legacy generic diagnoses remain available as low-detail events.
-        for index, diagnosis in enumerate((d.get("diagnoses_or_conditions", []) or []) if not has_quarantined_fact else []):
-            if isinstance(diagnosis, str) and diagnosis.strip():
-                clinical_rollups["diagnoses_timeline"].append({
-                    "name": diagnosis.strip(),
-                    # The enclosing document date is provenance, not an
-                    # explicitly documented diagnosis/onset date.
-                    "date": None,
-                    "document_date": visit_date,
+            all_lab_results.append(
+                {
+                    **lab,
+                    "date": visit_date,
                     "source_file": source_file,
-                    "source_page": source_page,
+                    "source_page": lab_evidence.get("page") or source_page,
                     "source_method": source.get("method"),
                     "document_id": doc_id,
-                    "fact_path": f"/diagnoses_or_conditions/{index}",
+                    "fact_path": f"/lab_results/{index}",
                     "document_type": d.get("document_type"),
-                })
+                }
+            )
+
+        # Legacy generic diagnoses remain available as low-detail events.
+        for index, diagnosis in enumerate(
+            (d.get("diagnoses_or_conditions", []) or []) if not has_quarantined_fact else []
+        ):
+            if isinstance(diagnosis, str) and diagnosis.strip():
+                clinical_rollups["diagnoses_timeline"].append(
+                    {
+                        "name": diagnosis.strip(),
+                        # The enclosing document date is provenance, not an
+                        # explicitly documented diagnosis/onset date.
+                        "date": None,
+                        "document_date": visit_date,
+                        "source_file": source_file,
+                        "source_page": source_page,
+                        "source_method": source.get("method"),
+                        "document_id": doc_id,
+                        "fact_path": f"/diagnoses_or_conditions/{index}",
+                        "document_type": d.get("document_type"),
+                    }
+                )
 
         for collection in CLINICAL_EVENT_COLLECTIONS:
             timeline_key = CLINICAL_TIMELINE_KEYS[collection]
@@ -3171,44 +3359,52 @@ def build_patient_timeline(raw_results: List[Dict[str, Any]]) -> Dict[str, Any]:
                 if not isinstance(fact, dict) or (fact.get("_trust") or {}).get("quarantined"):
                     continue
                 fact_evidence = first_evidence(fact) or {}
-                clinical_rollups[timeline_key].append({
-                    **fact,
-                    # Never relabel the enclosing document date as the event
-                    # date. Undated facts remain undated and retain the source
-                    # date separately for provenance.
-                    "date": fact.get(event_date_field) or None,
-                    "document_date": visit_date,
-                    "source_file": source_file,
-                    "source_page": fact_evidence.get("page") or source.get("page"),
-                    "source_method": source.get("method"),
-                    "document_id": doc_id,
-                    "fact_path": f"/{collection}/{index}",
-                    "document_type": d.get("document_type"),
-                })
+                clinical_rollups[timeline_key].append(
+                    {
+                        **fact,
+                        # Never relabel the enclosing document date as the event
+                        # date. Undated facts remain undated and retain the source
+                        # date separately for provenance.
+                        "date": fact.get(event_date_field) or None,
+                        "document_date": visit_date,
+                        "source_file": source_file,
+                        "source_page": fact_evidence.get("page") or source.get("page"),
+                        "source_method": source.get("method"),
+                        "document_id": doc_id,
+                        "fact_path": f"/{collection}/{index}",
+                        "document_type": d.get("document_type"),
+                    }
+                )
 
         allergy_regions = (d.get("field_evidence") or {}).get("allergies_noted") or []
         for allergy in d.get("allergies_noted", []) or []:
             all_allergies.add(allergy)
-            allergy_evidence.append({
-                "allergy": allergy,
-                "document_id": doc_id,
-                "date": visit_date,
-                "source_file": source_file,
-                "source_method": source.get("method"),
-                "document_type": d.get("document_type"),
-                "confidence": d.get("overall_confidence"),
-                "evidence": copy.deepcopy(allergy_regions),
-                "_trust": copy.deepcopy(d.get("_trust")),
-            })
+            allergy_evidence.append(
+                {
+                    "allergy": allergy,
+                    "document_id": doc_id,
+                    "date": visit_date,
+                    "source_file": source_file,
+                    "source_method": source.get("method"),
+                    "document_type": d.get("document_type"),
+                    "confidence": d.get("overall_confidence"),
+                    "evidence": copy.deepcopy(allergy_regions),
+                    "_trust": copy.deepcopy(d.get("_trust")),
+                }
+            )
 
     # Event-specific dates (for example a historical procedure date printed
     # in a recent discharge summary) can differ from the enclosing document
     # date, so sort every clinical rollup independently.
     for values in clinical_rollups.values():
-        values.sort(key=lambda item: (
-            _parse_timeline_date(item.get("date"), dayfirst=dayfirst) is None,
-            _parse_timeline_date(item.get("date"), dayfirst=dayfirst) or item.get("date") or "9999-99-99",
-        ))
+        values.sort(
+            key=lambda item: (
+                _parse_timeline_date(item.get("date"), dayfirst=dayfirst) is None,
+                _parse_timeline_date(item.get("date"), dayfirst=dayfirst)
+                or item.get("date")
+                or "9999-99-99",
+            )
+        )
 
     from document_dedup import find_duplicate_document_groups
 
@@ -3238,14 +3434,13 @@ def build_patient_timeline(raw_results: List[Dict[str, Any]]) -> Dict[str, Any]:
 # working via these re-exports.
 
 from medication_safety import (  # noqa: E402
-    CROSS_CHECK_PROMPT,
-    CROSS_CHECK_JSON_SCHEMA,
-    CROSS_CHECK_RESPONSE_FORMAT,
-    analyze_medication_safety,
+    CROSS_CHECK_JSON_SCHEMA,  # noqa: F401  (public re-export)
+    CROSS_CHECK_PROMPT,  # noqa: F401  (public re-export)
+    CROSS_CHECK_RESPONSE_FORMAT,  # noqa: F401  (public re-export)
+    analyze_medication_safety,  # noqa: F401  (public re-export)
     cross_check_prescriptions,
-    detect_exact_duplicate_medications,
+    detect_exact_duplicate_medications,  # noqa: F401  (public re-export)
 )
-
 
 # ---------------------------------------------------------------------------
 # 7. Persistence helpers — patient report / raw-document cache on disk
@@ -3260,6 +3455,7 @@ from medication_safety import (  # noqa: E402
 #   patient_report_<name>.json - the merged {"patient_key", "patient_timeline",
 #                                "cross_check_report"} snapshot, same shape
 #                                the CLI has always written.
+
 
 def _safe_patient_filename(patient_key: str) -> str:
     """Maps a patient_key into a filesystem-safe name for the two files
@@ -3337,7 +3533,7 @@ if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("Usage:")
         print("  Single/multiple files:  python medical_extractor.py file1.pdf file2.jpg ...")
-        print("  Whole patient folder:   python medical_extractor.py \"C:\\path\\to\\Patient x\"")
+        print('  Whole patient folder:   python medical_extractor.py "C:\\path\\to\\Patient x"')
         print("  Then chat about it:     add --chat to either form above")
         sys.exit(1)
 
@@ -3397,6 +3593,7 @@ if __name__ == "__main__":
 
         print("Tracking lab result trends ...")
         from lab_trends import track_lab_trends
+
         lab_trends = track_lab_trends(timeline)
 
         print("Indexing timeline for retrieval (Q&A) ...")
@@ -3416,7 +3613,9 @@ if __name__ == "__main__":
         print(f"  Medications tracked: {len(timeline['medications_timeline'])}")
         print(f"  Interaction flags: {len(cross_check.get('potential_drug_interactions', []))}")
         print(f"  Duplicate flags: {len(cross_check.get('duplicate_prescriptions', []))}")
-        print(f"  Dosage conflict flags: {len(cross_check.get('conflicting_dosage_instructions', []))}")
+        print(
+            f"  Dosage conflict flags: {len(cross_check.get('conflicting_dosage_instructions', []))}"  # noqa: E501
+        )
 
     # Step 5 (optional): interactive Q&A over whatever was just indexed.
     if chat_mode:
@@ -3434,7 +3633,8 @@ if __name__ == "__main__":
                 print("Invalid selection. Exiting.")
                 sys.exit(1)
 
-        from conversation import get_or_create_session, ask as conversation_ask
+        from conversation import ask as conversation_ask
+        from conversation import get_or_create_session
 
         print(f"\nChatting about patient '{active_patient}'. Type 'exit' to quit.")
         session = get_or_create_session(active_patient, session_id="cli")

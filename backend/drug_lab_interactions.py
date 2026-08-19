@@ -28,7 +28,7 @@ rule) rather than capping them as model recall.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Set, Tuple
 
 from clinical_lab_values import (
     LabValue,
@@ -48,12 +48,17 @@ except Exception:  # pragma: no cover
     _CLASS_MEMBERS = {}
 
 POTASSIUM_RAISING_CLASSES = (
-    "ace_inhibitor", "arb", "potassium_sparing_diuretic", "potassium_supplement",
+    "ace_inhibitor",
+    "arb",
+    "potassium_sparing_diuretic",
+    "potassium_supplement",
 )
 # Heparins also raise potassium (via aldosterone suppression) — listed directly.
 POTASSIUM_RAISING_INGREDIENTS: Set[str] = {"heparin", "enoxaparin", "dalteparin"}
 SODIUM_LOWERING_INGREDIENTS: Set[str] = {
-    "carbamazepine", "oxcarbazepine", "desmopressin",
+    "carbamazepine",
+    "oxcarbazepine",
+    "desmopressin",
 }
 SODIUM_LOWERING_CLASSES = ("ssri", "thiazide")  # thiazide added below if present
 DIGOXIN = "digoxin"
@@ -65,15 +70,15 @@ BLEEDING_RISK_INGREDIENTS: Set[str] = {"clopidogrel", "prasugrel", "ticagrelor",
 # Canonical danger thresholds. Units are matched as substrings of the stored
 # unit so "mmol/L", "meq/l", "mmol/l" all match. INR is unitless.
 POTASSIUM_UNITS = ("mmol", "meq")
-POTASSIUM_HIGH_MOD = 5.5   # >= 5.5 moderate, >= 6.0 high
+POTASSIUM_HIGH_MOD = 5.5  # >= 5.5 moderate, >= 6.0 high
 POTASSIUM_HIGH_HIGH = 6.0
-POTASSIUM_LOW = 3.5        # <= 3.5
+POTASSIUM_LOW = 3.5  # <= 3.5
 SODIUM_UNITS = ("mmol", "meq")
-SODIUM_LOW_MOD = 135       # <= 135 moderate (flag), <= 130 high
+SODIUM_LOW_MOD = 135  # <= 135 moderate (flag), <= 130 high
 SODIUM_LOW_HIGH = 130
 INR_HIGH = 4.0
 # Platelets (10^9/L) — low raises bleeding risk with anticoagulants/NSAIDs/SSRIs.
-PLATELET_LOW_MOD = 150     # <= 150 thrombocytopenia; <= 100 higher risk
+PLATELET_LOW_MOD = 150  # <= 150 thrombocytopenia; <= 100 higher risk
 PLATELET_LOW_HIGH = 100
 # Magnesium (mmol/L) — low increases digoxin toxicity and arrhythmia risk.
 MAGNESIUM_LOW = 0.7
@@ -95,7 +100,9 @@ def _active_meds(timeline: Dict[str, Any]) -> List[Dict[str, Any]]:
     return list(timeline.get("medications_timeline") or [])
 
 
-def _has_class_or_ingredient(med: Dict[str, Any], classes: Tuple[str, ...], ingredients: Set[str]) -> bool:
+def _has_class_or_ingredient(
+    med: Dict[str, Any], classes: Tuple[str, ...], ingredients: Set[str]
+) -> bool:
     meds_ing = _med_ingredients(med)
     for cls in classes:
         if meds_ing & _CLASS_MEMBERS.get(cls, set()):
@@ -143,7 +150,6 @@ def check_drug_lab_findings(timeline: Dict[str, Any]) -> List[Dict[str, Any]]:
 
     potassium = labs.get("potassium")
     if potassium is not None and potassium.present:
-        k_val = potassium.value
         # tier the severity
         k_high = is_high(potassium, POTASSIUM_HIGH_MOD, POTASSIUM_UNITS)
         k_high_severe = is_high(potassium, POTASSIUM_HIGH_HIGH, POTASSIUM_UNITS)
@@ -160,14 +166,18 @@ def check_drug_lab_findings(timeline: Dict[str, Any]) -> List[Dict[str, Any]]:
                     continue
                 seen.add(key)
                 severity = "high" if k_high_severe else "moderate"
-                findings.append(_finding(
-                    "potassium_raising_drug + high_potassium",
-                    [med], potassium, severity,
-                    f"{_med_display(med)} can raise blood potassium. Your most recent potassium "
-                    f"reading is high ({summarise_lab(potassium)}), which increases the risk of "
-                    "a dangerous heart rhythm. Do not stop any medicine on your own — ask your "
-                    "doctor or pharmacist whether the dose or combination needs reviewing."
-                ))
+                findings.append(
+                    _finding(
+                        "potassium_raising_drug + high_potassium",
+                        [med],
+                        potassium,
+                        severity,
+                        f"{_med_display(med)} can raise blood potassium. Your most recent potassium "  # noqa: E501
+                        f"reading is high ({summarise_lab(potassium)}), which increases the risk of "  # noqa: E501
+                        "a dangerous heart rhythm. Do not stop any medicine on your own — ask your "
+                        "doctor or pharmacist whether the dose or combination needs reviewing.",
+                    )
+                )
         if k_low:
             for med in meds:
                 if DIGOXIN not in _med_ingredients(med):
@@ -176,13 +186,17 @@ def check_drug_lab_findings(timeline: Dict[str, Any]) -> List[Dict[str, Any]]:
                 if key in seen:
                     continue
                 seen.add(key)
-                findings.append(_finding(
-                    "digoxin + low_potassium",
-                    [med], potassium, "moderate",
-                    f"Low potassium ({summarise_lab(potassium)}) makes the heart more sensitive to "
-                    f"digoxin and raises the risk of digoxin toxicity. Ask your doctor whether your "
-                    "potassium needs correcting or the digoxin dose needs reviewing."
-                ))
+                findings.append(
+                    _finding(
+                        "digoxin + low_potassium",
+                        [med],
+                        potassium,
+                        "moderate",
+                        f"Low potassium ({summarise_lab(potassium)}) makes the heart more sensitive to "  # noqa: E501
+                        f"digoxin and raises the risk of digoxin toxicity. Ask your doctor whether your "  # noqa: E501
+                        "potassium needs correcting or the digoxin dose needs reviewing.",
+                    )
+                )
 
     sodium = labs.get("sodium")
     if sodium is not None and sodium.present:
@@ -191,7 +205,9 @@ def check_drug_lab_findings(timeline: Dict[str, Any]) -> List[Dict[str, Any]]:
         if na_low:
             for med in meds:
                 ing = _med_ingredients(med)
-                hit = _has_class_or_ingredient(med, SODIUM_LOWERING_CLASSES, SODIUM_LOWERING_INGREDIENTS)
+                hit = _has_class_or_ingredient(
+                    med, SODIUM_LOWERING_CLASSES, SODIUM_LOWERING_INGREDIENTS
+                )
                 if not hit:
                     continue
                 key = ("na_lowering_low_na", _med_display(med))
@@ -199,13 +215,17 @@ def check_drug_lab_findings(timeline: Dict[str, Any]) -> List[Dict[str, Any]]:
                     continue
                 seen.add(key)
                 severity = "high" if na_low_severe else "moderate"
-                findings.append(_finding(
-                    "sodium_lowering_drug + low_sodium",
-                    [med], sodium, severity,
-                    f"{_med_display(med)} can lower blood sodium. Your most recent sodium is low "
-                    f"({summarise_lab(sodium)}), which can cause confusion, drowsiness or seizures. "
-                    "Ask your doctor whether this medicine or your fluid intake needs adjusting."
-                ))
+                findings.append(
+                    _finding(
+                        "sodium_lowering_drug + low_sodium",
+                        [med],
+                        sodium,
+                        severity,
+                        f"{_med_display(med)} can lower blood sodium. Your most recent sodium is low "  # noqa: E501
+                        f"({summarise_lab(sodium)}), which can cause confusion, drowsiness or seizures. "  # noqa: E501
+                        "Ask your doctor whether this medicine or your fluid intake needs adjusting.",  # noqa: E501
+                    )
+                )
 
     inr = labs.get("inr")
     if inr is not None and inr.present:
@@ -222,14 +242,18 @@ def check_drug_lab_findings(timeline: Dict[str, Any]) -> List[Dict[str, Any]]:
                 if key in seen:
                     continue
                 seen.add(key)
-                findings.append(_finding(
-                    "anticoagulant + high_inr",
-                    [med], inr, "high",
-                    f"Your INR is high ({summarise_lab(inr)}), meaning your blood is thinner than "
-                    "the intended range, and you are taking a blood thinner. This raises the risk "
-                    "of serious bleeding. Contact your doctor or prescriber promptly — do not "
-                    "change the dose yourself."
-                ))
+                findings.append(
+                    _finding(
+                        "anticoagulant + high_inr",
+                        [med],
+                        inr,
+                        "high",
+                        f"Your INR is high ({summarise_lab(inr)}), meaning your blood is thinner than "  # noqa: E501
+                        "the intended range, and you are taking a blood thinner. This raises the risk "  # noqa: E501
+                        "of serious bleeding. Contact your doctor or prescriber promptly — do not "
+                        "change the dose yourself.",
+                    )
+                )
 
     platelet = labs.get("platelet")
     if platelet is not None and platelet.present:
@@ -240,27 +264,41 @@ def check_drug_lab_findings(timeline: Dict[str, Any]) -> List[Dict[str, Any]]:
         if pl_low:
             for med in meds:
                 ing = _med_ingredients(med)
-                hit = _has_class_or_ingredient(med, BLEEDING_RISK_CLASSES, BLEEDING_RISK_INGREDIENTS)
+                hit = _has_class_or_ingredient(
+                    med, BLEEDING_RISK_CLASSES, BLEEDING_RISK_INGREDIENTS
+                )
                 if not hit:
                     continue
                 key = ("low_platelet_bleeding", _med_display(med))
                 if key in seen:
                     continue
                 seen.add(key)
-                severity = "high" if (pl_severe or ing & _CLASS_MEMBERS.get("anticoagulant", set())) else "moderate"
-                findings.append(_finding(
-                    "bleeding_risk_drug + low_platelets",
-                    [med], platelet, severity,
-                    f"Your platelet count is low ({summarise_lab(platelet)}), which already raises "
-                    f"bleeding risk, and {_med_display(med)} also increases bleeding. Together the "
-                    "risk is higher — ask your doctor whether this combination or dose is right for you."
-                ))
+                severity = (
+                    "high"
+                    if (pl_severe or ing & _CLASS_MEMBERS.get("anticoagulant", set()))
+                    else "moderate"
+                )
+                findings.append(
+                    _finding(
+                        "bleeding_risk_drug + low_platelets",
+                        [med],
+                        platelet,
+                        severity,
+                        f"Your platelet count is low ({summarise_lab(platelet)}), which already raises "  # noqa: E501
+                        f"bleeding risk, and {_med_display(med)} also increases bleeding. Together the "  # noqa: E501
+                        "risk is higher — ask your doctor whether this combination or dose is right for you.",  # noqa: E501
+                    )
+                )
 
     magnesium = labs.get("magnesium")
-    if magnesium is not None and magnesium.present and DIGOXIN in {
-        i for m in meds for i in _med_ingredients(m)
-    }:
-        mg_low = is_low(magnesium, MAGNESIUM_LOW, ("mmol",)) or (flagged_low(magnesium) and not magnesium.unit)
+    if (
+        magnesium is not None
+        and magnesium.present
+        and DIGOXIN in {i for m in meds for i in _med_ingredients(m)}
+    ):
+        mg_low = is_low(magnesium, MAGNESIUM_LOW, ("mmol",)) or (
+            flagged_low(magnesium) and not magnesium.unit
+        )
         if mg_low:
             for med in meds:
                 if DIGOXIN not in _med_ingredients(med):
@@ -269,13 +307,17 @@ def check_drug_lab_findings(timeline: Dict[str, Any]) -> List[Dict[str, Any]]:
                 if key in seen:
                     continue
                 seen.add(key)
-                findings.append(_finding(
-                    "digoxin + low_magnesium",
-                    [med], magnesium, "moderate",
-                    f"Low magnesium ({summarise_lab(magnesium)}) — like low potassium — increases "
-                    "sensitivity to digoxin and the risk of toxicity. Ask your doctor whether your "
-                    "magnesium needs correcting."
-                ))
+                findings.append(
+                    _finding(
+                        "digoxin + low_magnesium",
+                        [med],
+                        magnesium,
+                        "moderate",
+                        f"Low magnesium ({summarise_lab(magnesium)}) — like low potassium — increases "  # noqa: E501
+                        "sensitivity to digoxin and the risk of toxicity. Ask your doctor whether your "  # noqa: E501
+                        "magnesium needs correcting.",
+                    )
+                )
 
     hemoglobin = labs.get("hemoglobin")
     if hemoglobin is not None and hemoglobin.present:
@@ -284,19 +326,25 @@ def check_drug_lab_findings(timeline: Dict[str, Any]) -> List[Dict[str, Any]]:
         )
         if hb_low:
             for med in meds:
-                if not _has_class_or_ingredient(med, BLEEDING_RISK_CLASSES, BLEEDING_RISK_INGREDIENTS):
+                if not _has_class_or_ingredient(
+                    med, BLEEDING_RISK_CLASSES, BLEEDING_RISK_INGREDIENTS
+                ):
                     continue
                 key = ("low_hb_bleeding", _med_display(med))
                 if key in seen:
                     continue
                 seen.add(key)
-                findings.append(_finding(
-                    "bleeding_risk_drug + low_hemoglobin",
-                    [med], hemoglobin, "moderate",
-                    f"Your haemoglobin is low ({summarise_lab(hemoglobin)}, suggesting anaemia) and "
-                    f"{_med_display(med)} can cause or worsen bleeding/anaemia. Ask your doctor "
-                    "whether this medicine is contributing and should be reviewed."
-                ))
+                findings.append(
+                    _finding(
+                        "bleeding_risk_drug + low_hemoglobin",
+                        [med],
+                        hemoglobin,
+                        "moderate",
+                        f"Your haemoglobin is low ({summarise_lab(hemoglobin)}, suggesting anaemia) and "  # noqa: E501
+                        f"{_med_display(med)} can cause or worsen bleeding/anaemia. Ask your doctor "  # noqa: E501
+                        "whether this medicine is contributing and should be reviewed.",
+                    )
+                )
 
     # Lithium + low sodium: sodium depletion reduces lithium clearance -> toxicity.
     if sodium is not None and sodium.present:
@@ -310,13 +358,17 @@ def check_drug_lab_findings(timeline: Dict[str, Any]) -> List[Dict[str, Any]]:
                     continue
                 seen.add(key)
                 severity = "high" if is_low(sodium, SODIUM_LOW_HIGH, SODIUM_UNITS) else "moderate"
-                findings.append(_finding(
-                    "lithium + low_sodium",
-                    [med], sodium, severity,
-                    f"Low sodium ({summarise_lab(sodium)}) reduces the kidneys' ability to clear "
-                    "lithium, which can cause lithium to build up to toxic levels. Ask your doctor "
-                    "to check your lithium level and sodium."
-                ))
+                findings.append(
+                    _finding(
+                        "lithium + low_sodium",
+                        [med],
+                        sodium,
+                        severity,
+                        f"Low sodium ({summarise_lab(sodium)}) reduces the kidneys' ability to clear "  # noqa: E501
+                        "lithium, which can cause lithium to build up to toxic levels. Ask your doctor "  # noqa: E501
+                        "to check your lithium level and sodium.",
+                    )
+                )
 
     return findings
 

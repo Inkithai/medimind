@@ -37,7 +37,7 @@ Usage:
 """
 
 import logging
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Sequence
 
 from graph_db import run_read, run_write, session_scope
 
@@ -53,7 +53,10 @@ def ingest_guidance() -> Dict[str, int]:
     on every deploy. Returns counts of what was submitted.
     """
     from reference_library import (
-        DRUG_CLASSES, GUIDANCE, SAMHSA_TOOLKIT, CLASSIFICATION_SOURCE,
+        CLASSIFICATION_SOURCE,
+        DRUG_CLASSES,
+        GUIDANCE,
+        SAMHSA_TOOLKIT,
     )
 
     source = SAMHSA_TOOLKIT
@@ -77,12 +80,16 @@ def ingest_guidance() -> Dict[str, int]:
 
     logger.info(
         "ingest: loading %d guidance statement(s) and %d drug class(es) from '%s'",
-        len(guidance_rows), len(class_rows), source["title"],
+        len(guidance_rows),
+        len(class_rows),
+        source["title"],
     )
 
     with session_scope("ingest_guidance") as session:
         run_write(
-            session, "ingest_guidance", f"MERGE source '{source['publication_no']}'",
+            session,
+            "ingest_guidance",
+            f"MERGE source '{source['publication_no']}'",
             """
             MERGE (s:GuidanceSource {id: $source.id})
               SET s.title = $source.title,
@@ -95,7 +102,8 @@ def ingest_guidance() -> Dict[str, int]:
         )
 
         run_write(
-            session, "ingest_guidance",
+            session,
+            "ingest_guidance",
             f"MERGE {len(class_rows)} drug class(es) and their members",
             """
             UNWIND $classes AS row
@@ -114,7 +122,8 @@ def ingest_guidance() -> Dict[str, int]:
         )
 
         run_write(
-            session, "ingest_guidance",
+            session,
+            "ingest_guidance",
             f"MERGE {len(guidance_rows)} guidance statement(s)",
             """
             MATCH (s:GuidanceSource {id: $source_id})
@@ -141,7 +150,9 @@ def ingest_guidance() -> Dict[str, int]:
             ("link COMBINED_WITH classes", "COMBINED_WITH", "combined_with"),
         ):
             run_write(
-                session, "ingest_guidance", step,
+                session,
+                "ingest_guidance",
+                step,
                 f"""
                 UNWIND $rows AS row
                 UNWIND row.{field} AS class_name
@@ -154,7 +165,9 @@ def ingest_guidance() -> Dict[str, int]:
 
     logger.info(
         "ingest: '%s' complete — %d statement(s), %d class(es)",
-        source["title"], len(guidance_rows), len(class_rows),
+        source["title"],
+        len(guidance_rows),
+        len(class_rows),
     )
     return {"guidance": len(guidance_rows), "drug_classes": len(class_rows)}
 
@@ -175,7 +188,9 @@ def lookup_guidance_for_drugs(drug_names: Sequence[str]) -> List[Dict[str, Any]]
 
     with session_scope("lookup_guidance") as session:
         return run_read(
-            session, "lookup_guidance", f"match guidance for {len(names)} drug name(s)",
+            session,
+            "lookup_guidance",
+            f"match guidance for {len(names)} drug name(s)",
             """
             UNWIND $names AS wanted
             MATCH (c:DrugClass)-[:INCLUDES]->(m:Medicine {name: toLower(wanted)})
@@ -202,7 +217,9 @@ def loaded_summary() -> Dict[str, Any]:
     an ingest actually landed."""
     with session_scope("guidance_summary") as session:
         sources = run_read(
-            session, "guidance_summary", "sources",
+            session,
+            "guidance_summary",
+            "sources",
             """
             MATCH (s:GuidanceSource)
             RETURN s.title AS title, s.publication_no AS publication_no,
@@ -212,7 +229,9 @@ def loaded_summary() -> Dict[str, Any]:
             """,
         )
         classes = run_read(
-            session, "guidance_summary", "drug classes",
+            session,
+            "guidance_summary",
+            "drug classes",
             """
             MATCH (c:DrugClass)
             RETURN c.name AS name, count{(c)-[:INCLUDES]->()} AS members
@@ -237,20 +256,27 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Load or inspect published clinical guidance in the Neo4j graph."
     )
-    parser.add_argument("--ingest", action="store_true",
-                        help="load reference_library.py's guidance into Neo4j (idempotent)")
+    parser.add_argument(
+        "--ingest",
+        action="store_true",
+        help="load reference_library.py's guidance into Neo4j (idempotent)",
+    )
     args = parser.parse_args()
 
     if args.ingest:
         counts = ingest_guidance()
-        print(f"\nSubmitted {counts['guidance']} guidance statement(s), "
-              f"{counts['drug_classes']} drug class(es).")
+        print(
+            f"\nSubmitted {counts['guidance']} guidance statement(s), "
+            f"{counts['drug_classes']} drug class(es)."
+        )
 
     summary = loaded_summary()
     print("\nGuidance sources in the graph:")
     for source in summary["sources"]:
-        print(f"  {source['title']} ({source['publication_no']}, {source['released']})"
-              f" — {source['statements']} statement(s)")
+        print(
+            f"  {source['title']} ({source['publication_no']}, {source['released']})"
+            f" — {source['statements']} statement(s)"
+        )
     if not summary["sources"]:
         print("  (none — run with --ingest)")
 

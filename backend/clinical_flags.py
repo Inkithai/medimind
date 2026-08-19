@@ -13,7 +13,6 @@ from typing import Any, Dict, List, Optional
 
 from specialty_mapping import match_specialty
 
-
 LOW_CONFIDENCE_THRESHOLD = 0.60
 
 
@@ -58,16 +57,27 @@ def _append_flag(
 
 
 def _visit_evidence(visit: Dict[str, Any]) -> str:
-    medications = ", ".join(_text(m.get("name")) for m in visit.get("medications", []) if _text(m.get("name")))
-    labs = ", ".join(_text(l.get("test_name")) for l in visit.get("lab_results", []) if _text(l.get("test_name")))
+    medications = ", ".join(
+        _text(m.get("name")) for m in visit.get("medications", []) if _text(m.get("name"))
+    )
+    labs = ", ".join(
+        _text(lab.get("test_name"))
+        for lab in visit.get("lab_results", [])
+        if _text(lab.get("test_name"))  # noqa: E501
+    )
     pieces = [
         _text(visit.get("document_type")),
         _text(visit.get("clinical_notes")),
         medications,
         labs,
-        ", ".join(_text(x) for x in visit.get("illegible_or_low_confidence_fields", []) if _text(x)),
+        ", ".join(
+            _text(x) for x in visit.get("illegible_or_low_confidence_fields", []) if _text(x)
+        ),
     ]
-    return "; ".join(piece for piece in pieces if piece) or "A document extraction was marked low confidence."
+    return (
+        "; ".join(piece for piece in pieces if piece)
+        or "A document extraction was marked low confidence."
+    )
 
 
 def derive_clinical_flags(
@@ -88,7 +98,9 @@ def derive_clinical_flags(
     for index, issue in enumerate(cross_check.get("potential_drug_interactions", []) or []):
         if _text(issue.get("severity")).lower() != "high":
             continue
-        meds = ", ".join(_text(name) for name in issue.get("medications_involved", []) if _text(name))
+        meds = ", ".join(
+            _text(name) for name in issue.get("medications_involved", []) if _text(name)
+        )
         explanation = _text(issue.get("explanation"))
         evidence = "; ".join(part for part in [meds, explanation] if part)
         _append_flag(
@@ -98,7 +110,8 @@ def derive_clinical_flags(
             trigger="high_risk",
             risk_level="high",
             title="Potential high-severity medication interaction",
-            evidence=evidence or "The safety cross-check marked a medication interaction as high severity.",
+            evidence=evidence
+            or "The safety cross-check marked a medication interaction as high severity.",
             source="Medication safety cross-check",
             confidence=_confidence(issue.get("confidence")),
         )
@@ -108,7 +121,13 @@ def derive_clinical_flags(
         allergy = _text(issue.get("allergy"))
         explanation = _text(issue.get("explanation"))
         evidence = "; ".join(
-            part for part in [f"Medication: {medication}" if medication else "", f"Recorded allergy: {allergy}" if allergy else "", explanation] if part
+            part
+            for part in [
+                f"Medication: {medication}" if medication else "",
+                f"Recorded allergy: {allergy}" if allergy else "",
+                explanation,
+            ]
+            if part
         )
         _append_flag(
             flags,
@@ -117,7 +136,8 @@ def derive_clinical_flags(
             trigger="high_risk",
             risk_level="high",
             title="Potential medication and allergy conflict",
-            evidence=evidence or "The medication safety cross-check found a potential allergy conflict.",
+            evidence=evidence
+            or "The medication safety cross-check found a potential allergy conflict.",
             source="Medication safety cross-check",
             confidence=_confidence(issue.get("confidence")),
         )
@@ -147,12 +167,14 @@ def derive_clinical_flags(
         if confidence is None or confidence >= LOW_CONFIDENCE_THRESHOLD:
             continue
         evidence = "; ".join(
-            part for part in [
+            part
+            for part in [
                 _text(medication.get("name")),
                 _text(medication.get("dosage")),
                 _text(medication.get("frequency")),
                 _text(medication.get("source_file")),
-            ] if part
+            ]
+            if part
         )
         _append_flag(
             flags,
@@ -171,12 +193,14 @@ def derive_clinical_flags(
         if confidence is None or confidence >= LOW_CONFIDENCE_THRESHOLD:
             continue
         evidence = "; ".join(
-            part for part in [
+            part
+            for part in [
                 _text(lab.get("test_name")),
                 _text(lab.get("value")),
                 _text(lab.get("unit")),
                 _text(lab.get("source_file")),
-            ] if part
+            ]
+            if part
         )
         _append_flag(
             flags,
@@ -195,11 +219,13 @@ def derive_clinical_flags(
         if confidence is None or confidence >= LOW_CONFIDENCE_THRESHOLD:
             continue
         evidence = "; ".join(
-            part for part in [
+            part
+            for part in [
                 _text(trend.get("test_name")),
                 _text(trend.get("explanation")),
                 _text(trend.get("reference_range")),
-            ] if part
+            ]
+            if part
         )
         _append_flag(
             flags,
@@ -216,20 +242,34 @@ def derive_clinical_flags(
     # Retain only low-confidence safety observations; the high-risk
     # interaction/allergy cases were handled separately above.
     for collection_name, title, issue_type in [
-        ("potential_drug_interactions", "Low-confidence medication interaction signal", "low_confidence_interaction"),
-        ("duplicate_prescriptions", "Low-confidence duplicate prescription signal", "low_confidence_duplicate"),
-        ("conflicting_dosage_instructions", "Low-confidence dosage-conflict signal", "low_confidence_dosage"),
+        (
+            "potential_drug_interactions",
+            "Low-confidence medication interaction signal",
+            "low_confidence_interaction",
+        ),
+        (
+            "duplicate_prescriptions",
+            "Low-confidence duplicate prescription signal",
+            "low_confidence_duplicate",
+        ),
+        (
+            "conflicting_dosage_instructions",
+            "Low-confidence dosage-conflict signal",
+            "low_confidence_dosage",
+        ),
     ]:
         for index, issue in enumerate(cross_check.get(collection_name, []) or []):
             confidence = _confidence(issue.get("confidence"))
             if confidence is None or confidence >= LOW_CONFIDENCE_THRESHOLD:
                 continue
             evidence = "; ".join(
-                part for part in [
+                part
+                for part in [
                     ", ".join(_text(x) for x in issue.get("medications_involved", []) if _text(x)),
                     _text(issue.get("medication")),
                     _text(issue.get("explanation")),
-                ] if part
+                ]
+                if part
             )
             _append_flag(
                 flags,

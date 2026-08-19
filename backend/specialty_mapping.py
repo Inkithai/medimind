@@ -13,7 +13,6 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, Iterable, List
 
-
 # The terms are intentionally conservative and are used only to choose a
 # provider-search category. They are not a diagnostic model.
 _SPECIALTIES: List[Dict[str, Any]] = [
@@ -22,9 +21,19 @@ _SPECIALTIES: List[Dict[str, Any]] = [
         "label": "Cardiologist",
         "provider_query": "cardiologist",
         "match_terms": [
-            "cardiac", "cardiology", "cardiologist", "heart", "troponin", "bnp",
-            "ecg", "electrocardiogram", "arrhythm", "palpitation", "hypertension",
-            "blood pressure", "chest pain",
+            "cardiac",
+            "cardiology",
+            "cardiologist",
+            "heart",
+            "troponin",
+            "bnp",
+            "ecg",
+            "electrocardiogram",
+            "arrhythm",
+            "palpitation",
+            "hypertension",
+            "blood pressure",
+            "chest pain",
         ],
     },
     {
@@ -32,8 +41,17 @@ _SPECIALTIES: List[Dict[str, Any]] = [
         "label": "Nephrologist",
         "provider_query": "nephrologist",
         "match_terms": [
-            "kidney", "renal", "nephro", "creatinine", "egfr", "gfr", "urea",
-            "bun", "albuminuria", "proteinuria", "dialysis",
+            "kidney",
+            "renal",
+            "nephro",
+            "creatinine",
+            "egfr",
+            "gfr",
+            "urea",
+            "bun",
+            "albuminuria",
+            "proteinuria",
+            "dialysis",
         ],
     },
     {
@@ -41,8 +59,16 @@ _SPECIALTIES: List[Dict[str, Any]] = [
         "label": "Pulmonologist",
         "provider_query": "pulmonologist",
         "match_terms": [
-            "respiratory", "pulmonary", "pulmonologist", "lung", "asthma", "bronch",
-            "wheez", "spirometry", "oxygen", "shortness of breath",
+            "respiratory",
+            "pulmonary",
+            "pulmonologist",
+            "lung",
+            "asthma",
+            "bronch",
+            "wheez",
+            "spirometry",
+            "oxygen",
+            "shortness of breath",
         ],
     },
     {
@@ -50,8 +76,15 @@ _SPECIALTIES: List[Dict[str, Any]] = [
         "label": "Neurologist",
         "provider_query": "neurologist",
         "match_terms": [
-            "neurolog", "brain", "seizure", "migraine", "stroke", "numbness",
-            "neuropathy", "dizziness", "vertigo",
+            "neurolog",
+            "brain",
+            "seizure",
+            "migraine",
+            "stroke",
+            "numbness",
+            "neuropathy",
+            "dizziness",
+            "vertigo",
         ],
     },
     {
@@ -59,7 +92,13 @@ _SPECIALTIES: List[Dict[str, Any]] = [
         "label": "Dermatologist",
         "provider_query": "dermatologist",
         "match_terms": [
-            "dermat", "skin", "rash", "eczema", "psoriasis", "lesion", "hives",
+            "dermat",
+            "skin",
+            "rash",
+            "eczema",
+            "psoriasis",
+            "lesion",
+            "hives",
             "urticaria",
         ],
     },
@@ -107,7 +146,11 @@ def _profile(
     the broader route explicit without automatically searching it.
     """
     primary = _basic_profile(profile)
-    alternative = _basic_profile(_GENERAL) if include_general_alternative and profile["id"] != _GENERAL["id"] else None
+    alternative = (
+        _basic_profile(_GENERAL)
+        if include_general_alternative and profile["id"] != _GENERAL["id"]
+        else None
+    )
     return {
         **primary,
         "reason": reason,
@@ -140,7 +183,7 @@ def match_specialty(issue_type: str, evidence: str) -> Dict[str, Any]:
     }:
         return _profile(
             _PHARMACY,
-            "This flag concerns medication safety or prescription instructions; a pharmacist or the prescribing doctor is the appropriate first review.",
+            "This flag concerns medication safety or prescription instructions; a pharmacist or the prescribing doctor is the appropriate first review.",  # noqa: E501
         )
 
     candidates: List[tuple[int, Dict[str, Any], List[str]]] = []
@@ -153,13 +196,13 @@ def match_specialty(issue_type: str, evidence: str) -> Dict[str, Any]:
         _, profile, matched = max(candidates, key=lambda item: item[0])
         return _profile(
             profile,
-            "This provider category was selected from terms already present in the flagged record; it is not a diagnosis.",
+            "This provider category was selected from terms already present in the flagged record; it is not a diagnosis.",  # noqa: E501
             matched,
         )
 
     return _profile(
         _GENERAL,
-        "The available record does not support a narrower specialty choice, so a general physician is the safer starting point.",
+        "The available record does not support a narrower specialty choice, so a general physician is the safer starting point.",  # noqa: E501
     )
 
 

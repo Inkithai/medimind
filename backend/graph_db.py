@@ -47,6 +47,7 @@ logger = logging.getLogger("graph_db")
 
 try:
     from neo4j import Driver, GraphDatabase
+
     NEO4J_IMPORT_OK = True
 except ImportError:  # pragma: no cover — environment-dependent
     Driver = None  # type: ignore[assignment]
@@ -84,9 +85,7 @@ def is_configured() -> bool:
 # that dies between check and query is recovered.
 MAX_CONNECTION_LIFETIME = int(os.environ.get("NEO4J_MAX_CONNECTION_LIFETIME", "300"))
 LIVENESS_CHECK_TIMEOUT = int(os.environ.get("NEO4J_LIVENESS_CHECK_TIMEOUT", "30"))
-CONNECTION_ACQUISITION_TIMEOUT = int(
-    os.environ.get("NEO4J_CONNECTION_ACQUISITION_TIMEOUT", "30")
-)
+CONNECTION_ACQUISITION_TIMEOUT = int(os.environ.get("NEO4J_CONNECTION_ACQUISITION_TIMEOUT", "30"))
 # Bounds the driver's internal retry of a managed transaction. Kept short
 # because this graph is an optional enrichment on a request a user is
 # waiting on: recovering a dropped connection is worth a few seconds, but
@@ -139,14 +138,19 @@ def get_driver() -> Any:
             _driver = None
             logger.error(
                 "neo4j: connection FAILED to %s after %.0fms: %s",
-                _safe_uri(uri), (time.perf_counter() - started) * 1000, e,
+                _safe_uri(uri),
+                (time.perf_counter() - started) * 1000,
+                e,
             )
             raise
         logger.info(
             "neo4j: connected to %s in %.0fms "
             "(max_connection_lifetime=%ds liveness_check=%ds retry_window=%ds)",
-            _safe_uri(uri), (time.perf_counter() - started) * 1000,
-            MAX_CONNECTION_LIFETIME, LIVENESS_CHECK_TIMEOUT, MAX_TRANSACTION_RETRY_TIME,
+            _safe_uri(uri),
+            (time.perf_counter() - started) * 1000,
+            MAX_CONNECTION_LIFETIME,
+            LIVENESS_CHECK_TIMEOUT,
+            MAX_TRANSACTION_RETRY_TIME,
         )
     else:
         logger.debug("neo4j: reusing existing connection (singleton driver)")
@@ -219,12 +223,15 @@ def session_scope(operation: str) -> Iterator[Any]:
     except Exception as e:
         logger.error(
             "neo4j: [%s] FAILED after %.0fms: %s",
-            operation, (time.perf_counter() - started) * 1000, e,
+            operation,
+            (time.perf_counter() - started) * 1000,
+            e,
         )
         raise
     logger.info(
         "neo4j: [%s] completed in %.0fms",
-        operation, (time.perf_counter() - started) * 1000,
+        operation,
+        (time.perf_counter() - started) * 1000,
     )
 
 
@@ -242,7 +249,9 @@ def _attempt_logger(operation: str, step: str):
             logger.warning(
                 "neo4j: [%s] retrying %s (attempt %d) — the previous attempt failed, "
                 "most likely a connection dropped while idle",
-                operation, step, state["attempt"],
+                operation,
+                step,
+                state["attempt"],
             )
 
     return state, note_attempt
@@ -270,7 +279,9 @@ def run_write(session: Any, operation: str, step: str, cypher: str, **params: An
     summary = session.execute_write(_work)
     logger.info(
         "neo4j: [%s] <- %s ok in %.0fms%s (%s)",
-        operation, step, (time.perf_counter() - started) * 1000,
+        operation,
+        step,
+        (time.perf_counter() - started) * 1000,
         f" after {state['attempt']} attempts" if state["attempt"] > 1 else "",
         _format_counters(summary),
     )
@@ -298,7 +309,9 @@ def run_read(session: Any, operation: str, step: str, cypher: str, **params: Any
     records = session.execute_read(_work)
     logger.info(
         "neo4j: [%s] <- %s ok in %.0fms%s (%d row(s) returned)",
-        operation, step, (time.perf_counter() - started) * 1000,
+        operation,
+        step,
+        (time.perf_counter() - started) * 1000,
         f" after {state['attempt']} attempts" if state["attempt"] > 1 else "",
         len(records),
     )
@@ -312,16 +325,15 @@ def ensure_constraints() -> None:
             "CREATE CONSTRAINT IF NOT EXISTS FOR (m:Medicine) REQUIRE m.name IS UNIQUE"
         ),
         "SourceDocument.filename unique": (
-            "CREATE CONSTRAINT IF NOT EXISTS FOR (s:SourceDocument) "
-            "REQUIRE s.filename IS UNIQUE"
+            "CREATE CONSTRAINT IF NOT EXISTS FOR (s:SourceDocument) REQUIRE s.filename IS UNIQUE"
         ),
-        "GuidanceSource.id unique": "CREATE CONSTRAINT IF NOT EXISTS FOR (s:GuidanceSource) REQUIRE s.id IS UNIQUE",
-        "Guidance.id unique": "CREATE CONSTRAINT IF NOT EXISTS FOR (g:Guidance) REQUIRE g.id IS UNIQUE",
-        "DrugClass.name unique": "CREATE CONSTRAINT IF NOT EXISTS FOR (c:DrugClass) REQUIRE c.name IS UNIQUE",
-        "Section.id unique": "CREATE CONSTRAINT IF NOT EXISTS FOR (s:Section) REQUIRE s.id IS UNIQUE",
-        "Indication.name unique": "CREATE CONSTRAINT IF NOT EXISTS FOR (i:Indication) REQUIRE i.name IS UNIQUE",
-        "AWaReGroup.name unique": "CREATE CONSTRAINT IF NOT EXISTS FOR (g:AWaReGroup) REQUIRE g.name IS UNIQUE",
-        "AgeRestriction.id unique": "CREATE CONSTRAINT IF NOT EXISTS FOR (r:AgeRestriction) REQUIRE r.id IS UNIQUE",
+        "GuidanceSource.id unique": "CREATE CONSTRAINT IF NOT EXISTS FOR (s:GuidanceSource) REQUIRE s.id IS UNIQUE",  # noqa: E501
+        "Guidance.id unique": "CREATE CONSTRAINT IF NOT EXISTS FOR (g:Guidance) REQUIRE g.id IS UNIQUE",  # noqa: E501
+        "DrugClass.name unique": "CREATE CONSTRAINT IF NOT EXISTS FOR (c:DrugClass) REQUIRE c.name IS UNIQUE",  # noqa: E501
+        "Section.id unique": "CREATE CONSTRAINT IF NOT EXISTS FOR (s:Section) REQUIRE s.id IS UNIQUE",  # noqa: E501
+        "Indication.name unique": "CREATE CONSTRAINT IF NOT EXISTS FOR (i:Indication) REQUIRE i.name IS UNIQUE",  # noqa: E501
+        "AWaReGroup.name unique": "CREATE CONSTRAINT IF NOT EXISTS FOR (g:AWaReGroup) REQUIRE g.name IS UNIQUE",  # noqa: E501
+        "AgeRestriction.id unique": "CREATE CONSTRAINT IF NOT EXISTS FOR (r:AgeRestriction) REQUIRE r.id IS UNIQUE",  # noqa: E501
     }
     with session_scope("ensure_constraints") as session:
         for step, cypher in constraints.items():

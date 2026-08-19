@@ -167,8 +167,8 @@ class OsmProvider:
         hit = self._geocode_cache.get(key)
         if hit is not None:
             return None if hit is _MISSING else hit
-        url = NOMINATIM_URL + "?" + urllib.parse.urlencode(
-            {"q": text, "format": "json", "limit": 1}
+        url = (
+            NOMINATIM_URL + "?" + urllib.parse.urlencode({"q": text, "format": "json", "limit": 1})
         )
         payload = self._call([url])
         point: Optional[GeoPoint] = None
@@ -203,7 +203,9 @@ class OsmProvider:
     def route(self, origin: GeoPoint, destination: GeoPoint) -> RouteEstimate:
         # OSM routing needs a separate engine (OSRM). This adapter returns a
         # straight-line estimate so the service contract stays provider-shaped.
-        km = haversine_km(origin.latitude, origin.longitude, destination.latitude, destination.longitude)
+        km = haversine_km(
+            origin.latitude, origin.longitude, destination.latitude, destination.longitude
+        )
         return RouteEstimate(
             origin=origin,
             destination=destination,

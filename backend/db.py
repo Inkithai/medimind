@@ -29,9 +29,9 @@ Env:
     SUPABASE_SERVICE_ROLE_KEY   Settings -> API -> service_role (secret)
 """
 
-import os
 import functools
 import logging
+import os
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Sequence
 
@@ -52,9 +52,12 @@ def _get_client() -> Client:
         # with no browser-facing policies, so an anon key will be denied and
         # using it would also hide a deployment configuration error.
         key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
-        if (not url or not key or
-                url.strip() in ("", "https://your-project-ref.supabase.co") or
-                key.strip() in ("", "your-supabase-service-role-key")):
+        if (
+            not url
+            or not key
+            or url.strip() in ("", "https://your-project-ref.supabase.co")
+            or key.strip() in ("", "your-supabase-service-role-key")
+        ):
             raise RuntimeError(
                 "SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set. "
                 "Use the secret service_role key (not the anon/publishable key) "
@@ -123,6 +126,7 @@ def _translate_missing_schema(fn):
     schema cache") gives no hint about the actual fix; the translated error
     tells the operator exactly which setup step was missed.
     """
+
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
         try:
@@ -142,6 +146,7 @@ def _translate_missing_schema(fn):
                     "points at the right project."
                 ) from e
             raise
+
     return wrapper
 
 
@@ -197,7 +202,9 @@ def load_patient_snapshot(user_id: str) -> Optional[Dict[str, Any]]:
     try:
         response = (
             _snapshots()
-            .select("user_id, patient_timeline, cross_check_report, lab_trends, derived_reports, updated_at")
+            .select(
+                "user_id, patient_timeline, cross_check_report, lab_trends, derived_reports, updated_at"  # noqa: E501
+            )
             .eq("user_id", user_id)
             .limit(1)
             .execute()
@@ -303,7 +310,9 @@ def sync_clinical_projection(
             existing_rows = list(response.data or [])
         except Exception as exc:
             if getattr(exc, "code", None) == _MISSING_TABLE_CODE or _MISSING_TABLE_CODE in str(exc):
-                logger.warning("normalized projection unavailable; apply supabase_schema.sql: %s", table_name)
+                logger.warning(
+                    "normalized projection unavailable; apply supabase_schema.sql: %s", table_name
+                )
                 return {"available": False, "reason": "schema_not_migrated", "tables": {}}
             raise
 
@@ -330,7 +339,10 @@ def sync_clinical_projection(
         if upserts:
             client.table(table_name).upsert(upserts, on_conflict="id").execute()
         summary["tables"][table_name] = {
-            "created": created, "updated": updated, "unchanged": unchanged, "removed": removed,
+            "created": created,
+            "updated": updated,
+            "unchanged": unchanged,
+            "removed": removed,
         }
     summary["safety_findings"] = summary["tables"].get("safety_findings", {})
     return summary
@@ -340,11 +352,17 @@ def sync_clinical_projection(
 def load_clinical_entities(user_id: str, kind: str, limit: int = 500) -> List[Dict[str, Any]]:
     """Read one normalized entity class, always tenant-scoped."""
     from clinical_projection import ENTITY_TABLES
+
     if kind not in ENTITY_TABLES:
         raise ValueError(f"Unknown clinical entity kind: {kind}")
     response = (
-        _get_client().table(kind).select("*").eq("user_id", user_id)
-        .order("event_date", desc=True).limit(max(1, min(1000, limit))).execute()
+        _get_client()
+        .table(kind)
+        .select("*")
+        .eq("user_id", user_id)
+        .order("event_date", desc=True)
+        .limit(max(1, min(1000, limit)))
+        .execute()
     )
     return list(response.data or [])
 
@@ -371,7 +389,11 @@ def replace_document_group(
         data = row.get("data") if isinstance(row.get("data"), dict) else {}
         if content_sha256 and data.get("content_sha256") == content_sha256:
             matched_ids.append(row["id"])
-        elif not content_sha256 and source_file and (data.get("_source") or {}).get("file") == source_file:
+        elif (
+            not content_sha256
+            and source_file
+            and (data.get("_source") or {}).get("file") == source_file
+        ):
             matched_ids.append(row["id"])
     if matched_ids:
         _documents().delete().in_("id", matched_ids).execute()
@@ -507,8 +529,12 @@ def load_patient_profile(user_id: str) -> Optional[Dict[str, Any]]:
 @_translate_missing_schema
 def save_patient_profile(user_id: str, profile: Dict[str, Any]) -> Dict[str, Any]:
     allowed = {
-        "legal_name", "preferred_name", "date_of_birth", "phone",
-        "emergency_contact", "preferred_language",
+        "legal_name",
+        "preferred_name",
+        "date_of_birth",
+        "phone",
+        "emergency_contact",
+        "preferred_language",
     }
     row = {"user_id": user_id, "updated_at": _now_iso()}
     row.update({key: profile.get(key) for key in allowed})
@@ -521,11 +547,13 @@ def save_referral_search(user_id: str, search: Dict[str, Any]) -> None:
     """Appends one referral-trail record (finding -> specialty -> search ->
     ranked providers) for this user. Append-only; see referral_trail.py
     for the record shape. The table is created by supabase_schema.sql."""
-    _referral_searches().insert({
-        "user_id": user_id,
-        "created_at": _now_iso(),
-        "search": search,
-    }).execute()
+    _referral_searches().insert(
+        {
+            "user_id": user_id,
+            "created_at": _now_iso(),
+            "search": search,
+        }
+    ).execute()
 
 
 @_translate_missing_schema
@@ -546,10 +574,14 @@ def load_referral_searches(user_id: str, limit: int = 20) -> List[Dict[str, Any]
 @_translate_missing_schema
 def load_correction_events(user_id: str, document_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """Return immutable correction events in replay/audit order."""
-    query = _corrections().select(
-        "id, correction_batch_id, user_id, document_id, field_path, original_value, "
-        "previous_value, corrected_value, reason, created_at"
-    ).eq("user_id", user_id)
+    query = (
+        _corrections()
+        .select(
+            "id, correction_batch_id, user_id, document_id, field_path, original_value, "
+            "previous_value, corrected_value, reason, created_at"
+        )
+        .eq("user_id", user_id)
+    )
     if document_id is not None:
         query = query.eq("document_id", document_id)
     response = query.order("created_at").order("id").execute()
@@ -565,49 +597,59 @@ def insert_correction_events(user_id: str, events: Sequence[Dict[str, Any]]) -> 
     for event in events:
         if event.get("user_id") != user_id:
             raise ValueError("Correction event user_id does not match the authenticated user.")
-        rows.append({
-            "id": event["id"],
-            "correction_batch_id": event["correction_batch_id"],
-            "user_id": user_id,
-            "document_id": event["document_id"],
-            "field_path": event["field_path"],
-            "original_value": event.get("original_value"),
-            "previous_value": event.get("previous_value"),
-            "corrected_value": event.get("corrected_value"),
-            "reason": event["reason"],
-            "created_at": event.get("created_at") or _now_iso(),
-        })
+        rows.append(
+            {
+                "id": event["id"],
+                "correction_batch_id": event["correction_batch_id"],
+                "user_id": user_id,
+                "document_id": event["document_id"],
+                "field_path": event["field_path"],
+                "original_value": event.get("original_value"),
+                "previous_value": event.get("previous_value"),
+                "corrected_value": event.get("corrected_value"),
+                "reason": event["reason"],
+                "created_at": event.get("created_at") or _now_iso(),
+            }
+        )
     _corrections().insert(rows).execute()
 
 
 @_translate_missing_schema
 def load_conflicts(user_id: str, include_inactive: bool = False) -> List[Dict[str, Any]]:
-    query = _conflicts().select(
-        "conflict_id, user_id, status, authoritative_document_id, resolution_note, "
-        "data, detected_at, updated_at, resolved_at"
-    ).eq("user_id", user_id)
+    query = (
+        _conflicts()
+        .select(
+            "conflict_id, user_id, status, authoritative_document_id, resolution_note, "
+            "data, detected_at, updated_at, resolved_at"
+        )
+        .eq("user_id", user_id)
+    )
     response = query.order("updated_at", desc=True).execute()
     rows: List[Dict[str, Any]] = []
     for row in response.data or []:
         if not include_inactive and row.get("status") == "superseded":
             continue
         data = dict(row.get("data") or {})
-        data.update({
-            "conflict_id": row["conflict_id"],
-            "user_id": row["user_id"],
-            "status": row.get("status") or "unresolved",
-            "authoritative_document_id": row.get("authoritative_document_id"),
-            "resolution_note": row.get("resolution_note"),
-            "detected_at": row.get("detected_at"),
-            "updated_at": row.get("updated_at"),
-            "resolved_at": row.get("resolved_at"),
-        })
+        data.update(
+            {
+                "conflict_id": row["conflict_id"],
+                "user_id": row["user_id"],
+                "status": row.get("status") or "unresolved",
+                "authoritative_document_id": row.get("authoritative_document_id"),
+                "resolution_note": row.get("resolution_note"),
+                "detected_at": row.get("detected_at"),
+                "updated_at": row.get("updated_at"),
+                "resolved_at": row.get("resolved_at"),
+            }
+        )
         rows.append(data)
     return rows
 
 
 @_translate_missing_schema
-def sync_conflicts(user_id: str, detected_conflicts: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def sync_conflicts(
+    user_id: str, detected_conflicts: Sequence[Dict[str, Any]]
+) -> List[Dict[str, Any]]:
     """Persist current detections while preserving still-valid resolutions.
 
     Conflicts that disappear after a correction are retained as superseded
@@ -627,23 +669,32 @@ def sync_conflicts(user_id: str, detected_conflicts: Sequence[Dict[str, Any]]) -
         keep_resolution = old.get("status") == "resolved" and authoritative in source_ids
         status = "resolved" if keep_resolution else "unresolved"
         data = {
-            key: value for key, value in detected.items()
-            if key not in {
-                "user_id", "status", "authoritative_document_id", "resolution_note",
-                "detected_at", "updated_at", "resolved_at",
+            key: value
+            for key, value in detected.items()
+            if key
+            not in {
+                "user_id",
+                "status",
+                "authoritative_document_id",
+                "resolution_note",
+                "detected_at",
+                "updated_at",
+                "resolved_at",
             }
         }
-        rows.append({
-            "conflict_id": conflict_id,
-            "user_id": user_id,
-            "status": status,
-            "authoritative_document_id": authoritative if keep_resolution else None,
-            "resolution_note": old.get("resolution_note") if keep_resolution else None,
-            "data": data,
-            "detected_at": old.get("detected_at") or now,
-            "updated_at": now,
-            "resolved_at": old.get("resolved_at") if keep_resolution else None,
-        })
+        rows.append(
+            {
+                "conflict_id": conflict_id,
+                "user_id": user_id,
+                "status": status,
+                "authoritative_document_id": authoritative if keep_resolution else None,
+                "resolution_note": old.get("resolution_note") if keep_resolution else None,
+                "data": data,
+                "detected_at": old.get("detected_at") or now,
+                "updated_at": now,
+                "resolved_at": old.get("resolved_at") if keep_resolution else None,
+            }
+        )
     if rows:
         _conflicts().upsert(rows, on_conflict="user_id,conflict_id").execute()
 
@@ -685,16 +736,18 @@ def set_conflict_resolution(
     now = _now_iso()
     old_status = current.get("status") or "unresolved"
     event_id = f"resolution_{__import__('uuid').uuid4().hex}"
-    _conflict_events().insert({
-        "id": event_id,
-        "user_id": user_id,
-        "conflict_id": conflict_id,
-        "old_status": old_status,
-        "new_status": status,
-        "authoritative_document_id": authoritative_document_id,
-        "note": (note or "").strip() or None,
-        "created_at": now,
-    }).execute()
+    _conflict_events().insert(
+        {
+            "id": event_id,
+            "user_id": user_id,
+            "conflict_id": conflict_id,
+            "old_status": old_status,
+            "new_status": status,
+            "authoritative_document_id": authoritative_document_id,
+            "note": (note or "").strip() or None,
+            "created_at": now,
+        }
+    ).execute()
     fields = {
         "status": status,
         "authoritative_document_id": authoritative_document_id,

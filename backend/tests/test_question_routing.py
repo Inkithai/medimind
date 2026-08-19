@@ -41,29 +41,39 @@ def test_routes_lab_question_away_from_unrelated_medication_chunks():
 def test_preserves_vector_order_and_applies_limit():
     docs = ["first", "second", "third"]
     metas = [{"chunk_type": "medication"} for _ in docs]
-    routed, _ = route_chunks(docs, metas, classify_question("What medicines were prescribed?"), limit=2)
+    routed, _ = route_chunks(
+        docs, metas, classify_question("What medicines were prescribed?"), limit=2
+    )
     assert routed == ["first", "second"]
 
 
 def test_trend_question_requires_multiple_evidence_items():
     intent = classify_question("Has my glucose improved over time?")
-    limited = assess_evidence(intent, [{"chunk_type": "lab_result", "source_file": "one.pdf", "date": "2025-01-01"}])
+    limited = assess_evidence(
+        intent, [{"chunk_type": "lab_result", "source_file": "one.pdf", "date": "2025-01-01"}]
+    )
     assert limited["level"] == "limited"
     assert limited["expected_minimum"] == 2
-    sufficient = assess_evidence(intent, [
-        {"chunk_type": "lab_result", "source_file": "one.pdf", "date": "2025-01-01"},
-        {"chunk_type": "lab_result", "source_file": "two.pdf", "date": "2025-02-01"},
-    ])
+    sufficient = assess_evidence(
+        intent,
+        [
+            {"chunk_type": "lab_result", "source_file": "one.pdf", "date": "2025-01-01"},
+            {"chunk_type": "lab_result", "source_file": "two.pdf", "date": "2025-02-01"},
+        ],
+    )
     assert sufficient["level"] == "sufficient"
     assert sufficient["distinct_sources"] == 2
 
 
 def test_multiple_chunks_from_one_date_do_not_establish_a_trend():
     intent = classify_question("Has my glucose changed over time?")
-    evidence = assess_evidence(intent, [
-        {"chunk_type": "lab_result", "source_file": "one.pdf", "date": "2025-01-01"},
-        {"chunk_type": "lab_result", "source_file": "one.pdf", "date": "2025-01-01"},
-    ])
+    evidence = assess_evidence(
+        intent,
+        [
+            {"chunk_type": "lab_result", "source_file": "one.pdf", "date": "2025-01-01"},
+            {"chunk_type": "lab_result", "source_file": "one.pdf", "date": "2025-01-01"},
+        ],
+    )
     assert evidence["level"] == "limited"
     assert evidence["distinct_sources"] == 1
 

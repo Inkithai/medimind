@@ -47,44 +47,96 @@ from typing import Any, Dict, List, Set, Tuple
 
 _CLASS_MEMBERS: Dict[str, Set[str]] = {
     "penicillin": {
-        "penicillin", "penicillin g", "penicillin v", "benzylpenicillin",
-        "amoxicillin", "ampicillin", "amoxicillin and clavulanate potassium",
-        "amoxicillin and clavulanic acid", "flucloxacillin", "dicloxacillin",
-        "cloxacillin", "piperacillin", "piperacillin and tazobactam",
+        "penicillin",
+        "penicillin g",
+        "penicillin v",
+        "benzylpenicillin",
+        "amoxicillin",
+        "ampicillin",
+        "amoxicillin and clavulanate potassium",
+        "amoxicillin and clavulanic acid",
+        "flucloxacillin",
+        "dicloxacillin",
+        "cloxacillin",
+        "piperacillin",
+        "piperacillin and tazobactam",
     },
     "cephalosporin": {
-        "cephalexin", "cefuroxime", "cefixime", "ceftriaxone", "cefotaxime",
-        "cefpodoxime", "cefadroxil", "cefazolin", "cefdinir", "ceftazidime",
+        "cephalexin",
+        "cefuroxime",
+        "cefixime",
+        "ceftriaxone",
+        "cefotaxime",
+        "cefpodoxime",
+        "cefadroxil",
+        "cefazolin",
+        "cefdinir",
+        "ceftazidime",
         "cefaclor",
     },
     "sulfonamide": {
-        "sulfamethoxazole", "trimethoprim and sulfamethoxazole",
-        "sulfamethoxazole and trimethoprim", "co-trimoxazole",
-        "sulfadiazine", "sulfasalazine", "sulfisoxazole",
+        "sulfamethoxazole",
+        "trimethoprim and sulfamethoxazole",
+        "sulfamethoxazole and trimethoprim",
+        "co-trimoxazole",
+        "sulfadiazine",
+        "sulfasalazine",
+        "sulfisoxazole",
     },
     "nsaid": {
-        "ibuprofen", "naproxen", "diclofenac", "aspirin", "ketorolac",
-        "indomethacin", "celecoxib", "mefenamic acid", "piroxicam",
-        "etoricoxib", "meloxicam",
+        "ibuprofen",
+        "naproxen",
+        "diclofenac",
+        "aspirin",
+        "ketorolac",
+        "indomethacin",
+        "celecoxib",
+        "mefenamic acid",
+        "piroxicam",
+        "etoricoxib",
+        "meloxicam",
     },
     "opioid": {
-        "morphine", "codeine", "tramadol", "oxycodone", "hydrocodone",
-        "fentanyl", "methadone", "buprenorphine", "pethidine",
-        "dihydrocodeine", "hydromorphone", "tapentadol",
+        "morphine",
+        "codeine",
+        "tramadol",
+        "oxycodone",
+        "hydrocodone",
+        "fentanyl",
+        "methadone",
+        "buprenorphine",
+        "pethidine",
+        "dihydrocodeine",
+        "hydromorphone",
+        "tapentadol",
     },
     "macrolide": {
-        "azithromycin", "clarithromycin", "erythromycin", "roxithromycin",
+        "azithromycin",
+        "clarithromycin",
+        "erythromycin",
+        "roxithromycin",
     },
     "tetracycline": {
-        "doxycycline", "tetracycline", "minocycline", "lymecycline",
+        "doxycycline",
+        "tetracycline",
+        "minocycline",
+        "lymecycline",
     },
     "quinolone": {
-        "ciprofloxacin", "levofloxacin", "moxifloxacin", "norfloxacin",
+        "ciprofloxacin",
+        "levofloxacin",
+        "moxifloxacin",
+        "norfloxacin",
         "ofloxacin",
     },
     "ace_inhibitor": {
-        "lisinopril", "enalapril", "ramipril", "captopril", "perindopril",
-        "benazepril", "quinapril",
+        "lisinopril",
+        "enalapril",
+        "ramipril",
+        "captopril",
+        "perindopril",
+        "benazepril",
+        "quinapril",
     },
 }
 
@@ -97,38 +149,89 @@ _CLASS_MEMBERS: Dict[str, Set[str]] = {
 
 _CLASS_ALIASES: Dict[str, Tuple[str, ...]] = {
     "penicillin": (
-        "penicillin", "penicillins", "amoxicillin", "amoxil", "ampicillin",
-        "augmentin", "amoxiclav",
+        "penicillin",
+        "penicillins",
+        "amoxicillin",
+        "amoxil",
+        "ampicillin",
+        "augmentin",
+        "amoxiclav",
     ),
     "cephalosporin": (
-        "cephalosporin", "cephalosporins", "ceph", "cef",
+        "cephalosporin",
+        "cephalosporins",
+        "ceph",
+        "cef",
     ),
     "sulfonamide": (
-        "sulfa", "sulpha", "sulphonamide", "sulfonamide", "sulphonamides",
-        "sulfonamides", "co-trimoxazole", "cotrimoxazole", "bactrim", "septrin",
+        "sulfa",
+        "sulpha",
+        "sulphonamide",
+        "sulfonamide",
+        "sulphonamides",
+        "sulfonamides",
+        "co-trimoxazole",
+        "cotrimoxazole",
+        "bactrim",
+        "septrin",
     ),
     "nsaid": (
-        "nsaid", "nsaids", "anti-inflammatory", "antiinflammatory",
-        "brufen", "voltaren", "naprosyn", "advil", "motrin", "nurofen", "ponstan",
+        "nsaid",
+        "nsaids",
+        "anti-inflammatory",
+        "antiinflammatory",
+        "brufen",
+        "voltaren",
+        "naprosyn",
+        "advil",
+        "motrin",
+        "nurofen",
+        "ponstan",
     ),
     "opioid": (
-        "opioid", "opioids", "opiate", "opiates", "narcotic", "narcotics",
-        "morphine", "codeine", "tramadol",
+        "opioid",
+        "opioids",
+        "opiate",
+        "opiates",
+        "narcotic",
+        "narcotics",
+        "morphine",
+        "codeine",
+        "tramadol",
     ),
     "macrolide": (
-        "macrolide", "macrolides", "azithromycin", "zithromax",
-        "erythromycin", "clarithromycin", "klacid",
+        "macrolide",
+        "macrolides",
+        "azithromycin",
+        "zithromax",
+        "erythromycin",
+        "clarithromycin",
+        "klacid",
     ),
     "tetracycline": (
-        "tetracycline", "tetracyclines", "doxycycline", "minocycline",
+        "tetracycline",
+        "tetracyclines",
+        "doxycycline",
+        "minocycline",
     ),
     "quinolone": (
-        "quinolone", "quinolones", "fluoroquinolone", "fluoroquinolones",
-        "ciprofloxacin", "cipro", "levofloxacin", "norfloxacin",
+        "quinolone",
+        "quinolones",
+        "fluoroquinolone",
+        "fluoroquinolones",
+        "ciprofloxacin",
+        "cipro",
+        "levofloxacin",
+        "norfloxacin",
     ),
     "ace_inhibitor": (
-        "ace inhibitor", "ace inhibitors", "lisinopril", "enalapril",
-        "ramipril", "captopril", "perindopril",
+        "ace inhibitor",
+        "ace inhibitors",
+        "lisinopril",
+        "enalapril",
+        "ramipril",
+        "captopril",
+        "perindopril",
     ),
 }
 
@@ -184,9 +287,15 @@ KB_CONFIDENCE = 0.95  # exact ingredient-class match against an established rule
 # same text, so "no known drug allergies except penicillin" still matches
 # penicillin.
 _NEGATIVE_MARKERS = (
-    "no known allergies", "no known drug allergies",
-    "no known medication allergies", "no known medicine allergies",
-    "nkda", "nka", "not known", "none", "nil",
+    "no known allergies",
+    "no known drug allergies",
+    "no known medication allergies",
+    "no known medicine allergies",
+    "nkda",
+    "nka",
+    "not known",
+    "none",
+    "nil",
 )
 
 # ---------------------------------------------------------------------------
@@ -252,8 +361,7 @@ def check_allergy_conflicts(timeline: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
     meds = timeline.get("medications_timeline", []) or []
     allergies = [
-        a for a in (timeline.get("known_allergies", []) or [])
-        if isinstance(a, str) and a.strip()
+        a for a in (timeline.get("known_allergies", []) or []) if isinstance(a, str) and a.strip()
     ]
     if not meds or not allergies:
         return []
@@ -269,15 +377,13 @@ def check_allergy_conflicts(timeline: Dict[str, Any]) -> List[Dict[str, Any]]:
             ingredients = [str(i).strip().lower() for i in (med.get("ingredients") or [])]
             ingredients = [i for i in ingredients if i]
 
-            class_members = {
-                member for c in classes for member in _CLASS_MEMBERS.get(c, set())
-            }
+            class_members = {member for c in classes for member in _CLASS_MEMBERS.get(c, set())}
             class_hits = sorted(
-                c for c in classes
-                if any(i in _CLASS_MEMBERS[c] for i in ingredients)
+                c for c in classes if any(i in _CLASS_MEMBERS[c] for i in ingredients)
             )
             direct_hits = sorted(
-                i for i in ingredients
+                i
+                for i in ingredients
                 if _contains_phrase(allergy_lower, i) and i not in class_members
             )
             if not class_hits and not direct_hits:
@@ -297,25 +403,26 @@ def check_allergy_conflicts(timeline: Dict[str, Any]) -> List[Dict[str, Any]]:
             else:
                 rule_label = "exact allergen match"
                 explanation = (
-                    "The medication's active ingredient is named in the "
-                    "patient's recorded allergy."
+                    "The medication's active ingredient is named in the patient's recorded allergy."
                 )
                 matched_ingredient = direct_hits[0]
 
-            findings.append({
-                "medication": _med_display(med),
-                "allergy": allergy.strip(),
-                "explanation": (
-                    f"Deterministic knowledge-base check ({rule_label}): "
-                    f"{explanation} Matched on active ingredient "
-                    f"'{matched_ingredient}'. Consult a doctor or pharmacist "
-                    "before making any changes."
-                ),
-                "severity": "high",
-                "confidence": KB_CONFIDENCE,
-                "source": "curated_knowledge_base",
-                "rule": rule_label,
-            })
+            findings.append(
+                {
+                    "medication": _med_display(med),
+                    "allergy": allergy.strip(),
+                    "explanation": (
+                        f"Deterministic knowledge-base check ({rule_label}): "
+                        f"{explanation} Matched on active ingredient "
+                        f"'{matched_ingredient}'. Consult a doctor or pharmacist "
+                        "before making any changes."
+                    ),
+                    "severity": "high",
+                    "confidence": KB_CONFIDENCE,
+                    "source": "curated_knowledge_base",
+                    "rule": rule_label,
+                }
+            )
     return findings
 
 
@@ -337,8 +444,7 @@ def merge_allergy_findings(
         return (value or "").strip().lower()
 
     existing_pairs = [
-        (_norm(item.get("medication")), _norm(item.get("allergy")))
-        for item in existing
+        (_norm(item.get("medication")), _norm(item.get("allergy"))) for item in existing
     ]
 
     def _same_pair(a: str, b: str) -> bool:
@@ -349,10 +455,7 @@ def merge_allergy_findings(
     for finding in kb_findings:
         med = _norm(finding.get("medication"))
         allergy = _norm(finding.get("allergy"))
-        duplicate = any(
-            _same_pair(med, m) and _same_pair(allergy, a)
-            for m, a in existing_pairs
-        )
+        duplicate = any(_same_pair(med, m) and _same_pair(allergy, a) for m, a in existing_pairs)
         if not duplicate:
             existing.append(finding)
             existing_pairs.append((med, allergy))

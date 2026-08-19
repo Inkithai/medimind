@@ -17,9 +17,10 @@ Verifies:
   4. A never-indexed patient gets the graceful _NO_INFO_ANSWER (200)
      instead of an exception.
 """
+
+import json
 import os
 import sys
-import json
 import types
 from unittest import mock
 
@@ -28,30 +29,50 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ["GROQ_API_KEY"] = "gsk_test_123"
 os.environ.pop("VECTOR_STORE", None)  # default = chroma
 
-import vector_store
 import retrieval
+import vector_store
 
 TIMELINE = {
     "visits": [{"date": "2024-03-15", "clinical_notes": None, "_source": {"file": "rx.jpg"}}],
-    "medications_timeline": [{
-        "name": "Paracetamol", "ingredients": ["Paracetamol"], "dosage": "500 mg",
-        "frequency": "3x daily", "duration": "5 days", "dosage_value": 500,
-        "dosage_unit": "mg", "frequency_per_day": 3, "is_as_needed": False,
-        "confidence": 0.95, "date": "2024-03-15", "source_file": "rx.jpg",
-    }],
-    "lab_results_timeline": [{
-        "test_name": "HbA1c", "value": "6.1", "unit": "%", "reference_range": "<5.7",
-        "flag": "high", "confidence": 0.9, "date": "2024-03-15", "source_file": "lab.pdf",
-    }],
+    "medications_timeline": [
+        {
+            "name": "Paracetamol",
+            "ingredients": ["Paracetamol"],
+            "dosage": "500 mg",
+            "frequency": "3x daily",
+            "duration": "5 days",
+            "dosage_value": 500,
+            "dosage_unit": "mg",
+            "frequency_per_day": 3,
+            "is_as_needed": False,
+            "confidence": 0.95,
+            "date": "2024-03-15",
+            "source_file": "rx.jpg",
+        }
+    ],
+    "lab_results_timeline": [
+        {
+            "test_name": "HbA1c",
+            "value": "6.1",
+            "unit": "%",
+            "reference_range": "<5.7",
+            "flag": "high",
+            "confidence": 0.9,
+            "date": "2024-03-15",
+            "source_file": "lab.pdf",
+        }
+    ],
     "known_allergies": ["Penicillin"],
 }
 
-ANSWER_JSON = json.dumps({
-    "answer": "You are taking Paracetamol 500 mg three times daily.",
-    "confidence": 0.95,
-    "sources": [{"date": "2024-03-15", "source_file": "rx.jpg", "page": 1}],
-    "recommend_professional_consult": False,
-})
+ANSWER_JSON = json.dumps(
+    {
+        "answer": "You are taking Paracetamol 500 mg three times daily.",
+        "confidence": 0.95,
+        "sources": [{"date": "2024-03-15", "source_file": "rx.jpg", "page": 1}],
+        "recommend_professional_consult": False,
+    }
+)
 
 
 def _make_fake_chromadb():
@@ -146,9 +167,12 @@ def test_index_then_answer_over_chroma_path():
     sys.modules["chromadb"] = fake
     vector_store._chroma_client = None
     try:
-        with mock.patch.object(retrieval, "embed_texts",
-                               side_effect=lambda texts: [[0.1] * 384 for _ in texts]), \
-             mock.patch.object(retrieval, "_completion_resilient", return_value=ANSWER_JSON):
+        with (
+            mock.patch.object(
+                retrieval, "embed_texts", side_effect=lambda texts: [[0.1] * 384 for _ in texts]
+            ),
+            mock.patch.object(retrieval, "_completion_resilient", return_value=ANSWER_JSON),
+        ):
             n = retrieval.index_patient_timeline("anon_qa", TIMELINE)
             # 1 medication + 1 lab result + 1 allergy chunk (no clinical notes)
             assert n == 3, n
@@ -181,18 +205,27 @@ def test_reindex_does_not_leave_stale_chunks_after_order_shift():
     sys.modules["chromadb"] = fake
     vector_store._chroma_client = None
     try:
-        with mock.patch.object(retrieval, "embed_texts",
-                               side_effect=lambda texts: [[0.1] * 384 for _ in texts]):
+        with mock.patch.object(
+            retrieval, "embed_texts", side_effect=lambda texts: [[0.1] * 384 for _ in texts]
+        ):
             n1 = retrieval.index_patient_timeline("anon_shift", TIMELINE)
             assert n1 == 3
             older = {
                 **TIMELINE,
                 "medications_timeline": [
                     {
-                        "name": "Aspirin", "ingredients": ["Aspirin"], "dosage": "75 mg",
-                        "frequency": "daily", "duration": None, "dosage_value": 75,
-                        "dosage_unit": "mg", "frequency_per_day": 1, "is_as_needed": False,
-                        "confidence": 0.9, "date": "2023-01-01", "source_file": "old.pdf",
+                        "name": "Aspirin",
+                        "ingredients": ["Aspirin"],
+                        "dosage": "75 mg",
+                        "frequency": "daily",
+                        "duration": None,
+                        "dosage_value": 75,
+                        "dosage_unit": "mg",
+                        "frequency_per_day": 1,
+                        "is_as_needed": False,
+                        "confidence": 0.9,
+                        "date": "2023-01-01",
+                        "source_file": "old.pdf",
                     },
                     *TIMELINE["medications_timeline"],
                 ],

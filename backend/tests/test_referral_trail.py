@@ -9,7 +9,6 @@ ever come from runtime sources).
 
 import os
 import sys
-from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -28,7 +27,7 @@ os.environ.setdefault("JWT_SECRET", "dummy")
 
 
 def _flag(issue_type="high_severity_interaction"):
-    evidence = "Medication: A; Medication: B. The safety cross-check marked a medication interaction as high severity."
+    evidence = "Medication: A; Medication: B. The safety cross-check marked a medication interaction as high severity."  # noqa: E501
     return {
         "id": "interaction-0",
         "issue_type": issue_type,
@@ -115,15 +114,15 @@ def test_ranked_providers_carry_numeric_components():
             assert 0.0 <= c["contribution"] <= 100.0
             assert c["explanation"]
         # the displayed score equals the sum of rounded contributions
-        assert provider["ranking"]["score"] == round(
-            sum(c["contribution"] for c in components), 1
-        )
+        assert provider["ranking"]["score"] == round(sum(c["contribution"] for c in components), 1)
 
 
 def test_optional_signals_only_appear_when_source_provides_them():
     # No rating and no opening hours -> only specialty + distance components.
     providers = [_provider("Gamma Clinic", 3.0)]
-    ranked = rank_providers(providers, match_specialty("high_severity_interaction", "x"), "evenings")
+    ranked = rank_providers(
+        providers, match_specialty("high_severity_interaction", "x"), "evenings"
+    )
     signals = {c["signal"] for c in ranked[0]["ranking"]["components"]}
     assert signals == {"specialty_relevance", "distance"}
 
@@ -145,7 +144,11 @@ def test_referral_search_record_shape():
         location={"query": "Kandy", "resolved_area": "Kandy", "latitude": 7.29, "longitude": 80.63},
         availability="evenings",
         providers=providers,
-        provenance={"source_id": "synthetic", "label": "Live provider data — synthetic", "retrieved_at": "2026-08-17T00:00:00Z"},
+        provenance={
+            "source_id": "synthetic",
+            "label": "Live provider data — synthetic",
+            "retrieved_at": "2026-08-17T00:00:00Z",
+        },
     )
 
     assert record["search_id"].startswith("interaction-0::")
@@ -165,19 +168,29 @@ def test_referral_search_record_shape():
 
 SEARCH_RESPONSE = {
     "clinical_flag": {
-        "id": "interaction-0", "issue_type": "high_severity_interaction",
-        "trigger": "high_risk", "risk_level": "high",
+        "id": "interaction-0",
+        "issue_type": "high_severity_interaction",
+        "trigger": "high_risk",
+        "risk_level": "high",
         "title": "Potential high-severity medication interaction",
-        "evidence": "x", "source": "Medication safety cross-check", "confidence": 0.91,
+        "evidence": "x",
+        "source": "Medication safety cross-check",
+        "confidence": 0.91,
     },
     "specialty": {
-        "id": "pharmacy", "label": "Pharmacist",
+        "id": "pharmacy",
+        "label": "Pharmacist",
         "provider_query": "pharmacy",
         "reason": "medication safety concerns warrant pharmacist review.",
     },
     "location": {"query": "Kandy", "resolved_area": "Kandy", "latitude": None, "longitude": None},
     "availability": "any",
-    "provenance": {"live": True, "source_id": "synthetic", "label": "Live provider data — synthetic", "retrieved_at": "2026-08-17T00:00:00Z"},
+    "provenance": {
+        "live": True,
+        "source_id": "synthetic",
+        "label": "Live provider data — synthetic",
+        "retrieved_at": "2026-08-17T00:00:00Z",
+    },
     "ranking_method": "transparent",
     "providers": [],
     "no_results_message": None,
@@ -201,8 +214,12 @@ def _snapshot_for_flag():
         "patient_timeline": {"visits": [], "medications_timeline": [], "lab_results_timeline": []},
         "cross_check_report": {
             "potential_drug_interactions": [
-                {"medications_involved": ["A", "B"], "severity": "high",
-                 "confidence": 0.91, "explanation": "x"},
+                {
+                    "medications_involved": ["A", "B"],
+                    "severity": "high",
+                    "confidence": 0.91,
+                    "explanation": "x",
+                },
             ],
             "allergy_conflicts": [],
         },
@@ -224,9 +241,14 @@ def test_search_endpoint_attaches_referral_trail_and_persists(monkeypatch):
     monkeypatch.setattr(api, "_load_snapshot_or_rebuild", lambda uid: _snapshot_for_flag())
     monkeypatch.setattr(api, "search_live_providers", lambda *a, **kw: dict(SEARCH_RESPONSE))
     with TestClient(api.app) as client:
-        resp = client.post("/api/v1/care-recommendations/search", json={
-            "flag_id": "interaction-0", "location": "Kandy", "availability": "any",
-        })
+        resp = client.post(
+            "/api/v1/care-recommendations/search",
+            json={
+                "flag_id": "interaction-0",
+                "location": "Kandy",
+                "availability": "any",
+            },
+        )
     assert resp.status_code == 200, resp.text
     body = resp.json()
 
@@ -247,13 +269,21 @@ def test_search_endpoint_survives_persistence_failure(monkeypatch):
     monkeypatch.setattr(api, "_load_snapshot_or_rebuild", lambda uid: _snapshot_for_flag())
     monkeypatch.setattr(api, "search_live_providers", lambda *a, **kw: dict(SEARCH_RESPONSE))
     monkeypatch.setattr(
-        api.db, "save_referral_search",
-        lambda user_id, search: (_ for _ in ()).throw(api.db.SchemaNotInitializedError("missing table")),
+        api.db,
+        "save_referral_search",
+        lambda user_id, search: (_ for _ in ()).throw(
+            api.db.SchemaNotInitializedError("missing table")
+        ),
     )
     with TestClient(api.app) as client:
-        resp = client.post("/api/v1/care-recommendations/search", json={
-            "flag_id": "interaction-0", "location": "Kandy", "availability": "any",
-        })
+        resp = client.post(
+            "/api/v1/care-recommendations/search",
+            json={
+                "flag_id": "interaction-0",
+                "location": "Kandy",
+                "availability": "any",
+            },
+        )
     assert resp.status_code == 200, resp.text
     assert resp.json()["referral_id"]
 
@@ -262,10 +292,13 @@ def test_referrals_endpoint_lists_history(monkeypatch):
     from fastapi.testclient import TestClient
 
     _auth_override()
-    history = [{
-        "id": 2, "created_at": "2026-08-17T01:00:00Z",
-        "search": {"search_id": "interaction-0::abc", "intent": {}, "results": []},
-    }]
+    history = [
+        {
+            "id": 2,
+            "created_at": "2026-08-17T01:00:00Z",
+            "search": {"search_id": "interaction-0::abc", "intent": {}, "results": []},
+        }
+    ]
     monkeypatch.setattr(api.db, "load_referral_searches", lambda uid, limit=20: history)
     with TestClient(api.app) as client:
         resp = client.get("/api/v1/care-referrals")

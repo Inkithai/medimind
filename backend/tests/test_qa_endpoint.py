@@ -23,7 +23,6 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 import api  # noqa: E402
 
-
 ANSWER = {
     "answer": "You are taking Paracetamol 500mg twice daily.",
     "confidence": 0.9,
@@ -69,9 +68,7 @@ def test_question_is_trimmed_before_it_reaches_the_model():
     try:
         with mock.patch.object(api, "answer_question", answerer):
             with _client() as client:
-                response = client.post(
-                    "/api/v1/qa", json={"question": "  What medications?  "}
-                )
+                response = client.post("/api/v1/qa", json={"question": "  What medications?  "})
         assert response.status_code == 200, response.text
         assert answerer.call_args.kwargs["question"] == "What medications?"
     finally:
@@ -130,12 +127,8 @@ def test_top_k_is_bounded():
     try:
         with mock.patch.object(api, "answer_question", return_value=ANSWER):
             with _client() as client:
-                too_big = client.post(
-                    "/api/v1/qa", json={"question": "hi", "top_k": 999}
-                )
-                too_small = client.post(
-                    "/api/v1/qa", json={"question": "hi", "top_k": 0}
-                )
+                too_big = client.post("/api/v1/qa", json={"question": "hi", "top_k": 999})
+                too_small = client.post("/api/v1/qa", json={"question": "hi", "top_k": 0})
         assert too_big.status_code == 422
         assert too_small.status_code == 422
     finally:
@@ -147,9 +140,7 @@ def test_top_k_is_forwarded_to_retrieval():
     try:
         with mock.patch.object(api, "answer_question", answerer):
             with _client() as client:
-                response = client.post(
-                    "/api/v1/qa", json={"question": "What meds?", "top_k": 3}
-                )
+                response = client.post("/api/v1/qa", json={"question": "What meds?", "top_k": 3})
         assert response.status_code == 200, response.text
         assert answerer.call_args.kwargs["top_k"] == 3
     finally:

@@ -9,8 +9,8 @@ radius promise is actually enforced ("5 km" must mean no result beyond
 import re
 from typing import List, Optional
 
-from care.models import haversine_km as distance_km
 from care.models import Facility
+from care.models import haversine_km as distance_km
 
 # Two listings with the same normalized name within this distance are
 # treated as the same real-world facility. Two facilities can legitimately

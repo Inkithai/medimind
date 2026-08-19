@@ -51,11 +51,9 @@ SUBSECTION_RE = re.compile(r"^\d+\.\d+\s+(Non-specific|Specific)", re.IGNORECASE
 # The EMLc titles itself "...Essential Medicines for Children"; the adult
 # EML never does. Read off the document itself rather than the filename,
 # which a caller can name anything.
-CHILDREN_LIST_RE = re.compile(
-    r"Model List of Essential Medicines for Children", re.IGNORECASE
-)
+CHILDREN_LIST_RE = re.compile(r"Model List of Essential Medicines for Children", re.IGNORECASE)
 MAX_SECTION_PAGES = 5  # safety cap; the antidotes section is always 1-2 pages
-TITLE_SCAN_PAGES = 4   # the title/citation block is always in the front matter
+TITLE_SCAN_PAGES = 4  # the title/citation block is always in the front matter
 
 
 def _find_section_pages(pdf: "pdfplumber.PDF") -> List[int]:
@@ -88,11 +86,9 @@ def _clean(text: str) -> str:
 
 
 def _detect_population(pdf: "pdfplumber.PDF") -> str:
-    """"children" for the EMLc, "adult" for the main EML -- decided by the
+    """ "children" for the EMLc, "adult" for the main EML -- decided by the
     document's own title text, not by the filename."""
-    front_matter = "\n".join(
-        (page.extract_text() or "") for page in pdf.pages[:TITLE_SCAN_PAGES]
-    )
+    front_matter = "\n".join((page.extract_text() or "") for page in pdf.pages[:TITLE_SCAN_PAGES])
     return "children" if CHILDREN_LIST_RE.search(front_matter) else "adult"
 
 
@@ -124,14 +120,17 @@ def extract_antidote_section(pdf_path: str) -> Dict[str, Any]:
         population = _detect_population(pdf)
         logger.info(
             "extract: '%s' has %d page(s), population=%s",
-            pdf_path, len(pdf.pages), population,
+            pdf_path,
+            len(pdf.pages),
+            population,
         )
 
         section_pages = _find_section_pages(pdf)
         if not section_pages:
             logger.warning(
                 "extract: no 'Antidotes and other substances used in poisonings' "
-                "section heading found in '%s' — nothing to ingest", pdf_path,
+                "section heading found in '%s' — nothing to ingest",
+                pdf_path,
             )
         else:
             logger.info(
@@ -164,7 +163,8 @@ def extract_antidote_section(pdf_path: str) -> Dict[str, Any]:
                             subsection = sub_match.group(1).lower().replace("-", "_")
                             logger.debug(
                                 "extract: entered subsection '%s' on page %d",
-                                subsection, page.page_number,
+                                subsection,
+                                page.page_number,
                             )
                             continue
                         if marker.lower() == "complementary list":
@@ -180,28 +180,37 @@ def extract_antidote_section(pdf_path: str) -> Dict[str, Any]:
                         continue
 
                     name, dosage_form = non_empty[0], " ".join(non_empty[1:])
-                    entries.append({
-                        "name": name,
-                        "dosage_form": dosage_form,
-                        "subsection": subsection,
-                        "list_type": list_type,
-                        "source_page": page.page_number,
-                    })
+                    entries.append(
+                        {
+                            "name": name,
+                            "dosage_form": dosage_form,
+                            "subsection": subsection,
+                            "list_type": list_type,
+                            "source_page": page.page_number,
+                        }
+                    )
                     logger.debug(
                         "extract: + %s (%s) [%s/%s] p%d",
-                        name, dosage_form or "no dosage form", subsection or "uncategorised",
-                        list_type, page.page_number,
+                        name,
+                        dosage_form or "no dosage form",
+                        subsection or "uncategorised",
+                        list_type,
+                        page.page_number,
                     )
 
             logger.info(
                 "extract: page %d yielded %d entrie(s)",
-                page.page_number, len(entries) - entries_before,
+                page.page_number,
+                len(entries) - entries_before,
             )
 
     categories = sorted({e["subsection"] for e in entries if e["subsection"]})
     logger.info(
         "extract: '%s' done in %.0fms — %d entrie(s), population=%s, categories=%s",
-        pdf_path, (time.perf_counter() - started) * 1000, len(entries), population,
+        pdf_path,
+        (time.perf_counter() - started) * 1000,
+        len(entries),
+        population,
         categories or "none",
     )
     return {"population": population, "entries": entries}
@@ -225,7 +234,9 @@ def ingest_antidote_entries(section: Dict[str, Any], source_document: str) -> in
 
     logger.info(
         "ingest: preparing to write %d entrie(s) from '%s' (population=%s) to Neo4j",
-        len(entries), source_document, section["population"],
+        len(entries),
+        source_document,
+        section["population"],
     )
 
     with session_scope("ingest_antidote_entries") as session:
@@ -263,7 +274,9 @@ def ingest_antidote_entries(section: Dict[str, Any], source_document: str) -> in
         logger.info(
             "ingest: '%s' loaded successfully — created %d node(s) and %d "
             "relationship(s), set %d propert(ies)",
-            source_document, counters.nodes_created, counters.relationships_created,
+            source_document,
+            counters.nodes_created,
+            counters.relationships_created,
             counters.properties_set,
         )
     else:
@@ -271,7 +284,8 @@ def ingest_antidote_entries(section: Dict[str, Any], source_document: str) -> in
             "ingest: '%s' loaded successfully — created no new nodes or relationships "
             "because this document was already in the graph; %d propert(ies) updated "
             "in place",
-            source_document, counters.properties_set,
+            source_document,
+            counters.properties_set,
         )
     logger.info("ingest: '%s' complete — %d entrie(s) submitted", source_document, len(entries))
     return len(entries)
@@ -317,11 +331,14 @@ def lookup_antidote_references(drug_names: List[str]) -> Dict[str, Dict[str, Any
 
     found: Dict[str, Dict[str, Any]] = {}
     for r in records:
-        entry = found.setdefault(r["wanted"], {
-            "display_name": r["display_name"],
-            "category": r["category"],
-            "listings": [],
-        })
+        entry = found.setdefault(
+            r["wanted"],
+            {
+                "display_name": r["display_name"],
+                "category": r["category"],
+                "listings": [],
+            },
+        )
         entry["listings"].append(
             {k: r[k] for k in ("population", "source_document", "list_type", "dosage_form")}
         )
@@ -329,13 +346,17 @@ def lookup_antidote_references(drug_names: List[str]) -> Dict[str, Dict[str, Any
     if found:
         logger.info(
             "lookup: %d of %d drug name(s) are listed as antidotes: %s",
-            len(found), len(names), ", ".join(sorted(found)),
+            len(found),
+            len(names),
+            ", ".join(sorted(found)),
         )
         for wanted, ref in sorted(found.items()):
             for listing in ref["listings"]:
                 logger.debug(
                     "lookup:   %s -> %s [%s] %s (%s)",
-                    wanted, ref["display_name"], listing["population"],
+                    wanted,
+                    ref["display_name"],
+                    listing["population"],
                     listing["dosage_form"] or "no dosage form",
                     listing["source_document"],
                 )

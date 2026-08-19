@@ -73,10 +73,22 @@ def test_low_confidence_kidney_related_lab_routes_to_nephrology_without_diagnosi
 
 
 def test_specialty_categories_are_mapped_from_reviewable_terms():
-    assert match_specialty("low_confidence_document", "Troponin was difficult to read.")["id"] == "cardiology"
-    assert match_specialty("low_confidence_document", "Spirometry value was difficult to read.")["id"] == "pulmonology"
-    assert match_specialty("low_confidence_document", "A migraine note was difficult to read.")["id"] == "neurology"
-    assert match_specialty("low_confidence_document", "A skin rash note was difficult to read.")["id"] == "dermatology"
+    assert (
+        match_specialty("low_confidence_document", "Troponin was difficult to read.")["id"]
+        == "cardiology"
+    )
+    assert (
+        match_specialty("low_confidence_document", "Spirometry value was difficult to read.")["id"]
+        == "pulmonology"
+    )
+    assert (
+        match_specialty("low_confidence_document", "A migraine note was difficult to read.")["id"]
+        == "neurology"
+    )
+    assert (
+        match_specialty("low_confidence_document", "A skin rash note was difficult to read.")["id"]
+        == "dermatology"
+    )
 
 
 def test_ambiguous_evidence_uses_general_physician():

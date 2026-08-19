@@ -10,7 +10,7 @@ integration can be added later without changing the export contract.
 import re
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 EXPORT_FORMATS = ("json", "fhir")
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -78,8 +78,10 @@ def _coding(system: str, code: str, display: str) -> Dict[str, str]:
 
 def build_native_export(user_id: str, snapshot: Dict[str, Any]) -> Dict[str, Any]:
     return {
-        "format": "medimind-record-export", "format_version": "1.0",
-        "exported_at": _now_iso(), "user_id": user_id,
+        "format": "medimind-record-export",
+        "format_version": "1.0",
+        "exported_at": _now_iso(),
+        "user_id": user_id,
         "patient_timeline": snapshot.get("patient_timeline"),
         "cross_check_report": snapshot.get("cross_check_report"),
         "lab_trends": snapshot.get("lab_trends"),
@@ -87,7 +89,9 @@ def build_native_export(user_id: str, snapshot: Dict[str, Any]) -> Dict[str, Any
     }
 
 
-def _condition_resources(timeline: Dict[str, Any], patient_ref: Dict[str, str], unmapped: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _condition_resources(
+    timeline: Dict[str, Any], patient_ref: Dict[str, str], unmapped: List[Dict[str, Any]]
+) -> List[Dict[str, Any]]:
     values: List[Any] = []
     for key in ("diagnoses_timeline", "conditions_timeline"):
         values.extend(timeline.get(key) or [])
@@ -111,7 +115,20 @@ def _condition_resources(timeline: Dict[str, Any], patient_ref: Dict[str, str], 
         codeable = {"text": name}
         if codings:
             codeable["coding"] = codings
-        resource = {"resourceType": "Condition", "clinicalStatus": {"coding": [_coding("http://terminology.hl7.org/CodeSystem/condition-clinical", "active", "Active")]}, "code": codeable, "subject": patient_ref}
+        resource = {
+            "resourceType": "Condition",
+            "clinicalStatus": {
+                "coding": [
+                    _coding(
+                        "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                        "active",
+                        "Active",
+                    )
+                ]
+            },
+            "code": codeable,
+            "subject": patient_ref,
+        }
         date = _fhir_date((item or {}).get("date") if isinstance(item, dict) else None)
         if date:
             resource["onsetDateTime"] = date
@@ -119,12 +136,22 @@ def _condition_resources(timeline: Dict[str, Any], patient_ref: Dict[str, str], 
     return result
 
 
-def build_fhir_bundle(user_id: str, snapshot: Dict[str, Any], *, return_metadata: bool = False) -> Dict[str, Any]:
+def build_fhir_bundle(
+    user_id: str, snapshot: Dict[str, Any], *, return_metadata: bool = False
+) -> Dict[str, Any]:
     timeline = snapshot.get("patient_timeline") or {}
     entries: List[Dict[str, Any]] = []
     unmapped: List[Dict[str, Any]] = []
     patient_fullurl = f"urn:uuid:{uuid.uuid4()}"
-    entries.append({"fullUrl": patient_fullurl, "resource": {"resourceType": "Patient", "identifier": [{"system": "urn:medimind:user", "value": user_id}]}})
+    entries.append(
+        {
+            "fullUrl": patient_fullurl,
+            "resource": {
+                "resourceType": "Patient",
+                "identifier": [{"system": "urn:medimind:user", "value": user_id}],
+            },
+        }
+    )
     patient_ref = {"reference": patient_fullurl}
 
     for med in timeline.get("medications_timeline", []) or []:
@@ -133,21 +160,36 @@ def build_fhir_bundle(user_id: str, snapshot: Dict[str, Any], *, return_metadata
         coding = RXNORM_CODES.get(key)
         medication = {"text": name}
         if coding:
-            medication["coding"] = [_coding("http://www.nlm.nih.gov/research/umls/rxnorm", coding[0], coding[1])]
+            medication["coding"] = [
+                _coding("http://www.nlm.nih.gov/research/umls/rxnorm", coding[0], coding[1])
+            ]
         else:
             unmapped.append({"domain": "medication", "value": name, "target": "RxNorm"})
-        resource: Dict[str, Any] = {"resourceType": "MedicationStatement", "status": "unknown", "subject": patient_ref, "medicationCodeableConcept": medication}
+        resource: Dict[str, Any] = {
+            "resourceType": "MedicationStatement",
+            "status": "unknown",
+            "subject": patient_ref,
+            "medicationCodeableConcept": medication,
+        }
         effective = _fhir_date(med.get("date"))
         if effective:
             resource["effectiveDateTime"] = effective
-        dosage_bits = [b for b in (med.get("dosage"), med.get("frequency"), med.get("duration")) if b]
+        dosage_bits = [
+            b for b in (med.get("dosage"), med.get("frequency"), med.get("duration")) if b
+        ]
         if dosage_bits:
             resource["dosage"] = [{"text": ", ".join(str(b) for b in dosage_bits)}]
         if med.get("source_file"):
             resource["note"] = [{"text": f"Source document: {med['source_file']}"}]
         entries.append({"fullUrl": f"urn:uuid:{uuid.uuid4()}", "resource": resource})
         # MedicationRequest represents the documented prescription intent.
-        request = {"resourceType": "MedicationRequest", "status": "active", "intent": "order", "subject": patient_ref, "medicationCodeableConcept": medication}
+        request = {
+            "resourceType": "MedicationRequest",
+            "status": "active",
+            "intent": "order",
+            "subject": patient_ref,
+            "medicationCodeableConcept": medication,
+        }
         if effective:
             request["authoredOn"] = effective
         if dosage_bits:
@@ -162,7 +204,23 @@ def build_fhir_bundle(user_id: str, snapshot: Dict[str, Any], *, return_metadata
             codeable["coding"] = [_coding("http://loinc.org", code[0], code[1])]
         else:
             unmapped.append({"domain": "laboratory", "value": name, "target": "LOINC"})
-        resource: Dict[str, Any] = {"resourceType": "Observation", "status": "final", "category": [{"coding": [_coding("http://terminology.hl7.org/CodeSystem/observation-category", "laboratory", "Laboratory")]}], "code": codeable, "subject": patient_ref}
+        resource: Dict[str, Any] = {
+            "resourceType": "Observation",
+            "status": "final",
+            "category": [
+                {
+                    "coding": [
+                        _coding(
+                            "http://terminology.hl7.org/CodeSystem/observation-category",
+                            "laboratory",
+                            "Laboratory",
+                        )
+                    ]
+                }
+            ],
+            "code": codeable,
+            "subject": patient_ref,
+        }
         effective = _fhir_date(lab.get("date"))
         if effective:
             resource["effectiveDateTime"] = effective
@@ -182,26 +240,68 @@ def build_fhir_bundle(user_id: str, snapshot: Dict[str, Any], *, return_metadata
             resource["note"] = [{"text": f"Source document: {lab['source_file']}"}]
         entries.append({"fullUrl": f"urn:uuid:{uuid.uuid4()}", "resource": resource})
 
-    entries.extend({"fullUrl": f"urn:uuid:{uuid.uuid4()}", "resource": resource} for resource in _condition_resources(timeline, patient_ref, unmapped))
+    entries.extend(
+        {"fullUrl": f"urn:uuid:{uuid.uuid4()}", "resource": resource}
+        for resource in _condition_resources(timeline, patient_ref, unmapped)
+    )
     for event in timeline.get("visits", []) or []:
         if not isinstance(event, dict):
             continue
-        resource = {"resourceType": "Encounter", "status": "finished", "class": {"system": "http://terminology.hl7.org/CodeSystem/v3-ActCode", "code": "AMB", "display": "ambulatory"}, "subject": patient_ref}
+        resource = {
+            "resourceType": "Encounter",
+            "status": "finished",
+            "class": {
+                "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+                "code": "AMB",
+                "display": "ambulatory",
+            },
+            "subject": patient_ref,
+        }
         date = _fhir_date(event.get("date"))
         if date:
             resource["period"] = {"start": date}
         if event.get("provider_or_doctor"):
-            resource["participant"] = [{"individual": {"display": str(event["provider_or_doctor"])}}]
+            resource["participant"] = [
+                {"individual": {"display": str(event["provider_or_doctor"])}}
+            ]
         entries.append({"fullUrl": f"urn:uuid:{uuid.uuid4()}", "resource": resource})
 
     for allergy in timeline.get("known_allergies", []) or []:
-        entries.append({"fullUrl": f"urn:uuid:{uuid.uuid4()}", "resource": {"resourceType": "AllergyIntolerance", "patient": patient_ref, "code": {"text": str(allergy)}}})
+        entries.append(
+            {
+                "fullUrl": f"urn:uuid:{uuid.uuid4()}",
+                "resource": {
+                    "resourceType": "AllergyIntolerance",
+                    "patient": patient_ref,
+                    "code": {"text": str(allergy)},
+                },
+            }
+        )
 
     provenance_targets = [e["fullUrl"] for e in entries]
-    entries.append({"fullUrl": f"urn:uuid:{uuid.uuid4()}", "resource": {"resourceType": "Provenance", "target": [{"reference": ref} for ref in provenance_targets], "recorded": _now_iso(), "agent": [{"who": {"display": "MediMind record export"}}]}})
-    bundle = {"resourceType": "Bundle", "type": "collection", "timestamp": _now_iso(), "total": len(entries), "entry": entries}
+    entries.append(
+        {
+            "fullUrl": f"urn:uuid:{uuid.uuid4()}",
+            "resource": {
+                "resourceType": "Provenance",
+                "target": [{"reference": ref} for ref in provenance_targets],
+                "recorded": _now_iso(),
+                "agent": [{"who": {"display": "MediMind record export"}}],
+            },
+        }
+    )
+    bundle = {
+        "resourceType": "Bundle",
+        "type": "collection",
+        "timestamp": _now_iso(),
+        "total": len(entries),
+        "entry": entries,
+    }
     if return_metadata:
-        bundle["_medimind_export_metadata"] = {"unmapped_terminology": unmapped, "mapping_systems": ["LOINC", "SNOMED CT", "RxNorm", "ICD-10-CM"]}
+        bundle["_medimind_export_metadata"] = {
+            "unmapped_terminology": unmapped,
+            "mapping_systems": ["LOINC", "SNOMED CT", "RxNorm", "ICD-10-CM"],
+        }
     return bundle
 
 
@@ -214,33 +314,88 @@ def validate_fhir_bundle(bundle: Dict[str, Any]) -> Dict[str, Any]:
     """
     errors: List[Dict[str, Any]] = []
     warnings: List[Dict[str, Any]] = []
-    if bundle.get("resourceType") != "Bundle": errors.append({"path": "resourceType", "message": "Must be Bundle"})
-    if bundle.get("type") != "collection": errors.append({"path": "type", "message": "Must be collection"})
+    if bundle.get("resourceType") != "Bundle":
+        errors.append({"path": "resourceType", "message": "Must be Bundle"})
+    if bundle.get("type") != "collection":
+        errors.append({"path": "type", "message": "Must be collection"})
     entries = bundle.get("entry") or []
-    if bundle.get("total") != len(entries): errors.append({"path": "total", "message": "Must equal entry count"})
-    valid_types = {"Patient", "MedicationStatement", "MedicationRequest", "Observation", "AllergyIntolerance", "Condition", "Encounter", "Provenance"}
+    if bundle.get("total") != len(entries):
+        errors.append({"path": "total", "message": "Must equal entry count"})
+    valid_types = {
+        "Patient",
+        "MedicationStatement",
+        "MedicationRequest",
+        "Observation",
+        "AllergyIntolerance",
+        "Condition",
+        "Encounter",
+        "Provenance",
+    }
     urls = set()
     for i, entry in enumerate(entries):
         resource = entry.get("resource") or {}
         path = f"entry[{i}].resource"
         kind = resource.get("resourceType")
-        if kind not in valid_types: errors.append({"path": path, "message": "Unsupported resource type"})
-        if not entry.get("fullUrl"): errors.append({"path": f"entry[{i}].fullUrl", "message": "Required"})
+        if kind not in valid_types:
+            errors.append({"path": path, "message": "Unsupported resource type"})
+        if not entry.get("fullUrl"):
+            errors.append({"path": f"entry[{i}].fullUrl", "message": "Required"})
         urls.add(entry.get("fullUrl"))
-        if kind == "MedicationStatement" and ("medicationCodeableConcept" not in resource and "medicationReference" not in resource): errors.append({"path": path, "message": "MedicationStatement requires medicationCodeableConcept or medicationReference"})
-        if kind == "MedicationRequest" and resource.get("status") not in {"active", "on-hold", "cancelled", "completed", "entered-in-error", "stopped", "draft", "unknown"}: errors.append({"path": path, "message": "Invalid MedicationRequest.status"})
-        if kind == "MedicationStatement" and resource.get("status") not in {"active", "completed", "entered-in-error", "intended", "stopped", "on-hold", "unknown"}: errors.append({"path": path, "message": "Invalid MedicationStatement.status"})
-    if not any((e.get("resource") or {}).get("resourceType") == "Patient" for e in entries): errors.append({"path": "entry", "message": "Bundle must contain Patient"})
+        if kind == "MedicationStatement" and (
+            "medicationCodeableConcept" not in resource and "medicationReference" not in resource
+        ):
+            errors.append(
+                {
+                    "path": path,
+                    "message": "MedicationStatement requires medicationCodeableConcept or medicationReference",  # noqa: E501
+                }
+            )
+        if kind == "MedicationRequest" and resource.get("status") not in {
+            "active",
+            "on-hold",
+            "cancelled",
+            "completed",
+            "entered-in-error",
+            "stopped",
+            "draft",
+            "unknown",
+        }:
+            errors.append({"path": path, "message": "Invalid MedicationRequest.status"})
+        if kind == "MedicationStatement" and resource.get("status") not in {
+            "active",
+            "completed",
+            "entered-in-error",
+            "intended",
+            "stopped",
+            "on-hold",
+            "unknown",
+        }:
+            errors.append({"path": path, "message": "Invalid MedicationStatement.status"})
+    if not any((e.get("resource") or {}).get("resourceType") == "Patient" for e in entries):
+        errors.append({"path": "entry", "message": "Bundle must contain Patient"})
     for entry in entries:
         resource = entry.get("resource") or {}
         if resource.get("resourceType") == "Provenance":
             for target in resource.get("target", []):
-                if target.get("reference") not in urls: errors.append({"path": "Provenance.target", "message": "Reference does not resolve"})
-    return {"valid": not errors, "validator": "MediMind local FHIR R4 structural validator", "errors": errors, "warnings": warnings, "resource_count": len(entries)}
+                if target.get("reference") not in urls:
+                    errors.append(
+                        {"path": "Provenance.target", "message": "Reference does not resolve"}
+                    )
+    return {
+        "valid": not errors,
+        "validator": "MediMind local FHIR R4 structural validator",
+        "errors": errors,
+        "warnings": warnings,
+        "resource_count": len(entries),
+    }
 
 
 def build_export(user_id: str, snapshot: Dict[str, Any], fmt: str) -> Dict[str, Any]:
     fmt = (fmt or "json").strip().lower()
     if fmt not in EXPORT_FORMATS:
         raise ValueError(f"Unknown export format '{fmt}'. Supported: {', '.join(EXPORT_FORMATS)}")
-    return build_fhir_bundle(user_id, snapshot) if fmt == "fhir" else build_native_export(user_id, snapshot)
+    return (
+        build_fhir_bundle(user_id, snapshot)
+        if fmt == "fhir"
+        else build_native_export(user_id, snapshot)
+    )

@@ -7,41 +7,62 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from export import build_export, build_fhir_bundle, build_native_export, validate_fhir_bundle  # noqa: E402
-
+from export import (  # noqa: E402
+    build_export,
+    build_fhir_bundle,
+    build_native_export,
+    validate_fhir_bundle,
+)
 
 SNAPSHOT = {
     "patient_timeline": {
         "visits": [],
         "medications_timeline": [
             {
-                "name": "Metformin", "ingredients": ["metformin"],
-                "dosage": "500 mg", "frequency": "2x daily", "duration": "30 days",
-                "date": "2024-03-15", "source_file": "rx.pdf",
+                "name": "Metformin",
+                "ingredients": ["metformin"],
+                "dosage": "500 mg",
+                "frequency": "2x daily",
+                "duration": "30 days",
+                "date": "2024-03-15",
+                "source_file": "rx.pdf",
             },
         ],
         "lab_results_timeline": [
             {
-                "test_name": "HbA1c", "value": "6.8", "unit": "%",
-                "reference_range": "4.0-5.6", "flag": "high",
-                "date": "2024-03-15", "source_file": "labs.pdf",
+                "test_name": "HbA1c",
+                "value": "6.8",
+                "unit": "%",
+                "reference_range": "4.0-5.6",
+                "flag": "high",
+                "date": "2024-03-15",
+                "source_file": "labs.pdf",
             },
             {
-                "test_name": "Urine culture", "value": "no growth", "unit": None,
-                "reference_range": None, "flag": None,
-                "date": "not-a-date", "source_file": "labs.pdf",
+                "test_name": "Urine culture",
+                "value": "no growth",
+                "unit": None,
+                "reference_range": None,
+                "flag": None,
+                "date": "not-a-date",
+                "source_file": "labs.pdf",
             },
         ],
         "known_allergies": ["penicillin"],
     },
-    "cross_check_report": {"potential_drug_interactions": [], "overall_recommendation": "Consult a professional."},
+    "cross_check_report": {
+        "potential_drug_interactions": [],
+        "overall_recommendation": "Consult a professional.",
+    },
     "lab_trends": {"trends": [], "insufficient_data": []},
     "updated_at": "2024-03-16T00:00:00+00:00",
 }
 
 
 def _resources_of(bundle, resource_type):
-    return [e["resource"] for e in bundle["entry"] if e["resource"]["resourceType"] == resource_type]
+    return [
+        e["resource"] for e in bundle["entry"] if e["resource"]["resourceType"] == resource_type
+    ]
 
 
 def test_native_export_is_lossless_and_self_describing():
@@ -81,7 +102,10 @@ def test_fhir_medication_maps_dosage_and_date():
     bundle = build_fhir_bundle("anon_x", SNAPSHOT)
     med = _resources_of(bundle, "MedicationStatement")[0]
     assert med["medicationCodeableConcept"]["text"] == "Metformin"
-    assert med["medicationCodeableConcept"]["coding"][0]["system"] == "http://www.nlm.nih.gov/research/umls/rxnorm"
+    assert (
+        med["medicationCodeableConcept"]["coding"][0]["system"]
+        == "http://www.nlm.nih.gov/research/umls/rxnorm"
+    )
     assert med["effectiveDateTime"] == "2024-03-15"
     assert "500 mg" in med["dosage"][0]["text"]
 

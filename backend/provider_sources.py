@@ -24,7 +24,6 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-
 DEFAULT_TIMEOUT_SECONDS = 12
 
 # Public Nominatim and Overpass endpoints are shared infrastructure. Keep a
@@ -81,7 +80,12 @@ class ProviderSourcePayload:
 
 def _timeout_seconds() -> int:
     try:
-        return max(3, min(30, int(os.environ.get("PROVIDER_SEARCH_TIMEOUT_SECONDS", DEFAULT_TIMEOUT_SECONDS))))
+        return max(
+            3,
+            min(
+                30, int(os.environ.get("PROVIDER_SEARCH_TIMEOUT_SECONDS", DEFAULT_TIMEOUT_SECONDS))
+            ),
+        )
     except ValueError:
         return DEFAULT_TIMEOUT_SECONDS
 
@@ -128,7 +132,7 @@ def _read_json(
         if exc.code in (401, 403):
             raise ProviderSearchError(
                 "provider_authorization_failed",
-                "The live provider directory is not available because its server configuration was rejected.",
+                "The live provider directory is not available because its server configuration was rejected.",  # noqa: E501
                 retryable=False,
                 http_status=503,
             ) from exc
@@ -162,7 +166,7 @@ def _read_json(
             ) from exc
         raise ProviderSearchError(
             "provider_network_error",
-            "The live provider directory could not be reached. Check your connection and try again.",
+            "The live provider directory could not be reached. Check your connection and try again.",  # noqa: E501
             retryable=True,
             http_status=503,
         ) from exc
@@ -214,7 +218,7 @@ class GooglePlacesSource:
                 )
             raise ProviderSearchError(
                 "provider_location_failed",
-                "Google Places could not locate that city or area. Check the spelling and try again.",
+                "Google Places could not locate that city or area. Check the spelling and try again.",  # noqa: E501
                 retryable=False,
                 http_status=422,
             )
@@ -245,7 +249,7 @@ class GooglePlacesSource:
                 source_label=self.source_label,
                 origin=None,
                 records=[],
-                no_results_message="Google Places could not locate that city or area. Check the spelling and try again.",
+                no_results_message="Google Places could not locate that city or area. Check the spelling and try again.",  # noqa: E501
             )
 
         query = f"{specialty.get('provider_query') or 'doctor'} near {location}"
@@ -318,15 +322,21 @@ class OpenStreetMapSource:
         if not user_agent.strip():
             raise ProviderSearchError(
                 "provider_configuration_missing",
-                "OpenStreetMap search requires OSM_NOMINATIM_USER_AGENT to identify this application to the public service.",
+                "OpenStreetMap search requires OSM_NOMINATIM_USER_AGENT to identify this application to the public service.",  # noqa: E501
                 retryable=False,
                 http_status=503,
             )
         self.user_agent = user_agent.strip()
-        self.nominatim_url = os.environ.get("OSM_NOMINATIM_URL", "https://nominatim.openstreetmap.org/search")
-        self.overpass_url = os.environ.get("OSM_OVERPASS_URL", "https://overpass-api.de/api/interpreter")
+        self.nominatim_url = os.environ.get(
+            "OSM_NOMINATIM_URL", "https://nominatim.openstreetmap.org/search"
+        )
+        self.overpass_url = os.environ.get(
+            "OSM_OVERPASS_URL", "https://overpass-api.de/api/interpreter"
+        )
         try:
-            self.radius_meters = max(1000, min(50000, int(os.environ.get("OSM_PROVIDER_SEARCH_RADIUS_METERS", "20000"))))
+            self.radius_meters = max(
+                1000, min(50000, int(os.environ.get("OSM_PROVIDER_SEARCH_RADIUS_METERS", "20000")))
+            )
         except ValueError:
             self.radius_meters = 20000
 
@@ -368,7 +378,7 @@ class OpenStreetMapSource:
                 source_label=self.source_label,
                 origin=None,
                 records=[],
-                no_results_message="OpenStreetMap could not locate that city or area. Check the spelling and try again.",
+                no_results_message="OpenStreetMap could not locate that city or area. Check the spelling and try again.",  # noqa: E501
             )
 
         # The query only obtains real map records. Specialty selection happens
@@ -401,7 +411,7 @@ out center tags;"""
             origin=origin,
             records=records,
             no_results_message=(
-                "No nearby doctor, clinic, hospital, or pharmacy records were returned by OpenStreetMap. "
+                "No nearby doctor, clinic, hospital, or pharmacy records were returned by OpenStreetMap. "  # noqa: E501
                 "Try a broader area or a nearby city."
                 if not records
                 else None
@@ -410,11 +420,11 @@ out center tags;"""
 
 
 _GEOAPIFY_CATEGORIES = {
-    "cardiology": "healthcare.clinic_or_praxis.cardiology,healthcare.clinic_or_praxis,healthcare.hospital",
-    "pulmonology": "healthcare.clinic_or_praxis.pulmonology,healthcare.clinic_or_praxis,healthcare.hospital",
-    "dermatology": "healthcare.clinic_or_praxis.dermatology,healthcare.clinic_or_praxis,healthcare.hospital",
+    "cardiology": "healthcare.clinic_or_praxis.cardiology,healthcare.clinic_or_praxis,healthcare.hospital",  # noqa: E501
+    "pulmonology": "healthcare.clinic_or_praxis.pulmonology,healthcare.clinic_or_praxis,healthcare.hospital",  # noqa: E501
+    "dermatology": "healthcare.clinic_or_praxis.dermatology,healthcare.clinic_or_praxis,healthcare.hospital",  # noqa: E501
     "pharmacy": "healthcare.pharmacy",
-    "general_practice": "healthcare.clinic_or_praxis.general,healthcare.clinic_or_praxis,healthcare.hospital",
+    "general_practice": "healthcare.clinic_or_praxis.general,healthcare.clinic_or_praxis,healthcare.hospital",  # noqa: E501
 }
 
 
@@ -446,10 +456,16 @@ class GeoapifyPlacesSource:
                 http_status=503,
             )
         self.api_key = api_key
-        self.geocode_url = os.environ.get("GEOAPIFY_GEOCODE_URL", "https://api.geoapify.com/v1/geocode/search")
-        self.places_url = os.environ.get("GEOAPIFY_PLACES_URL", "https://api.geoapify.com/v2/places")
+        self.geocode_url = os.environ.get(
+            "GEOAPIFY_GEOCODE_URL", "https://api.geoapify.com/v1/geocode/search"
+        )
+        self.places_url = os.environ.get(
+            "GEOAPIFY_PLACES_URL", "https://api.geoapify.com/v2/places"
+        )
         try:
-            self.radius_meters = max(1000, min(50000, int(os.environ.get("OSM_PROVIDER_SEARCH_RADIUS_METERS", "20000"))))
+            self.radius_meters = max(
+                1000, min(50000, int(os.environ.get("OSM_PROVIDER_SEARCH_RADIUS_METERS", "20000")))
+            )
         except ValueError:
             self.radius_meters = 20000
 
@@ -487,10 +503,12 @@ class GeoapifyPlacesSource:
                 source_label=self.source_label,
                 origin=None,
                 records=[],
-                no_results_message="Geoapify could not locate that city or area. Check the spelling and try again.",
+                no_results_message="Geoapify could not locate that city or area. Check the spelling and try again.",  # noqa: E501
             )
         specialty_id = str((specialty or {}).get("id") or "general_practice")
-        categories = _GEOAPIFY_CATEGORIES.get(specialty_id) or _GEOAPIFY_CATEGORIES["general_practice"]
+        categories = (
+            _GEOAPIFY_CATEGORIES.get(specialty_id) or _GEOAPIFY_CATEGORIES["general_practice"]
+        )
         query = urlencode(
             {
                 "categories": categories,
@@ -557,7 +575,7 @@ def get_provider_source() -> Any:
         if not api_key or api_key.startswith("your-"):
             raise ProviderSearchError(
                 "provider_configuration_missing",
-                "Google Places is selected but GOOGLE_PLACES_API_KEY is not configured on the backend.",
+                "Google Places is selected but GOOGLE_PLACES_API_KEY is not configured on the backend.",  # noqa: E501
                 retryable=False,
                 http_status=503,
             )

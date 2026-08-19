@@ -1,4 +1,5 @@
 """Regression tests for longitudinal diagnoses, symptoms, procedures, vitals, and imaging."""
+
 import os
 import sys
 import tempfile
@@ -33,32 +34,58 @@ def _document(doc_id="doc-clinical", vital_value="120/80", source="consult.pdf")
         "patient_name": "Jane Doe",
         "medications": [],
         "lab_results": [],
-        "diagnoses": [{
-            "name": "Essential hypertension", "code": "I10", "status": "active",
-            "onset_date": "2024-01-10", "confidence": 0.93,
-            "evidence": [_region("Assessment: Essential hypertension (I10)")],
-        }],
-        "symptoms": [{
-            "name": "Headache", "severity": "moderate", "status": "current",
-            "onset_date": "2025-05-18", "confidence": 0.9,
-            "evidence": [_region("moderate headache since 18 May")],
-        }],
-        "procedures": [{
-            "name": "Appendectomy", "procedure_date": "2018-06-01", "body_site": "appendix",
-            "status": "historical", "outcome": "No documented complications", "confidence": 0.88,
-            "evidence": [_region("Past surgery: appendectomy in 2018")],
-        }],
-        "vital_signs": [{
-            "name": "Blood pressure", "value": vital_value, "unit": "mmHg",
-            "measured_at": "2025-05-20", "confidence": 0.97,
-            "evidence": [_region(f"BP {vital_value} mmHg")],
-        }],
-        "imaging_results": [{
-            "study_type": "Chest X-ray", "body_site": "chest", "study_date": "2025-05-19",
-            "findings": "No focal airspace opacity", "impression": "No acute cardiopulmonary abnormality",
-            "confidence": 0.95,
-            "evidence": [_region("Chest X-ray: No acute cardiopulmonary abnormality")],
-        }],
+        "diagnoses": [
+            {
+                "name": "Essential hypertension",
+                "code": "I10",
+                "status": "active",
+                "onset_date": "2024-01-10",
+                "confidence": 0.93,
+                "evidence": [_region("Assessment: Essential hypertension (I10)")],
+            }
+        ],
+        "symptoms": [
+            {
+                "name": "Headache",
+                "severity": "moderate",
+                "status": "current",
+                "onset_date": "2025-05-18",
+                "confidence": 0.9,
+                "evidence": [_region("moderate headache since 18 May")],
+            }
+        ],
+        "procedures": [
+            {
+                "name": "Appendectomy",
+                "procedure_date": "2018-06-01",
+                "body_site": "appendix",
+                "status": "historical",
+                "outcome": "No documented complications",
+                "confidence": 0.88,
+                "evidence": [_region("Past surgery: appendectomy in 2018")],
+            }
+        ],
+        "vital_signs": [
+            {
+                "name": "Blood pressure",
+                "value": vital_value,
+                "unit": "mmHg",
+                "measured_at": "2025-05-20",
+                "confidence": 0.97,
+                "evidence": [_region(f"BP {vital_value} mmHg")],
+            }
+        ],
+        "imaging_results": [
+            {
+                "study_type": "Chest X-ray",
+                "body_site": "chest",
+                "study_date": "2025-05-19",
+                "findings": "No focal airspace opacity",
+                "impression": "No acute cardiopulmonary abnormality",
+                "confidence": 0.95,
+                "evidence": [_region("Chest X-ray: No acute cardiopulmonary abnormality")],
+            }
+        ],
         "allergies_noted": [],
         "clinical_notes": None,
         "field_evidence": {
@@ -90,12 +117,14 @@ def test_strict_extraction_schema_requires_all_longitudinal_collections():
 
 
 def test_legacy_documents_receive_empty_longitudinal_collections():
-    legacy = normalize_document_evidence({
-        "document_type": "lab_report",
-        "medications": [],
-        "lab_results": [],
-        "_source": {"file": "legacy.pdf", "method": "text_layer", "page": 1},
-    })
+    legacy = normalize_document_evidence(
+        {
+            "document_type": "lab_report",
+            "medications": [],
+            "lab_results": [],
+            "_source": {"file": "legacy.pdf", "method": "text_layer", "page": 1},
+        }
+    )
 
     for collection in ("diagnoses", "symptoms", "procedures", "vital_signs", "imaging_results"):
         assert legacy[collection] == []
@@ -144,8 +173,11 @@ def test_timeline_rollups_use_event_dates_and_keep_source_provenance():
     assert timeline["vital_signs_timeline"][0]["date"] == "2025-05-20"
     assert timeline["imaging_results_timeline"][0]["date"] == "2025-05-19"
     for key in (
-        "diagnoses_timeline", "symptoms_timeline", "procedures_timeline",
-        "vital_signs_timeline", "imaging_results_timeline",
+        "diagnoses_timeline",
+        "symptoms_timeline",
+        "procedures_timeline",
+        "vital_signs_timeline",
+        "imaging_results_timeline",
     ):
         fact = timeline[key][0]
         assert fact["document_date"] == "2025-05-20"
@@ -179,18 +211,34 @@ def test_timeline_sorts_date_only_and_timezone_aware_event_dates_together():
 
     timeline = build_patient_timeline([older, newer])
 
-    assert [item["document_id"] for item in timeline["diagnoses_timeline"]] == ["doc-older", "doc-newer"]
+    assert [item["document_id"] for item in timeline["diagnoses_timeline"]] == [
+        "doc-older",
+        "doc-newer",
+    ]
 
 
 def test_all_clinical_events_are_retrievable_with_evidence_metadata():
     timeline = build_patient_timeline([normalize_document_evidence(_document(), default_page=1)])
     chunks = build_chunks_from_timeline("anon-clinical", timeline)
-    clinical = [chunk for chunk in chunks if chunk["metadata"]["chunk_type"] in {
-        "diagnosis", "symptom", "procedure", "vital_sign", "imaging_result",
-    }]
+    clinical = [
+        chunk
+        for chunk in chunks
+        if chunk["metadata"]["chunk_type"]
+        in {
+            "diagnosis",
+            "symptom",
+            "procedure",
+            "vital_sign",
+            "imaging_result",
+        }
+    ]
 
     assert {chunk["metadata"]["chunk_type"] for chunk in clinical} == {
-        "diagnosis", "symptom", "procedure", "vital_sign", "imaging_result",
+        "diagnosis",
+        "symptom",
+        "procedure",
+        "vital_sign",
+        "imaging_result",
     }
     assert len(clinical) == 5
     for chunk in clinical:
@@ -203,9 +251,14 @@ def test_all_clinical_events_are_retrievable_with_evidence_metadata():
 def test_diagnosis_only_document_is_recognized_as_structured_medical_content():
     document = {
         "document_type": "other",
-        "medications": [], "lab_results": [], "allergies_noted": [],
+        "medications": [],
+        "lab_results": [],
+        "allergies_noted": [],
         "diagnoses": [{"name": "Asthma"}],
-        "symptoms": [], "procedures": [], "vital_signs": [], "imaging_results": [],
+        "symptoms": [],
+        "procedures": [],
+        "vital_signs": [],
+        "imaging_results": [],
         "overall_confidence": 0.7,
     }
     assert looks_like_medical_document(document) is True

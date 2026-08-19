@@ -5,15 +5,14 @@ windows, overlap verdicts (concurrent / possible / not_concurrent /
 unknown), finding annotation, double-dosing exposure arithmetic, and the
 chronological risk calendar. All deterministic — no model call.
 """
+
 import os
 import sys
 from datetime import date
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import risk_timeline  # noqa: E402
 from risk_timeline import (  # noqa: E402
-    ASSUMED_COURSE_DAYS,
     CONCURRENT,
     NOT_CONCURRENT,
     POSSIBLE,
@@ -30,35 +29,61 @@ from risk_timeline import (  # noqa: E402
 
 
 def _med(name, ingredient, d, duration, value=None, unit=None, per_day=None, group=None):
-    return {"name": name, "ingredients": [ingredient], "date": d,
-            "duration": duration, "dosage_value": value, "dosage_unit": unit,
-            "frequency_per_day": per_day, "source_file": f"{name}.png",
-            "prescription_group": group}
+    return {
+        "name": name,
+        "ingredients": [ingredient],
+        "date": d,
+        "duration": duration,
+        "dosage_value": value,
+        "dosage_unit": unit,
+        "frequency_per_day": per_day,
+        "source_file": f"{name}.png",
+        "prescription_group": group,
+    }
 
 
 def _timeline():
-    return {"medications_timeline": [
-        _med("Paracetamol", "Paracetamol", "09/11/2025", "14 days", 1000, "mg", 3, "rx-0"),
-        _med("Diclofenac sodium", "Diclofenac", "09/11/2025", "14 days", None, None, 2, "rx-0"),
-        _med("Fluconazole", "Fluconazole", "27/03/2025", "4 weeks", 150, "mg", 0.14, "rx-1"),
-        _med("Cetirizine", "Cetirizine", "26/02/2026", "14 days", 10, "mg", 1, "rx-2"),
-        _med("Montelukast", "Montelukast", "26/02/2026", "14 days", 10, "mg", 1, "rx-2"),
-        _med("Chlorpheniramine", "Chlorpheniramine", "14/10/2023", "5 days", 4, "mg", 1, "rx-3"),
-    ]}
+    return {
+        "medications_timeline": [
+            _med("Paracetamol", "Paracetamol", "09/11/2025", "14 days", 1000, "mg", 3, "rx-0"),
+            _med("Diclofenac sodium", "Diclofenac", "09/11/2025", "14 days", None, None, 2, "rx-0"),
+            _med("Fluconazole", "Fluconazole", "27/03/2025", "4 weeks", 150, "mg", 0.14, "rx-1"),
+            _med("Cetirizine", "Cetirizine", "26/02/2026", "14 days", 10, "mg", 1, "rx-2"),
+            _med("Montelukast", "Montelukast", "26/02/2026", "14 days", 10, "mg", 1, "rx-2"),
+            _med(
+                "Chlorpheniramine", "Chlorpheniramine", "14/10/2023", "5 days", 4, "mg", 1, "rx-3"
+            ),
+        ]
+    }
 
 
 def _report():
     return {
         "potential_drug_interactions": [
-            {"medications_involved": ["Paracetamol", "Diclofenac"],
-             "explanation": "Additive GI/renal risk.", "severity": "moderate",
-             "confidence": 0.6},
-            {"medications_involved": ["Fluconazole", "Montelukast"],
-             "explanation": "CYP inhibition.", "severity": "moderate", "confidence": 0.6},
-            {"medications_involved": ["Cetirizine", "Chlorpheniramine"],
-             "explanation": "Additive sedation.", "severity": "moderate", "confidence": 0.6},
-            {"medications_involved": ["Cetirizine", "Montelukast"],
-             "explanation": "Prescribed together.", "severity": "low", "confidence": 0.5},
+            {
+                "medications_involved": ["Paracetamol", "Diclofenac"],
+                "explanation": "Additive GI/renal risk.",
+                "severity": "moderate",
+                "confidence": 0.6,
+            },
+            {
+                "medications_involved": ["Fluconazole", "Montelukast"],
+                "explanation": "CYP inhibition.",
+                "severity": "moderate",
+                "confidence": 0.6,
+            },
+            {
+                "medications_involved": ["Cetirizine", "Chlorpheniramine"],
+                "explanation": "Additive sedation.",
+                "severity": "moderate",
+                "confidence": 0.6,
+            },
+            {
+                "medications_involved": ["Cetirizine", "Montelukast"],
+                "explanation": "Prescribed together.",
+                "severity": "low",
+                "confidence": 0.5,
+            },
         ],
         "duplicate_prescriptions": [],
         "conflicting_dosage_instructions": [],
@@ -69,6 +94,7 @@ def _report():
 # ---------------------------------------------------------------------------
 # Primitives
 # ---------------------------------------------------------------------------
+
 
 def test_duration_parsing():
     assert parse_duration_days("14 days") == 14
@@ -103,11 +129,14 @@ def test_treatment_windows_open_vs_closed():
 # Overlap verdicts
 # ---------------------------------------------------------------------------
 
+
 def test_concurrent_courses_are_live_risks():
     report = _report()
     annotate_findings_with_timing(report, _timeline())
-    by_pair = {" + ".join(f["medications_involved"]): f["timing"]
-               for f in report["potential_drug_interactions"]}
+    by_pair = {
+        " + ".join(f["medications_involved"]): f["timing"]
+        for f in report["potential_drug_interactions"]
+    }
 
     timing = by_pair["Paracetamol + Diclofenac"]
     assert timing["status"] == CONCURRENT
@@ -120,11 +149,15 @@ def test_concurrent_courses_are_live_risks():
 def test_never_concurrent_findings_marked_historical():
     report = _report()
     annotate_findings_with_timing(report, _timeline())
-    by_pair = {" + ".join(f["medications_involved"]): f["timing"]
-               for f in report["potential_drug_interactions"]}
+    by_pair = {
+        " + ".join(f["medications_involved"]): f["timing"]
+        for f in report["potential_drug_interactions"]
+    }
 
-    for pair, min_gap in (("Fluconazole + Montelukast", 300),
-                          ("Cetirizine + Chlorpheniramine", 800)):
+    for pair, min_gap in (
+        ("Fluconazole + Montelukast", 300),
+        ("Cetirizine + Chlorpheniramine", 800),
+    ):
         timing = by_pair[pair]
         assert timing["status"] == NOT_CONCURRENT, (pair, timing)
         assert timing["gap_days"] > min_gap
@@ -136,25 +169,43 @@ def test_never_concurrent_findings_marked_historical():
 
 
 def test_unknown_duration_is_possible_never_concurrent():
-    open_ended = {"medications_timeline": [
-        _med("DrugA", "druga", "01/01/2026", "As required", 10, "mg", 1, "g1"),
-        _med("DrugB", "drugb", "05/01/2026", "14 days", 10, "mg", 1, "g2"),
-    ]}
-    report = {"potential_drug_interactions": [
-        {"medications_involved": ["DrugA", "DrugB"], "explanation": "x",
-         "severity": "low", "confidence": 0.5}]}
+    open_ended = {
+        "medications_timeline": [
+            _med("DrugA", "druga", "01/01/2026", "As required", 10, "mg", 1, "g1"),
+            _med("DrugB", "drugb", "05/01/2026", "14 days", 10, "mg", 1, "g2"),
+        ]
+    }
+    report = {
+        "potential_drug_interactions": [
+            {
+                "medications_involved": ["DrugA", "DrugB"],
+                "explanation": "x",
+                "severity": "low",
+                "confidence": 0.5,
+            }
+        ]
+    }
     annotate_findings_with_timing(report, open_ended)
     assert report["potential_drug_interactions"][0]["timing"]["status"] == POSSIBLE
 
 
 def test_undatable_is_unknown():
-    no_dates = {"medications_timeline": [
-        _med("DrugA", "druga", None, None, 10, "mg", 1, "g1"),
-        _med("DrugB", "drugb", None, None, 10, "mg", 1, "g2"),
-    ]}
-    report = {"potential_drug_interactions": [
-        {"medications_involved": ["DrugA", "DrugB"], "explanation": "x",
-         "severity": "low", "confidence": 0.5}]}
+    no_dates = {
+        "medications_timeline": [
+            _med("DrugA", "druga", None, None, 10, "mg", 1, "g1"),
+            _med("DrugB", "drugb", None, None, 10, "mg", 1, "g2"),
+        ]
+    }
+    report = {
+        "potential_drug_interactions": [
+            {
+                "medications_involved": ["DrugA", "DrugB"],
+                "explanation": "x",
+                "severity": "low",
+                "confidence": 0.5,
+            }
+        ]
+    }
     annotate_findings_with_timing(report, no_dates)
     assert report["potential_drug_interactions"][0]["timing"]["status"] == UNKNOWN
 
@@ -163,13 +214,16 @@ def test_undatable_is_unknown():
 # Concurrent double-dosing exposure
 # ---------------------------------------------------------------------------
 
+
 def test_concurrent_exposure_arithmetic():
-    doubled = {"medications_timeline": [
-        _med("Panadol", "Paracetamol", "09/11/2025", "14 days", 1000, "mg", 3, "rx-A"),
-        _med("Calpol", "Paracetamol", "12/11/2025", "10 days", 500, "mg", 4, "rx-B"),
-        # Same prescription uploaded twice must NOT count as a second course.
-        _med("Panadol", "Paracetamol", "09/11/2025", "14 days", 1000, "mg", 3, "rx-A"),
-    ]}
+    doubled = {
+        "medications_timeline": [
+            _med("Panadol", "Paracetamol", "09/11/2025", "14 days", 1000, "mg", 3, "rx-A"),
+            _med("Calpol", "Paracetamol", "12/11/2025", "10 days", 500, "mg", 4, "rx-B"),
+            # Same prescription uploaded twice must NOT count as a second course.
+            _med("Panadol", "Paracetamol", "09/11/2025", "14 days", 1000, "mg", 3, "rx-A"),
+        ]
+    }
     exposures = concurrent_exposure(doubled)
     assert len(exposures) == 2
     assert all(e["ingredient"] == "paracetamol" for e in exposures)
@@ -180,14 +234,18 @@ def test_concurrent_exposure_arithmetic():
 
 
 def test_single_course_no_exposure():
-    single = {"medications_timeline": [
-        _med("Panadol", "Paracetamol", "09/11/2025", "14 days", 1000, "mg", 3, "rx-A")]}
+    single = {
+        "medications_timeline": [
+            _med("Panadol", "Paracetamol", "09/11/2025", "14 days", 1000, "mg", 3, "rx-A")
+        ]
+    }
     assert concurrent_exposure(single) == []
 
 
 # ---------------------------------------------------------------------------
 # Calendar
 # ---------------------------------------------------------------------------
+
 
 def test_risk_calendar_most_recent_first_with_historical_bucket():
     report = _report()
@@ -216,20 +274,30 @@ def test_overlap_of_disjoint_windows_reports_gap():
 # invented end date.
 # ---------------------------------------------------------------------------
 
+
 def test_open_ended_course_is_never_proven_not_concurrent():
-    timeline = {"medications_timeline": [
-        _med("PRN Drug", "druga", "01/01/2023", "As required", 10, "mg", 1, "g1"),
-        _med("Course B", "drugb", "01/09/2023", "5 days", 10, "mg", 1, "g2"),
-    ]}
+    timeline = {
+        "medications_timeline": [
+            _med("PRN Drug", "druga", "01/01/2023", "As required", 10, "mg", 1, "g1"),
+            _med("Course B", "drugb", "01/09/2023", "5 days", 10, "mg", 1, "g2"),
+        ]
+    }
     windows = build_treatment_windows(timeline)
     result = overlap_of(windows[0], windows[1])
     assert result["status"] == UNKNOWN
     assert result["gap_days"] is None
 
     # And the finding-level wiring keeps the same honest verdict + plain note.
-    report = {"potential_drug_interactions": [
-        {"medications_involved": ["PRN Drug", "Course B"], "explanation": "x",
-         "severity": "low", "confidence": 0.5}]}
+    report = {
+        "potential_drug_interactions": [
+            {
+                "medications_involved": ["PRN Drug", "Course B"],
+                "explanation": "x",
+                "severity": "low",
+                "confidence": 0.5,
+            }
+        ]
+    }
     annotate_findings_with_timing(report, timeline)
     timing = report["potential_drug_interactions"][0]["timing"]
     assert timing["status"] == UNKNOWN
@@ -241,14 +309,23 @@ def test_pair_level_not_concurrent_needs_every_combination_provable():
     # Fluconazole provably never overlapped the DATED Montelukast course, but
     # a second Montelukast course is open-ended (PRN): with it, non-overlap
     # cannot be proven, so the pair cannot be declared not_concurrent.
-    timeline = {"medications_timeline": [
-        _med("Fluconazole", "Fluconazole", "27/03/2025", "4 weeks", 150, "mg", 0.14, "rx-1"),
-        _med("Montelukast", "Montelukast", "01/01/2023", "14 days", 10, "mg", 1, "rx-2"),
-        _med("Montelukast", "Montelukast", "01/06/2025", "As required", 10, "mg", 1, "rx-3"),
-    ]}
-    report = {"potential_drug_interactions": [
-        {"medications_involved": ["Fluconazole", "Montelukast"], "explanation": "x",
-         "severity": "moderate", "confidence": 0.6}]}
+    timeline = {
+        "medications_timeline": [
+            _med("Fluconazole", "Fluconazole", "27/03/2025", "4 weeks", 150, "mg", 0.14, "rx-1"),
+            _med("Montelukast", "Montelukast", "01/01/2023", "14 days", 10, "mg", 1, "rx-2"),
+            _med("Montelukast", "Montelukast", "01/06/2025", "As required", 10, "mg", 1, "rx-3"),
+        ]
+    }
+    report = {
+        "potential_drug_interactions": [
+            {
+                "medications_involved": ["Fluconazole", "Montelukast"],
+                "explanation": "x",
+                "severity": "moderate",
+                "confidence": 0.6,
+            }
+        ]
+    }
     annotate_findings_with_timing(report, timeline)
     timing = report["potential_drug_interactions"][0]["timing"]
     assert timing["status"] == UNKNOWN, timing
@@ -261,11 +338,14 @@ def test_pair_level_not_concurrent_needs_every_combination_provable():
 # true total — in the very report that exists to catch double-dosing.
 # ---------------------------------------------------------------------------
 
+
 def test_concurrent_exposure_normalizes_mixed_mass_units():
-    mixed = {"medications_timeline": [
-        _med("Panadol", "Paracetamol", "01/01/2026", "10 days", 1000, "mg", 3, "rx-A"),
-        _med("IV Paracetamol", "Paracetamol", "03/01/2026", "5 days", 1, "g", 4, "rx-B"),
-    ]}
+    mixed = {
+        "medications_timeline": [
+            _med("Panadol", "Paracetamol", "01/01/2026", "10 days", 1000, "mg", 3, "rx-A"),
+            _med("IV Paracetamol", "Paracetamol", "03/01/2026", "5 days", 1, "g", 4, "rx-B"),
+        ]
+    }
     exposures = concurrent_exposure(mixed)
     assert len(exposures) == 1
     assert exposures[0]["cumulative_daily_dose"] == 7000.0
@@ -274,10 +354,12 @@ def test_concurrent_exposure_normalizes_mixed_mass_units():
 
 
 def test_concurrent_exposure_declines_uncheckable_units():
-    odd = {"medications_timeline": [
-        _med("Spray A", "Budesonide", "01/01/2026", "10 days", 2, "puffs", 2, "rx-A"),
-        _med("Spray B", "budesonide", "03/01/2026", "5 days", 400, "mcg", 2, "rx-B"),
-    ]}
+    odd = {
+        "medications_timeline": [
+            _med("Spray A", "Budesonide", "01/01/2026", "10 days", 2, "puffs", 2, "rx-A"),
+            _med("Spray B", "budesonide", "03/01/2026", "5 days", 400, "mcg", 2, "rx-B"),
+        ]
+    }
     exposures = concurrent_exposure(odd)
     assert len(exposures) == 1
     assert exposures[0]["cumulative_daily_dose"] is None
@@ -295,11 +377,20 @@ def test_concurrent_exposure_declines_uncheckable_units():
 # prescriptions, can overlap.
 # ---------------------------------------------------------------------------
 
+
 def _duplicate_timing(meds):
-    report = {"potential_drug_interactions": [], "conflicting_dosage_instructions": [],
-              "duplicate_prescriptions": [{"medication": meds[0]["name"], "occurrences": [
-                  {"date": m["date"], "source_file": m["source_file"]} for m in meds
-              ], "explanation": "duplicate", "confidence": 0.9}]}
+    report = {
+        "potential_drug_interactions": [],
+        "conflicting_dosage_instructions": [],
+        "duplicate_prescriptions": [
+            {
+                "medication": meds[0]["name"],
+                "occurrences": [{"date": m["date"], "source_file": m["source_file"]} for m in meds],
+                "explanation": "duplicate",
+                "confidence": 0.9,
+            }
+        ],
+    }
     annotate_findings_with_timing(report, {"medications_timeline": meds})
     return report["duplicate_prescriptions"][0]["timing"]
 

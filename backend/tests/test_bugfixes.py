@@ -31,10 +31,10 @@ import conversation  # noqa: E402
 import lab_trends  # noqa: E402
 import vector_store  # noqa: E402
 
-
 # ---------------------------------------------------------------------------
 # BUG-A: a slow answer must not block every other request
 # ---------------------------------------------------------------------------
+
 
 def _client():
     async def override_user():
@@ -85,6 +85,7 @@ def test_a_slow_qa_request_does_not_block_the_event_loop():
 # ---------------------------------------------------------------------------
 # BUG-B: grouped thousands were truncated
 # ---------------------------------------------------------------------------
+
 
 def test_b_grouped_thousands_are_not_truncated():
     assert lab_trends._parse_value("1,200") == 1200.0
@@ -148,6 +149,7 @@ def test_b_trend_text_reports_the_real_platelet_count():
 # BUG-C: collection names must be unique per patient
 # ---------------------------------------------------------------------------
 
+
 def test_c_similar_patient_keys_get_distinct_collections():
     """Two patients sharing a collection would leak records between them."""
     colliding_pairs = [
@@ -180,6 +182,7 @@ def test_c_collection_names_satisfy_chroma_constraints():
 # ---------------------------------------------------------------------------
 # BUG-D: sessions were never evicted
 # ---------------------------------------------------------------------------
+
 
 def _reset_sessions():
     with conversation._SESSIONS_LOCK:

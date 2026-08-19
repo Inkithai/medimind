@@ -5,6 +5,7 @@ recovery.pdf and cardiovascular.pdf. Combined with a sparse-text lab
 report that has fewer than 3 medical keyword hits, those files were
 rejected before the LLM ever ran.
 """
+
 import os
 import sys
 
@@ -12,7 +13,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("GROQ_API_KEY", "gsk_test_123")
 
 from medical_extractor import looks_like_medical_text  # noqa: E402
-
 
 SPARSE_LAB = "Patient: Jane Doe\nGlucose 95 mg/dL\n"
 

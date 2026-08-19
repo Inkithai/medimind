@@ -179,8 +179,10 @@ def test_adherence_and_reconciliation_read_the_timeline():
 
 
 def test_managed_alerts_wrap_the_cross_check():
-    with mock.patch.object(api, "_load_snapshot_or_rebuild", return_value=dict(SNAPSHOT)), \
-         mock.patch.object(api, "_enhanced_cross_check", return_value=dict(CLEAN_REPORT)):
+    with (
+        mock.patch.object(api, "_load_snapshot_or_rebuild", return_value=dict(SNAPSHOT)),
+        mock.patch.object(api, "_enhanced_cross_check", return_value=dict(CLEAN_REPORT)),
+    ):
         with _authed() as client:
             response = client.get("/api/v1/findings/alerts")
     assert response.status_code == 200, response.text
@@ -190,8 +192,10 @@ def test_managed_alerts_wrap_the_cross_check():
 
 
 def test_preventive_care_degrades_without_a_record():
-    with mock.patch.object(api, "_load_snapshot_or_rebuild", return_value=None), \
-         mock.patch.object(api.db, "load_patient_profile", return_value=None):
+    with (
+        mock.patch.object(api, "_load_snapshot_or_rebuild", return_value=None),
+        mock.patch.object(api.db, "load_patient_profile", return_value=None),
+    ):
         with _authed() as client:
             response = client.get("/api/v1/preventive-care")
     assert response.status_code == 200, response.text
@@ -214,7 +218,9 @@ def test_symptom_analyse_validates_and_refuses_diagnosis():
 def test_finding_feedback_round_trip():
     with _authed() as client:
         missing = client.post("/api/v1/findings/feedback", json={"verdict": "confirmed"})
-        bad = client.post("/api/v1/findings/feedback", json={"finding_key": "abc", "verdict": "not-a-verdict"})
+        bad = client.post(
+            "/api/v1/findings/feedback", json={"finding_key": "abc", "verdict": "not-a-verdict"}
+        )
         created = client.post(
             "/api/v1/findings/feedback",
             json={
@@ -264,13 +270,24 @@ def test_fhir_import_parses_and_best_effort_persists():
     bundle = {
         "resourceType": "Bundle",
         "entry": [
-            {"resource": {"resourceType": "Patient", "name": [{"given": ["Jane"], "family": "Doe"}]}},
-            {"resource": {"resourceType": "MedicationStatement",
-                          "medicationCodeableConcept": {"text": "Metformin 500mg"}}},
+            {
+                "resource": {
+                    "resourceType": "Patient",
+                    "name": [{"given": ["Jane"], "family": "Doe"}],
+                }
+            },
+            {
+                "resource": {
+                    "resourceType": "MedicationStatement",
+                    "medicationCodeableConcept": {"text": "Metformin 500mg"},
+                }
+            },
         ],
     }
-    with mock.patch.object(api.db, "insert_documents") as insert, \
-         mock.patch.object(api.audit, "record"):
+    with (
+        mock.patch.object(api.db, "insert_documents") as insert,
+        mock.patch.object(api.audit, "record"),
+    ):
         with _authed() as client:
             bad = client.post("/api/v1/import/fhir", json={"bundle": "not-a-bundle"})
             ok = client.post("/api/v1/import/fhir", json={"bundle": bundle})
@@ -327,9 +344,11 @@ def test_guidelines_status_is_public_refresh_is_authed():
 
 
 def test_finding_history_and_clinical_entities():
-    with mock.patch.object(api, "_load_snapshot_or_rebuild", return_value=dict(SNAPSHOT)), \
-         mock.patch.object(api, "_enhanced_cross_check", return_value=dict(CLEAN_REPORT)), \
-         mock.patch.object(api.db, "load_clinical_entities", return_value=[{"id": "m1"}]):
+    with (
+        mock.patch.object(api, "_load_snapshot_or_rebuild", return_value=dict(SNAPSHOT)),
+        mock.patch.object(api, "_enhanced_cross_check", return_value=dict(CLEAN_REPORT)),
+        mock.patch.object(api.db, "load_clinical_entities", return_value=[{"id": "m1"}]),
+    ):
         with _authed() as client:
             snap = client.post("/api/v1/findings/history/snapshot")
             history = client.get("/api/v1/findings/history")

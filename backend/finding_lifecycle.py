@@ -65,15 +65,18 @@ def _now() -> str:
 def _mirror(event: Dict[str, Any]) -> None:
     try:
         from db import _get_client  # type: ignore
-        _get_client().table("finding_lifecycle").insert({
-            "user_id": event["user_id"],
-            "finding_key": event["finding_key"],
-            "from_state": event.get("from_state"),
-            "to_state": event["to_state"],
-            "reason": event.get("reason"),
-            "actor": event.get("actor"),
-            "at": event["at"],
-        }).execute()
+
+        _get_client().table("finding_lifecycle").insert(
+            {
+                "user_id": event["user_id"],
+                "finding_key": event["finding_key"],
+                "from_state": event.get("from_state"),
+                "to_state": event["to_state"],
+                "reason": event.get("reason"),
+                "actor": event.get("actor"),
+                "at": event["at"],
+            }
+        ).execute()
     except Exception:
         return
 
@@ -94,7 +97,11 @@ def transition(
     reason: str = "",
     actor: str = "",
 ) -> Dict[str, Any]:
-    fkey = finding_key(finding) if "finding_kind" in finding or "rule" in finding else finding.get("finding_key")
+    fkey = (
+        finding_key(finding)
+        if "finding_kind" in finding or "rule" in finding
+        else finding.get("finding_key")
+    )
     if to_state not in ALL_STATES:
         raise ValueError(f"unknown state {to_state}")
     prev = current_state(user_id, fkey) or NEW
@@ -104,9 +111,12 @@ def transition(
     if to_state not in allowed:
         raise ValueError(f"illegal transition {prev} -> {to_state}")
     event = {
-        "user_id": user_id, "finding_key": fkey,
-        "from_state": prev, "to_state": to_state,
-        "reason": (reason or "").strip(), "actor": (actor or "").strip(),
+        "user_id": user_id,
+        "finding_key": fkey,
+        "from_state": prev,
+        "to_state": to_state,
+        "reason": (reason or "").strip(),
+        "actor": (actor or "").strip(),
         "at": _now(),
     }
     with _lock:

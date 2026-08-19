@@ -13,10 +13,9 @@ from urllib.parse import urlparse
 
 from evidence_builder import build_care_pathway_evidence
 
-
 CONSULTATION_PACK_DISCLAIMER = (
     "MediMind does not diagnose conditions or replace professional medical advice. "
-    "This preparation list is drawn from the uploaded record to help discuss the original information with a licensed clinician or pharmacist."
+    "This preparation list is drawn from the uploaded record to help discuss the original information with a licensed clinician or pharmacist."  # noqa: E501
 )
 
 LOW_CONFIDENCE_THRESHOLD = 0.60
@@ -76,21 +75,31 @@ def _documents_to_bring(evidence: Iterable[Dict[str, Any]]) -> List[Dict[str, An
             "reason": _document_reason(_text(item.get("kind"))),
         }
         _optional(document, "date", _text(item.get("date")) or None)
-        _optional(document, "page", item.get("page") if isinstance(item.get("page"), int) and item.get("page") > 0 else None)
+        _optional(
+            document,
+            "page",
+            item.get("page")
+            if isinstance(item.get("page"), int) and item.get("page") > 0
+            else None,
+        )
         _optional(document, "document_url", _valid_url(item.get("document_url")))
         documents.append(document)
     return documents
 
 
 def _same_source(item: Dict[str, Any], evidence: Dict[str, Any]) -> bool:
-    if _text(evidence.get("source_file")) and _text(item.get("source_file")) != _text(evidence.get("source_file")):
+    if _text(evidence.get("source_file")) and _text(item.get("source_file")) != _text(
+        evidence.get("source_file")
+    ):
         return False
     if _text(evidence.get("date")) and _text(item.get("date")) != _text(evidence.get("date")):
         return False
     return True
 
 
-def _medication_records(evidence: Iterable[Dict[str, Any]], timeline: Dict[str, Any]) -> List[Dict[str, Any]]:
+def _medication_records(
+    evidence: Iterable[Dict[str, Any]], timeline: Dict[str, Any]
+) -> List[Dict[str, Any]]:
     """Return only medication timeline entries selected by record evidence.
 
     These are deliberately labelled as records to discuss, not current active
@@ -123,17 +132,29 @@ def _medication_records(evidence: Iterable[Dict[str, Any]], timeline: Dict[str, 
             _optional(record, "date", _text(medication.get("date")) or None)
             _optional(record, "confidence", _number(medication.get("confidence")))
             _optional(record, "document_url", _valid_url(evidence_item.get("document_url")))
-            _optional(record, "page", evidence_item.get("page") if isinstance(evidence_item.get("page"), int) else None)
+            _optional(
+                record,
+                "page",
+                evidence_item.get("page") if isinstance(evidence_item.get("page"), int) else None,
+            )
             records.append(record)
     return records
 
 
-def _allergy_records(evidence: Iterable[Dict[str, Any]], timeline: Dict[str, Any]) -> List[Dict[str, Any]]:
+def _allergy_records(
+    evidence: Iterable[Dict[str, Any]], timeline: Dict[str, Any]
+) -> List[Dict[str, Any]]:
     """Include allergy evidence only when the snapshot itself records it."""
-    known = {_text(value).lower() for value in (timeline.get("known_allergies") or []) if _text(value)}
+    known = {
+        _text(value).lower() for value in (timeline.get("known_allergies") or []) if _text(value)
+    }
     for visit in timeline.get("visits") or []:
         if isinstance(visit, dict):
-            known.update(_text(value).lower() for value in (visit.get("allergies_noted") or []) if _text(value))
+            known.update(
+                _text(value).lower()
+                for value in (visit.get("allergies_noted") or [])
+                if _text(value)
+            )
 
     allergies: List[Dict[str, Any]] = []
     seen: set[Tuple[str, str, str]] = set()
@@ -156,7 +177,9 @@ def _allergy_records(evidence: Iterable[Dict[str, Any]], timeline: Dict[str, Any
     return allergies
 
 
-def _lab_points(evidence: Iterable[Dict[str, Any]], timeline: Dict[str, Any]) -> List[Dict[str, Any]]:
+def _lab_points(
+    evidence: Iterable[Dict[str, Any]], timeline: Dict[str, Any]
+) -> List[Dict[str, Any]]:
     points: List[Dict[str, Any]] = []
     seen: set[Tuple[str, str, str, str]] = set()
     labs = timeline.get("lab_results_timeline") or []
@@ -178,13 +201,20 @@ def _lab_points(evidence: Iterable[Dict[str, Any]], timeline: Dict[str, Any]) ->
             if key in seen:
                 continue
             seen.add(key)
-            point: Dict[str, Any] = {"test": _text(lab.get("test_name")), "value": _text(lab.get("value"))}
+            point: Dict[str, Any] = {
+                "test": _text(lab.get("test_name")),
+                "value": _text(lab.get("value")),
+            }
             _optional(point, "unit", _text(lab.get("unit")) or None)
             _optional(point, "date", _text(lab.get("date")) or None)
             _optional(point, "source_file", _text(lab.get("source_file")) or None)
             _optional(point, "confidence", _number(lab.get("confidence")))
             _optional(point, "document_url", _valid_url(evidence_item.get("document_url")))
-            _optional(point, "page", evidence_item.get("page") if isinstance(evidence_item.get("page"), int) else None)
+            _optional(
+                point,
+                "page",
+                evidence_item.get("page") if isinstance(evidence_item.get("page"), int) else None,
+            )
             points.append(point)
     return points
 
@@ -201,7 +231,9 @@ def _low_confidence_label(issue_type: str) -> str:
     }.get(issue_type, "Information requires verification")
 
 
-def _low_confidence_items(flag: Dict[str, Any], evidence: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _low_confidence_items(
+    flag: Dict[str, Any], evidence: Iterable[Dict[str, Any]]
+) -> List[Dict[str, Any]]:
     if flag.get("trigger") != "low_confidence":
         return []
     # Prefer the existing flag confidence. Older snapshots can lack it, in
@@ -209,7 +241,8 @@ def _low_confidence_items(flag: Dict[str, Any], evidence: Iterable[Dict[str, Any
     # never synthesize a percentage.
     confidence = _number(flag.get("confidence"))
     source_candidates = [
-        item for item in evidence
+        item
+        for item in evidence
         if item.get("kind") in {"medication", "lab_result", "lab_trend", "document", "cross_check"}
     ]
     source = source_candidates[0] if source_candidates else {}
@@ -218,7 +251,8 @@ def _low_confidence_items(flag: Dict[str, Any], evidence: Iterable[Dict[str, Any
     record: Dict[str, Any] = {
         "type": _text(flag.get("issue_type")) or "unknown",
         "label": _low_confidence_label(_text(flag.get("issue_type"))),
-        "reason": _text(flag.get("evidence")) or "The existing record contains low-confidence information.",
+        "reason": _text(flag.get("evidence"))
+        or "The existing record contains low-confidence information.",
     }
     _optional(record, "confidence", confidence)
     _optional(record, "source_file", _text(source.get("source_file")) or None)

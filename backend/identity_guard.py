@@ -145,7 +145,9 @@ def build_known_identity(existing_docs: List[Dict[str, Any]]) -> Optional[Dict[s
 
     distinct_names: List[str] = []
     for name in names:
-        if not any(_name_similarity(name, seen) >= NAME_WEAK_MISMATCH_BELOW for seen in distinct_names):
+        if not any(
+            _name_similarity(name, seen) >= NAME_WEAK_MISMATCH_BELOW for seen in distinct_names
+        ):
             distinct_names.append(name)
 
     def _mode(values: List[Any]) -> Optional[Any]:
@@ -163,9 +165,7 @@ def build_known_identity(existing_docs: List[Dict[str, Any]]) -> Optional[Dict[s
     }
 
 
-def _score_document(
-    doc: Dict[str, Any], known: Dict[str, Any]
-) -> Tuple[int, List[Dict[str, Any]]]:
+def _score_document(doc: Dict[str, Any], known: Dict[str, Any]) -> Tuple[int, List[Dict[str, Any]]]:
     """Scores one document against a known identity. Returns (score,
     signals). Signals list every mismatch found with an explanation, so
     the caller can show the user exactly why a document was held."""
@@ -178,60 +178,72 @@ def _score_document(
         best_similarity = max(_name_similarity(doc_name, kn) for kn in known_names)
         if best_similarity < NAME_STRONG_MISMATCH_BELOW:
             score += STRONG_SIGNAL_SCORE
-            signals.append({
-                "field": "name",
-                "extracted_value": doc_name,
-                "known_value": known_names[0],
-                "similarity": round(best_similarity, 2),
-                "severity": "strong",
-                "explanation": (
-                    f'"{doc_name}" is only {round(best_similarity * 100)}% similar to the '
-                    "patient name on your other document(s)."
-                ),
-            })
+            signals.append(
+                {
+                    "field": "name",
+                    "extracted_value": doc_name,
+                    "known_value": known_names[0],
+                    "similarity": round(best_similarity, 2),
+                    "severity": "strong",
+                    "explanation": (
+                        f'"{doc_name}" is only {round(best_similarity * 100)}% similar to the '
+                        "patient name on your other document(s)."
+                    ),
+                }
+            )
         elif best_similarity < NAME_WEAK_MISMATCH_BELOW:
             score += WEAK_SIGNAL_SCORE
-            signals.append({
-                "field": "name",
-                "extracted_value": doc_name,
-                "known_value": known_names[0],
-                "similarity": round(best_similarity, 2),
-                "severity": "weak",
-                "explanation": (
-                    f'"{doc_name}" is close to, but not clearly the same as, the patient '
-                    "name on your other document(s)."
-                ),
-            })
+            signals.append(
+                {
+                    "field": "name",
+                    "extracted_value": doc_name,
+                    "known_value": known_names[0],
+                    "similarity": round(best_similarity, 2),
+                    "severity": "weak",
+                    "explanation": (
+                        f'"{doc_name}" is close to, but not clearly the same as, the patient '
+                        "name on your other document(s)."
+                    ),
+                }
+            )
 
     doc_by = _estimate_birth_year(doc)
     known_by = known.get("estimated_birth_year")
-    if doc_by is not None and known_by is not None and abs(doc_by - known_by) > BIRTH_YEAR_TOLERANCE:
+    if (
+        doc_by is not None
+        and known_by is not None
+        and abs(doc_by - known_by) > BIRTH_YEAR_TOLERANCE
+    ):
         score += WEAK_SIGNAL_SCORE
-        signals.append({
-            "field": "birth_year",
-            "extracted_value": doc_by,
-            "known_value": known_by,
-            "severity": "weak",
-            "explanation": (
-                f"This document suggests the patient was born around {doc_by}, but your "
-                f"other document(s) suggest around {known_by}."
-            ),
-        })
+        signals.append(
+            {
+                "field": "birth_year",
+                "extracted_value": doc_by,
+                "known_value": known_by,
+                "severity": "weak",
+                "explanation": (
+                    f"This document suggests the patient was born around {doc_by}, but your "
+                    f"other document(s) suggest around {known_by}."
+                ),
+            }
+        )
 
     doc_gender = _normalize_gender(doc.get("patient_gender"))
     known_gender = known.get("gender")
     if doc_gender and known_gender and doc_gender != known_gender:
         score += WEAK_SIGNAL_SCORE
-        signals.append({
-            "field": "gender",
-            "extracted_value": doc_gender,
-            "known_value": known_gender,
-            "severity": "weak",
-            "explanation": (
-                f"This document lists the patient as {doc_gender}, but your other "
-                f"document(s) list {known_gender}."
-            ),
-        })
+        signals.append(
+            {
+                "field": "gender",
+                "extracted_value": doc_gender,
+                "known_value": known_gender,
+                "severity": "weak",
+                "explanation": (
+                    f"This document lists the patient as {doc_gender}, but your other "
+                    f"document(s) list {known_gender}."
+                ),
+            }
+        )
 
     return score, signals
 
@@ -262,7 +274,11 @@ def check_batch_identity(
         unnamed: List[str] = []
         for file_name, pages in new_docs_by_file.items():
             name = next(
-                (p.get("patient_name") for p in pages if p.get("patient_name") and _normalize_name(p.get("patient_name"))),
+                (
+                    p.get("patient_name")
+                    for p in pages
+                    if p.get("patient_name") and _normalize_name(p.get("patient_name"))
+                ),
                 None,
             )
             if not name:
@@ -289,29 +305,33 @@ def check_batch_identity(
         accepted = list(baseline_files) + unnamed
         held = []
         for name, files in groups[1:]:
-            held.append({
-                "patient_name": name,
-                "estimated_birth_year": None,
-                "gender": None,
-                "source_files": files,
-                "message": (
-                    f'"{name}" doesn\'t match the patient on the other document(s) in this '
-                    "upload."
-                ),
-                "signals": [{
-                    "field": "name",
-                    "extracted_value": name,
-                    "known_value": baseline_name,
-                    "similarity": round(_name_similarity(name, baseline_name), 2),
-                    "severity": "strong",
-                    "explanation": (
-                        f'"{name}" doesn\'t match "{baseline_name}", the patient on most '
-                        "documents in this upload."
+            held.append(
+                {
+                    "patient_name": name,
+                    "estimated_birth_year": None,
+                    "gender": None,
+                    "source_files": files,
+                    "message": (
+                        f'"{name}" doesn\'t match the patient on the other document(s) in this '
+                        "upload."
                     ),
-                }],
-                "score": STRONG_SIGNAL_SCORE,
-                "threshold": HOLD_THRESHOLD,
-            })
+                    "signals": [
+                        {
+                            "field": "name",
+                            "extracted_value": name,
+                            "known_value": baseline_name,
+                            "similarity": round(_name_similarity(name, baseline_name), 2),
+                            "severity": "strong",
+                            "explanation": (
+                                f'"{name}" doesn\'t match "{baseline_name}", the patient on most '
+                                "documents in this upload."
+                            ),
+                        }
+                    ],
+                    "score": STRONG_SIGNAL_SCORE,
+                    "threshold": HOLD_THRESHOLD,
+                }
+            )
         return {
             "accepted_files": accepted,
             "held": held,
@@ -336,26 +356,30 @@ def check_batch_identity(
                 worst_score, worst_signals = score, signals
                 identity_page = page
         if worst_score >= HOLD_THRESHOLD:
-            held.append({
-                "patient_name": identity_page.get("patient_name"),
-                "estimated_birth_year": _estimate_birth_year(identity_page),
-                "gender": _normalize_gender(identity_page.get("patient_gender")),
-                "source_files": [file_name],
-                "message": (
-                    f'"{identity_page.get("patient_name") or file_name}" doesn\'t match the '
-                    "patient on your other document(s)."
-                ),
-                "signals": worst_signals,
-                "score": worst_score,
-                "threshold": HOLD_THRESHOLD,
-            })
+            held.append(
+                {
+                    "patient_name": identity_page.get("patient_name"),
+                    "estimated_birth_year": _estimate_birth_year(identity_page),
+                    "gender": _normalize_gender(identity_page.get("patient_gender")),
+                    "source_files": [file_name],
+                    "message": (
+                        f'"{identity_page.get("patient_name") or file_name}" doesn\'t match the '
+                        "patient on your other document(s)."
+                    ),
+                    "signals": worst_signals,
+                    "score": worst_score,
+                    "threshold": HOLD_THRESHOLD,
+                }
+            )
         else:
             accepted.append(file_name)
 
     return {"accepted_files": accepted, "held": held, "known_identity": known}
 
 
-def build_identity_review(held: List[Dict[str, Any]], known: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+def build_identity_review(
+    held: List[Dict[str, Any]], known: Optional[Dict[str, Any]]
+) -> Dict[str, Any]:
     """Formats the identity_review_needed response block."""
     total_held = len(held)
     names = ", ".join(sorted({str(h.get("patient_name") or "unknown") for h in held}))

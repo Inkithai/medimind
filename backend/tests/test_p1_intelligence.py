@@ -6,9 +6,9 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import living_guidelines as lg  # noqa: E402
 import preventive_care as pc  # noqa: E402
 import symptom_intake as si  # noqa: E402
-import living_guidelines as lg  # noqa: E402
 
 
 def _timeline(meds=None, conditions=None):
@@ -23,11 +23,20 @@ def _med(name, ing):
 
 
 def _labs(t, v, u="mmol/L", flag="normal"):
-    return {"test_name": t, "value": v, "unit": u, "reference_range": None, "flag": flag,
-            "confidence": 0.9, "date": "2024-02-01", "source_file": "lab.pdf"}
+    return {
+        "test_name": t,
+        "value": v,
+        "unit": u,
+        "reference_range": None,
+        "flag": flag,
+        "confidence": 0.9,
+        "date": "2024-02-01",
+        "source_file": "lab.pdf",
+    }
 
 
 # ---- preventive care: medication-driven monitoring ----------------------- #
+
 
 def test_warfarin_triggers_inr_monitoring():
     out = pc.generate_care_gaps(_timeline(meds=[_med("Warfarin", ["warfarin"])]), 60, "male")
@@ -36,14 +45,19 @@ def test_warfarin_triggers_inr_monitoring():
 
 
 def test_methotrexate_triggers_monitoring():
-    out = pc.generate_care_gaps(_timeline(meds=[_med("Methotrexate", ["methotrexate"])]), 50, "female")
+    out = pc.generate_care_gaps(
+        _timeline(meds=[_med("Methotrexate", ["methotrexate"])]), 50, "female"
+    )
     titles = {g["title"] for g in out["care_gaps"]}
     assert "Methotrexate monitoring" in titles
 
 
 def test_diuretic_and_acei_monitoring():
-    out = pc.generate_care_gaps(_timeline(meds=[_med("Furosemide", ["furosemide"]),
-                                                _med("Ramipril", ["ramipril"])]), 70, "male")
+    out = pc.generate_care_gaps(
+        _timeline(meds=[_med("Furosemide", ["furosemide"]), _med("Ramipril", ["ramipril"])]),
+        70,
+        "male",
+    )
     titles = {g["title"] for g in out["care_gaps"]}
     assert "Diuretic monitoring" in titles
     assert "ACE-inhibitor / ARB monitoring" in titles
@@ -57,6 +71,7 @@ def test_metformin_monitoring_priority_routine():
 
 # ---- preventive care: condition-driven monitoring ------------------------ #
 
+
 def test_afib_triggers_stroke_prevention():
     out = pc.generate_care_gaps(_timeline(conditions=["Atrial fibrillation"]), 72, "male")
     titles = {g["title"] for g in out["care_gaps"]}
@@ -64,13 +79,16 @@ def test_afib_triggers_stroke_prevention():
 
 
 def test_hypothyroid_and_osteoporosis_monitoring():
-    out = pc.generate_care_gaps(_timeline(conditions=["Hypothyroidism", "Osteoporosis"]), 68, "female")
+    out = pc.generate_care_gaps(
+        _timeline(conditions=["Hypothyroidism", "Osteoporosis"]), 68, "female"
+    )
     titles = {g["title"] for g in out["care_gaps"]}
     assert "Thyroid-function monitoring" in titles
     assert "Bone-health review" in titles
 
 
 # ---- preventive care: extra screenings ----------------------------------- #
+
 
 def test_aaa_screening_for_older_male():
     out = pc.generate_care_gaps(_timeline(), 66, "male")
@@ -100,6 +118,7 @@ def test_lung_cancer_screening_for_smoker_in_age_range():
 
 # ---- symptom correlation: new symptoms + drug mapping -------------------- #
 
+
 def test_constipation_correlates_opioid():
     out = si.analyse_symptom(_timeline(meds=[_med("Codeine", ["codeine"])]), "severe constipation")
     assert out["analysed"] is True
@@ -112,22 +131,28 @@ def test_diarrhoea_correlates_metformin():
 
 
 def test_neuropathy_correlates_metformin():
-    out = si.analyse_symptom(_timeline(meds=[_med("Glucophage", ["metformin"])]), "numbness and tingling in feet")
+    out = si.analyse_symptom(
+        _timeline(meds=[_med("Glucophage", ["metformin"])]), "numbness and tingling in feet"
+    )
     assert "Glucophage" in out["findings"][0]["relevant_medications_on_record"]
 
 
 def test_frequent_infections_correlates_steroid():
-    out = si.analyse_symptom(_timeline(meds=[_med("Prednisolone", ["prednisolone"])]), "keep getting infections")
+    out = si.analyse_symptom(
+        _timeline(meds=[_med("Prednisolone", ["prednisolone"])]), "keep getting infections"
+    )
     assert "Prednisolone" in out["findings"][0]["relevant_medications_on_record"]
 
 
 # ---- symptom correlation: conditions + labs ----------------------------- #
 
+
 def test_chest_pain_correlates_heart_condition():
     out = si.analyse_symptom(_timeline(conditions=["Coronary heart disease"]), "chest pain")
     assert out["analysed"] is True
-    assert any("Coronary heart disease" in c
-               for c in out["findings"][0]["relevant_conditions_on_record"])
+    assert any(
+        "Coronary heart disease" in c for c in out["findings"][0]["relevant_conditions_on_record"]
+    )
 
 
 def test_fatigue_correlates_diabetes_condition_and_glucose_lab():
@@ -136,7 +161,7 @@ def test_fatigue_correlates_diabetes_condition_and_glucose_lab():
     out = si.analyse_symptom(tl, "very tired all the time")
     f = out["findings"][0]
     assert any("diabetes" in c.lower() for c in f["relevant_conditions_on_record"])
-    assert any("glucose" in l.lower() for l in f["relevant_abnormal_labs"])
+    assert any("glucose" in lab.lower() for lab in f["relevant_abnormal_labs"])
 
 
 def test_palpitations_correlates_thyroid_condition():
@@ -151,6 +176,7 @@ def test_no_correlation_for_unrelated_record():
 
 # ---- living guidelines auto-refresh ------------------------------------- #
 
+
 def test_refresh_flags_newer_manifest_version(monkeypatch=None):
     lg.reset()
     lg.registry_status()  # seed
@@ -160,8 +186,10 @@ def test_refresh_flags_newer_manifest_version(monkeypatch=None):
     lg._fetch_manifest = lambda url: {"sources": {"drug_interactions": {"version": "2026-09"}}}
     check = lg.check_for_updates()
     assert check["checked"] is True
-    assert any(u["key"] == "drug_interactions" and u["latest_version"] == "2026-09"
-               for u in check["updates_available"])
+    assert any(
+        u["key"] == "drug_interactions" and u["latest_version"] == "2026-09"
+        for u in check["updates_available"]
+    )
 
 
 def test_refresh_applies_newer_version():
