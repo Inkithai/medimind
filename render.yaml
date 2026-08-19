@@ -1,0 +1,70 @@
+# Render Blueprint — MediMind backend (FastAPI)
+# =============================================
+# Deploys the FastAPI backend as a Docker web service. The frontend is
+# deployed separately to Vercel (see frontend/vercel.json); point the
+# frontend's VITE_API_URL at the resulting Render URL.
+#
+# Usage (https://render.com/docs/blueprint-spec):
+#   In the Render dashboard: New → Blueprint → select this repository.
+#   Render reads render.yaml, provisions the service, and (re)deploys on push.
+#
+# Secrets marked `sync: false` must be filled in the Render dashboard
+# (Project → Settings → Environment), NOT committed to git. `generateValue`
+# has Render create a random secret (JWT_SECRET) on first deploy.
+# =============================================
+
+services:
+  - type: web
+    name: medimind-backend
+    runtime: docker
+    plan: free
+    dockerContext: backend
+    dockerfilePath: backend/Dockerfile
+    healthCheckPath: /api/v1/health
+    autoDeploy: true
+    envVars:
+      # ── LLM provider (pick one; Gemini recommended for multimodal reading) ──
+      - key: LLM_PROVIDER
+        value: gemini
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+
+      # ── Storage / database ────────────────────────────────────────────────
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
+
+      # ── Security ──────────────────────────────────────────────────────────
+      - key: JWT_SECRET
+        generateValue: true
+
+      # ── Vector store: Supabase chunks table (no disk needed) ──────────────
+      - key: VECTOR_STORE
+        value: supabase
+
+      # ── Runtime tuning (constrained/free quotas) ──────────────────────────
+      - key: USE_BACKGROUND_JOBS
+        value: "true"
+      - key: UPLOAD_FILE_CONCURRENCY
+        value: "1"
+      - key: PRELOAD_EMBEDDING_MODEL
+        value: "true"
+
+      # ── Browser frontend origin (set to your Vercel URL) ──────────────────
+      - key: CORS_ORIGINS
+        value: https://YOUR-APP.vercel.app
+
+      # ── Optional: openFDA references (labels / recalls / NDC) ─────────────
+      - key: OPENFDA_API_KEY
+        sync: false
