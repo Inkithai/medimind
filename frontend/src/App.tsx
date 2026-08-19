@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes, useSearchParams } from "react-router-dom";
 import { Layout } from "./components/Layout";
 import { useAuth } from "./context/AuthContext";
 import { AboutPage } from "./pages/AboutPage";
@@ -25,7 +25,6 @@ import { PreventiveCarePage } from "./pages/PreventiveCarePage";
 import { ProviderMessagesPage } from "./pages/ProviderMessagesPage";
 import { QAPage } from "./pages/QAPage";
 import { RecordCheckHubPage } from "./pages/RecordCheckHubPage";
-import { RecordIntegrityPage } from "./pages/RecordIntegrityPage";
 import { RecordsHubPage } from "./pages/RecordsHubPage";
 import { RiskTimelinePage } from "./pages/RiskTimelinePage";
 import { SafetyHubPage } from "./pages/SafetyHubPage";
@@ -69,6 +68,17 @@ function Guarded({ children }: { children: JSX.Element }) {
 }
 
 /**
+ * /record-integrity was the same screen as the Record check tabs behind a
+ * second door. It now redirects onto the hub, preserving its old
+ * ?tab=conflicts contract (its default view maps to the Discrepancies tab).
+ */
+function RecordIntegrityRedirect() {
+  const [params] = useSearchParams();
+  const tab = params.get("tab") === "conflicts" ? "conflicts" : "discrepancies";
+  return <Navigate to={`/record-check?tab=${tab}`} replace />;
+}
+
+/**
  * Route table.
  *
  * The sidebar shows eleven destinations, but the app still answers every URL
@@ -81,8 +91,8 @@ function Guarded({ children }: { children: JSX.Element }) {
  *   DEEP     — a real page kept out of the sidebar on purpose: the analysis
  *              audit log (/analyses) and the viva sheet (/ygc-prep).
  *
- * Several screens are also still mounted standalone (e.g. /record-integrity,
- * /settings, /guidelines) because links, print views and tests point at them.
+ * Several screens are also still mounted standalone (e.g. /settings,
+ * /guidelines) because links, print views and tests point at them.
  */
 export default function App() {
   return (
@@ -227,7 +237,7 @@ export default function App() {
           }
         />
 
-        {/* HUB: Discrepancies | Conflicts | What changed */}
+        {/* HUB: What changed | Discrepancies | Conflicts */}
         <Route
           path="/record-check"
           element={
@@ -236,18 +246,12 @@ export default function App() {
             </Guarded>
           }
         />
-        {/* TAB URLs. /record-integrity keeps its own ?tab=conflicts contract,
-            so it is redirected with the parameter preserved below. */}
+        {/* TAB URLs. /record-integrity was a second door to the same screen;
+            it now redirects onto the hub with its ?tab=conflicts contract
+            preserved. */}
         <Route path="/changes" element={<Navigate to="/record-check?tab=changes" replace />} />
         <Route path="/review" element={<Navigate to="/record-check?tab=conflicts" replace />} />
-        <Route
-          path="/record-integrity"
-          element={
-            <Guarded>
-              <RecordIntegrityPage />
-            </Guarded>
-          }
-        />
+        <Route path="/record-integrity" element={<RecordIntegrityRedirect />} />
         <Route
           path="/record-check/changes"
           element={
@@ -281,9 +285,10 @@ export default function App() {
         />
 
         {/* ---------------- Take action ---------------- */}
-        {/* HUB: Find local care (default) | Who to see | Browse nearby.
-            The flag → specialty → live listing flow used to be reachable only
-            by typing /care; it is now the landing tab of a sidebar entry. */}
+        {/* HUB: Browse nearby (default) | Find a local professional | Who to see.
+            The map directory works with or without a safety flag, so it is
+            the landing tab; the flag → specialty → live listing flow is one
+            tab over. */}
         <Route
           path="/care"
           element={

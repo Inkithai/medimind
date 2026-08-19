@@ -8,14 +8,14 @@ records and persists no provider-directory data.
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from clinical_flags import derive_clinical_flags, find_flag
 from consultation_pack import build_consultation_pack
 from evidence_builder import enrich_care_flag
 from provider_normalizer import normalize_provider_records
 from provider_ranking import rank_providers, ranking_method_description
-from provider_sources import ProviderSearchError, get_provider_source
+from provider_sources import ProviderSearchError, SearchOrigin, get_provider_source
 
 MEDICAL_DISCLAIMER = (
     "MediMind does not diagnose medical conditions. It identifies potential issues and confidence limits in uploaded records. "  # noqa: E501
@@ -57,8 +57,16 @@ def search_live_providers(
     flag_id: str,
     location: str,
     availability: str,
+    radius_km: Optional[float] = None,
+    latitude: Optional[float] = None,
+    longitude: Optional[float] = None,
 ) -> Dict[str, Any]:
-    """Search one configured live directory for an authenticated snapshot flag."""
+    """Search one configured live directory for an authenticated snapshot flag.
+
+    ``radius_km`` bounds the directory query around the search origin. When
+    the caller already resolved coordinates (map autocomplete), ``latitude``/
+    ``longitude`` are used directly instead of re-geocoding the free text.
+    """
     flags = flags_from_snapshot(snapshot)
     selected_flag = find_flag(flags, flag_id)
     if selected_flag is None:
@@ -75,7 +83,14 @@ def search_live_providers(
     )
 
     source = get_provider_source()
-    payload = source.search(location, selected_flag["specialty"])
+    origin = (
+        SearchOrigin(label=location, latitude=float(latitude), longitude=float(longitude))
+        if latitude is not None and longitude is not None
+        else None
+    )
+    payload = source.search(
+        location, selected_flag["specialty"], radius_km=radius_km, origin=origin
+    )
     normalized = normalize_provider_records(payload)
     ranked = rank_providers(normalized, selected_flag["specialty"], availability)
     no_results_message = payload.no_results_message
@@ -95,6 +110,7 @@ def search_live_providers(
             "resolved_area": payload.origin.label if payload.origin else None,
             "latitude": payload.origin.latitude if payload.origin else None,
             "longitude": payload.origin.longitude if payload.origin else None,
+            "radius_km": radius_km,
         },
         "availability": availability,
         "provenance": {

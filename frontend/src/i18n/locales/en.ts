@@ -818,13 +818,13 @@ export const en = {
     f6Title: "Find Care",
     f6Body:
       "Search nearby hospitals, clinics, pharmacies, laboratories, and doctors around a location you confirm on a map. Directory listings are clearly marked as public data.",
-    f7Title: "What Changed?",
+    f7Title: "What changed",
     f7Body:
-      "Compare consecutive dated records with before-and-after values and both source documents, without treating an omitted medicine as proof it stopped.",
-    f8Title: "Record Integrity",
+      "Compare consecutive dated records with before-and-after values and both source documents, without treating an omitted medicine as proof it stopped. The first tab of Record check.",
+    f8Title: "Record check: discrepancies & conflicts",
     f8Body:
       "Surface identity, allergy, same-date lab, and medication-instruction discrepancies side by side for verification instead of silently choosing one source.",
-    f9Title: "Appointment Prep",
+    f9Title: "Appointment prep",
     f9Body:
       "Create a printable clinician handoff, latest documented medication list, record-backed questions, and a practical visit checklist.",
     f10Title: "Action Center",
@@ -1113,7 +1113,7 @@ export const en = {
     subtitle:
       "Start from a safety flag and find a matching professional near you — or check first whether a pharmacist is enough.",
     tabsLabel: "Find care views",
-    tabLocal: "Find local care",
+    tabLocal: "Find a local professional",
     tabWho: "Who to see",
     tabMap: "Browse nearby",
   },

@@ -589,18 +589,18 @@ function PipelineDetail({
   );
 }
 
+/* The current sidebar destinations that consume the stored record. Every key
+   here must exist in the nav catalog — a missing key prints its raw name. */
 const CONSUMER_KEYS = [
   "nav.dashboard",
-  "nav.documents",
-  "nav.medicines",
+  "nav.records",
+  "nav.medications",
   "nav.labs",
-  "nav.history",
-  "nav.changes",
-  "nav.appointmentPrep",
-  "nav.actionCenter",
-  "nav.recordCheck",
   "nav.safety",
+  "nav.recordCheck",
   "nav.ask",
+  "nav.care",
+  "nav.nextSteps",
 ];
 
 function DataFlowDetail() {

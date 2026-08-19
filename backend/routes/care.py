@@ -61,6 +61,12 @@ class CareProviderSearchRequest(BaseModel):
     flag_id: str = Field(min_length=1, max_length=160)
     location: str = Field(min_length=2, max_length=200)
     availability: Literal["any", "today", "this_week", "evenings", "weekends"] = "any"
+    radius_km: float = Field(default=10, ge=1, le=50)
+    # Optional coordinates from the frontend's map autocomplete. When both are
+    # present the live source searches around this exact point instead of
+    # re-geocoding the free-text location.
+    latitude: Optional[float] = Field(default=None, ge=-90, le=90)
+    longitude: Optional[float] = Field(default=None, ge=-180, le=180)
 
 
 # ---------------------------------------------------------------------------
@@ -165,6 +171,9 @@ async def search_care_recommendations(
             flag_id=body.flag_id,
             location=body.location.strip(),
             availability=body.availability,
+            radius_km=body.radius_km,
+            latitude=body.latitude,
+            longitude=body.longitude,
         )
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc

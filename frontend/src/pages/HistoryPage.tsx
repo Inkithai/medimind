@@ -107,7 +107,7 @@ export function HistoryPage({ embedded }: EmbeddedPageProps = {}) {
                 <Link
                   to={
                     timeline.trust_summary?.unresolved_conflicts
-                      ? "/record-integrity?tab=conflicts"
+                      ? "/record-check?tab=conflicts"
                       : "/upload"
                   }
                   className="mt-4 inline-flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700"

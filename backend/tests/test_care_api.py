@@ -162,11 +162,11 @@ def test_search_reports_missing_live_source_configuration_without_provider_fallb
 class EmptyLiveSource:
     """Live-source shaped test double with no provider records whatsoever."""
 
-    def search(self, location, specialty):
+    def search(self, location, specialty, *, radius_km=None, origin=None):
         return ProviderSourcePayload(
             source_id="test_empty_source",
             source_label="Empty live-source test",
-            origin=SearchOrigin(label=location, latitude=0.0, longitude=0.0),
+            origin=origin or SearchOrigin(label=location, latitude=0.0, longitude=0.0),
             records=[],
             no_results_message="No records returned.",
         )

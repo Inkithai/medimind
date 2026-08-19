@@ -74,20 +74,44 @@ const tests: Array<[string, () => void]> = [
   ],
 
   [
-    "the scored Find Local Care flow is in the sidebar and is its own default tab",
+    "browse nearby is the default Find care tab, and the scored flow keeps its own tab",
     () => {
-      // The whole point of the regroup: /care used to be reachable only by
-      // typing the URL, so the flow judges score could go unseen.
+      // /care is a sidebar destination; the map directory leads because it
+      // works with or without a safety flag, and the flag → specialty → live
+      // listing flow stays one tab over instead of unreachable.
       assert.ok(navArray.includes('to: "/care"'), "/care is a sidebar destination");
       const hub = read("../GetCareHubPage.tsx");
       const firstTab = hub.slice(hub.indexOf("const tabs")).match(/id: "([^"]+)"/);
-      assert.equal(firstTab?.[1], "local", "Find local care is the first (default) tab");
+      assert.equal(firstTab?.[1], "map", "Browse nearby is the first (default) tab");
       assert.ok(
         hub.includes("<CareRecommendationsPage embedded />"),
-        "the default tab renders the flag → specialty → live listing flow",
+        "the flag → specialty → live listing flow is still a tab of the hub",
       );
       assert.ok(routeExists("/care"), "/care still resolves");
       assert.ok(routeExists("/find-care"), "/find-care still resolves");
+    },
+  ],
+
+  [
+    "what changed is the default Record check tab",
+    () => {
+      const hub = read("../RecordCheckHubPage.tsx");
+      const firstTab = hub.slice(hub.indexOf("const tabs")).match(/id: "([^"]+)"/);
+      assert.equal(firstTab?.[1], "changes", "What changed is the first (default) tab");
+    },
+  ],
+
+  [
+    "/record-integrity is a redirect, not a second door to the Record check screen",
+    () => {
+      assert.ok(
+        appSource.includes('path="/record-integrity" element={<RecordIntegrityRedirect />}'),
+        "/record-integrity must redirect onto /record-check",
+      );
+      assert.ok(
+        appSource.includes('params.get("tab") === "conflicts"'),
+        "the old ?tab=conflicts contract is preserved by the redirect",
+      );
     },
   ],
 

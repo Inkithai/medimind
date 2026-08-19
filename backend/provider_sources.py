@@ -78,6 +78,16 @@ class ProviderSourcePayload:
     no_results_message: Optional[str] = None
 
 
+def _resolve_radius_meters(radius_km: Optional[float], default_meters: int) -> int:
+    """Clamp a caller-selected search radius to the 1–50 km directory bounds."""
+    if radius_km is None:
+        return default_meters
+    try:
+        return max(1000, min(50000, int(float(radius_km) * 1000)))
+    except (TypeError, ValueError):
+        return default_meters
+
+
 def _timeout_seconds() -> int:
     try:
         return max(
@@ -241,8 +251,15 @@ class GooglePlacesSource:
                 retryable=True,
             ) from exc
 
-    def search(self, location: str, specialty: Dict[str, Any]) -> ProviderSourcePayload:
-        origin = self._geocode(location)
+    def search(
+        self,
+        location: str,
+        specialty: Dict[str, Any],
+        *,
+        radius_km: Optional[float] = None,
+        origin: Optional[SearchOrigin] = None,
+    ) -> ProviderSourcePayload:
+        origin = origin or self._geocode(location)
         if origin is None:
             return ProviderSourcePayload(
                 source_id=self.source_id,
@@ -253,6 +270,7 @@ class GooglePlacesSource:
             )
 
         query = f"{specialty.get('provider_query') or 'doctor'} near {location}"
+        radius_meters = _resolve_radius_meters(radius_km, 30000)
         payload = _read_json(
             "https://places.googleapis.com/v1/places:searchText",
             method="POST",
@@ -282,7 +300,7 @@ class GooglePlacesSource:
                 "locationBias": {
                     "circle": {
                         "center": {"latitude": origin.latitude, "longitude": origin.longitude},
-                        "radius": 30000.0,
+                        "radius": float(radius_meters),
                     }
                 },
             },
@@ -370,8 +388,15 @@ class OpenStreetMapSource:
                 retryable=True,
             ) from exc
 
-    def search(self, location: str, specialty: Dict[str, Any]) -> ProviderSourcePayload:
-        origin = self._geocode(location)
+    def search(
+        self,
+        location: str,
+        specialty: Dict[str, Any],
+        *,
+        radius_km: Optional[float] = None,
+        origin: Optional[SearchOrigin] = None,
+    ) -> ProviderSourcePayload:
+        origin = origin or self._geocode(location)
         if origin is None:
             return ProviderSourcePayload(
                 source_id=self.source_id,
@@ -381,14 +406,15 @@ class OpenStreetMapSource:
                 no_results_message="OpenStreetMap could not locate that city or area. Check the spelling and try again.",  # noqa: E501
             )
 
+        radius_meters = _resolve_radius_meters(radius_km, self.radius_meters)
         # The query only obtains real map records. Specialty selection happens
         # after normalization/ranking because OSM specialty tags are incomplete
         # in many regions; broad doctor/clinic/hospital results remain useful
         # when a narrowly tagged specialty is unavailable.
         query = f"""[out:json][timeout:15];
 (
-  nwr[\"amenity\"~\"^(doctors|clinic|hospital|pharmacy)$\"](around:{self.radius_meters},{origin.latitude},{origin.longitude});
-  nwr[\"healthcare\"~\"^(doctor|clinic|hospital|pharmacy)$\"](around:{self.radius_meters},{origin.latitude},{origin.longitude});
+  nwr[\"amenity\"~\"^(doctors|clinic|hospital|pharmacy)$\"](around:{radius_meters},{origin.latitude},{origin.longitude});
+  nwr[\"healthcare\"~\"^(doctor|clinic|hospital|pharmacy)$\"](around:{radius_meters},{origin.latitude},{origin.longitude});
 );
 out center tags;"""
         _respect_osm_request_spacing()
@@ -495,8 +521,15 @@ class GeoapifyPlacesSource:
                 retryable=True,
             ) from exc
 
-    def search(self, location: str, specialty: Dict[str, Any]) -> ProviderSourcePayload:
-        origin = self._geocode(location)
+    def search(
+        self,
+        location: str,
+        specialty: Dict[str, Any],
+        *,
+        radius_km: Optional[float] = None,
+        origin: Optional[SearchOrigin] = None,
+    ) -> ProviderSourcePayload:
+        origin = origin or self._geocode(location)
         if origin is None:
             return ProviderSourcePayload(
                 source_id=self.source_id,
@@ -509,10 +542,11 @@ class GeoapifyPlacesSource:
         categories = (
             _GEOAPIFY_CATEGORIES.get(specialty_id) or _GEOAPIFY_CATEGORIES["general_practice"]
         )
+        radius_meters = _resolve_radius_meters(radius_km, self.radius_meters)
         query = urlencode(
             {
                 "categories": categories,
-                "filter": f"circle:{origin.longitude},{origin.latitude},{self.radius_meters}",
+                "filter": f"circle:{origin.longitude},{origin.latitude},{radius_meters}",
                 "bias": f"proximity:{origin.longitude},{origin.latitude}",
                 "limit": 40,
                 "apiKey": self.api_key,
@@ -543,16 +577,27 @@ class GeoapifyPlacesSource:
 class HybridDirectorySource:
     """Geoapify first when keyed; OpenStreetMap otherwise. Never says a source failed."""
 
-    def search(self, location: str, specialty: Dict[str, Any]) -> ProviderSourcePayload:
+    def search(
+        self,
+        location: str,
+        specialty: Dict[str, Any],
+        *,
+        radius_km: Optional[float] = None,
+        origin: Optional[SearchOrigin] = None,
+    ) -> ProviderSourcePayload:
         key = _geoapify_key()
         if key:
             try:
-                payload = GeoapifyPlacesSource(key).search(location, specialty)
+                payload = GeoapifyPlacesSource(key).search(
+                    location, specialty, radius_km=radius_km, origin=origin
+                )
                 if payload.records:
                     return payload
             except ProviderSearchError:
                 pass
-        return OpenStreetMapSource(_osm_user_agent()).search(location, specialty)
+        return OpenStreetMapSource(_osm_user_agent()).search(
+            location, specialty, radius_km=radius_km, origin=origin
+        )
 
 
 def get_provider_source() -> Any:

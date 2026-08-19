@@ -70,13 +70,45 @@ export function FollowUpPage({ embedded }: EmbeddedPageProps = {}) {
   const openHighCount =
     plan?.tasks.filter((task) => task.priority === "high" && !taskState[task.id]?.completed)
       .length || 0;
-  const visibleTasks = useMemo(
-    () =>
+  // A reminder is only useful if the queue reacts to it: overdue items jump
+  // to the top, and the next upcoming date is surfaced without scrolling.
+  const reminderStats = useMemo(() => {
+    const today = todayLocal();
+    const dates = (plan?.tasks || [])
+      .map((task) => taskState[task.id])
+      .filter((state) => state && !state.completed && state.reminderDate)
+      .map((state) => state!.reminderDate);
+    const upcoming = dates.filter((date) => date >= today).sort();
+    return {
+      total: dates.length,
+      overdue: dates.filter((date) => date < today).length,
+      next: upcoming[0] || null,
+    };
+  }, [plan, taskState]);
+  const visibleTasks = useMemo(() => {
+    const matching =
       plan?.tasks.filter(
         (task) => Boolean(taskState[task.id]?.completed) === (view === "completed"),
-      ) || [],
-    [plan, taskState, view],
-  );
+      ) || [];
+    if (view !== "open") return matching;
+    // Overdue reminders first (oldest first), then upcoming dated reminders,
+    // then undated tasks in their original priority order (sort is stable).
+    const today = todayLocal();
+    const group = (task: FollowUpTask) => {
+      const date = taskState[task.id]?.reminderDate || "";
+      if (!date) return 2;
+      return date < today ? 0 : 1;
+    };
+    return [...matching].sort((a, b) => {
+      const groupA = group(a);
+      const groupB = group(b);
+      if (groupA !== groupB) return groupA - groupB;
+      if (groupA === 2) return 0;
+      const dateA = taskState[a.id]?.reminderDate || "";
+      const dateB = taskState[b.id]?.reminderDate || "";
+      return dateA < dateB ? -1 : dateA > dateB ? 1 : 0;
+    });
+  }, [plan, taskState, view]);
 
   function updateTask(taskId: string, patch: Partial<TaskState[string]>) {
     setTaskState((previous) => ({
@@ -186,9 +218,29 @@ export function FollowUpPage({ embedded }: EmbeddedPageProps = {}) {
           <div className="rounded-2xl border border-sky-100 bg-sky-50/70 p-5 text-sm leading-relaxed text-sky-900">
             <p className="font-semibold">You set the schedule</p>
             <p className="mt-1">
-              {plan.note} Reminder dates are saved only in this browser workspace.
+              {plan.note} Reminder dates are saved only in this browser workspace — add them to
+              your calendar to be notified outside MediMind.
             </p>
           </div>
+
+          {reminderStats.total > 0 && (
+            <div
+              className={`flex flex-wrap items-center gap-x-4 gap-y-1 rounded-2xl border px-5 py-3 text-sm ${
+                reminderStats.overdue
+                  ? "border-red-200 bg-red-50 text-red-900"
+                  : "border-emerald-200 bg-emerald-50 text-emerald-900"
+              }`}
+              role="status"
+            >
+              <span className="inline-flex items-center gap-2 font-semibold">
+                <ReminderIcon className="h-4 w-4" />
+                {reminderStats.overdue
+                  ? `${reminderStats.overdue} reminder${reminderStats.overdue === 1 ? "" : "s"} passed — moved to the top of the queue`
+                  : `${reminderStats.total} reminder${reminderStats.total === 1 ? "" : "s"} set`}
+              </span>
+              {reminderStats.next && <span>Next reminder: {formatDate(reminderStats.next)}</span>}
+            </div>
+          )}
 
           <div className="flex items-center justify-between gap-4 border-b border-slate-200">
             <div className="flex gap-1">
@@ -315,13 +367,25 @@ function TaskCard({
             />
           </label>
           {state.reminderDate && (
-            <button
-              type="button"
-              onClick={() => downloadCalendar(task, state.reminderDate)}
-              className="btn-secondary whitespace-nowrap px-4 py-2 text-sm"
-            >
-              Add to calendar
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={() => downloadCalendar(task, state.reminderDate)}
+                className="btn-secondary whitespace-nowrap px-4 py-2 text-sm"
+                title="Download an .ics file with a built-in alert for Apple/Outlook/other calendars"
+              >
+                Add to calendar
+              </button>
+              <a
+                href={googleCalendarUrl(task, state.reminderDate)}
+                target="_blank"
+                rel="noreferrer"
+                className="btn-secondary whitespace-nowrap px-4 py-2 text-sm"
+                title="Create this reminder directly in Google Calendar"
+              >
+                Google Calendar
+              </a>
+            </>
           )}
           <button
             type="button"
@@ -466,11 +530,28 @@ function todayLocal() {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
 }
 
-function downloadCalendar(task: FollowUpTask, date: string) {
+function calendarDates(date: string): { start: string; end: string } {
   const start = date.replace(/-/g, "");
   const endDate = new Date(`${date}T12:00:00`);
   endDate.setDate(endDate.getDate() + 1);
   const end = `${endDate.getFullYear()}${String(endDate.getMonth() + 1).padStart(2, "0")}${String(endDate.getDate()).padStart(2, "0")}`;
+  return { start, end };
+}
+
+/** Prefilled Google Calendar event — no file handling needed on phones. */
+function googleCalendarUrl(task: FollowUpTask, date: string): string {
+  const { start, end } = calendarDates(date);
+  const params = new URLSearchParams({
+    action: "TEMPLATE",
+    text: `MediMind follow-up: ${task.title}`,
+    dates: `${start}/${end}`,
+    details: `${task.action}\n\n${task.timing_guardrail}`,
+  });
+  return `https://calendar.google.com/calendar/render?${params.toString()}`;
+}
+
+function downloadCalendar(task: FollowUpTask, date: string) {
+  const { start, end } = calendarDates(date);
   const escape = (value: string) =>
     value.replace(/\\/g, "\\\\").replace(/\n/g, "\\n").replace(/,/g, "\\,").replace(/;/g, "\\;");
   const content = [
@@ -483,6 +564,13 @@ function downloadCalendar(task: FollowUpTask, date: string) {
     `DTEND;VALUE=DATE:${end}`,
     `SUMMARY:${escape(`MediMind follow-up: ${task.title}`)}`,
     `DESCRIPTION:${escape(`${task.action}\n\n${task.timing_guardrail}`)}`,
+    // Without an alarm the event sits silently in the calendar; alert at
+    // 9:00 on the reminder day so the export actually reminds.
+    "BEGIN:VALARM",
+    "ACTION:DISPLAY",
+    `DESCRIPTION:${escape(`MediMind follow-up: ${task.title}`)}`,
+    "TRIGGER;RELATED=START:PT9H",
+    "END:VALARM",
     "END:VEVENT",
     "END:VCALENDAR",
   ].join("\r\n");

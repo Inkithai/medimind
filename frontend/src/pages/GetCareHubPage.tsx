@@ -1,15 +1,13 @@
 /**
- * Find care — the "I have a flag, now what?" hub, and the fix for the single
- * biggest navigation problem in the app: the flag → specialty → live listing
- * flow lived at /care and was not in the sidebar at all. It is now the
- * default tab of this hub, so it is the first thing anyone sees here.
+ * Find care — the "I have a flag, now what?" hub.
  *
- *   /care  (or /find-care)      → Find local care  (pick a safety flag → live doctors nearby)
- *   /find-care?tab=who          → Who to see       (pharmacist vs doctor triage)
- *   /find-care?tab=map          → Browse nearby    (Leaflet directory of facilities)
+ *   /care  (or /find-care)      → Browse nearby              (map directory of facilities)
+ *   /care?tab=local             → Find a local professional  (pick a safety flag → live doctors)
+ *   /care?tab=who               → Who to see                 (pharmacist vs doctor triage)
  *
- * The map tab stays lazy-loaded: the Leaflet bundle must not be downloaded
- * by someone who only wanted the triage answer.
+ * Browse nearby is the default tab: it works with or without a safety flag,
+ * so it is the first thing anyone sees here. The map component itself stays
+ * lazy-loaded behind Suspense so the other tabs never pay for Leaflet.
  */
 import { Suspense, lazy } from "react";
 import { HubHeader, TabBar, TabPanel, useTabParam, type TabSpec } from "../components/TabBar";
@@ -41,9 +39,9 @@ function MapLoading() {
 export function GetCareHubPage() {
   const { t } = useI18n();
   const tabs: TabSpec[] = [
+    { id: "map", label: t("careHub.tabMap") },
     { id: "local", label: t("careHub.tabLocal") },
     { id: "who", label: t("careHub.tabWho") },
-    { id: "map", label: t("careHub.tabMap") },
   ];
   const [active, setActive] = useTabParam(tabs);
 
@@ -68,16 +66,16 @@ export function GetCareHubPage() {
         />
       </div>
 
+      <TabPanel group={GROUP} id="map" active={active}>
+        <Suspense fallback={<MapLoading />}>
+          <FindCarePage embedded />
+        </Suspense>
+      </TabPanel>
       <TabPanel group={GROUP} id="local" active={active}>
         <CareRecommendationsPage embedded />
       </TabPanel>
       <TabPanel group={GROUP} id="who" active={active}>
         <WhoToSeePage embedded />
-      </TabPanel>
-      <TabPanel group={GROUP} id="map" active={active}>
-        <Suspense fallback={<MapLoading />}>
-          <FindCarePage embedded />
-        </Suspense>
       </TabPanel>
     </div>
   );

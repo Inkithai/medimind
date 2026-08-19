@@ -3,12 +3,12 @@ import type { Coordinates, LocationPlace } from "../types/location";
 // Photon handles OSM places/landmarks and reverse geocoding. Open-Meteo adds
 // fast prefix matching for cities (for example, "Nego" → "Negombo"). Both
 // endpoints are configurable so production deployments can use hosted copies.
-const PHOTON_URL = (import.meta.env.VITE_GEOCODING_API_URL || "https://photon.komoot.io").replace(
+const PHOTON_URL = (import.meta.env?.VITE_GEOCODING_API_URL || "https://photon.komoot.io").replace(
   /\/$/,
   "",
 );
 const CITY_GEOCODING_URL = (
-  import.meta.env.VITE_CITY_GEOCODING_API_URL || "https://geocoding-api.open-meteo.com/v1"
+  import.meta.env?.VITE_CITY_GEOCODING_API_URL || "https://geocoding-api.open-meteo.com/v1"
 ).replace(/\/$/, "");
 
 interface PhotonFeature {

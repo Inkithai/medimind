@@ -11,7 +11,29 @@
 import { StrictMode, act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { JSDOM } from "jsdom";
+import Module from "node:module";
 import { MemoryRouter } from "react-router-dom";
+
+// The Browse-nearby tab (now the /care default) imports leaflet.css; Node has
+// no CSS loader, so short-circuit stylesheet imports to empty modules.
+(
+  Module as unknown as {
+    registerHooks?: (hooks: {
+      load: (
+        url: string,
+        context: unknown,
+        nextLoad: (url: string, context?: unknown) => unknown,
+      ) => unknown;
+    }) => void;
+  }
+).registerHooks?.({
+  load(url, context, nextLoad) {
+    if (url.split("?")[0].endsWith(".css")) {
+      return { format: "module", source: "export default {};", shortCircuit: true };
+    }
+    return nextLoad(url, context);
+  },
+});
 
 const dom = new JSDOM("<!DOCTYPE html><html><body><div id='root'></div></body></html>", {
   url: "http://localhost/",
@@ -182,6 +204,15 @@ const PAYLOADS: Record<string, unknown> = {
     message: "",
     disclaimer: "",
   },
+  "/api/v1/care/recommendation": {
+    triggered: false,
+    specialty: "General practice",
+    specialty_query: "",
+    facility_kind: "doctor",
+    reason: "",
+    disclaimer: "",
+    evidence: [],
+  },
   "/api/v1/care/recommendations": { recommendations: [] },
   "/api/v1/care/suggestion": { suggestion: null, specialties: [] },
   "/api/v1/guidelines/status": { sources: [], checked_at: null, summary: {} },
@@ -285,26 +316,32 @@ const HUBS: HubCase[] = [
   {
     name: "Find care",
     path: "/care",
-    tabs: ["Find local care", "Who to see", "Browse nearby"],
-    selected: "Find local care",
+    tabs: ["Browse nearby", "Find a local professional", "Who to see"],
+    selected: "Browse nearby",
   },
   {
     name: "Find care (who to see deep link)",
     path: "/care?tab=who",
-    tabs: ["Find local care", "Who to see", "Browse nearby"],
+    tabs: ["Browse nearby", "Find a local professional", "Who to see"],
     selected: "Who to see",
+  },
+  {
+    name: "Find care (local professional deep link)",
+    path: "/care?tab=local",
+    tabs: ["Browse nearby", "Find a local professional", "Who to see"],
+    selected: "Find a local professional",
   },
   {
     name: "Record check",
     path: "/record-check",
-    tabs: ["Discrepancies", "Conflicts", "What changed"],
-    selected: "Discrepancies",
+    tabs: ["What changed", "Discrepancies", "Conflicts"],
+    selected: "What changed",
   },
   {
-    name: "Record check (changes deep link)",
-    path: "/record-check?tab=changes",
-    tabs: ["Discrepancies", "Conflicts", "What changed"],
-    selected: "What changed",
+    name: "Record check (conflicts deep link)",
+    path: "/record-check?tab=conflicts",
+    tabs: ["What changed", "Discrepancies", "Conflicts"],
+    selected: "Conflicts",
   },
   {
     name: "Ask AI",
@@ -460,6 +497,8 @@ await check("old URLs still land on the right screen", async () => {
     ["/who-to-see", "Who to see"],
     ["/conversations", "Conversation"],
     ["/changes", "What changed"],
+    ["/record-integrity", "Discrepancies"],
+    ["/record-integrity?tab=conflicts", "Conflicts"],
     ["/follow-up", "Action Center"],
     ["/preventive-care", "Preventive"],
     ["/messages", "Messages"],

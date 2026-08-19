@@ -5,6 +5,7 @@ import { CareRecommendationView } from "../components/CareRecommendationView";
 import { CareEvidencePanel } from "../components/CareEvidencePanel";
 import { Card, CardBody, CardHeader } from "../components/Card";
 import { ErrorState } from "../components/ErrorState";
+import { LocationAutocompleteInput } from "../components/location";
 import { LoadingState, Spinner } from "../components/Spinner";
 import { StatusBadge } from "../components/StatusBadge";
 import { useAuth } from "../context/AuthContext";
@@ -15,12 +16,15 @@ import type {
   CareProviderSearchResponse,
   CareRecommendationContext,
 } from "../types/api";
+import type { LocationPlace } from "../types/location";
 import { confidenceTone, formatConfidence } from "../utils/format";
 import type { EmbeddedPageProps } from "../components/TabBar";
 
+const SEARCH_RADII_KM = [5, 10, 20, 50] as const;
+
 export function CareRecommendationsPage({ embedded }: EmbeddedPageProps = {}) {
   const { credentials } = useAuth();
-  const { t } = useI18n();
+  const { t, formatNumber } = useI18n();
   const availabilityOptions: Array<{ value: AvailabilityPreference; label: string }> = [
     { value: "any", label: t("care.anyConsultation") },
     { value: "today", label: t("care.today") },
@@ -31,6 +35,8 @@ export function CareRecommendationsPage({ embedded }: EmbeddedPageProps = {}) {
   const [context, setContext] = useState<CareRecommendationContext | null>(null);
   const [selectedFlagId, setSelectedFlagId] = useState("");
   const [location, setLocation] = useState("");
+  const [selectedPlace, setSelectedPlace] = useState<LocationPlace | null>(null);
+  const [radiusKm, setRadiusKm] = useState<number>(10);
   const [availability, setAvailability] = useState<AvailabilityPreference>("any");
   const [result, setResult] = useState<CareProviderSearchResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -65,8 +71,13 @@ export function CareRecommendationsPage({ embedded }: EmbeddedPageProps = {}) {
     try {
       const data = await api.searchCareProviders(credentials, {
         flag_id: selectedFlagId,
-        location: location.trim(),
+        // A picked suggestion sends its precise map name + coordinates, so
+        // the backend skips its own geocoding of ambiguous free text.
+        location: selectedPlace ? selectedPlace.displayName : location.trim(),
         availability,
+        radius_km: radiusKm,
+        latitude: selectedPlace?.latitude,
+        longitude: selectedPlace?.longitude,
       });
       setResult(data);
     } catch (err) {
@@ -183,25 +194,43 @@ export function CareRecommendationsPage({ embedded }: EmbeddedPageProps = {}) {
             />
             <CardBody>
               <form
-                className="grid gap-4 sm:grid-cols-2"
+                className="grid gap-4 sm:grid-cols-3"
                 aria-busy={searching}
                 onSubmit={(event) => {
                   event.preventDefault();
                   void search();
                 }}
               >
+                <LocationAutocompleteInput
+                  label={t("care.cityArea")}
+                  placeholder={t("care.cityPlaceholder")}
+                  value={location}
+                  selected={selectedPlace}
+                  onTextChange={(text) => {
+                    setLocation(text);
+                    setSelectedPlace(null);
+                  }}
+                  onSelect={(place) => {
+                    setSelectedPlace(place);
+                    setLocation(place.name);
+                  }}
+                  disabled={searching}
+                  required
+                />
                 <label className="block">
-                  <span className="text-sm font-medium text-slate-700">{t("care.cityArea")}</span>
-                  <input
-                    value={location}
-                    onChange={(event) => setLocation(event.target.value)}
-                    placeholder={t("care.cityPlaceholder")}
-                    autoComplete="address-level2"
-                    required
-                    minLength={2}
-                    className="mt-1.5 block w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                  <span className="text-sm font-medium text-slate-700">{t("care.radius")}</span>
+                  <select
+                    value={radiusKm}
+                    onChange={(event) => setRadiusKm(Number(event.target.value))}
+                    className="mt-1.5 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
                     disabled={searching}
-                  />
+                  >
+                    {SEARCH_RADII_KM.map((radius) => (
+                      <option key={radius} value={radius}>
+                        {formatNumber(radius)} km
+                      </option>
+                    ))}
+                  </select>
                 </label>
                 <label className="block">
                   <span className="text-sm font-medium text-slate-700">
@@ -222,7 +251,7 @@ export function CareRecommendationsPage({ embedded }: EmbeddedPageProps = {}) {
                     ))}
                   </select>
                 </label>
-                <div className="sm:col-span-2 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4">
+                <div className="sm:col-span-3 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4">
                   <p className="max-w-2xl text-xs leading-relaxed text-slate-500">
                     {t("care.hoursRankingNotice")}
                   </p>

@@ -13,7 +13,6 @@ const routeKeys: Record<string, string> = {
   "/labs": "nav.labs",
   "/safety": "nav.safety",
   "/record-check": "nav.recordCheck",
-  "/record-integrity": "nav.recordCheck",
   "/ask": "nav.ask",
   "/care": "nav.care",
   "/find-care": "nav.care",

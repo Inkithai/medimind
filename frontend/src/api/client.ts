@@ -821,6 +821,11 @@ export const api = {
       flag_id: string;
       location: string;
       availability: "any" | "today" | "this_week" | "evenings" | "weekends";
+      /** Search radius in km around the location (backend clamps 1–50). */
+      radius_km?: number;
+      /** Coordinates from the map autocomplete; skips server-side geocoding. */
+      latitude?: number;
+      longitude?: number;
     },
   ): Promise<CareProviderSearchResponse> {
     return request<CareProviderSearchResponse>(credentials, "/api/v1/care-recommendations/search", {
