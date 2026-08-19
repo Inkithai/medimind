@@ -1,7 +1,7 @@
 import { useId } from "react";
 import { Link } from "react-router-dom";
 import { useI18n } from "../i18n/I18nContext";
-import type { LabTrend, LabTrendsReport } from "../types/api";
+import type { LabTrend, LabTrendsReport, SingleLabResult } from "../types/api";
 import { classNames, flagTone, formatConfidence } from "../utils/format";
 import { Alert } from "./Alert";
 import { Card, CardBody, CardHeader } from "./Card";
@@ -12,6 +12,8 @@ import { StatusBadge } from "./StatusBadge";
 export function LabTrendsView({ report }: { report: LabTrendsReport }) {
   const { t, formatNumber } = useI18n();
   const hasTrends = report.trends.length > 0;
+  const singleResults = report.single_results || [];
+  const hasSingles = singleResults.length > 0;
   const hasInsufficient = report.insufficient_data.length > 0;
 
   return (
@@ -28,7 +30,7 @@ export function LabTrendsView({ report }: { report: LabTrendsReport }) {
           </Alert>
         )}
 
-        {!hasTrends && !hasInsufficient && (
+        {!hasTrends && !hasSingles && !hasInsufficient && (
           <EmptyState
             title={t("labs.noTrends")}
             description={t("labs.noTrendsBody")}
@@ -40,6 +42,22 @@ export function LabTrendsView({ report }: { report: LabTrendsReport }) {
             {report.trends.map((trend, idx) => (
               <TrendCard key={idx} trend={trend} />
             ))}
+          </div>
+        )}
+
+        {hasSingles && (
+          <div>
+            <h3 className="mb-2 text-sm font-semibold text-slate-700">
+              Single lab results ({formatNumber(singleResults.length)})
+            </h3>
+            <p className="mb-3 text-xs text-slate-500">
+              These have one usable reading, so no trend is calculated. When safe, the backend compares the value with the printed reference range or a conservative general interval.
+            </p>
+            <div className="grid gap-2 md:grid-cols-2">
+              {singleResults.map((item, idx) => (
+                <SingleResultCard key={idx} item={item} />
+              ))}
+            </div>
           </div>
         )}
 
@@ -73,6 +91,36 @@ function recovered(trend: LabTrend): boolean {
   // Old snapshots omit the field — a last-reading "normal" after a recorded
   // crossing is a recovery, not an ongoing alarm.
   return Boolean(trend.crossed_into_abnormal_at) && lastFlag(trend) === "normal";
+}
+
+
+function SingleResultCard({ item }: { item: SingleLabResult }) {
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-3 text-sm">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <p className="font-semibold text-slate-900">{item.test_name}</p>
+          <p className="mt-0.5 text-xs text-slate-500">
+            {item.date || "unknown date"} · {item.source_file || "unknown source"}
+            {item.range_source ? ` · range: ${item.range_source}` : ""}
+          </p>
+        </div>
+        <StatusBadge tone={item.status === "normal" ? "success" : item.status === "high" ? "danger" : item.status === "low" ? "info" : "neutral"}>
+          {item.status}
+        </StatusBadge>
+      </div>
+      <p className="mt-2 text-sm text-slate-700">
+        <span className="font-medium">Value:</span> {item.value ?? "—"}{item.unit ? ` ${item.unit}` : ""}
+      </p>
+      {item.reference_range && (
+        <p className="mt-1 text-xs text-slate-500">Reference: {item.reference_range}</p>
+      )}
+      <p className="mt-2 text-xs leading-relaxed text-slate-600">{item.explanation}</p>
+      {typeof item.confidence === "number" && (
+        <p className="mt-2 text-[11px] text-slate-500">confidence {formatConfidence(item.confidence)}</p>
+      )}
+    </div>
+  );
 }
 
 function TrendCard({ trend }: { trend: LabTrend }) {

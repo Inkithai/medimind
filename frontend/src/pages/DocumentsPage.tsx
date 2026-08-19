@@ -161,7 +161,7 @@ export function DocumentsPage() {
                               </p>
                             </div>
                           </div>
-                          {visit.document_url && (
+                          {(visit.document_url || visit.storage_path) && (
                             <span className="inline-flex items-center gap-1 text-xs text-brand-600">
                               <LinkIcon className="h-3.5 w-3.5" /> source
                             </span>
@@ -263,6 +263,15 @@ export function DocumentsPage() {
                     onDelete={async () => {
                       await api.deleteDocument(credentials, selected._document_id);
                       setSelected(null);
+                      await load();
+                    }}
+                    onOpenOriginal={async () => {
+                      if (selected.document_url) return selected.document_url;
+                      const signed = await api.getDocumentSignedUrl(credentials, selected._document_id);
+                      return signed.url;
+                    }}
+                    onProcessText={async () => {
+                      await api.processDocumentText(credentials, selected._document_id);
                       await load();
                     }}
                     initialEvidenceId={requestedEvidenceId}

@@ -33,9 +33,10 @@ the same numbers, months apart.
 """
 
 import re
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Dict, List, Optional, Tuple
 
+from reference_intervals import canonical_test, is_main_test, lookup_interval, to_canonical_value
 from date_convention import infer_dayfirst, parse_mixed_datetime
 
 # A value within this fraction of the reference range width, relative to
@@ -237,6 +238,145 @@ def _group_by_test(lab_results_timeline: List[Dict[str, Any]]) -> Dict[str, List
         if name:
             display_names.setdefault(name.lower(), name)
     return {display_names[k]: v for k, v in groups.items()}
+
+
+
+
+def _normalize_sex(value: Any) -> Optional[str]:
+    text = str(value or "").strip().lower()
+    if text in {"male", "m", "man"}:
+        return "male"
+    if text in {"female", "f", "woman"}:
+        return "female"
+    return None
+
+
+def _derive_patient_context(timeline: Dict[str, Any]) -> Dict[str, Any]:
+    """Best-effort demographics for safe reference interval fallback.
+
+    Document-printed demographics are used only to choose a reference interval;
+    if sex or age is absent, sex/age-specific intervals simply decline to
+    classify instead of guessing.
+    """
+    profile = timeline.get("patient_profile") if isinstance(timeline.get("patient_profile"), dict) else {}
+    sex = _normalize_sex(profile.get("sex") or profile.get("gender"))
+    age = None
+    if isinstance(profile.get("age"), (int, float)):
+        age = float(profile["age"])
+    elif profile.get("date_of_birth"):
+        try:
+            born = date.fromisoformat(str(profile["date_of_birth"])[:10])
+            today = date.today()
+            age = float(today.year - born.year - ((today.month, today.day) < (born.month, born.day)))
+        except Exception:
+            age = None
+    visits = timeline.get("visits") or []
+    for visit in visits:
+        if sex is None:
+            sex = _normalize_sex(visit.get("patient_gender"))
+        if age is None and isinstance(visit.get("patient_age"), (int, float)):
+            age = float(visit["patient_age"])
+        if sex is not None and age is not None:
+            break
+    return {"sex": sex, "age": age}
+
+
+def _classify_value(value: float, low: Optional[float], high: Optional[float]) -> str:
+    if low is not None and value < low:
+        return "low"
+    if high is not None and value > high:
+        return "high"
+    if low is None and high is None:
+        return "unknown"
+    return "normal"
+
+
+def _format_bounds(low: Optional[float], high: Optional[float], unit: str) -> str:
+    if low is None and high is None:
+        return "no numeric range"
+    if low is None:
+        return f"≤ {high:g} {unit}".strip()
+    if high is None:
+        return f"≥ {low:g} {unit}".strip()
+    return f"{low:g}-{high:g} {unit}".strip()
+
+
+def _single_result_explanation(
+    test_name: str,
+    value: Any,
+    unit: str,
+    status: str,
+    range_text: Optional[str],
+    source: Optional[str],
+) -> str:
+    value_text = f"{value}{(' ' + unit) if unit else ''}".strip()
+    if status == "unknown":
+        return (
+            f"{test_name} has one usable result ({value_text}), but no safe reference range "
+            "was available to classify it. This is not a diagnosis."
+        )
+    source_phrase = "the range printed on the report" if source == "printed" else "a general reference interval"
+    return (
+        f"{test_name} has one usable result ({value_text}), which is {status} compared with "
+        f"{source_phrase}{f' ({range_text})' if range_text else ''}. This is a numeric comparison only, not a diagnosis."
+    )
+
+
+def _assess_single_result(test_name: str, usable: Dict[str, Any], sex: Optional[str], age: Optional[float]) -> Dict[str, Any]:
+    """Classify one lab value using printed range first, then safe general interval."""
+    unit = usable.get("unit") or ""
+    raw_value = usable.get("value")
+    numeric_value = usable.get("_value")
+    status = "unknown"
+    range_source = None
+    range_text = None
+    range_bounds = None
+    compared_value = numeric_value
+    compared_unit = unit
+    unit_assumed = False
+
+    printed = _parse_range(usable.get("reference_range"))
+    if printed:
+        range_bounds = {"low": printed[0], "high": printed[1], "unit": unit, "source": "printed"}
+        status = _classify_value(numeric_value, printed[0], printed[1])
+        range_source = "printed"
+        range_text = _format_bounds(printed[0], printed[1], unit)
+    else:
+        test_id = canonical_test(test_name)
+        converted = to_canonical_value(test_id, numeric_value, unit) if test_id else None
+        interval = lookup_interval(test_id, sex, age) if converted else None
+        if converted and interval:
+            compared_value, compared_unit = converted
+            unit_assumed = not bool(unit)
+            status = _classify_value(compared_value, interval.get("low"), interval.get("high"))
+            range_source = "general"
+            range_bounds = {
+                "low": interval.get("low"),
+                "high": interval.get("high"),
+                "unit": interval.get("unit"),
+                "source": interval.get("source"),
+                "basis": interval.get("basis"),
+            }
+            range_text = _format_bounds(interval.get("low"), interval.get("high"), interval.get("unit") or "")
+
+    return {
+        "test_name": test_name,
+        "date": usable.get("date"),
+        "value": raw_value,
+        "numeric_value": compared_value,
+        "unit": compared_unit,
+        "original_unit": unit,
+        "unit_assumed": unit_assumed,
+        "reference_range": usable.get("reference_range") or range_text,
+        "range_source": range_source,
+        "range_bounds": range_bounds,
+        "status": status,
+        "source_file": usable.get("source_file"),
+        "source_page": usable.get("source_page"),
+        "confidence": usable.get("confidence", 1.0),
+        "is_main_test": is_main_test(test_name),
+        "explanation": _single_result_explanation(test_name, raw_value, compared_unit or unit, status, range_text, range_source),
+    }
 
 
 def _flag_sequence_phrase(flags: List[str]) -> str:
@@ -448,7 +588,9 @@ def track_lab_trends(timeline: Dict[str, Any]) -> Dict[str, Any]:
     dayfirst = infer_dayfirst([e.get("date") for e in lab_results_timeline])
 
     trends: List[Dict[str, Any]] = []
+    single_results: List[Dict[str, Any]] = []
     insufficient: List[Dict[str, Any]] = []
+    patient_context = _derive_patient_context(timeline)
 
     for test_name, entries in grouped.items():
         usable = []
@@ -477,6 +619,10 @@ def track_lab_trends(timeline: Dict[str, Any]) -> Dict[str, Any]:
                 ranges_seen.add(e["reference_range"])
 
         if len(usable) < 2:
+            if len(usable) == 1:
+                single_results.append(_assess_single_result(
+                    test_name, usable[0], patient_context.get("sex"), patient_context.get("age")
+                ))
             insufficient.append({
                 "test_name": test_name,
                 "reason": (
@@ -569,6 +715,8 @@ def track_lab_trends(timeline: Dict[str, Any]) -> Dict[str, Any]:
 
     return {
         "trends": trends,
+        "single_results": single_results,
+        "patient_context": patient_context,
         "insufficient_data": insufficient,
         "note": (
             "This trend analysis is computed directly from the extracted lab values and reference "

@@ -1,84 +1,315 @@
 # MediMind — Anonymous Medical Document Intelligence
 
-MediMind converts your private medical files into something you can actually navigate. Drop in prescriptions, lab reports, and discharge summaries and you get a structured timeline, automatic safety checks, lab trend analysis, and grounded question answering. All of it lives inside a **private anonymous workspace** — no signup, no password, just a `session_id` stored locally in your browser.
+MediMind is an AI-powered medical record intelligence and local-care recommendation platform for the YGC AI Competition 2026 Final Round. It converts private prescriptions, laboratory reports, discharge summaries, clinical notes, images, and PDFs into a structured patient timeline; checks the record for medication and document-safety issues; explains lab trends; answers grounded questions across documents; and helps the user find real nearby care providers when a clinical flag needs follow-up.
+
+The application uses a **private anonymous workspace** model: no signup flow is required. The browser receives a signed workspace token from `POST /api/v1/anonymous/session`, stores it locally, and every record, document, analysis, and provider-search request is scoped to that workspace.
 
 **YGC Final Round: 19 / 19 requirements complete.** Official brief: [`docs/YGC_FINAL_ROUND_RULES.md`](docs/YGC_FINAL_ROUND_RULES.md). Evidence: [`docs/YGC_FINAL_ROUND_CHECKLIST.md`](docs/YGC_FINAL_ROUND_CHECKLIST.md). Feature inventory: [`docs/FEATURES.md`](docs/FEATURES.md).
 
-### YGC Final Round — Competition Checklist
+---
 
-#### ROUND 1 BASELINE
+## Project
 
-- [x] **R1** — Extract data from multiple medical documents (lab reports, prescriptions, notes, discharge summaries)
-- [x] **R2** — Merge extracted data into one unified patient timeline
-- [x] **R3** — Cross-check prescriptions for interactions, duplicates, or conflicting dosages
-- [x] **R4** — Track lab result trends over time
-- [x] **R5** — Explain lab trends in plain language
-- [x] **R6** — Answer follow-up questions across multiple documents
-- [x] **R7** — Give a confidence score for flagged issues
-- [x] **R8** — Recommend consulting a doctor for high-risk or low-confidence cases
+MediMind extends the Round 1 medical report and prescription cross-checker into a full medical-intelligence workflow:
 
-#### FINAL ROUND NEW FEATURE
+1. Upload medical documents.
+2. Extract structured clinical data.
+3. Merge documents into a unified timeline.
+4. Run deterministic and AI-assisted medical safety checks.
+5. Track laboratory results and single-result interpretations.
+6. Answer patient questions with source citations.
+7. Route important findings to the right professional type.
+8. Search real public provider directories for nearby care.
 
-- [x] **R9** — Identify the right type of doctor based on the flagged issue (specialty matching)
-- [x] **R10** — Ask the user for their location (city/area)
-- [x] **R11** — Ask the user for their availability for consultation
-- [x] **R12** — Search real, publicly available data using Google Maps Places API or a free alternative (OpenStreetMap/Nominatim)
-- [x] **R13** — Display a result list showing: doctor/clinic name, specialty, address, distance, and rating/contact number
-- [x] **R14** — Handle no-results gracefully: clear message + suggest widening the search area (no fake results)
+The system is designed to be evidence-based and conservative: it explains what uploaded records show, but it does **not** diagnose, prescribe, or fabricate provider data.
 
-#### DATA RULES
+---
 
-- [x] **R15** — All doctor/clinic data must come from a real public source (no synthetic or fabricated data)
-- [x] **R16** — App must never present itself as making a diagnosis
+## Core Features
 
-#### DELIVERABLES
+### Medical document processing
 
-- [x] **R17** — Working application demonstrating the full end-to-end flow: upload → flag → location asked → doctor list shown
-- [x] **R18** — Working web app link with a README explaining which API was used and how
-- [x] **R19** — A short demo (5 minutes) covering the full flow — [`docs/DEMO_RUNBOOK.md`](docs/DEMO_RUNBOOK.md)
+- Medical document upload for PDFs and images.
+- Native PDF text extraction.
+- Tesseract OCR fallback for scanned documents and photos.
+- Multimodal AI extraction for documents OCR cannot reliably read.
+- Persisted raw text/OCR lifecycle metadata (`raw_text_processing`) for inspection and reuse.
+- Structured extraction of medications, allergies, labs, diagnoses, symptoms, procedures, vitals, imaging, clinical notes, provider, dates, patient identity, and evidence regions.
+- Non-medical document rejection after extraction using deterministic content checks.
+- Duplicate-upload detection using file hashes.
+- Per-document reprocessing and deletion.
+- Correction and audit flow for extracted fields.
 
-**Directory APIs used (R12 / R18).** Find Local Care (`/care`) searches **live public listings only** — nothing is seeded or mocked.
+### Medical intelligence
+
+- Unified patient timeline across all uploaded documents.
+- Medication activity analysis (active / ended / uncertain).
+- Drug interaction detection.
+- Duplicate-prescription detection.
+- Dosage conflict and dosage-ceiling checks.
+- Allergy contradiction detection.
+- Drug-lab, renal/hepatic, and condition-contraindication checks.
+- Published guidance enrichment for opioid/depressant safety.
+- WHO/EML-backed poisoning and age-restriction reference logic.
+- Evidence grading: deterministic, reference-backed, or model-knowledge with confidence caps.
+- Treatment-window risk timeline: concurrent, possible, historical, and unknown risk timing.
+
+### Laboratory intelligence
+
+- Longitudinal lab trend analysis.
+- Normal-range crossing detection.
+- Returned-to-normal detection.
+- Approaching-threshold warnings.
+- Thousands-aware numeric parsing.
+- Mixed-unit trend refusal instead of unsafe conversion.
+- Single lab result interpretation using the report's printed range first, then safe demographic-aware fallback reference intervals.
+
+### Q&A and analysis logs
+
+- Multi-document medical Q&A with citations.
+- Intent-routed RAG over trusted, non-quarantined evidence.
+- Complete-record Q&A mode for completeness questions such as “What medicines am I taking?” and “What changed across all documents?”
+- Multi-turn conversations with query rewriting, entity focus carry-over, and durable session mirroring.
+- Prompt-injection resistance for record text.
+- Citation validation and evidence-sufficiency metadata.
+- AI analysis log page (`/analyses`) for document extraction summaries and saved Q&A answer logs.
+
+### Safety, triage, and patient record trust
+
+- Clinical safety page with current safety findings.
+- Consult triage that separates clinical referral items from document-quality notices.
+- Referral urgency and professional routing: pharmacist, doctor, or specialty.
+- Consult-triage output versioning so stale cached routing is recomputed.
+- Identity mismatch detection and held-document review.
+- Conflict quarantine: unresolved conflicting facts are excluded from downstream Q&A and analytics.
+- Record-integrity checks across identity, allergy, medication, and lab facts.
+- Follow-up task queue and appointment-preparation handoff.
+
+### Local provider search
+
+- Medical specialty matching from safety/lab flags.
+- Location-based healthcare provider search.
+- Real public provider data only.
+- OpenStreetMap/Nominatim/Overpass support by default.
+- Google Places API (New) optional backend-only provider.
+- Provider ranking by specialty relevance, source-provided metadata, distance, and availability signals.
+- Interactive Leaflet map.
+- Graceful zero-result handling with “widen search area” messaging.
+
+### Frontend and accessibility
+
+- Anonymous workspace onboarding.
+- Dashboard, upload, documents, medicines, labs, safety, changes, risk timeline, record check, appointment prep, follow-up, care search, messages, FHIR import, and analysis-log pages.
+- English, Sinhala, and Tamil UI catalogs.
+- WCAG-oriented semantics, keyboard support, live regions, and reduced-motion handling.
+
+---
+
+## Technology Stack
+
+### Frontend
+
+- React
+- TypeScript
+- Vite
+- Tailwind CSS
+- React Router
+- Leaflet maps
+
+### Backend
+
+- Python
+- FastAPI
+- Pydantic
+- Supabase Python client
+- PyJWT
+- Provider-neutral service modules
+
+### Database and vector storage
+
+- Supabase PostgreSQL for documents, snapshots, jobs, conversations, corrections, conflicts, projections, audit, and optional vector chunks.
+- Chroma local vector store, or Supabase `chunks` table when `VECTOR_STORE=supabase`.
+
+### Storage
+
+- Cloudinary for original document storage by default.
+- Optional private Supabase Storage mode for new uploads.
+- Time-limited document access URL endpoint for private storage and legacy Cloudinary proxy access.
+
+### AI and retrieval
+
+- Provider-independent OpenAI-compatible LLM layer.
+- Gemini, Groq, or generic OpenAI-compatible providers.
+- Strict JSON schema where supported, JSON-object fallback, and tolerant parser repair.
+- Local ONNX MiniLM or OpenAI embeddings.
+- RAG plus complete-record context assembly for completeness questions.
+
+### Document processing
+
+- PyMuPDF
+- pdfplumber
+- Tesseract OCR / pytesseract
+- Pillow
+
+### Healthcare provider search
+
+- OpenStreetMap
+- Nominatim
+- Overpass API
+- Optional Google Places API (New)
+
+### Deployment
+
+- Railway / Render-style FastAPI backend
+- Vercel/static-compatible Vite frontend
+- Supabase hosted database/storage
+- Cloudinary hosted file storage
+
+---
+
+## Repository Structure
+
+```text
+.
+├── backend/                  # FastAPI API and medical intelligence modules
+│   ├── api.py                # HTTP routes under /api/v1
+│   ├── medical_extractor.py  # extraction, evidence, timeline construction
+│   ├── medication_safety.py  # medication cross-check service
+│   ├── retrieval.py          # RAG + complete-record Q&A
+│   ├── lab_trends.py         # lab trends and single-result interpretation
+│   ├── consult_triage.py     # referral routing and document-quality notices
+│   ├── care/                 # provider-neutral local-care search adapters
+│   ├── tests/                # backend regression tests
+│   └── supabase_schema.sql   # database setup and additive migrations
+├── frontend/                 # React + Vite + TypeScript web app
+│   ├── src/pages/            # app pages
+│   ├── src/components/       # reusable UI components
+│   ├── src/api/              # backend API client
+│   └── src/i18n/             # English/Sinhala/Tamil catalogs
+├── docs/                     # competition, deployment, reports, runbooks
+└── README.md
+```
+
+---
+
+## Architecture
+
+```text
+Original file (PDF/JPG/PNG/WEBP)
+        |
+        v
+Document validation + raw text/OCR processing
+        |
+        v
+Structured AI extraction  <--- LLM_PROVIDER (Gemini / Groq / generic OpenAI-compatible)
+        |
+        +---------------------> Cloudinary original file storage (default)
+        |                         or optional private Supabase Storage
+        |
+        +---------------------> Supabase documents table (structured JSON)
+        |
+        v
+Trusted patient timeline
+(visits, diagnoses, symptoms, procedures, vitals, imaging, meds, labs, allergies)
+        |
+        +--> Medication safety service
+        |       interactions / duplicates / dosage / allergy / drug-lab / renal-hepatic / conditions
+        |
+        +--> Lab intelligence
+        |       trends, crossings, recovery, single-result interpretation
+        |
+        +--> Record trust and integrity
+        |       corrections, conflicts, quarantine, identity guard
+        |
+        +--> Vector store and complete-record retrieval
+        |       Chroma or Supabase chunks + full structured context when needed
+        |
+        +--> Q&A / conversations / analysis logs
+        |
+        +--> Consult triage and care navigation
+                specialty matching -> live public provider search -> ranked results
+```
+
+One browser workspace maps to one isolated patient record. Backend access is scoped by the verified `user_id`; client-provided patient IDs are not trusted.
+
+---
+
+## YGC Final Round Checklist
+
+### Round 1 baseline
+
+- [x] Extract data from multiple medical documents.
+- [x] Merge extracted data into one unified patient timeline.
+- [x] Cross-check prescriptions for interactions, duplicates, or conflicting dosages.
+- [x] Track lab result trends over time.
+- [x] Explain lab trends in plain language.
+- [x] Answer follow-up questions across multiple documents.
+- [x] Give confidence scores for flagged issues.
+- [x] Recommend consulting a professional for high-risk or low-confidence cases.
+
+### Final round new feature
+
+- [x] Identify the right type of doctor based on the flagged issue.
+- [x] Ask the user for their location.
+- [x] Ask the user for availability.
+- [x] Search real public provider data.
+- [x] Display provider name, specialty/category, address, distance, rating/contact when available.
+- [x] Handle no-results gracefully without fake providers.
+
+### Data and safety rules
+
+- [x] Provider data comes from real public sources only.
+- [x] MediMind never presents itself as making a diagnosis.
+
+### Deliverables
+
+- [x] Working end-to-end web app flow.
+- [x] README explaining APIs and setup.
+- [x] Demo runbook: [`docs/DEMO_RUNBOOK.md`](docs/DEMO_RUNBOOK.md).
+
+---
+
+## Directory APIs Used
 
 | Source | When it is used | How |
 |---|---|---|
-| **Google Places API (New)** | `PROVIDER_DIRECTORY_SOURCE=google_places` + `GOOGLE_PLACES_API_KEY`, or `CARE_PROVIDER=google` + `GOOGLE_MAPS_API_KEY` | Backend geocodes the city/area, then Nearby Search (coordinates) or Text Search (city text). Key stays server-side. |
-| **OpenStreetMap / Nominatim + Overpass** | Default, and automatic fallback | Nominatim geocodes the city/area; Overpass returns nearby doctors/clinics/hospitals. No API key. |
+| **OpenStreetMap / Nominatim + Overpass** | Default provider directory | Nominatim geocodes the city/area; Overpass returns nearby doctors, clinics, hospitals, pharmacies, and labs. No API key required. |
+| **Google Places API (New)** | Optional when configured with `CARE_PROVIDER=google` / `GOOGLE_MAPS_API_KEY` or related provider-directory variables | Backend keeps the key server-side and uses Places Nearby Search or Text Search. Falls back to OpenStreetMap when configured to do so. |
 
-Zero matches return an empty list plus a “widen the search area” message. Missing rating or phone is shown as “Not available”, never invented. Full contract: [`backend/docs/care_recommendations.md`](backend/docs/care_recommendations.md). Deploy: [`docs/DEPLOYMENT_GUIDE.md`](docs/DEPLOYMENT_GUIDE.md).
+Zero matches return an empty list plus a widening-search suggestion. Missing phone/rating is shown as unavailable and is never invented. Full contract: [`backend/docs/care_recommendations.md`](backend/docs/care_recommendations.md).
 
-```
-               Original file (PDF/JPG)
-                        |
-                   ┌────┴─────┐
-                   │ Extraction│ ← LLM_PROVIDER (Groq GPT-OSS 120B + Qwen3.6 27B vision
-                   │           │   or Gemini 3.6 Flash multimodal, structured JSON)
-                   └────┬─────┘
-                        |
-        ┌───────────────┼────────────────┐
-        │               │                │
-   Supabase (JSON)  Cloudinary (file)   │
-   documents +       mediscan/<user>/   │
-   patient_snapshots                    │
-        └───────┬───────────────────────┘
-                |
-            Timeline (visits, diagnoses, symptoms, procedures,
-                      vitals, imaging, meds, labs, allergies)
-                |
-     ┌──────────┼──────────┐
-     │          │          │
- Medication  Lab Trends   Vector Store (Chroma or Supabase `chunks`)
- Safety      deterministic   |  ← VECTOR_STORE=chroma (local) or supabase (no volume)
- service                    └──→ RAG Q&A / Conversations (query rewrite)
- (medication_safety.py —
-  interactions / duplicates /
-  dosage / allergy; not extraction)
-     │          │
-     └──────────┴──────────→ JSON answer with citations
-```
+---
 
-One browser = one isolated patient view. Scoping uses the `user_id` issued via `POST /api/v1/anonymous/session`.
+## Module Responsibilities
 
-### LLM Provider — Groq or Gemini
+| Module | Responsibility |
+|---|---|
+| `backend/api.py` | FastAPI wrapper for all `/api/v1` routes, uploads, background jobs, signed document URLs, document reprocess/delete, snapshots, safety, Q&A, care, exports, and analysis logs. |
+| `backend/medical_extractor.py` | Provider-neutral AI extraction, PDF/image handling, evidence normalization, patient grouping, timeline creation. |
+| `backend/document_processing.py` | Raw text/OCR lifecycle extraction without clinical interpretation. |
+| `backend/document_filter.py` | Deterministic non-medical document rejection after extraction. |
+| `backend/language_guard.py` | Detects failed cross-language medication normalization and grades translation/OCR risk. |
+| `backend/lab_trends.py` | Deterministic lab trend engine and single-result lab classification. |
+| `backend/reference_intervals.py` | Safe fallback reference intervals and unit conversion for single lab results. |
+| `backend/medication_safety.py` | Dedicated medication-safety service: interactions, duplicates, dosage, allergy, drug-lab, renal/hepatic, condition contraindications, evidence grading. |
+| `backend/consult_triage.py` | Routes clinical findings to pharmacist/doctor/specialty; separates document-quality notices; versions triage output. |
+| `backend/retrieval.py` | Trusted evidence indexing, intent-routed RAG, complete-record Q&A mode, citation validation, confidence and consult guards. |
+| `backend/conversation.py` | Multi-turn sessions, query rewriting, entity focus, summarization, durable conversation mirroring. |
+| `backend/record_trust.py` | Correction replay, deterministic conflict detection, authoritative-source state, fail-closed quarantine. |
+| `backend/evidence.py` | Page/quote/bounding-box provenance and exact text-region resolution. |
+| `backend/evidence_grading.py` | Finding evidence source classification and model-knowledge confidence caps. |
+| `backend/risk_timeline.py` | Timing windows for safety findings and double-dosing exposure periods. |
+| `backend/vector_store.py` | Chroma/Supabase vector-store abstraction. |
+| `backend/storage.py` | Cloudinary default storage, optional Supabase private storage, signed URL helpers, storage deletion/download abstraction. |
+| `backend/care/` and care modules | Provider-neutral facility search, specialty mapping, ranking, source normalization, and live care recommendations. |
+| `backend/db.py` | Supabase persistence for documents, snapshots, jobs, sessions, conflicts, projections, audit, referral searches, and profiles. |
+| `frontend/src/` | React application, typed API client, pages, i18n, accessibility-oriented components. |
+
+Deep dives live in [`backend/docs/`](backend/docs/README.md).
+
+---
+
+## LLM Provider — Groq or Gemini
 
 All LLM calls go through the OpenAI SDK — only `base_url` / `api_key` / `model` differ. Select with `LLM_PROVIDER` (default `groq` for backward compat):
 
@@ -90,40 +321,7 @@ All LLM calls go through the OpenAI SDK — only `base_url` / `api_key` / `model
 
 Vision+text use the same Gemini model; Groq needs two. All three are OpenAI-compatible, so the retry ladder (`strict json_schema → json_object → plain text`), `<think>` stripping, and tolerant parser work unchanged. Token budgets / rate-limit caps are provider-aware (`GEMINI_MAX_TOKENS`, `LLM_MAX_TOKENS`, `GEMINI_MAX_RATE_LIMIT_RETRIES`, etc. override `GROQ_*`).
 
-### Backend modules
-
-| File | What it handles |
-|---|---|
-| `medical_extractor.py` | `LLM_PROVIDER` layer, vision / text extraction, patient grouping, timeline creation, local CLI persistence. Does **not** own medication safety. |
-| `medication_safety.py` | Dedicated medication-safety service. Reads the timeline and writes analyses: deterministic interaction KB, allergy KB, duplicates, dosage, drug–lab / renal-hepatic / condition engines, numeric confidence grading. HTTP: `GET /api/v1/medication-safety`. |
-| `document_filter.py` | Fast post-extraction filter for non-medical files (no extra LLM call, reuses `document_type` + clinical fields) |
-| `lab_trends.py` | Pure Python trend engine — direction, crossings, recovery (`returned_to_normal`), unit-clash decline, and thousands-aware parsing |
-| `change_detection.py` / `record_integrity.py` | Deterministic longitudinal change detection and source-linked cross-document discrepancy checks |
-| `appointment_prep.py` / `follow_up.py` | Printable clinician handoff plus a stable, grounded follow-up queue without inferred clinical deadlines |
-| `record_trust.py` | Immutable correction replay, deterministic conflict detection, authoritative-source state merge, and fail-closed fact/document quarantine |
-| `clinical_events.py` | Shared contracts for diagnoses, symptoms, procedures, vital signs, and imaging rollups, correction fields, dates, and evidence-search fallbacks |
-| `evidence.py` | Normalizes page/quote/box provenance, remaps vision coordinates, preserves stable evidence IDs, and uses deterministic PyMuPDF search for exact digital-PDF rectangles |
-| `retrieval.py` | Chunks only trusted timelines into source-linked medication, lab, diagnosis, note, and allergy evidence; carries source regions through `vector_store`; then runs intent-routed Q&A with injection resistance, evidence-sufficiency gates, stale-index repair, exact citation validation, and confidence caps. Richer response contract (`cross_document`, `low_confidence`, `consult_reason`, sources enriched with `document_type` + `document_url`) plus a deterministic guard that forces `recommend_professional_consult=true` on risk/allergy/dosage questions |
-| `vector_store.py` | Abstraction over Chroma (`VECTOR_STORE=chroma`, local `CHROMA_DIR`) and Supabase `chunks` table (`VECTOR_STORE=supabase`, no volume, brute-force cosine) |
-| `jobs.py` | Thread-safe parent jobs with independent per-file progress (`queued → reading → extracting → saving → ready/failed`) and optional Supabase persistence |
-| `conversation.py` | In-memory conversation store, rewrites follow-ups like “was that safe?” into self-contained retrieval queries, summarizes older turns to keep context bounded, and keeps a deterministic **entity focus** (medications/labs/documents under discussion) matched against the patient's own record vocabulary — so a follow-up's subject survives even if the LLM rewrite fails |
-| `document_dedup.py` | Same-prescription detection: tags re-uploads / scan+photo copies of one prescription with a shared `prescription_group` so duplicate detection counts prescriptions, not files (nothing is ever deleted) |
-| `evidence_grading.py` | Grades every safety finding by what backs it (`deterministic` vs `model_knowledge`), caps ungrounded model confidence at 0.6, keeps the model's original claim visible |
-| `risk_timeline.py` | Places every safety finding in time using prescription dates/durations (`concurrent` / `possible` / `not_concurrent` / `unknown`), computes double-dosing exposure windows and a chronological risk calendar |
-| `api.py` | FastAPI wrapper — lifespan startup, CORS (fixed `*` + credentials handling), all `/api/v1/` routes, multipart upload handling (sync 201 or async 202 via `USE_BACKGROUND_JOBS`/`?async=true`), merges new docs with old, fixes `_source.file` to original filename. Re-uploads are detected before extraction: byte-for-byte identical files (`CBC_Report.pdf` / `CBC_Report (1).pdf`) are skipped via `content_sha256` and reported in `duplicate_files_skipped`. Also serves `GET /api/v1/risk-timeline` (chronological risk view + evidence grades) |
-| `care_finder.py` | Find Care — specialty suggestion from the record; Geoapify geocode + Places primary, OpenStreetMap Nominatim + Overpass fallback; opening-hours match, ranking. Leaflet map |
-| `auth.py` | Validates `Authorization: Bearer <jwt>` + `X-User-Id`, plus issues anonymous JWTs via `issue_anonymous_token()` |
-| `care/` | Provider-neutral `Facility` model/factory plus the server-side Google Places API (New) adapter for Find Care |
-| `db.py` | Supabase Postgres persistence (documents append-only + patient snapshot upsert), chained `.order("uploaded_at").order("id")` |
-| `storage.py` | Uploads original file to Cloudinary `mediscan/<user_id>/...` |
-| `supabase_schema.sql` | One-time table creation with RLS enabled/no policies (only service_role key can access) |
-| `care/` | Optional Care Navigation: provider-agnostic facility search. Does not read the patient record. |
-| `inspect_chroma.py` | Read-only CLI to list collections / inspect chunks |
-| `requirements.txt` / `Procfile` | Railway Nixpacks deployment |
-
-Deep dives live in [`backend/docs/`](backend/docs/README.md). Freeze [01-end-to-end-pipeline.md](backend/docs/01-end-to-end-pipeline.md) for the deck: Understand → Detect → Explain → Protect. No `/care` on this branch.
-
-### Setup
+## Setup
 
 Prerequisite: Python 3.10+, Node 18+.
 
@@ -146,7 +344,7 @@ LLM_PROVIDER=gemini
 GEMINI_API_KEY=AIza...          # create/manage at aistudio.google.com/app/apikey
 # or: LLM_PROVIDER=groq + GROQ_API_KEY=gsk_...
 
-CLOUDINARY_CLOUD_NAME=...
+CLOUDINARY_CLOUD_NAME=...          # default original-file storage
 CLOUDINARY_API_KEY=...
 CLOUDINARY_API_SECRET=...
 SUPABASE_URL=https://your-ref.supabase.co
@@ -160,6 +358,10 @@ CHROMA_DIR=./chroma_db   # only for VECTOR_STORE=chroma, override to /data/chrom
 USE_BACKGROUND_JOBS=true # async 202 + polling for uploads
 UPLOAD_FILE_CONCURRENCY=1 # shared worker limit; raise only if provider quota supports it
 CORS_ORIGINS=*          # or https://your-frontend
+
+# optional private document storage instead of Cloudinary for NEW uploads
+# MEDIMIND_DOCUMENT_STORAGE_BACKEND=supabase
+# SUPABASE_DOCUMENT_BUCKET=medical-documents
 
 # optional provider overrides
 # GEMINI_MODEL=gemini-3.6-flash
@@ -179,13 +381,13 @@ Embeddings fallback chain (Groq/Gemini have no embeddings API):
 If you switch embedding backends, delete `./chroma_db` and re-upload.
 If you switch `LLM_PROVIDER`, no code change needed — just env + restart.
 
-#### Supabase one-time setup
+### Supabase one-time setup
 
 1. Create project at supabase.com.
 2. SQL Editor → paste `backend/supabase_schema.sql` → Run. Re-run the idempotent file after upgrades; it creates `documents`, `patient_snapshots`, `chunks`, `extraction_corrections`, `record_conflicts`, `conflict_resolution_events`, indexes, grants, and RLS.
 3. Copy Project URL + service_role key into `.env`.
 
-### Running backend
+## Running backend
 
 ```bash
 cd backend
@@ -195,7 +397,7 @@ uvicorn api:app --reload
 
 Base URL `http://127.0.0.1:8000`, all routes under `/api/v1/`.
 
-### Frontend — MediMind workspace
+## Frontend — MediMind workspace
 
 `frontend/` is React + TS + Vite + Tailwind. It includes a reusable translation provider and catalogs for English, Sinhala, and Tamil; browser/saved language detection; locale-aware formatting; and WCAG-oriented landmarks, keyboard interaction, live regions, focus handling, reduced-motion support, and semantic medical-data views. See [`frontend/ACCESSIBILITY_I18N.md`](frontend/ACCESSIBILITY_I18N.md).
 
@@ -204,19 +406,20 @@ Zero-login anonymous model:
 - **Landing** `/` — hero, anonymous session explanation, Start My Health Record → auto-creates workspace via `POST /anonymous/session` (token stored in `localStorage.medimind.session.v1`).
 - **Overview / Dashboard** `/dashboard` — documents / clinical events / medicines / labs / safety counts, latest safety warnings, recent history, pipeline hint.
 - **Upload** `/upload` — drag-drop and dedup (`name-size-lastModified`); shows each document's independent queue/read/extract/save state, then clearly separates the one-time record finalization steps (history → safety → search).
-- **My Documents** `/documents` — original and structured extraction plus **Correct & Audit**. “View evidence” beside dates, identities, medicines, labs, allergies, and notes opens the cited page and draws the saved region when exact geometry exists. Corrections are append-only and preserve every original/before/after value.
+- **My Documents** `/documents` — original and structured extraction plus **Correct & Audit**. “View evidence” beside dates, identities, medicines, labs, allergies, and notes opens the cited page and draws the saved region when exact geometry exists. The raw text/OCR processing panel shows reusable extracted text, method, page count, and confidence. Corrections are append-only and preserve every original/before/after value.
 - **Trust Review** `/review` — quarantines conflicting evidence, records an authoritative source decision, supports reopening, and rebuilds all derived views.
 - **My History** `/history` — event-date-specific longitudinal diagnoses, symptoms, procedures, vital signs, and imaging with evidence deep links, plus the year-grouped source-document timeline and full `TimelineView`.
 - **My Medicines** `/medicines` — current per ingredient (most recent) + historical log table, filterable, source file traceable (now fixed to original filename, not temp sanitized path).
-- **Test Results / Lab Trends** `/labs` — per-test direction, flag sequence, crossing / recovery badge (green when the latest reading is back to normal), approaching-threshold, SVG sparkline with reference band. Thousands-aware values; mixed units (`mg/dL` vs `mmol/L`) are declined rather than trended.
+- **Test Results / Lab Trends** `/labs` — per-test direction, flag sequence, crossing / recovery badge (green when the latest reading is back to normal), approaching-threshold, single-result lab classification, SVG sparkline with reference band. Thousands-aware values; mixed units (`mg/dL` vs `mmol/L`) are declined rather than trended.
 - **Safety** `/safety` — allergy conflicts (danger), interactions with severity, dosage conflicts, duplicates, overall recommendation.
 - **What Changed** `/changes` — deterministic consecutive-record comparisons with before/after source evidence.
 - **Appointment Prep** `/appointment-prep` — printable handoff and prioritized record-grounded clinician questions.
 - **Action Center** `/follow-up` — combined follow-up queue with browser-only completion state, user-selected reminder dates, and `.ics` calendar export.
 - **Record Check** `/record-integrity` — side-by-side identity, allergy, same-date lab, and medication-instruction discrepancies.
-- **Ask** `/ask` — intent-routed RAG with evidence sufficiency, verbatim source quotes, exact-highlight deep links, injection resistance, citation validation, and confidence caps.
+- **Ask** `/ask` — intent-routed RAG plus complete-record retrieval for list/completeness questions, evidence sufficiency, verbatim source quotes, exact-highlight deep links, injection resistance, citation validation, and confidence caps.
+- **AI Analysis Logs** `/analyses` — patient-scoped document extraction and Q&A analysis history without exposing hidden model reasoning.
 
-##### Ask AI groundedness
+### Ask AI groundedness
 
 For a medical RAG product a confidently wrong answer is worse than no answer, so the answer path is defended at three layers rather than by prompt wording alone:
 

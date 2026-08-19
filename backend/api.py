@@ -49,14 +49,14 @@ load_dotenv(override=True)
 import re
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, Dict, List, Literal, Optional, Tuple
 
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field, field_validator
 
 import conversation
@@ -64,6 +64,7 @@ import db
 import jobs
 import storage
 import vector_store
+import jwt
 from care import CareConfigurationError, CareProviderError, get_care_provider
 from care.postprocess import finalize as finalize_facilities
 from care.recommendation import recommend_care
@@ -77,8 +78,9 @@ from appointment_prep import build_appointment_prep
 from change_detection import detect_record_changes
 import audit
 import export as export_module
-from consult_triage import generate_consult_triage
+from consult_triage import TRIAGE_OUTPUT_VERSION, generate_consult_triage
 from document_filter import NonMedicalDocumentError, assert_medical_document
+from document_processing import process_raw_text
 from dosage_rules import check_dosages
 from identity_guard import build_identity_review, check_batch_identity
 from language_guard import (
@@ -910,7 +912,7 @@ async def _execute_upload_pipeline(
 
         # Results are keyed by input index so concurrent workers never reorder
         # the response or mismatch duplicate-looking filenames.
-        extracted: Dict[int, Tuple[Path, str, List[Dict[str, Any]]]] = {}
+        extracted: Dict[int, Tuple[Path, str, List[Dict[str, Any]], Dict[str, Any]]] = {}
         extraction_errors: Dict[int, Dict[str, Any]] = {}
         queue: asyncio.Queue[Optional[Tuple[int, str, Path]]] = asyncio.Queue()
         for item in work_items:
@@ -943,11 +945,7 @@ async def _execute_upload_pipeline(
                         # This wrapper starts only when the shared executor has
                         # a real slot. Until then the file truthfully remains
                         # "queued" instead of claiming to be read while it is
-                        # sitting behind another upload job. The first progress
-                        # event (reading/"Opening and checking the document") is
-                        # emitted by process_document() itself — emitting it here
-                        # too used to duplicate the jobs-table write and the log
-                        # line for every file.
+                        # sitting behind another upload job.
                         logger.info(
                             "upload: user=%s processing '%s' (%d/%d)",
                             user_id,
@@ -955,13 +953,21 @@ async def _execute_upload_pipeline(
                             file_index,
                             total_files,
                         )
-                        return process_document(
+                        raw_text_processing = process_raw_text(str(tmp_path))
+                        structured = process_document(
                             str(tmp_path),
                             progress_callback=report_file_step,
                         )
+                        return {"structured": structured, "raw_text_processing": raw_text_processing}
 
                     try:
-                        result = await loop.run_in_executor(_DOCUMENT_EXECUTOR, run_document)
+                        result_bundle = await loop.run_in_executor(_DOCUMENT_EXECUTOR, run_document)
+                        result = result_bundle.get("structured") if isinstance(result_bundle, dict) else result_bundle
+                        raw_text_processing = (
+                            result_bundle.get("raw_text_processing")
+                            if isinstance(result_bundle, dict) and isinstance(result_bundle.get("raw_text_processing"), dict)
+                            else {}
+                        )
                     except NonMedicalDocumentError as exc:
                         info = {
                             "file": original_name,
@@ -1073,7 +1079,7 @@ async def _execute_upload_pipeline(
                         _file_progress(file_index, status="failed", step="failed", message=info["error"], error_info=info)
                         continue
 
-                    extracted[file_index] = (tmp_path, original_name, kept_pages)
+                    extracted[file_index] = (tmp_path, original_name, kept_pages, raw_text_processing)
                     _file_progress(
                         file_index,
                         status="processing",
@@ -1187,7 +1193,7 @@ async def _execute_upload_pipeline(
         # Cloud storage is per-file too: one storage failure should not discard
         # documents that were extracted and saved successfully.
         for file_index in sorted(extracted):
-            tmp_path, filename, kept_pages = extracted[file_index]
+            tmp_path, filename, kept_pages, raw_text_processing = extracted[file_index]
             _file_progress(file_index, status="processing", step="saving", message="Saving securely")
             try:
                 upload_info = await asyncio.to_thread(
@@ -1217,7 +1223,13 @@ async def _execute_upload_pipeline(
                 # correctable without exposing storage-provider identifiers.
                 page.setdefault("_document_id", f"doc_{uuid.uuid4().hex}")
                 page["document_url"] = upload_info["document_url"]
-                page["cloudinary_public_id"] = upload_info["cloudinary_public_id"]
+                page["cloudinary_public_id"] = upload_info.get("cloudinary_public_id")
+                page["storage_backend"] = upload_info.get("storage_backend") or "cloudinary"
+                if upload_info.get("storage_path"):
+                    page["storage_path"] = upload_info.get("storage_path")
+                if upload_info.get("storage_bucket"):
+                    page["storage_bucket"] = upload_info.get("storage_bucket")
+                page["raw_text_processing"] = raw_text_processing
                 # Pin the model's free-form type to the closed vocabulary so
                 # chunk metadata / evidence weighting downstream are stable.
                 page["document_type"] = normalize_document_type(page.get("document_type"))
@@ -1782,7 +1794,7 @@ async def reprocess_document(
 
     source_file = ((doc.get("_source") or {}).get("file")) or "document"
     try:
-        content = storage.download_document_bytes(doc)
+        content = storage.download_original_bytes(doc)
     except storage.StorageDownloadError as exc:
         raise HTTPException(502, str(exc)) from exc
 
@@ -1799,6 +1811,7 @@ async def reprocess_document(
                 user_id, document_id, source_file,
             )
             try:
+                raw_text_processing = await asyncio.to_thread(process_raw_text, str(tmp_path))
                 result = await asyncio.to_thread(process_document, str(tmp_path))
             except NonMedicalDocumentError as exc:
                 raise HTTPException(422, str(exc)) from exc
@@ -1830,6 +1843,12 @@ async def reprocess_document(
         page.setdefault("_document_id", doc.get("_document_id"))
         page["document_url"] = doc.get("document_url")
         page["cloudinary_public_id"] = doc.get("cloudinary_public_id")
+        page["storage_backend"] = doc.get("storage_backend") or "cloudinary"
+        if doc.get("storage_path"):
+            page["storage_path"] = doc.get("storage_path")
+        if doc.get("storage_bucket"):
+            page["storage_bucket"] = doc.get("storage_bucket")
+        page["raw_text_processing"] = raw_text_processing
         if doc.get("content_sha256"):
             page["content_sha256"] = doc["content_sha256"]
         page["document_type"] = normalize_document_type(page.get("document_type"))
@@ -2154,7 +2173,7 @@ async def delete_document(
     # Remove the original first. If secure storage is unavailable, keep the
     # database and every derived view unchanged so the user can safely retry.
     try:
-        await asyncio.to_thread(storage.delete_patient_document, str(public_id or ""))
+        await asyncio.to_thread(storage.delete_uploaded_document, selected)
     except storage.StorageDeletionError as exc:
         raise HTTPException(502, str(exc)) from exc
 
@@ -2215,6 +2234,245 @@ async def delete_workspace(user_id: str = Depends(get_current_user)) -> Dict[str
     logger.info("workspace permanently deleted: user=%s tables=%s", user_id, sorted(deleted))
     return {"deleted": True}
 
+
+
+
+def _select_document_group(user_id: str, document_id: str) -> Tuple[Dict[str, Any], List[Dict[str, Any]], List[Dict[str, Any]]]:
+    documents = db.load_documents(user_id)
+    selected = next((doc for doc in documents if trust_document_id(doc) == document_id), None)
+    if selected is None:
+        raise HTTPException(404, "Document not found in this workspace.")
+    content_sha256 = selected.get("content_sha256")
+    public_id = selected.get("cloudinary_public_id")
+    source_file = ((selected.get("_source") or {}).get("file")) or None
+
+    def belongs(doc: Dict[str, Any]) -> bool:
+        if content_sha256:
+            return doc.get("content_sha256") == content_sha256
+        if public_id:
+            return doc.get("cloudinary_public_id") == public_id
+        if selected.get("storage_path"):
+            return doc.get("storage_path") == selected.get("storage_path")
+        if source_file:
+            return ((doc.get("_source") or {}).get("file")) == source_file
+        return trust_document_id(doc) == document_id
+
+    group = [doc for doc in documents if belongs(doc)]
+    remaining = [doc for doc in documents if not belongs(doc)]
+    return selected, group, remaining
+
+
+def _document_access_token(user_id: str, document_id: str, expires_in_seconds: int) -> str:
+    secret = os.environ.get("JWT_SECRET")
+    if not secret:
+        raise HTTPException(500, "Server misconfigured: JWT_SECRET is not set.")
+    now = datetime.now(timezone.utc)
+    payload = {
+        "purpose": "document_access",
+        "user_id": user_id,
+        "document_id": document_id,
+        "iat": int(now.timestamp()),
+        "exp": int((now + timedelta(seconds=expires_in_seconds)).timestamp()),
+    }
+    return jwt.encode(payload, secret, algorithm="HS256")
+
+
+def _verify_document_access_token(token: str, document_id: str) -> str:
+    secret = os.environ.get("JWT_SECRET")
+    if not secret:
+        raise HTTPException(500, "Server misconfigured: JWT_SECRET is not set.")
+    try:
+        payload = jwt.decode(token, secret, algorithms=["HS256"])
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(401, "Document access link has expired.")
+    except jwt.InvalidTokenError as exc:
+        raise HTTPException(401, f"Invalid document access link: {exc}")
+    if payload.get("purpose") != "document_access" or str(payload.get("document_id")) != document_id:
+        raise HTTPException(401, "Document access link does not match this document.")
+    user_id = str(payload.get("user_id") or "")
+    if not user_id:
+        raise HTTPException(401, "Document access link is missing its owner.")
+    return user_id
+
+
+def _content_type_for_document(doc: Dict[str, Any]) -> str:
+    name = str(((doc.get("_source") or {}).get("file")) or "").lower()
+    if name.endswith(".pdf"):
+        return "application/pdf"
+    if name.endswith((".jpg", ".jpeg")):
+        return "image/jpeg"
+    if name.endswith(".png"):
+        return "image/png"
+    if name.endswith(".webp"):
+        return "image/webp"
+    return "application/octet-stream"
+
+
+@app.post("/api/v1/documents/{document_id}/signed-url")
+async def create_document_signed_url(
+    document_id: str,
+    request: Request,
+    expires_in_seconds: int = Query(default=900, ge=60, le=3600),
+    user_id: str = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """Return a time-limited URL for the original uploaded document.
+
+    Private Supabase-stored documents receive a provider signed URL. Legacy
+    Cloudinary documents receive a short-lived MediMind proxy URL so access is
+    still time-limited even though their storage URL predates private buckets.
+    """
+    selected, _group, _remaining = _select_document_group(user_id, document_id)
+    expires = max(60, min(int(expires_in_seconds), 3600))
+    if selected.get("storage_backend") == "supabase" and selected.get("storage_path"):
+        url = storage.create_signed_storage_url(selected, expires)
+        mode = "private_storage_signed_url"
+    else:
+        token = _document_access_token(user_id, document_id, expires)
+        url = str(request.url_for("download_signed_document", document_id=document_id)) + f"?token={token}"
+        mode = "medimind_expiring_proxy"
+    audit.record(user_id, "documents.signed_url", {"document_id": document_id, "expires_in_seconds": expires, "mode": mode})
+    return {"document_id": document_id, "url": url, "expires_in_seconds": expires, "mode": mode}
+
+
+@app.get("/api/v1/documents/{document_id}/file", name="download_signed_document")
+async def download_signed_document(document_id: str, token: str = Query(...)):
+    user_id = _verify_document_access_token(token, document_id)
+    selected, _group, _remaining = _select_document_group(user_id, document_id)
+    try:
+        content = await asyncio.to_thread(storage.download_original_bytes, selected)
+    except storage.StorageDownloadError as exc:
+        raise HTTPException(502, str(exc)) from exc
+    filename = Path(str(((selected.get("_source") or {}).get("file")) or "document")).name or "document"
+    headers = {"Content-Disposition": f'inline; filename="{filename}"'}
+    return Response(content, media_type=_content_type_for_document(selected), headers=headers)
+
+
+@app.post("/api/v1/documents/{document_id}/process-text")
+async def process_document_text_layer(
+    document_id: str,
+    user_id: str = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """Persist or refresh the raw text/OCR processing layer for a document.
+
+    This does not rerun clinical AI extraction. It stores the intermediate raw
+    text lifecycle metadata on every extracted page belonging to the physical
+    upload so the text layer can be inspected/reused independently.
+    """
+    selected, group, _remaining = _select_document_group(user_id, document_id)
+    source_file = ((selected.get("_source") or {}).get("file")) or "document"
+    suffix = Path(source_file).suffix or ".bin"
+    try:
+        content = await asyncio.to_thread(storage.download_original_bytes, selected)
+    except storage.StorageDownloadError as exc:
+        raise HTTPException(502, str(exc)) from exc
+    from document_processing import process_raw_text
+    with TemporaryDirectory() as tmp_dir:
+        tmp_path = Path(tmp_dir) / ("original" + suffix)
+        tmp_path.write_bytes(content)
+        raw_processing = await asyncio.to_thread(process_raw_text, str(tmp_path))
+    updated_pages = []
+    for page in group:
+        clone = dict(page)
+        clone["raw_text_processing"] = raw_processing
+        updated_pages.append(clone)
+    replaced = db.replace_document_group(
+        user_id,
+        content_sha256=str(selected.get("content_sha256")) if selected.get("content_sha256") else None,
+        source_file=str(source_file) if source_file else None,
+        pages=updated_pages,
+    )
+    audit.record(user_id, "documents.process_text", {"document_id": document_id, "status": raw_processing.get("processing_status"), "rows_replaced": replaced})
+    return {"document_id": document_id, "raw_text_processing": raw_processing, "rows_updated": len(updated_pages)}
+
+
+
+
+@app.get("/api/v1/analyses")
+async def list_ai_analyses(
+    limit: int = Query(default=50, ge=1, le=200),
+    user_id: str = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """Return patient-scoped AI/analysis log cards for extraction and Q&A.
+
+    This is an audit/display surface. It reconstructs extraction entries from
+    durable document rows and conversation QA entries from persisted sessions
+    where available; it never exposes model chain-of-thought.
+    """
+    records: List[Dict[str, Any]] = []
+    try:
+        docs = db.load_documents(user_id)
+    except Exception:
+        docs = []
+    for doc in docs:
+        doc_id = trust_document_id(doc)
+        source_file = ((doc.get("_source") or {}).get("file")) or "uploaded document"
+        counts = {
+            "medications": len(doc.get("medications") or []),
+            "lab_results": len(doc.get("lab_results") or []),
+            "allergies": len(doc.get("allergies_noted") or []),
+            "findings": len(doc.get("diagnoses") or []) + len(doc.get("symptoms") or []),
+            "events": len(doc.get("procedures") or []) + len(doc.get("vital_signs") or []) + len(doc.get("imaging_results") or []),
+        }
+        summary = doc.get("clinical_notes") or (
+            f"Extracted {counts['medications']} medication(s), {counts['lab_results']} lab result(s), "
+            f"and {counts['findings']} clinical finding(s) from {source_file}."
+        )
+        records.append({
+            "id": f"document_extraction:{doc_id}",
+            "analysis_type": "document_extraction",
+            "result": {
+                "summary": summary,
+                "document_type_detected": doc.get("document_type"),
+                "persisted_counts": counts,
+                "source_file": source_file,
+                "document_id": doc_id,
+                "raw_text_processing": doc.get("raw_text_processing"),
+            },
+            "confidence": doc.get("overall_confidence"),
+            "summary": summary,
+            "created_at": doc.get("uploaded_at") or doc.get("date") or "",
+        })
+
+    # Best-effort Q&A log from persisted conversation sessions. Older/local
+    # deployments may not have the table; extraction logs still return.
+    try:
+        rows = (
+            db._get_client().table("conversation_sessions")
+            .select("session_id, turns, updated_at")
+            .eq("user_id", user_id)
+            .execute()
+            .data or []
+        )
+        for row in rows:
+            session_id = str(row.get("session_id") or "")
+            turns = list(row.get("turns") or [])
+            for idx, turn in enumerate(turns):
+                if turn.get("role") != "assistant":
+                    continue
+                content = str(turn.get("content") or "").strip()
+                if not content:
+                    continue
+                source_files = [str(v) for v in ((turn.get("entities") or {}).get("source_files") or []) if v]
+                records.append({
+                    "id": f"qa:{session_id}:{idx}",
+                    "analysis_type": "qa",
+                    "result": {
+                        "paragraphs": [content],
+                        "citations": [
+                            {"documentTitle": source, "document_title": source, "page": 1, "quote": "Referenced in the saved answer."}
+                            for source in source_files
+                        ],
+                        "guidance": "Saved Q&A answer grounded in the uploaded record context.",
+                    },
+                    "confidence": None,
+                    "summary": content[:240],
+                    "created_at": turn.get("timestamp") or row.get("updated_at") or "",
+                })
+    except Exception as exc:
+        logger.info("analysis log: conversation session rows unavailable: %s", exc)
+
+    records.sort(key=lambda item: str(item.get("created_at") or ""), reverse=True)
+    return {"analyses": records[:limit], "count": min(len(records), limit), "total": len(records)}
 
 @app.get("/api/v1/documents")
 async def list_documents(user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
@@ -2934,12 +3192,20 @@ async def get_consult_triage(user_id: str = Depends(get_current_user)) -> Dict[s
     snapshot = _load_snapshot_or_rebuild(user_id)
     if snapshot is None:
         raise HTTPException(404, "No records found for this user.")
-    if "consult_triage" in snapshot:
+    cached = snapshot.get("consult_triage")
+    if isinstance(cached, dict) and cached.get("output_version") == TRIAGE_OUTPUT_VERSION:
         audit.record(user_id, "records.read", {"view": "consult_triage"})
-        return snapshot["consult_triage"]
+        return cached
     lab_trends = _lab_trends_for_snapshot(snapshot)
     dosage_report = snapshot.get("dosage_report") or check_dosages(snapshot["patient_timeline"])
     result = generate_consult_triage(snapshot["cross_check_report"], lab_trends, dosage_report, snapshot["patient_timeline"])
+    try:
+        db.save_patient_snapshot(
+            user_id, snapshot["patient_timeline"], snapshot["cross_check_report"],
+            lab_trends=lab_trends, dosage_report=dosage_report, consult_triage=result,
+        )
+    except Exception as exc:
+        logger.warning("consult-triage recompute was not persisted: %s", exc)
     audit.record(user_id, "records.read", {"view": "consult_triage", "recomputed": True})
     return result
 
@@ -3216,9 +3482,14 @@ async def get_patient_snapshot(user_id: str = Depends(get_current_user)) -> Dict
     # Derived safety reports — recomputed for pre-feature snapshots so the
     # dashboard always has them.
     result["dosage_report"] = snapshot.get("dosage_report") or check_dosages(snapshot["patient_timeline"])
-    result["consult_triage"] = snapshot.get("consult_triage") or generate_consult_triage(
-        snapshot["cross_check_report"], result["lab_trends"], result["dosage_report"],
-        snapshot["patient_timeline"],
+    cached_triage = snapshot.get("consult_triage")
+    result["consult_triage"] = (
+        cached_triage
+        if isinstance(cached_triage, dict) and cached_triage.get("output_version") == TRIAGE_OUTPUT_VERSION
+        else generate_consult_triage(
+            snapshot["cross_check_report"], result["lab_trends"], result["dosage_report"],
+            snapshot["patient_timeline"],
+        )
     )
     try:
         result["patient_profile"] = db.load_patient_profile(user_id)
