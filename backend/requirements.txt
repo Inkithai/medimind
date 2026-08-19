@@ -19,6 +19,10 @@ python-dateutil
 fastapi
 uvicorn[standard]
 python-multipart
+# Structured JSON logs (api.py) + /metrics endpoint — imported at startup,
+# must be present or the service crashes on boot
+python-json-logger
+prometheus-client
 supabase
 cloudinary
 pyjwt
