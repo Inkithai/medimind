@@ -123,27 +123,26 @@ export function MedicinesPage() {
       <Header count={timeline.medications_timeline.length} />
 
       <Card>
-        <CardBody className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
+        <CardBody className="space-y-2">
+          <div className="flex flex-wrap items-center gap-3">
             <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand-50 text-brand-600">
               <PillIcon className="h-5 w-5" />
             </div>
-            <div className="min-w-0">
-              <p className="text-sm font-semibold text-slate-900">{t("medicines.title")}</p>
-              <p className="text-xs text-slate-600">{t("medicines.description")}</p>
-            </div>
+            <label htmlFor="medicine-search" className="sr-only">
+              {t("medicines.searchLabel")}
+            </label>
+            <input
+              id="medicine-search"
+              type="search"
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              placeholder={t("medicines.searchPlaceholder")}
+              className="min-w-0 flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm shadow-sm placeholder:text-slate-400 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 sm:max-w-xs"
+            />
           </div>
-          <label htmlFor="medicine-search" className="sr-only">
-            {t("medicines.searchLabel")}
-          </label>
-          <input
-            id="medicine-search"
-            type="search"
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            placeholder={t("medicines.searchPlaceholder")}
-            className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm shadow-sm placeholder:text-slate-400 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 sm:w-72"
-          />
+          <p className="text-xs text-slate-500">
+            {filter.trim() ? t("medicines.searchHelp") : t("medicines.description")}
+          </p>
         </CardBody>
       </Card>
 
@@ -216,8 +215,18 @@ export function MedicinesPage() {
                           .join(" • ") || "—"}
                       </p>
                       <p className="text-slate-500">
-                        Source: {mostRecent.source_file || "unknown"} •{" "}
-                        {formatDate(mostRecent.date)}
+                        Source:{" "}
+                        {mostRecent.document_id ? (
+                          <Link
+                            to={`/documents?document=${encodeURIComponent(mostRecent.document_id)}`}
+                            className="font-medium text-brand-700 underline decoration-brand-300 underline-offset-2 hover:text-brand-900"
+                          >
+                            {mostRecent.source_file || "unknown"}
+                          </Link>
+                        ) : (
+                          mostRecent.source_file || "unknown"
+                        )}{" "}
+                        • {formatDate(mostRecent.date)}
                       </p>
                       {(mostRecent.dosage_value != null ||
                         mostRecent.frequency_per_day != null) && (
@@ -297,7 +306,16 @@ export function MedicinesPage() {
                           {[med.dosage, med.frequency].filter(Boolean).join(" • ")}
                         </td>
                         <td className="px-4 py-2 text-xs text-slate-500">
-                          {med.source_file || "—"}
+                          {med.document_id ? (
+                            <Link
+                              to={`/documents?document=${encodeURIComponent(med.document_id)}`}
+                              className="font-medium text-brand-700 underline decoration-brand-300 underline-offset-2 hover:text-brand-900"
+                            >
+                              {med.source_file || "—"}
+                            </Link>
+                          ) : (
+                            med.source_file || "—"
+                          )}
                         </td>
                       </tr>
                     ))}

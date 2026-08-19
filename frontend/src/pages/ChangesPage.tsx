@@ -448,6 +448,12 @@ function FindingChangeLogSection({
             shows when each one first appeared, when it was last seen, and whether it went away and
             came back.
           </p>
+          <p className="mt-2 rounded-lg bg-slate-50 px-3 py-2 text-xs leading-relaxed text-slate-600">
+            <span className="font-semibold">What the button does: </span>
+            “Save today&apos;s checkpoint” records the warnings you have right now. Save one after
+            each check-up, and later you can see at a glance which warnings are new, which have
+            disappeared, and which came back.
+          </p>
         </div>
         <button
           type="button"
@@ -457,14 +463,14 @@ function FindingChangeLogSection({
           title="Records today's warnings so you can see later what changed."
         >
           {saving ? <Spinner className="h-5 w-5" /> : <ChangesIcon className="h-5 w-5" />}
-          {saving ? "Saving snapshot…" : "Save today's snapshot"}
+          {saving ? "Saving checkpoint…" : "Save today's checkpoint"}
         </button>
       </div>
 
       {findings.length === 0 ? (
         <p className="mt-4 text-base text-slate-600">
           No warning history has been recorded yet. Use{" "}
-          <span className="font-semibold">Save today&apos;s snapshot</span> after an analysis, and
+          <span className="font-semibold">Save today&apos;s checkpoint</span> after an analysis, and
           future changes will be listed here.
         </p>
       ) : (

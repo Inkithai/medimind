@@ -380,6 +380,59 @@ async function request<T>(
   return data as T;
 }
 
+/**
+ * Authenticated request that returns the raw body as a Blob (for binary
+ * downloads such as the health-passport PDF). Error handling mirrors request().
+ */
+async function requestBlob(
+  credentials: Credentials,
+  path: string,
+  options: RequestOptions = {},
+): Promise<Blob> {
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${credentials.token}`,
+    "X-User-Id": credentials.userId,
+    ...(options.headers || {}),
+  };
+
+  let response: Response;
+  try {
+    response = await fetch(buildUrl(credentials.apiBase, path), {
+      method: options.method || "GET",
+      headers,
+      body: options.body ?? undefined,
+      signal: options.signal,
+    });
+  } catch (err) {
+    throw new ApiError(
+      0,
+      `Could not reach the API at ${credentials.apiBase || "(same origin)"}. Check that the backend is running.`,
+      err,
+    );
+  }
+
+  if (!response.ok) {
+    const text = await response.text();
+    let data: unknown = null;
+    if (text) {
+      try {
+        data = JSON.parse(text);
+      } catch {
+        data = text;
+      }
+    }
+    const message =
+      (typeof data === "object" && data !== null && "detail" in data
+        ? String((data as { detail: unknown }).detail)
+        : null) ||
+      (typeof data === "string" ? data : null) ||
+      `Request failed with status ${response.status}`;
+    throw new ApiError(response.status, message, data, apiErrorMetadata(data));
+  }
+
+  return response.blob();
+}
+
 export const api = {
   // Public, no auth needed
   healthUnauthenticated(apiBase = ""): Promise<HealthResponse> {
@@ -547,6 +600,36 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(profile),
     });
+  },
+
+  getWorkspaceName(credentials: Credentials): Promise<{ user_id: string; name: string | null }> {
+    return request<{ user_id: string; name: string | null }>(credentials, "/api/v1/workspace/name");
+  },
+
+  checkWorkspaceName(
+    credentials: Credentials,
+    name: string,
+  ): Promise<{ name: string; available: boolean; reason?: string | null }> {
+    return request<{ name: string; available: boolean; reason?: string | null }>(
+      credentials,
+      `/api/v1/workspace/name/check?name=${encodeURIComponent(name)}`,
+    );
+  },
+
+  setWorkspaceName(
+    credentials: Credentials,
+    name: string,
+  ): Promise<{ user_id: string; name: string }> {
+    return request<{ user_id: string; name: string }>(credentials, "/api/v1/workspace/name", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+  },
+
+  /** One-page health-passport PDF for a new doctor. Returns the raw PDF blob. */
+  downloadHealthPassport(credentials: Credentials): Promise<Blob> {
+    return requestBlob(credentials, "/api/v1/export/health-passport");
   },
 
   // Re-runs the full per-document pipeline for one stored document (fetches

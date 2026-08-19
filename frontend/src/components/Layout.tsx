@@ -94,19 +94,19 @@ const NAV: NavItem[] = [
   },
   {
     group: "insights",
-    to: "/changes",
-    labelKey: "nav.changes",
-    descriptionKey: "nav.descriptions.changes",
-    icon: ChangesIcon,
-    chip: "bg-indigo-50 text-indigo-800",
-  },
-  {
-    group: "insights",
     to: "/safety",
     labelKey: "nav.safety",
     descriptionKey: "nav.descriptions.safety",
     icon: AlertIcon,
     chip: "bg-red-50 text-red-800",
+  },
+  {
+    group: "insights",
+    to: "/vitals",
+    labelKey: "nav.vitals",
+    descriptionKey: "nav.descriptions.vitals",
+    icon: ChartIcon,
+    chip: "bg-teal-50 text-teal-800",
   },
   {
     group: "insights",
@@ -126,35 +126,11 @@ const NAV: NavItem[] = [
   },
   {
     group: "insights",
-    to: "/vitals",
-    labelKey: "nav.vitals",
-    descriptionKey: "nav.descriptions.vitals",
-    icon: ChartIcon,
-    chip: "bg-teal-50 text-teal-800",
-  },
-  {
-    group: "insights",
-    to: "/preventive-care",
-    labelKey: "nav.preventive",
-    descriptionKey: "nav.descriptions.preventive",
-    icon: SparkleIcon,
-    chip: "bg-emerald-50 text-emerald-800",
-  },
-  {
-    group: "insights",
-    to: "/symptoms",
-    labelKey: "nav.symptoms",
-    descriptionKey: "nav.descriptions.symptoms",
-    icon: ChatIcon,
-    chip: "bg-sky-50 text-sky-800",
-  },
-  {
-    group: "insights",
-    to: "/review",
-    labelKey: "nav.trustReview",
-    descriptionKey: "nav.descriptions.trustReview",
-    icon: ShieldIcon,
-    chip: "bg-amber-50 text-amber-800",
+    to: "/changes",
+    labelKey: "nav.changes",
+    descriptionKey: "nav.descriptions.changes",
+    icon: ChangesIcon,
+    chip: "bg-indigo-50 text-indigo-800",
   },
   {
     group: "insights",
@@ -163,6 +139,14 @@ const NAV: NavItem[] = [
     descriptionKey: "nav.descriptions.recordCheck",
     icon: IntegrityIcon,
     chip: "bg-orange-50 text-orange-800",
+  },
+  {
+    group: "actions",
+    to: "/ask",
+    labelKey: "nav.ask",
+    descriptionKey: "nav.descriptions.ask",
+    icon: ChatIcon,
+    chip: "bg-brand-50 text-brand-700",
   },
   {
     group: "actions",
@@ -190,35 +174,19 @@ const NAV: NavItem[] = [
   },
   {
     group: "actions",
-    to: "/messages",
-    labelKey: "nav.messages",
-    descriptionKey: "nav.descriptions.messages",
-    icon: ChatIcon,
-    chip: "bg-cyan-50 text-cyan-800",
-  },
-  {
-    group: "actions",
-    to: "/guidelines",
-    labelKey: "nav.guidelines",
-    descriptionKey: "nav.descriptions.guidelines",
-    icon: InfoIcon,
-    chip: "bg-slate-100 text-slate-700",
-  },
-  {
-    group: "actions",
-    to: "/ask",
-    labelKey: "nav.ask",
-    descriptionKey: "nav.descriptions.ask",
-    icon: ChatIcon,
-    chip: "bg-brand-50 text-brand-700",
-  },
-  {
-    group: "actions",
     to: "/find-care",
     labelKey: "nav.care",
     descriptionKey: "nav.descriptions.care",
     icon: LocationIcon,
     chip: "bg-cyan-50 text-cyan-800",
+  },
+  {
+    group: "utility",
+    to: "/guidelines",
+    labelKey: "nav.guidelines",
+    descriptionKey: "nav.descriptions.guidelines",
+    icon: InfoIcon,
+    chip: "bg-slate-100 text-slate-700",
   },
   {
     group: "utility",
@@ -276,7 +244,28 @@ export function Layout() {
     safetyPending: false,
     hasChanges: false,
   });
+  // Friendly workspace name (optional; shown in the sidebar header).
+  const [workspaceName, setWorkspaceName] = useState<string | null>(null);
   const desktop = useDesktopLayout();
+
+  useEffect(() => {
+    if (!isConfigured) {
+      setWorkspaceName(null);
+      return;
+    }
+    let cancelled = false;
+    api
+      .getWorkspaceName(credentials)
+      .then((result) => {
+        if (!cancelled) setWorkspaceName(result.name);
+      })
+      .catch(() => {
+        if (!cancelled) setWorkspaceName(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [credentials, isConfigured]);
 
   useEffect(() => {
     if (!isConfigured) {
@@ -327,8 +316,8 @@ export function Layout() {
   }, []);
 
   useEffect(() => {
-    if (!desktop || !collapsed) setTooltip(null);
-  }, [collapsed, desktop, location.pathname]);
+    if (!desktop) setTooltip(null);
+  }, [desktop, location.pathname]);
 
   useEffect(() => {
     try {
@@ -380,13 +369,8 @@ export function Layout() {
   const closeSidebar = () => setSidebarOpen(false);
   const navInteractive = desktop || sidebarOpen;
 
-  const showCollapsedTooltip = (
-    anchor: HTMLElement,
-    id: string,
-    title: string,
-    description: string,
-  ) => {
-    if (!desktop || !collapsed) return;
+  const showTooltip = (anchor: HTMLElement, id: string, title: string, description: string) => {
+    if (!desktop) return;
     const rect = anchor.getBoundingClientRect();
     setTooltip({
       id,
@@ -466,6 +450,11 @@ export function Layout() {
               <Logo />
               <div className="min-w-0 flex-1">
                 <p className="text-xl font-bold leading-tight text-slate-900">MediMind</p>
+                {workspaceName && (
+                  <p className="truncate text-xs text-slate-500" title={workspaceName}>
+                    {workspaceName}
+                  </p>
+                )}
               </div>
             </div>
             {desktop && (
@@ -510,7 +499,7 @@ export function Layout() {
                 to="/upload"
                 onClick={closeSidebar}
                 onMouseEnter={(event) =>
-                  showCollapsedTooltip(
+                  showTooltip(
                     event.currentTarget,
                     "sidebar-tooltip-upload",
                     t("nav.upload"),
@@ -519,7 +508,7 @@ export function Layout() {
                 }
                 onMouseLeave={() => setTooltip(null)}
                 onFocus={(event) =>
-                  showCollapsedTooltip(
+                  showTooltip(
                     event.currentTarget,
                     "sidebar-tooltip-upload",
                     t("nav.upload"),
@@ -528,7 +517,7 @@ export function Layout() {
                 }
                 onBlur={() => setTooltip(null)}
                 tabIndex={navInteractive ? undefined : -1}
-                aria-describedby={desktop && collapsed ? "sidebar-tooltip-upload" : undefined}
+                aria-describedby={desktop ? "sidebar-tooltip-upload" : undefined}
                 className={classNames(
                   "flex h-11 w-full items-center justify-center gap-2 rounded-[10px] bg-brand-600 px-3 text-[15px] font-semibold text-white shadow-sm transition hover:bg-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-300 focus-visible:ring-offset-2",
                   collapsed && "lg:px-0",
@@ -589,7 +578,7 @@ export function Layout() {
                           closeSidebar();
                         }}
                         onMouseEnter={(event) =>
-                          showCollapsedTooltip(
+                          showTooltip(
                             event.currentTarget,
                             `sidebar-tooltip-${index}`,
                             t(item.labelKey),
@@ -598,7 +587,7 @@ export function Layout() {
                         }
                         onMouseLeave={() => setTooltip(null)}
                         onFocus={(event) =>
-                          showCollapsedTooltip(
+                          showTooltip(
                             event.currentTarget,
                             `sidebar-tooltip-${index}`,
                             t(item.labelKey),
@@ -612,9 +601,7 @@ export function Layout() {
                             ? `${t(item.labelKey)}${navSignals.safetyPending && item.to === "/safety" ? ", analysis pending" : safetyCount ? `, ${safetyCount} alerts` : ""}`
                             : undefined
                         }
-                        aria-describedby={
-                          desktop && collapsed ? `sidebar-tooltip-${index}` : undefined
-                        }
+                        aria-describedby={desktop ? `sidebar-tooltip-${index}` : undefined}
                         className={({ isActive }) =>
                           classNames(
                             "group relative flex min-h-[44px] items-center gap-2.5 rounded-[9px] px-2.5 text-[15px] font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-offset-1 lg:min-h-[42px]",
@@ -722,7 +709,7 @@ export function Layout() {
               to="/about"
               onClick={closeSidebar}
               onMouseEnter={(event) =>
-                showCollapsedTooltip(
+                showTooltip(
                   event.currentTarget,
                   "sidebar-tooltip-about",
                   t("about.nav"),
@@ -731,7 +718,7 @@ export function Layout() {
               }
               onMouseLeave={() => setTooltip(null)}
               onFocus={(event) =>
-                showCollapsedTooltip(
+                showTooltip(
                   event.currentTarget,
                   "sidebar-tooltip-about",
                   t("about.nav"),
@@ -740,7 +727,7 @@ export function Layout() {
               }
               onBlur={() => setTooltip(null)}
               aria-label={collapsed ? t("about.nav") : undefined}
-              aria-describedby={desktop && collapsed ? "sidebar-tooltip-about" : undefined}
+              aria-describedby={desktop ? "sidebar-tooltip-about" : undefined}
               className={({ isActive }) =>
                 classNames(
                   "flex min-h-[44px] items-center gap-2.5 rounded-[9px] px-2.5 text-[15px] font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-offset-1",
@@ -892,7 +879,7 @@ export function Layout() {
           <div
             id={tooltip.id}
             role="tooltip"
-            style={{ left: 82, top: tooltip.top }}
+            style={{ left: collapsed ? 82 : 300, top: tooltip.top }}
             className="sidebar-tooltip pointer-events-none fixed z-[100] w-[280px] -translate-y-1/2 rounded-xl border border-slate-200/90 bg-white px-4 py-3 text-left shadow-[0_16px_40px_-12px_rgba(15,23,42,0.28)]"
           >
             <span

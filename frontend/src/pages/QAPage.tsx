@@ -1,16 +1,17 @@
 import { useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
 import { Alert } from "../components/Alert";
 import { ErrorState } from "../components/ErrorState";
 import { Card, CardBody, CardHeader } from "../components/Card";
 import { DocumentViewer } from "../components/DocumentViewer";
 import { QAResultCard } from "../components/QAResultCard";
+import { MedicalDisclaimer } from "../components/MedicalDisclaimer";
 import { Spinner } from "../components/Spinner";
 import { ChatIcon, SendIcon } from "../components/icons";
 import { useAuth } from "../context/AuthContext";
 import { useI18n } from "../i18n/I18nContext";
-import type { QAResponse, QASource, Timeline, Visit } from "../types/api";
+import type { QAResponse, QASource, SymptomAnalysis, Timeline, Visit } from "../types/api";
 import { findVisitForSource } from "../utils/sources";
 
 const SUGGESTION_KEYS = [
@@ -20,9 +21,14 @@ const SUGGESTION_KEYS = [
   "ask.suggestion4",
 ] as const;
 
+type Tab = "question" | "symptom";
+
 export function QAPage() {
   const { credentials } = useAuth();
   const { t } = useI18n();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab: Tab = searchParams.get("tab") === "symptoms" ? "symptom" : "question";
+
   const [question, setQuestion] = useState("");
   const [topK, setTopK] = useState(8);
   const [loading, setLoading] = useState(false);
@@ -33,6 +39,13 @@ export function QAPage() {
   );
   const inFlightRef = useRef(false);
   const timelineRef = useRef<Timeline | null>(null);
+
+  // Symptom-check state (merged from the former /symptoms page).
+  const [symptom, setSymptom] = useState("");
+  const [duration, setDuration] = useState("");
+  const [symptomLoading, setSymptomLoading] = useState(false);
+  const [symptomError, setSymptomError] = useState<string | null>(null);
+  const [symptomResult, setSymptomResult] = useState<SymptomAnalysis | null>(null);
 
   // Loaded lazily so a citation can resolve to its document. A failure here
   // must never break asking questions — citations stay non-clickable.
@@ -75,8 +88,29 @@ export function QAPage() {
     }
   }
 
+  async function runSymptomCheck(e: React.FormEvent) {
+    e.preventDefault();
+    if (!symptom.trim()) return;
+    setSymptomLoading(true);
+    setSymptomError(null);
+    setSymptomResult(null);
+    try {
+      setSymptomResult(
+        await api.analyseSymptom(credentials, symptom.trim(), duration.trim() || undefined),
+      );
+    } catch (err) {
+      setSymptomError(err instanceof Error ? err.message : "Analysis failed");
+    } finally {
+      setSymptomLoading(false);
+    }
+  }
+
   function handleOpenSource(source: QASource) {
     setOpenSource({ source, visit: findVisitForSource(timelineRef.current, source) });
+  }
+
+  function setTab(next: Tab) {
+    setSearchParams(next === "symptom" ? { tab: "symptoms" } : {}, { replace: true });
   }
 
   return (
@@ -86,136 +120,264 @@ export function QAPage() {
         <p className="secondary-text mt-2 max-w-2xl">{t("ask.subtitle")}</p>
       </header>
 
-      <Card>
-        <CardHeader
-          title={t("ask.question")}
-          description={t("ask.description")}
-          icon={<ChatIcon className="h-5 w-5" />}
-        />
-        <CardBody className="space-y-4">
-          <form
-            className="flex min-w-0 flex-col gap-2 sm:flex-row"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void ask();
-            }}
-          >
-            <label htmlFor="record-question" className="sr-only">
-              {t("ask.inputLabel")}
-            </label>
-            <input
-              id="record-question"
-              name="question"
-              type="text"
-              value={question}
-              onChange={(e) => setQuestion(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  void ask();
-                }
-              }}
-              placeholder={t("ask.placeholder")}
-              aria-describedby="question-help"
-              className="block min-w-0 w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
-              disabled={loading}
-            />
-            <button
-              type="submit"
-              disabled={loading || !question.trim()}
-              className="inline-flex items-center gap-2 rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 disabled:opacity-60"
-            >
-              {loading ? <Spinner className="h-4 w-4" /> : <SendIcon className="h-4 w-4" />}
-              {t("ask.ask")}
-            </button>
-          </form>
-          <p id="question-help" className="sr-only">
-            {t("ask.description")}
-          </p>
+      <div
+        className="flex gap-1 border-b border-slate-200"
+        role="tablist"
+        aria-label="Ask AI views"
+      >
+        <Tab active={tab === "question"} onClick={() => setTab("question")}>
+          {t("ask.tabQuestion")}
+        </Tab>
+        <Tab active={tab === "symptom"} onClick={() => setTab("symptom")}>
+          {t("ask.tabSymptom")}
+        </Tab>
+      </div>
 
-          <details className="text-xs text-slate-500">
-            <summary className="cursor-pointer font-medium text-slate-700">
-              {t("ask.advanced")}
-            </summary>
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              <label htmlFor="topk">{t("ask.amount")}:</label>
-              <input
-                id="topk"
-                type="range"
-                min={1}
-                max={20}
-                value={topK}
-                onChange={(e) => setTopK(parseInt(e.target.value, 10))}
-                className="w-32"
-              />
-              <span className="font-medium text-slate-700">{topK}</span>
-            </div>
-          </details>
+      <div className="rounded-xl border border-sky-100 bg-sky-50/70 px-4 py-3 text-sm leading-relaxed text-sky-900">
+        <span className="font-semibold">{t("ask.scopeLabel")}: </span>
+        {t("ask.scopeHelp", { count: topK })}
+      </div>
 
-          <fieldset>
-            <legend className="mb-2 text-xs font-semibold text-slate-700">
-              {t("ask.suggestions")}
-            </legend>
-            <div className="flex flex-wrap gap-2">
-              {SUGGESTION_KEYS.map((key) => {
-                const suggestion = t(key);
-                return (
-                  <button
-                    type="button"
-                    key={key}
-                    onClick={() => {
-                      setQuestion(suggestion);
-                      void ask(suggestion);
-                    }}
-                    disabled={loading}
-                    className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-50"
-                  >
-                    {suggestion}
-                  </button>
-                );
-              })}
-            </div>
-          </fieldset>
-        </CardBody>
-      </Card>
-
-      {loading && (
-        <Alert variant="info" title={t("ask.reading")}>
-          {t("ask.readingBody")}
-        </Alert>
-      )}
-
-      {!loading && error !== null && <ErrorState error={error} onRetry={() => void ask()} />}
-
-      {!loading && result && (
-        <div className="space-y-3">
-          <h2 className="section-title">{t("ask.answer")}</h2>
-          <QAResultCard
-            result={result}
-            onOpenSource={timelineRef.current ? handleOpenSource : undefined}
+      {tab === "symptom" ? (
+        <Card>
+          <CardHeader
+            title={t("ask.tabSymptom")}
+            description={t("ask.symptomHint")}
+            icon={<ChatIcon className="h-5 w-5" />}
           />
-        </div>
-      )}
+          <CardBody>
+            <form onSubmit={runSymptomCheck} className="space-y-3">
+              <label className="block text-sm">
+                <span className="font-medium text-slate-700">{t("symptoms.formLabel")}</span>
+                <textarea
+                  value={symptom}
+                  onChange={(e) => setSymptom(e.target.value)}
+                  placeholder={t("symptoms.formPlaceholder")}
+                  rows={3}
+                  className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                />
+              </label>
+              <label className="block text-sm">
+                <span className="font-medium text-slate-700">{t("symptoms.durationLabel")}</span>
+                <input
+                  value={duration}
+                  onChange={(e) => setDuration(e.target.value)}
+                  placeholder="3 days"
+                  className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm sm:max-w-xs"
+                />
+              </label>
+              <button
+                type="submit"
+                disabled={symptomLoading || !symptom.trim()}
+                className="inline-flex items-center gap-2 rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
+              >
+                {symptomLoading ? (
+                  <Spinner className="h-4 w-4" />
+                ) : (
+                  <SendIcon className="h-4 w-4" />
+                )}
+                {symptomLoading ? t("symptoms.analysing") : t("symptoms.submit")}
+              </button>
+            </form>
 
-      {openSource && (
-        <div className="space-y-3">
-          <h2 className="section-title">{openSource.source.source_file}</h2>
-          {openSource.visit ? (
-            <DocumentViewer visit={openSource.visit} onClose={() => setOpenSource(null)} />
-          ) : (
-            <Alert variant="info" title={t("ask.sourceUnavailable")}>
-              {t("ask.sourceUnavailableBody", { file: openSource.source.source_file })}
+            {symptomError && (
+              <p role="alert" className="mt-3 text-sm text-red-600">
+                {symptomError}
+              </p>
+            )}
+
+            {symptomResult && (
+              <div className="mt-4 space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-4">
+                {symptomResult.analysed ? (
+                  <>
+                    <div className="flex flex-wrap gap-2">
+                      {symptomResult.matched_symptoms?.map((s) => (
+                        <span
+                          key={s}
+                          className="rounded-full bg-brand-50 px-2.5 py-0.5 text-xs font-medium text-brand-700"
+                        >
+                          {s}
+                        </span>
+                      ))}
+                    </div>
+                    <p className="whitespace-pre-line text-sm leading-relaxed text-slate-700">
+                      {symptomResult.summary}
+                    </p>
+                    {symptomResult.findings?.some(
+                      (f) =>
+                        f.relevant_medications_on_record.length === 0 &&
+                        f.relevant_abnormal_labs.length === 0,
+                    ) && <p className="text-xs text-slate-400">{t("symptoms.noMatch")}</p>}
+                  </>
+                ) : (
+                  <p className="text-sm text-slate-600">{symptomResult.note}</p>
+                )}
+              </div>
+            )}
+          </CardBody>
+        </Card>
+      ) : (
+        <>
+          <Card>
+            <CardHeader
+              title={t("ask.question")}
+              description={t("ask.description")}
+              icon={<ChatIcon className="h-5 w-5" />}
+            />
+            <CardBody className="space-y-4">
+              <form
+                className="flex min-w-0 flex-col gap-2 sm:flex-row"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void ask();
+                }}
+              >
+                <label htmlFor="record-question" className="sr-only">
+                  {t("ask.inputLabel")}
+                </label>
+                <input
+                  id="record-question"
+                  name="question"
+                  type="text"
+                  value={question}
+                  onChange={(e) => setQuestion(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      void ask();
+                    }
+                  }}
+                  placeholder={t("ask.placeholder")}
+                  aria-describedby="question-help"
+                  className="block min-w-0 w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                  disabled={loading}
+                />
+                <button
+                  type="submit"
+                  disabled={loading || !question.trim()}
+                  className="inline-flex items-center gap-2 rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 disabled:opacity-60"
+                >
+                  {loading ? <Spinner className="h-4 w-4" /> : <SendIcon className="h-4 w-4" />}
+                  {t("ask.ask")}
+                </button>
+              </form>
+              <p id="question-help" className="sr-only">
+                {t("ask.description")}
+              </p>
+
+              <details className="text-xs text-slate-500">
+                <summary className="cursor-pointer font-medium text-slate-700">
+                  {t("ask.advanced")}
+                </summary>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <label htmlFor="topk">{t("ask.amount")}:</label>
+                  <input
+                    id="topk"
+                    type="range"
+                    min={1}
+                    max={20}
+                    value={topK}
+                    onChange={(e) => setTopK(parseInt(e.target.value, 10))}
+                    className="w-32"
+                  />
+                  <span className="font-medium text-slate-700">{topK}</span>
+                </div>
+              </details>
+
+              <fieldset>
+                <legend className="mb-2 text-xs font-semibold text-slate-700">
+                  {t("ask.suggestions")}
+                </legend>
+                <div className="flex flex-wrap gap-2">
+                  {SUGGESTION_KEYS.map((key) => {
+                    const suggestion = t(key);
+                    return (
+                      <button
+                        type="button"
+                        key={key}
+                        onClick={() => {
+                          setQuestion(suggestion);
+                          void ask(suggestion);
+                        }}
+                        disabled={loading}
+                        className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-50"
+                      >
+                        {suggestion}
+                      </button>
+                    );
+                  })}
+                </div>
+              </fieldset>
+            </CardBody>
+          </Card>
+
+          {loading && (
+            <Alert variant="info" title={t("ask.reading")}>
+              {t("ask.readingBody")}
             </Alert>
           )}
-        </div>
+
+          {!loading && error !== null && <ErrorState error={error} onRetry={() => void ask()} />}
+
+          {!loading && result && (
+            <div className="space-y-3">
+              <h2 className="section-title">{t("ask.answer")}</h2>
+              <QAResultCard
+                result={result}
+                onOpenSource={timelineRef.current ? handleOpenSource : undefined}
+              />
+            </div>
+          )}
+
+          {openSource && (
+            <div className="space-y-3">
+              <h2 className="section-title">{openSource.source.source_file}</h2>
+              {openSource.visit ? (
+                <DocumentViewer visit={openSource.visit} onClose={() => setOpenSource(null)} />
+              ) : (
+                <Alert variant="info" title={t("ask.sourceUnavailable")}>
+                  {t("ask.sourceUnavailableBody", { file: openSource.source.source_file })}
+                </Alert>
+              )}
+            </div>
+          )}
+
+          <p className="secondary-text text-center">
+            Prefer a back-and-forth chat?{" "}
+            <Link to="/conversations" className="font-medium text-brand-600 hover:text-brand-700">
+              Open Conversations →
+            </Link>
+          </p>
+        </>
       )}
 
-      <p className="secondary-text text-center">
-        Prefer a back-and-forth chat?{" "}
-        <Link to="/conversations" className="font-medium text-brand-600 hover:text-brand-700">
-          Open Conversations →
-        </Link>
-      </p>
+      <MedicalDisclaimer />
     </div>
+  );
+}
+
+function Tab({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      onClick={onClick}
+      className={`border-b-2 px-4 py-3 text-sm font-semibold transition ${
+        active
+          ? "border-brand-600 text-brand-700"
+          : "border-transparent text-slate-500 hover:text-slate-800"
+      }`}
+    >
+      {children}
+    </button>
   );
 }

@@ -4,8 +4,8 @@ import { Alert } from "../components/Alert";
 import { Spinner } from "../components/Spinner";
 import { StatusBadge } from "../components/StatusBadge";
 import { toastMessage, useToast } from "../components/Toast";
-import { DownloadIcon, SettingsIcon, ShieldIcon } from "../components/icons";
-import { downloadJsonFile, todayStamp } from "../utils/download";
+import { DownloadIcon, FileIcon, SettingsIcon, ShieldIcon } from "../components/icons";
+import { downloadBlob, downloadJsonFile, todayStamp } from "../utils/download";
 import type { FhirValidationReport } from "../types/api";
 import { useAuth } from "../context/AuthContext";
 import { useI18n } from "../i18n/I18nContext";
@@ -32,6 +32,15 @@ export function SettingsPage() {
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileNotice, setProfileNotice] = useState<string | null>(null);
+  // Workspace display name.
+  const [wsName, setWsName] = useState("");
+  const [wsNameSaved, setWsNameSaved] = useState<string | null>(null);
+  const [wsNameStatus, setWsNameStatus] = useState<
+    "idle" | "checking" | "available" | "taken" | "invalid" | "current"
+  >("idle");
+  const [wsNameSaving, setWsNameSaving] = useState(false);
+  // Health passport PDF.
+  const [passportBusy, setPassportBusy] = useState(false);
   const deleteTriggerRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
@@ -49,10 +58,95 @@ export function SettingsPage() {
       .finally(() => {
         if (!cancelled) setProfileLoading(false);
       });
+    api
+      .getWorkspaceName(credentials)
+      .then((value) => {
+        if (cancelled) return;
+        const current = value.name || "";
+        setWsName(current);
+        setWsNameSaved(current || null);
+      })
+      .catch(() => {
+        if (!cancelled) setWsNameSaved(null);
+      });
     return () => {
       cancelled = true;
     };
   }, [credentials, isConfigured]);
+
+  // Debounced name-availability check while the user types.
+  useEffect(() => {
+    if (!isConfigured) return;
+    const candidate = wsName.trim();
+    if (!candidate) {
+      setWsNameStatus("idle");
+      return;
+    }
+    if (candidate.toLowerCase() === (wsNameSaved || "").toLowerCase()) {
+      setWsNameStatus("current");
+      return;
+    }
+    setWsNameStatus("checking");
+    const handle = window.setTimeout(() => {
+      let cancelled = false;
+      api
+        .checkWorkspaceName(credentials, candidate)
+        .then((result) => {
+          if (cancelled) return;
+          if (result.reason === "invalid") setWsNameStatus("invalid");
+          else setWsNameStatus(result.available ? "available" : "taken");
+        })
+        .catch(() => {
+          if (!cancelled) setWsNameStatus("idle");
+        });
+      return () => {
+        cancelled = true;
+      };
+    }, 400);
+    return () => window.clearTimeout(handle);
+  }, [wsName, wsNameSaved, credentials, isConfigured]);
+
+  async function handleSaveWorkspaceName() {
+    const candidate = wsName.trim();
+    if (!candidate) return;
+    setWsNameSaving(true);
+    try {
+      await api.setWorkspaceName(credentials, candidate);
+      setWsNameSaved(candidate);
+      setWsName(candidate);
+      setWsNameStatus("current");
+      toastSuccess(t("settings.nameSaved"), candidate);
+    } catch (error) {
+      toastError(t("settings.nameSaveFailed"), toastMessage(error));
+      setWsNameStatus(error instanceof ApiError && error.status === 409 ? "taken" : "idle");
+    } finally {
+      setWsNameSaving(false);
+    }
+  }
+
+  async function handleDownloadPassport() {
+    setPassportBusy(true);
+    try {
+      const blob = await api.downloadHealthPassport(credentials);
+      const saved = downloadBlob(`medimind-health-passport-${todayStamp()}.pdf`, blob);
+      if (!saved) {
+        toastError(
+          t("settings.passportFailed"),
+          "Your browser blocked the download. Allow downloads and retry.",
+        );
+      } else {
+        toastSuccess(t("settings.passportDownloaded"), undefined);
+      }
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 404) {
+        toastInfo(t("settings.passportNoRecords"), undefined);
+      } else {
+        toastError(t("settings.passportFailed"), toastMessage(error));
+      }
+    } finally {
+      setPassportBusy(false);
+    }
+  }
 
   useEffect(() => {
     if (!deleteOpen) return;
@@ -218,6 +312,22 @@ export function SettingsPage() {
         onInfo={toastInfo}
         disabled={!isConfigured}
         credentials={credentials}
+      />
+
+      <HealthPassportSection
+        busy={passportBusy}
+        disabled={!isConfigured}
+        onDownload={() => void handleDownloadPassport()}
+      />
+
+      <WorkspaceNameSection
+        name={wsName}
+        savedName={wsNameSaved}
+        status={wsNameStatus}
+        saving={wsNameSaving}
+        disabled={!isConfigured}
+        onNameChange={setWsName}
+        onSave={() => void handleSaveWorkspaceName()}
       />
 
       <section
@@ -430,6 +540,164 @@ export function SettingsPage() {
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * "Health passport" — the one-page pocket version of Appointment Prep.
+ *
+ * The backend renders a single-page PDF (active medications, allergies, key
+ * conditions, recent abnormal labs); this card only triggers the download and
+ * explains what the file is for.
+ */
+function HealthPassportSection({
+  busy,
+  disabled,
+  onDownload,
+}: {
+  busy: boolean;
+  disabled: boolean;
+  onDownload: () => void;
+}) {
+  const { t } = useI18n();
+  return (
+    <section
+      aria-labelledby="health-passport-title"
+      className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"
+    >
+      <div className="flex items-center gap-3">
+        <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-brand-50 text-brand-600">
+          <FileIcon className="h-6 w-6" aria-hidden="true" />
+        </div>
+        <div>
+          <h2 id="health-passport-title" className="card-title">
+            {t("settings.healthPassport")}
+          </h2>
+          <p className="secondary-text max-w-2xl">{t("settings.healthPassportBody")}</p>
+        </div>
+      </div>
+
+      <div className="mt-4 rounded-xl bg-slate-50 px-4 py-3 text-sm leading-relaxed text-slate-600">
+        {t("settings.healthPassportNote")}
+      </div>
+
+      <button
+        type="button"
+        onClick={onDownload}
+        disabled={disabled || busy}
+        className="btn-primary mt-4"
+      >
+        {busy ? (
+          <Spinner className="h-5 w-5" />
+        ) : (
+          <DownloadIcon className="h-5 w-5" aria-hidden="true" />
+        )}
+        {busy ? t("settings.passportDownloading") : t("settings.downloadPassport")}
+      </button>
+    </section>
+  );
+}
+
+/**
+ * Workspace display name with live availability.
+ *
+ * The backend enforces global, case-insensitive uniqueness; this form mirrors
+ * that with an inline check so the user sees "Available" before saving rather
+ * than a 409 after the fact.
+ */
+function WorkspaceNameSection({
+  name,
+  savedName,
+  status,
+  saving,
+  disabled,
+  onNameChange,
+  onSave,
+}: {
+  name: string;
+  savedName: string | null;
+  status: "idle" | "checking" | "available" | "taken" | "invalid" | "current";
+  saving: boolean;
+  disabled: boolean;
+  onNameChange: (value: string) => void;
+  onSave: () => void;
+}) {
+  const { t } = useI18n();
+  const trimmed = name.trim();
+  const canSave = disabled
+    ? false
+    : Boolean(trimmed) && !saving && status !== "taken" && status !== "invalid";
+
+  return (
+    <section
+      aria-labelledby="workspace-name-title"
+      className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"
+    >
+      <div className="flex items-center gap-3">
+        <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-brand-50 text-brand-600">
+          <SettingsIcon className="h-6 w-6" aria-hidden="true" />
+        </div>
+        <div>
+          <h2 id="workspace-name-title" className="card-title">
+            {t("settings.workspaceName")}
+          </h2>
+          <p className="secondary-text max-w-2xl">{t("settings.workspaceNameBody")}</p>
+        </div>
+      </div>
+
+      {savedName && (
+        <p className="mt-3 text-sm text-slate-600">
+          <span className="font-semibold text-slate-700">
+            {t("settings.workspaceNameCurrent")}:
+          </span>{" "}
+          {savedName}
+        </p>
+      )}
+
+      <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-start">
+        <div className="min-w-0 flex-1">
+          <label htmlFor="workspace-name" className="sr-only">
+            {t("settings.workspaceName")}
+          </label>
+          <input
+            id="workspace-name"
+            type="text"
+            value={name}
+            onChange={(event) => onNameChange(event.target.value)}
+            placeholder={t("settings.workspaceNamePlaceholder")}
+            maxLength={40}
+            disabled={disabled}
+            className="input w-full"
+          />
+          <p role="status" aria-live="polite" className="mt-2 text-sm">
+            {status === "checking" && (
+              <span className="text-slate-500">{t("settings.nameChecking")}</span>
+            )}
+            {status === "available" && (
+              <span className="font-medium text-emerald-700">{t("settings.nameAvailable")}</span>
+            )}
+            {status === "taken" && (
+              <span className="font-medium text-red-700">{t("settings.nameTaken")}</span>
+            )}
+            {status === "invalid" && (
+              <span className="font-medium text-amber-700">{t("settings.nameInvalid")}</span>
+            )}
+            {status === "current" && (
+              <span className="font-medium text-slate-600">{t("settings.nameIsCurrent")}</span>
+            )}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onSave}
+          disabled={!canSave}
+          className="btn-primary self-start"
+        >
+          {saving ? <Spinner className="h-5 w-5" /> : null}
+          {saving ? t("settings.nameSaving") : t("settings.saveName")}
+        </button>
+      </div>
+    </section>
   );
 }
 

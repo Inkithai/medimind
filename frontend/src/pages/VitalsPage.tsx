@@ -17,6 +17,7 @@ import type {
   VitalTrendsReport,
   EarlyWarningReport,
   AdherenceReport,
+  AdherenceSignal,
   DeteriorationReport,
   PatientMeasurement,
 } from "../types/api";
@@ -33,6 +34,32 @@ const RISK_BAND_TONE: Record<string, "danger" | "warning" | "success" | "neutral
   low: "neutral",
   none: "success",
 };
+
+const ADHERENCE_SIGNAL_LABEL: Record<string, string> = {
+  refill_gap: "Possible gap in refills",
+  late_refill: "Possible late refill",
+  apparent_stop: "May have stopped",
+};
+
+// The backend emits one signal per gap plus one "may have stopped" per
+// medicine, so a medicine can legitimately appear more than once. This
+// collapses only EXACT repeats (same medicine, signal and dates) that a
+// re-upload can introduce, so the list never shows the same line twice.
+function dedupeAdherenceSignals(signals: AdherenceSignal[]): AdherenceSignal[] {
+  const seen = new Set<string>();
+  return signals.filter((signal) => {
+    const key = [
+      signal.ingredient,
+      signal.signal,
+      signal.gap_days ?? "",
+      (signal.between || []).join("|"),
+      signal.last_supply ?? "",
+    ].join("::");
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
 
 export function VitalsPage() {
   const { credentials } = useAuth();
@@ -224,15 +251,18 @@ export function VitalsPage() {
 
       {!loading && adh && adh.signals.length > 0 && (
         <Card>
-          <CardHeader title="Possible adherence signals" />
+          <CardHeader
+            title="Possible adherence signals"
+            description="Patterns in how a medicine was supplied that may be worth asking about. They do not say whether you took the medicine or not."
+          />
           <CardBody className="space-y-2">
-            {adh.signals.map((s, i) => (
+            {dedupeAdherenceSignals(adh.signals).map((s, i) => (
               <div
-                key={i}
+                key={`${s.ingredient}-${s.signal}-${i}`}
                 className="rounded-md border border-amber-200 bg-amber-50/50 p-2 text-xs"
               >
                 <div className="font-medium text-amber-800">
-                  {s.ingredient} — {s.signal.replace(/_/g, " ")}
+                  {s.ingredient} — {ADHERENCE_SIGNAL_LABEL[s.signal] || s.signal.replace(/_/g, " ")}
                 </div>
                 <div className="text-slate-600">{s.detail}</div>
               </div>

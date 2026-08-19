@@ -251,6 +251,20 @@ create table if not exists public.patient_profiles (
 grant select, insert, update, delete on table public.patient_profiles to service_role;
 alter table public.patient_profiles enable row level security;
 
+-- User-chosen workspace display name. Anonymous by default; names are
+-- globally unique (case-insensitive) so a name is a stable, human-recognisable
+-- label. name_key is the lowercased comparison key the unique index enforces.
+create table if not exists public.workspace_names (
+    user_id    text        primary key,
+    name       text        not null,
+    name_key   text        not null,
+    updated_at timestamptz not null default now()
+);
+create unique index if not exists workspace_names_name_key_idx
+    on public.workspace_names (name_key);
+grant select, insert, update, delete on table public.workspace_names to service_role;
+alter table public.workspace_names enable row level security;
+
 -- Reviewer feedback on individual safety findings (clinician feedback loop +
 -- alert-fatigue / override capture). In-memory-first; this table is a
 -- best-effort mirror and is optional — the API records feedback in memory even

@@ -95,6 +95,10 @@ def _profiles():
     return _get_client().table("patient_profiles")
 
 
+def _workspace_names():
+    return _get_client().table("workspace_names")
+
+
 class SchemaNotInitializedError(RuntimeError):
     """Raised when the Supabase project is reachable but the app's tables
     (documents / patient_snapshots) do not exist — i.e. supabase_schema.sql
@@ -537,6 +541,7 @@ def delete_workspace_data(user_id: str) -> Dict[str, int]:
         ("clinical_prescriptions", "user_id"),
         ("clinical_medications", "user_id"),
         ("patient_profiles", "user_id"),
+        ("workspace_names", "user_id"),
         ("conflict_resolution_events", "user_id"),
         ("record_conflicts", "user_id"),
         ("extraction_corrections", "user_id"),
@@ -584,6 +589,51 @@ def save_patient_profile(user_id: str, profile: Dict[str, Any]) -> Dict[str, Any
     row.update({key: profile.get(key) for key in allowed})
     response = _profiles().upsert(row, on_conflict="user_id").execute()
     return dict((response.data or [row])[0])
+
+
+@_translate_missing_schema
+def load_workspace_name(user_id: str) -> Optional[str]:
+    """The user's friendly workspace name, or None when unnamed."""
+    response = _workspace_names().select("name").eq("user_id", user_id).limit(1).execute()
+    rows = response.data or []
+    return str(rows[0]["name"]).strip() if rows and rows[0].get("name") else None
+
+
+@_translate_missing_schema
+def workspace_name_owner(name: str) -> Optional[str]:
+    """The user_id that owns a name (case-insensitive), or None when free.
+
+    Comparison is on ``name_key`` so "Amma's Records" and "amma's records"
+    resolve to the same name. Callers treat ``None`` (and the caller's own
+    id) as "available" — the unique index enforces the hard guarantee under
+    races at insert time.
+    """
+    from workspace_names import name_key
+
+    key = name_key(name)
+    if not key:
+        return None
+    response = _workspace_names().select("user_id").eq("name_key", key).limit(1).execute()
+    rows = response.data or []
+    return str(rows[0]["user_id"]) if rows else None
+
+
+@_translate_missing_schema
+def save_workspace_name(user_id: str, name: str) -> Dict[str, Any]:
+    """Upsert this user's workspace name. Raises on a case-insensitive
+    collision (the workspace_names_name_key unique index) so the API can
+    translate it to a 409."""
+    from workspace_names import name_key
+
+    clean = " ".join(str(name).split())
+    row = {
+        "user_id": user_id,
+        "name": clean,
+        "name_key": name_key(clean),
+        "updated_at": _now_iso(),
+    }
+    _workspace_names().upsert(row, on_conflict="user_id").execute()
+    return {"user_id": user_id, "name": clean}
 
 
 @_translate_missing_schema

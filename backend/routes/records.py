@@ -21,6 +21,7 @@ from fastapi import (  # noqa: E402
     HTTPException,
     Query,
 )
+from fastapi.responses import Response  # noqa: E402
 from pydantic import BaseModel, Field, field_validator  # noqa: E402
 
 import audit  # noqa: E402
@@ -50,6 +51,12 @@ from record_trust import (  # noqa: E402
 )
 from retrieval import timeline_fingerprint  # noqa: E402
 from risk_timeline import build_treatment_windows, concurrent_exposure, risk_calendar  # noqa: E402
+from workspace_names import normalize_workspace_name  # noqa: E402
+
+try:  # health passport PDF generation (PyMuPDF is a core dependency; fail loud only when used)
+    import health_passport  # noqa: E402
+except Exception:  # pragma: no cover - import only fails if pymupdf is absent
+    health_passport = None  # type: ignore[assignment]
 
 logger = logging.getLogger("api.records")
 
@@ -367,6 +374,70 @@ async def update_patient_profile(
         },
     )
     return profile
+
+
+# ---------------------------------------------------------------------------
+# Workspace display name (globally unique, case-insensitive)
+# ---------------------------------------------------------------------------
+
+
+class WorkspaceNameRequest(BaseModel):
+    name: str
+
+
+def _unique_violation(exc: BaseException) -> bool:
+    return getattr(exc, "code", None) == "23505" or "23505" in str(exc)
+
+
+@router.get("/api/v1/workspace/name")
+async def get_workspace_name(user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
+    """The user's friendly workspace name (None until they set one)."""
+    return {"user_id": user_id, "name": db.load_workspace_name(user_id)}
+
+
+@router.get("/api/v1/workspace/name/check")
+async def check_workspace_name(
+    name: str = Query(..., min_length=1, max_length=64),
+    user_id: str = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """Name availability for the live inline check. The caller's own current
+    name counts as available (renaming to your own name is a no-op)."""
+    cleaned = normalize_workspace_name(name)
+    if cleaned is None:
+        return {"name": name, "available": False, "reason": "invalid"}
+    owner = db.workspace_name_owner(cleaned)
+    return {
+        "name": cleaned,
+        "available": owner is None or owner == user_id,
+        "reason": None if owner is None or owner == user_id else "taken",
+    }
+
+
+@router.put("/api/v1/workspace/name")
+async def set_workspace_name(
+    request: WorkspaceNameRequest,
+    user_id: str = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """Set (or rename) the workspace. 409 on a case-insensitive name collision,
+    enforced by the unique index even under a check-then-save race."""
+    cleaned = normalize_workspace_name(request.name)
+    if cleaned is None:
+        raise HTTPException(
+            400,
+            "Workspace name must be 1-40 characters and use only letters, "
+            "numbers, spaces and . _ ' - .",
+        )
+    owner = db.workspace_name_owner(cleaned)
+    if owner is not None and owner != user_id:
+        raise HTTPException(409, "That workspace name is already taken.")
+    try:
+        result = db.save_workspace_name(user_id, cleaned)
+    except Exception as exc:  # race with a concurrent rename
+        if _unique_violation(exc):
+            raise HTTPException(409, "That workspace name is already taken.")
+        raise
+    audit.record(user_id, "workspace.name_updated", {"name": cleaned})
+    return result
 
 
 @router.get("/api/v1/clinical-entities/{kind}")
@@ -996,6 +1067,48 @@ async def validate_record_export(
     report["bundle_type"] = bundle.get("type")
     audit.record(user_id, "records.export_validation", {"format": "fhir", "valid": report["valid"]})
     return report
+
+
+@router.get("/api/v1/export/health-passport")
+async def export_health_passport(user_id: str = Depends(get_current_user)) -> Response:
+    """One-page printable PDF for a new doctor: active medications, allergies,
+    key conditions, and recent abnormal labs. The pocket version of
+    Appointment Prep. Deterministic — no LLM calls."""
+    if health_passport is None:
+        raise HTTPException(500, "PDF generation is unavailable: PyMuPDF is not installed.")
+    snapshot = _load_snapshot_or_rebuild(user_id)
+    if snapshot is None:
+        raise HTTPException(404, "No patient record found for this user — upload documents first.")
+    timeline = snapshot["patient_timeline"]
+    lab_trends = _lab_trends_for_snapshot(snapshot)
+    profile = None
+    try:
+        profile = db.load_patient_profile(user_id)
+    except Exception:  # additive storage; a missing profile must not block the PDF
+        profile = None
+    workspace_name = None
+    try:
+        workspace_name = db.load_workspace_name(user_id)
+    except Exception:  # additive storage; a missing table must not block the PDF
+        workspace_name = None
+    try:
+        pdf_bytes = health_passport.build_health_passport_pdf(
+            timeline,
+            cross_check=snapshot.get("cross_check_report") or {},
+            lab_trends=lab_trends,
+            patient_name=(profile or {}).get("preferred_name") or (profile or {}).get("legal_name"),
+            workspace_name=workspace_name,
+        )
+    except Exception as exc:
+        logger.warning("health passport generation failed: %s", exc, exc_info=True)
+        raise HTTPException(500, "Could not generate the health passport PDF.")
+    filename = f"health-passport-{date.today().isoformat()}.pdf"
+    audit.record(user_id, "records.export", {"format": "health_passport_pdf"})
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get("/api/v1/changes")

@@ -1,9 +1,10 @@
 import { useCallback, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
 import { Card, CardBody } from "../components/Card";
 import { ErrorState } from "../components/ErrorState";
 import { LoadingState } from "../components/Spinner";
+import { TrustReview } from "../components/TrustReview";
 import {
   AlertIcon,
   CheckIcon,
@@ -24,6 +25,8 @@ import { formatDate } from "../utils/format";
 
 export function RecordIntegrityPage() {
   const { credentials } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab = searchParams.get("tab") === "conflicts" ? "conflicts" : "discrepancies";
   const [report, setReport] = useState<RecordIntegrityReport | null>(null);
   const [corrections, setCorrections] = useState<CorrectionEvent[]>([]);
   const [reviewed, setReviewed] = useState<Set<string>>(new Set());
@@ -79,89 +82,121 @@ export function RecordIntegrityPage() {
         </button>
       </header>
 
-      {loading && (
-        <LoadingState
-          label="Cross-checking structured records"
-          description="Comparing identities, allergies, labs, and medication instructions without guessing which source is correct."
-        />
-      )}
-      {!loading && error !== null && <IntegrityError error={error} onRetry={() => void load()} />}
+      <div
+        className="flex gap-1 border-b border-slate-200"
+        role="tablist"
+        aria-label="Record check views"
+      >
+        <Tab
+          active={tab === "discrepancies"}
+          onClick={() => setSearchParams({}, { replace: true })}
+        >
+          Discrepancies
+        </Tab>
+        <Tab
+          active={tab === "conflicts"}
+          onClick={() => setSearchParams({ tab: "conflicts" }, { replace: true })}
+        >
+          Conflicts to resolve
+        </Tab>
+      </div>
 
-      {!loading && report && (
+      {tab === "conflicts" ? (
+        <TrustReview />
+      ) : (
         <>
-          <div className="grid gap-4 sm:grid-cols-3">
-            <Metric label="Records checked" value={report.summary.records_checked} tone="neutral" />
-            <Metric
-              label="Needs verification"
-              value={report.summary.issues_found}
-              tone={report.summary.issues_found ? "warning" : "success"}
+          {loading && (
+            <LoadingState
+              label="Cross-checking structured records"
+              description="Comparing identities, allergies, labs, and medication instructions without guessing which source is correct."
             />
-            <Metric
-              label="Reviewed this session"
-              value={reviewedCount}
-              tone={reviewedCount === report.summary.issues_found ? "success" : "neutral"}
-            />
-          </div>
-
-          {report.issues.length === 0 ? (
-            <Card>
-              <CardBody className="py-14 text-center">
-                <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-emerald-50 text-emerald-700">
-                  <CheckIcon className="h-7 w-7" />
-                </div>
-                <h2 className="mt-4 section-title">No structured discrepancies found</h2>
-                <p className="mx-auto mt-2 max-w-xl text-sm leading-relaxed text-slate-500">
-                  The checks did not find conflicting patient names, allergy statements, same-date
-                  lab results, or complete medication instructions. This does not prove every record
-                  is complete or correct.
-                </p>
-              </CardBody>
-            </Card>
-          ) : (
-            <section className="space-y-4">
-              <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-900">
-                <p className="font-semibold">Do not choose a value from this screen alone</p>
-                <p className="mt-1 leading-relaxed">
-                  Open both original documents and use the suggested verification step. Apparent
-                  conflicts may be valid corrections, separate samples, or extraction uncertainty.
-                </p>
-              </div>
-              {report.issues.map((issue) => (
-                <IntegrityCard
-                  key={issue.id}
-                  issue={issue}
-                  reviewed={reviewed.has(issue.id)}
-                  onToggleReviewed={() =>
-                    setReviewed((previous) => {
-                      const next = new Set(previous);
-                      if (next.has(issue.id)) next.delete(issue.id);
-                      else next.add(issue.id);
-                      return next;
-                    })
-                  }
-                />
-              ))}
-            </section>
+          )}
+          {!loading && error !== null && (
+            <IntegrityError error={error} onRetry={() => void load()} />
           )}
 
-          <CorrectionHistorySection corrections={corrections} />
+          {!loading && report && (
+            <>
+              <div className="grid gap-4 sm:grid-cols-3">
+                <Metric
+                  label="Records checked"
+                  value={report.summary.records_checked}
+                  tone="neutral"
+                />
+                <Metric
+                  label="Needs verification"
+                  value={report.summary.issues_found}
+                  tone={report.summary.issues_found ? "warning" : "success"}
+                />
+                <Metric
+                  label="Reviewed this session"
+                  value={reviewedCount}
+                  tone={reviewedCount === report.summary.issues_found ? "success" : "neutral"}
+                />
+              </div>
 
-          <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h2 className="text-sm font-bold text-slate-900">Checks performed</h2>
-            <div className="mt-3 flex flex-wrap gap-2">
-              {report.checks_performed.map((check) => (
-                <span
-                  key={check}
-                  className="rounded-full bg-slate-100 px-3 py-1.5 text-xs font-medium capitalize text-slate-700"
-                >
-                  {check}
-                </span>
-              ))}
-            </div>
-            <p className="mt-4 text-xs leading-relaxed text-slate-500">
-              {report.method} {report.note}
-            </p>
-          </section>
+              {report.issues.length === 0 ? (
+                <Card>
+                  <CardBody className="py-14 text-center">
+                    <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-emerald-50 text-emerald-700">
+                      <CheckIcon className="h-7 w-7" />
+                    </div>
+                    <h2 className="mt-4 section-title">No structured discrepancies found</h2>
+                    <p className="mx-auto mt-2 max-w-xl text-sm leading-relaxed text-slate-500">
+                      The checks did not find conflicting patient names, allergy statements,
+                      same-date lab results, or complete medication instructions. This does not
+                      prove every record is complete or correct.
+                    </p>
+                  </CardBody>
+                </Card>
+              ) : (
+                <section className="space-y-4">
+                  <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-900">
+                    <p className="font-semibold">Do not choose a value from this screen alone</p>
+                    <p className="mt-1 leading-relaxed">
+                      Open both original documents and use the suggested verification step. Apparent
+                      conflicts may be valid corrections, separate samples, or extraction
+                      uncertainty.
+                    </p>
+                  </div>
+                  {report.issues.map((issue) => (
+                    <IntegrityCard
+                      key={issue.id}
+                      issue={issue}
+                      reviewed={reviewed.has(issue.id)}
+                      onToggleReviewed={() =>
+                        setReviewed((previous) => {
+                          const next = new Set(previous);
+                          if (next.has(issue.id)) next.delete(issue.id);
+                          else next.add(issue.id);
+                          return next;
+                        })
+                      }
+                    />
+                  ))}
+                </section>
+              )}
+
+              <CorrectionHistorySection corrections={corrections} />
+
+              <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                <h2 className="text-sm font-bold text-slate-900">Checks performed</h2>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {report.checks_performed.map((check) => (
+                    <span
+                      key={check}
+                      className="rounded-full bg-slate-100 px-3 py-1.5 text-xs font-medium capitalize text-slate-700"
+                    >
+                      {check}
+                    </span>
+                  ))}
+                </div>
+                <p className="mt-4 text-xs leading-relaxed text-slate-500">
+                  {report.method} {report.note}
+                </p>
+              </section>
+            </>
+          )}
         </>
       )}
     </div>
@@ -272,6 +307,32 @@ function Evidence({ source }: { source: IntegrityEvidence }) {
       <FileIcon className="h-3 w-3" />
       {label}
     </span>
+  );
+}
+
+function Tab({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      onClick={onClick}
+      className={`border-b-2 px-4 py-3 text-sm font-semibold transition ${
+        active
+          ? "border-brand-600 text-brand-700"
+          : "border-transparent text-slate-500 hover:text-slate-800"
+      }`}
+    >
+      {children}
+    </button>
   );
 }
 
