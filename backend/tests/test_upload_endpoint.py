@@ -388,6 +388,82 @@ def test_all_files_non_medical_still_422():
         app.dependency_overrides.clear()
 
 
+def test_placeholder_page_is_kept_when_demo_skipping_is_off():
+    """Marker detection must not silently discard an otherwise plausible
+    clinical page unless the deployment explicitly opted into that policy."""
+    import routes.upload as upload_routes
+
+    placeholder = {
+        **NON_MEDICAL_DOC,
+        "document_type": "prescription",
+        "patient_name": "DEMO PATIENT",
+        "overall_confidence": 0.9,
+    }
+    app, patchers = _make_client(index_chunks=2)
+    try:
+        api.process_document.return_value = placeholder
+        with mock.patch.object(upload_routes, "SKIP_DEMO_DOCUMENTS", False):
+            with TestClient(app) as client:
+                resp = client.post(
+                    "/api/v1/documents",
+                    files=[("files", ("rx.pdf", b"%PDF-1.4 possible-real-rx", "application/pdf"))],
+                )
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["documents_added"] == 1
+    finally:
+        for p in patchers:
+            p.stop()
+        app.dependency_overrides.clear()
+
+
+def test_placeholder_page_without_content_is_dropped_when_enabled():
+    import routes.upload as upload_routes
+
+    placeholder = {
+        **NON_MEDICAL_DOC,
+        "document_type": "prescription",
+        "patient_name": "DEMO PATIENT",
+        "overall_confidence": 0.9,
+    }
+    app, patchers = _make_client(index_chunks=2)
+    try:
+        api.process_document.return_value = placeholder
+        with mock.patch.object(upload_routes, "SKIP_DEMO_DOCUMENTS", True):
+            with TestClient(app) as client:
+                resp = client.post(
+                    "/api/v1/documents",
+                    files=[("files", ("demo.pdf", b"%PDF-1.4 sample-pack", "application/pdf"))],
+                )
+        assert resp.status_code == 422, resp.text
+        assert "demo/placeholder marker" in resp.json()["detail"]
+        assert api.storage.upload_patient_document.call_count == 0
+    finally:
+        for p in patchers:
+            p.stop()
+        app.dependency_overrides.clear()
+
+
+def test_placeholder_marker_never_beats_structured_medical_content():
+    import routes.upload as upload_routes
+
+    real_content = {**EXTRACTED_DOC, "patient_name": "SAMPLE"}
+    app, patchers = _make_client(index_chunks=2)
+    try:
+        api.process_document.return_value = real_content
+        with mock.patch.object(upload_routes, "SKIP_DEMO_DOCUMENTS", True):
+            with TestClient(app) as client:
+                resp = client.post(
+                    "/api/v1/documents",
+                    files=[("files", ("lab.pdf", b"%PDF-1.4 real-content", "application/pdf"))],
+                )
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["documents_added"] == 1
+    finally:
+        for p in patchers:
+            p.stop()
+        app.dependency_overrides.clear()
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:

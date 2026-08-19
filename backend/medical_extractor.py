@@ -3060,6 +3060,19 @@ def _flatten_documents(raw_results: List[Dict[str, Any]]) -> List[Dict[str, Any]
 # language. The structural `_source.method == "synthetic"` check below is
 # the reliable signal; these markers are the best-effort fallback for
 # vendor sample packs we did not generate ourselves.
+#
+# Detection always runs, but dropping is opt-in. A false positive here would
+# otherwise remove a page before it reaches the patient's record, with only a
+# server log to explain the loss. Deployments intentionally importing vendor
+# sample packs can set SKIP_DEMO_DOCUMENTS=true; ordinary patient uploads keep
+# placeholder-looking pages and still pass the normal medical-content filter.
+SKIP_DEMO_DOCUMENTS = os.getenv("SKIP_DEMO_DOCUMENTS", "false").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+
 _DEMO_MARKERS_WORD = frozenset(
     {
         "demo",
@@ -3135,7 +3148,7 @@ def _is_demo_document(d: Dict[str, Any]) -> bool:
     if _has_demo_marker(d.get("patient_name")):
         return True
 
-    for med in d.get("medications", []):
+    for med in d.get("medications", []) or []:
         if not isinstance(med, dict):
             continue
         if _has_demo_marker(med.get("name")):
@@ -3153,7 +3166,7 @@ def _normalize_patient_key(name: Any) -> str:
 
 
 def group_documents_by_patient(
-    raw_results: List[Dict[str, Any]], drop_demo_documents: bool = True
+    raw_results: List[Dict[str, Any]], drop_demo_documents: bool = SKIP_DEMO_DOCUMENTS
 ) -> Dict[str, List[Dict[str, Any]]]:
     """
     Splits a flat list of extracted documents into groups keyed by patient
@@ -3591,15 +3604,15 @@ if __name__ == "__main__":
         print("No documents were successfully extracted. Exiting.")
         sys.exit(1)
 
-    # Step 2: split by patient name, dropping demo/placeholder documents.
-    # This stops unrelated prescriptions (e.g. sample docs for different
-    # people sitting in the same folder) from being merged into one
-    # timeline and cross-checked against each other.
+    # Step 2: split by patient name. Demo/placeholder detection always runs,
+    # while dropping is controlled by SKIP_DEMO_DOCUMENTS (off by default).
+    # This prevents a marker false-positive from silently losing patient data;
+    # sample-pack imports can explicitly opt into filtering.
     print("\nGrouping documents by patient ...")
-    patient_groups = group_documents_by_patient(all_results, drop_demo_documents=True)
+    patient_groups = group_documents_by_patient(all_results)
 
     if not patient_groups:
-        print("No real (non-demo) documents remained after filtering. Exiting.")
+        print("No documents remained after filtering. Exiting.")
         sys.exit(1)
 
     # Step 3 + 4: for EACH distinct patient found, merge into a timeline and

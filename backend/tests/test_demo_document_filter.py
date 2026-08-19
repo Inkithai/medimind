@@ -171,8 +171,24 @@ class TestRobustness:
         doc = _doc("Jane Doe", medications=["not a dict", None, 42])
         assert _is_demo_document(doc) is False
 
+    def test_null_medication_collection_does_not_raise(self):
+        doc = _doc("Jane Doe")
+        doc["medications"] = None
+        assert _is_demo_document(doc) is False
+
     def test_non_string_patient_name(self):
         assert _is_demo_document(_doc(12345)) is False
+
+
+class TestGroupDocumentsByPatientDefaults:
+    def test_demo_filtering_is_off_by_default(self):
+        doc = _doc(
+            "DEMO PATIENT",
+            medications=[],
+            source={"file": "possible_false_positive.pdf", "method": "vision"},
+        )
+        groups = group_documents_by_patient([doc])
+        assert groups == {"demo patient": [doc]}
 
 
 class TestGroupDocumentsByPatientContentWins:
