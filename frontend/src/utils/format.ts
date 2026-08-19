@@ -77,7 +77,11 @@ export function formatDate(date: string | null | undefined): string {
       d.getMonth() === month - 1 &&
       d.getDate() === day;
     if (isRealDate) {
-      return d.toLocaleDateString(undefined, {
+      // The app's selected language, not the browser's. Timestamps below
+      // already used getRuntimeLocale(), so a Sinhala or Tamil user saw
+      // calendar dates rendered in English next to timestamps rendered in
+      // their own language — in the same table, sometimes in the same row.
+      return d.toLocaleDateString(getRuntimeLocale(), {
         year: "numeric",
         month: "short",
         day: "numeric",

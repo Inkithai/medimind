@@ -202,6 +202,13 @@ export function MedicinesPage() {
                       </div>
                       <StatusBadge tone="brand">{historyCount} ×</StatusBadge>
                     </div>
+                    {mostRecent.cross_check_eligible === false && (
+                      <p className="mt-2 rounded-lg border border-amber-300 bg-amber-50 p-2 text-xs leading-relaxed text-amber-900">
+                        <span className="font-semibold">Not safety-checked: </span>
+                        {mostRecent.unmatched_reason ||
+                          "This drug name could not be converted to its standard English name, so it cannot be compared against your other records."}
+                      </p>
+                    )}
                     <div className="mt-2 space-y-1 text-xs text-slate-600">
                       <p>
                         {[mostRecent.dosage, mostRecent.frequency, mostRecent.duration]

@@ -71,6 +71,13 @@ export interface Medication {
   confidence: number;
   evidence?: EvidenceRegion[];
   _trust?: TrustMetadata;
+  /**
+   * False when the drug name could not be converted to its standard English
+   * (INN) name, so this medicine cannot be matched against the rest of the
+   * record for duplicates or interactions (see language_guard.py).
+   */
+  cross_check_eligible?: boolean;
+  unmatched_reason?: string;
 }
 
 export interface LabResult {
@@ -499,6 +506,22 @@ export interface DuplicateDocumentGroup {
   identical_files: boolean;
   medications: string[];
   documents: DuplicateDocumentInfo[];
+}
+
+/**
+ * A page kept despite incomplete drug-name translation. The medications
+ * named here are stored, but cannot be compared against the rest of the
+ * record for duplicates or interactions.
+ */
+export interface LanguageDegradation {
+  degraded: boolean;
+  file?: string;
+  problems: string[];
+  unmatched_medications: string[];
+  languages?: string[];
+  confidence?: number;
+  message: string;
+  advice?: string;
 }
 
 export interface DuplicateFileSkipped {
@@ -1005,6 +1028,8 @@ export interface UploadResponse {
   failed_files?: FailedFile[];
   // Re-uploads recognised as byte-for-byte duplicates and not added again.
   duplicate_files_skipped?: DuplicateFileSkipped[];
+  /** Files accepted at reduced confidence because some drug names could not be normalized. */
+  language_degradations?: LanguageDegradation[];
   // True when every file in the batch was an already-uploaded duplicate.
   all_files_duplicate?: boolean;
 }

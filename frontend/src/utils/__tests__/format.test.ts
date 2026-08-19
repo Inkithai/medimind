@@ -72,3 +72,27 @@ for (const [name, run] of tests) {
 }
 console.log(`\n${tests.length - failures}/${tests.length} tests passed in ${TZ}`);
 if (failures) process.exit(1);
+
+// --- locale consistency ------------------------------------------------------
+// A calendar date and a timestamp shown side by side must be formatted in the
+// SAME language. formatDate's date-only branch used the browser locale while
+// its timestamp branch used the app's selected language, so switching the app
+// to Sinhala or Tamil left plain dates in English.
+{
+  const { setRuntimeLanguage } = await import("../../i18n/runtime");
+  try {
+    setRuntimeLanguage("ta");
+    const calendarDate = formatDate("2026-08-07");
+    const timestamp = formatDate("2026-08-07T09:30:00Z");
+    assert.notEqual(calendarDate, "Aug 7, 2026", "a Tamil user should not see an English date");
+    assert.equal(
+      calendarDate.replace(/[\d\s,]/g, "") === timestamp.replace(/[\d\s,]/g, ""),
+      true,
+      "calendar dates and timestamps use the same language",
+    );
+  } finally {
+    setRuntimeLanguage("en");
+  }
+  assert.equal(formatDate("2026-08-07"), "Aug 7, 2026", "English output is unchanged");
+  console.log("PASS: dates follow the selected language");
+}

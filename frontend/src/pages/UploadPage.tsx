@@ -696,6 +696,30 @@ export function UploadPage() {
                     </p>
                   </div>
                 )}
+                {result.language_degradations && result.language_degradations.length > 0 && (
+                  <div className="mt-2 rounded-lg border-2 border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                    <p className="font-semibold">Some medicine names could not be translated</p>
+                    <ul className="mt-1 list-disc space-y-1 pl-5">
+                      {result.language_degradations.map((degradation, index) => (
+                        <li key={`${degradation.file}-${index}`}>
+                          <strong>{degradation.file || "This document"}</strong>
+                          {degradation.unmatched_medications.length > 0 && (
+                            <span> — {degradation.unmatched_medications.join(", ")}</span>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                    <p className="mt-1">
+                      These documents were saved and the rest of their details were read normally.
+                      The medicines listed above cannot be checked against your other medicines for
+                      duplicates or interactions, so they are marked in your record.
+                    </p>
+                    <p className="mt-1">
+                      {result.language_degradations[0]?.advice ||
+                        "Ask your pharmacist or doctor for a copy that also lists the generic (non-brand) drug names, then upload that."}
+                    </p>
+                  </div>
+                )}
                 {!result.indexed && result.index_error && (
                   <p className="mt-2 rounded-lg bg-amber-100/70 px-3 py-2 text-sm text-amber-900">
                     {result.index_error_code === "memory_limit"

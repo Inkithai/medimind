@@ -725,8 +725,24 @@ Several capabilities the API already served had no screen. They are now surfaced
 - **Forms** (home measurement entry) have visible labels, required markers, per-field guidance, inline `role="alert"` errors, and a disabled submit that explains what is missing.
 - **Touch targets** on row actions are at least 44px, with visible focus rings, `title` explanations for unfamiliar actions, and `aria-busy` while an action runs.
 
+### Partially-translated documents are kept, not refused
+
+A prescription whose drug names cannot all be converted to their standard English (INN) names used to be rejected in full (HTTP 422). For a photographed non-English prescription partial translation is the *normal* outcome, so that rule discarded the medicines that had resolved along with the one that had not, and left the user with no record at all.
+
+`language_guard.apply_language_degradation()` now accepts the document and records the gap instead:
+
+- each unmatchable medication is marked `cross_check_eligible: False` with a plain-language `unmatched_reason`, so the medicine is visible in the record (and flagged in the Medications screen) rather than silently missing from duplicate/interaction checks;
+- the document's confidence is capped at 0.4 — below the review threshold so it is visibly flagged, above `document_filter.LOW_CONFIDENCE_THRESHOLD` (0.35) so degrading a document can never make a later stage drop it as non-medical;
+- the upload response carries `language_degradations` (file, affected medicines, languages, advice), which the Upload screen shows;
+- a degraded document is always graded **high** translation risk regardless of the model's self-reported `translation_confidence`: a model can be perfectly confident about a translation it never performed.
+
+`assert_language_normalized()` (hard refusal) is unchanged and still available; both it and the degradation path share one detector, `detect_normalization_failures()`, so they cannot disagree about what failed.
+
 ### What changed
 
+- **Partially-translated prescriptions are no longer thrown away** — the usable medicines are kept, the unmatchable ones are marked `cross_check_eligible: False`, and the upload response/UI say which medicines cannot be safety-checked.
+- **Honest rejection messages** — `document_filter` no longer reports `overall_confidence=0.0` for a document that reported no score at all (or `overall_confidence=high is below 0.35` for a non-numeric one). The accept/reject decision is unchanged; only the explanation is truthful.
+- **Bug fixes** — an identity-mismatch hold crashed the whole upload (`ValueError: too many values to unpack`) instead of returning the 409 confirm-to-add review; the safety analysis bypassed the module's patchable indirection, so upload tests reached the real LLM provider; calendar dates ignored the selected language while timestamps honoured it.
 - **Backend capabilities exposed in the UI** — consult triage, medication reconciliation, deterioration trajectory, finding lifecycle + past feedback, correction history, finding change log/snapshot, record export (+ FHIR validation) and guideline refresh all have screens now; a toast system gives every action a plain-language success/failure message.
 - **One analysis log entry per document** — the analysis log grouped page rows into the upload they came from, so a multi-page scan no longer appears as several separate "Document extraction" analyses with its medications counted once per page. Document type is normalized (never null/free-form), confidence falls back to the result payload in the UI and is normalized when reported as a percentage, and `clean_duplicate_analyses.py` cleans historical duplicate page rows (dry-run by default).
 - **Sticky sidebar** — the desktop sidebar is now `lg:sticky lg:top-0 lg:h-screen lg:self-start` instead of a flex child stretched by its sibling, so it stays fixed in the viewport on long pages rather than scrolling away and growing to the content height.
