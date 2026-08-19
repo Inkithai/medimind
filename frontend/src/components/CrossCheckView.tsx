@@ -58,7 +58,7 @@ export function CrossCheckView({
   const canonicalAlerts = collectSafetyAlerts(report, dosageReport);
   const totalIssues = canonicalAlerts.length;
   const continuations = report.medication_continuations || [];
-  const supplementalKinds = new Set(["concurrent_duplicate", "age_restriction"]);
+  const supplementalKinds = new Set(["concurrent_duplicate", "age_restriction", "recall"]);
   const supplementalAlerts = canonicalAlerts.filter(
     (item) =>
       supplementalKinds.has(item.kind) ||

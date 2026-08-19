@@ -52,6 +52,8 @@ The system is designed to be evidence-based and conservative: it explains what u
 - Published guidance enrichment for opioid/depressant safety.
 - WHO/EML-backed poisoning and age-restriction reference logic.
 - Optional openFDA-backed FDA Structured Product Label citations for interaction findings (evidence-backed, not model recall).
+- Optional US FDA recall checking (deterministic, framed as US-market data, routed to a pharmacist).
+- Optional deterministic brand→generic (INN) resolution from the FDA NDC directory.
 - Evidence grading: deterministic, reference-backed, or model-knowledge with confidence caps.
 - Treatment-window risk timeline: concurrent, possible, historical, and unknown risk timing.
 
@@ -299,7 +301,9 @@ Zero matches return an empty list plus a widening-search suggestion. Missing pho
 | `backend/record_trust.py` | Correction replay, deterministic conflict detection, authoritative-source state, fail-closed quarantine. |
 | `backend/evidence.py` | Page/quote/bounding-box provenance and exact text-region resolution. |
 | `backend/evidence_grading.py` | Finding evidence source classification and model-knowledge confidence caps. |
-| `backend/openfda_reference.py` | Optional openFDA adapter: FDA Structured Product Labels cited behind interaction findings (cache-first, fail-open, keyed by ingredient). |
+| `backend/openfda_reference.py` | Optional openFDA adapter: FDA Structured Product Labels cited behind interaction findings, US recall records, and NDC brand→generic lookups (cache-first, fail-open, keyed by ingredient/brand). |
+| `backend/recall_check.py` | Deterministic US FDA recall check: one finding per recalled ingredient, routed to a pharmacist (US-market framing, absence never rendered as "not recalled"). |
+| `backend/brand_resolver.py` | Deterministic brand→INN resolution from the NDC directory, filling empty ingredient lists so Latin-script brands join cross-checking. |
 | `backend/risk_timeline.py` | Timing windows for safety findings and double-dosing exposure periods. |
 | `backend/vector_store.py` | Chroma/Supabase vector-store abstraction. |
 | `backend/storage.py` | Cloudinary default storage, optional Supabase private storage, signed URL helpers, storage deletion/download abstraction. |

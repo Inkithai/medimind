@@ -452,6 +452,19 @@ def cross_check_prescriptions(
     except Exception as e:
         logger.warning("Deterministic condition check failed (LLM findings kept): %s", e)
 
+    # Deterministic US FDA recall pass: matches each active medication's
+    # ingredients against openFDA enforcement records. Reads only the cache
+    # warmed by the record/upload path (never network during this check), so
+    # a cold cache or an unconfigured key simply means no recall findings
+    # this run — the finding is never invented, and absence is never
+    # rendered as "not recalled".
+    try:
+        from recall_check import check_recalls, merge_recall_findings
+
+        merge_recall_findings(result, check_recalls(active_timeline))
+    except Exception as e:
+        logger.warning("Deterministic recall check failed (other findings kept): %s", e)
+
     from medication_history import detect_medication_transitions, enrich_cross_check_sources
 
     result.update(detect_medication_transitions(timeline))

@@ -403,6 +403,29 @@ export interface EmlAgeConflict extends GradedFinding {
   population?: string;
 }
 
+/** A US FDA recall match (openfda_recalls) — deterministic, US-market data. */
+export interface OpenFdaRecall extends GradedFinding {
+  medications_involved?: string[];
+  ingredient?: string;
+  explanation: string;
+  severity?: string;
+  confidence?: number;
+  source?: string;
+  rule?: string;
+  finding_kind?: string;
+  recall_count?: number;
+  reference?: {
+    source?: string;
+    publisher?: string;
+    recall_number?: string;
+    classification?: string;
+    status?: string;
+    recall_initiation_date?: string;
+    reason_for_recall?: string;
+    product_description?: string;
+  };
+}
+
 export interface CrossCheckReport {
   // Every finding may additionally carry evidence-grading and timing fields
   // (GradedFinding) — added deterministically server-side.
@@ -412,6 +435,7 @@ export interface CrossCheckReport {
   allergy_conflicts: (AllergyConflict & GradedFinding)[];
   guideline_flagged_combinations?: GuidelineCombination[];
   eml_age_conflicts?: EmlAgeConflict[];
+  openfda_recalls?: OpenFdaRecall[];
   medication_changes?: MedicationTransition[];
   medication_continuations?: MedicationTransition[];
   overall_recommendation: string;
@@ -1157,8 +1181,11 @@ export type Severity = "high" | "moderate" | "low";
 /** A generic finding shared by the drug-lab / renal-hepatic / condition engines. */
 export interface ClinicalFinding {
   medications_involved?: string[];
+  ingredient?: string;
   condition?: string;
   organ?: string;
+  recall_count?: number;
+  reference?: Record<string, unknown>;
   lab?: { test: string; value: number | string | null; unit: string | null; flag?: string | null };
   lab_markers?: Array<{
     test: string;

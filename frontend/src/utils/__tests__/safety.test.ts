@@ -118,4 +118,32 @@ test("prefers cited guidance over a duplicate model finding for the same pair", 
   assert.equal(alerts[0].evidenceSource, "published_reference");
 });
 
+test("surfaces US FDA recall findings as a recall alert", () => {
+  const report: CrossCheckReport = {
+    ...empty,
+    openfda_recalls: [
+      {
+        medications_involved: ["Losartan"],
+        ingredient: "losartan",
+        explanation: "Losartan has an ongoing recall in the US market...",
+        severity: "high",
+        confidence: 0.9,
+        source: "openfda_enforcement",
+        finding_kind: "openfda_recall",
+        recall_count: 2,
+        reference: {
+          recall_number: "D-1234-2024",
+          classification: "Class I",
+          status: "Ongoing",
+        },
+      },
+    ],
+  };
+  const alerts = collectSafetyAlerts(report);
+  assert.equal(alerts.length, 1);
+  assert.equal(alerts[0].kind, "recall");
+  assert.equal(alerts[0].severity, "high");
+  assert.match(alerts[0].description, /Class I/);
+});
+
 console.log("All safety-summary tests passed.");

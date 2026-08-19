@@ -55,6 +55,12 @@ def _seed() -> None:
         "openfda_labels": (
             "FDA Structured Product Labels (openFDA drug/label API; US-market data)"
         ),
+        "openfda_recalls": (
+            "FDA Enforcement Reports / recalls (openFDA drug/enforcement API; US-market data)"
+        ),
+        "openfda_ndc_directory": (
+            "FDA National Drug Code directory (openFDA drug/ndc API; brand-to-generic)"
+        ),
     }.items():
         register(key, version="initial", reviewed=today, description=desc, _seed=True)
 

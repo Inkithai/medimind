@@ -599,6 +599,43 @@ def generate_consult_triage(
                 )
             )
 
+    # --- US FDA recall findings ---------------------------------------------
+    # A recall match is a medication-reconciliation question, not a
+    # prescribing decision: the professional who can compare a dispensed
+    # batch/lot against the recall is the pharmacist. Urgency follows the
+    # FDA class (Class I most serious), and every item carries the US-market
+    # caveat so a patient never reads a foreign-market record as a certainty
+    # about their own supply.
+    for recall in cross_check.get("openfda_recalls") or []:
+        ref = recall.get("reference") or {}
+        severity = str(recall.get("severity") or "moderate").lower()
+        urgency = "soon" if severity in {"high", "moderate"} else "routine"
+        meds = recall.get("medications_involved") or []
+        subject = " + ".join(str(m) for m in meds) or str(recall.get("ingredient") or "medicine")
+        item = _item(
+            trigger="us_fda_recall",
+            subject=subject,
+            detail=recall.get("explanation") or "",
+            route="pharmacist",
+            urgency=urgency,
+            why_this_route=(
+                "Checking whether a dispensed supply is part of a recall is a "
+                "pharmacist's reconciliation task — they hold the batch and lot "
+                "numbers. The record is US-market data and may not affect this "
+                "patient's medicine."
+            ),
+            confidence=recall.get("confidence"),
+        )
+        item["reference"] = {
+            "source": ref.get("source"),
+            "recall_number": ref.get("recall_number"),
+            "classification": ref.get("classification"),
+            "status": ref.get("status"),
+            "recall_initiation_date": ref.get("recall_initiation_date"),
+        }
+        item["evidence_source"] = "openfda_enforcement"
+        items.append(item)
+
     # --- Lab trend findings -------------------------------------------------
     for trend in lab_trends.get("trends") or []:
         test_name = str(trend.get("test_name") or "lab test")

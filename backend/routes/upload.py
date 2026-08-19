@@ -43,6 +43,7 @@ import storage  # noqa: E402
 import vector_store  # noqa: E402
 from analysis_log import build_extraction_analyses  # noqa: E402
 from auth import get_current_user  # noqa: E402
+from brand_resolver import resolve_brand_ingredients  # noqa: E402
 from document_filter import NonMedicalDocumentError, assert_medical_document  # noqa: E402
 from document_processing import process_raw_text  # noqa: E402
 from document_types import normalize_document_type, summarize_document_types  # noqa: E402
@@ -89,7 +90,7 @@ from routes.records import (  # noqa: E402
     _attach_eml_age_safety,
     _cross_check_trusted_timeline,
     _derive_record,
-    _openfda_label_context,
+    _openfda_reference_context,
     _prepare_current_trust_state,
     _rebuild_after_document_deletion,
     _replace_index,
@@ -669,6 +670,34 @@ async def _execute_upload_pipeline(
                             )
                             rejected = True
                             break
+                        # Deterministic brand -> generic resolution from the
+                        # FDA NDC directory BEFORE language degradation: a
+                        # Latin-script brand the model could not map to an
+                        # ingredient gets its INN filled from the directory,
+                        # so it takes part in cross-checking instead of
+                        # silently dropping out. Fail-open: no key, no hit, or
+                        # a lookup failure leaves the page exactly as
+                        # extracted. Non-Latin names are never queried (NDC
+                        # brand names are Latin) and remain language_guard's
+                        # responsibility.
+                        try:
+                            ndc_summary = resolve_brand_ingredients(page)
+                        except Exception as exc:  # defensive — never block a record on a lookup
+                            logger.warning(
+                                "upload: user=%s NDC brand resolution failed for '%s': %s",
+                                user_id,
+                                label,
+                                exc,
+                            )
+                            ndc_summary = {}
+                        if ndc_summary.get("resolved"):
+                            logger.info(
+                                "upload: user=%s NDC resolved %d brand name(s) on '%s': %s",
+                                user_id,
+                                len(ndc_summary["resolved"]),
+                                label,
+                                ", ".join(ndc_summary["resolved"]),
+                            )
                         # A page whose drug names could not all be normalized
                         # is KEPT at a lowered confidence with the unmatchable
                         # medications marked, instead of failing the whole
@@ -1011,11 +1040,12 @@ async def _execute_upload_pipeline(
         graph_backed_findings, antidote_reference_notes = _antidote_context(
             timeline, user_id, "upload_documents"
         )
-        # Warm the openFDA label cache BEFORE the cross-check so interaction
-        # findings can be corroborated by FDA Structured Product Labels. Fail-
-        # open: a cold cache or a failed fetch just means findings grade as
-        # model knowledge, exactly as they did before this feature existed.
-        _openfda_label_context(timeline, user_id, "upload_documents")
+        # Warm the openFDA caches (labels + recalls) BEFORE the cross-check so
+        # interaction findings can be corroborated by FDA Structured Product
+        # Labels and the recall check can match ingredients. Fail-open: a cold
+        # cache or a failed fetch just means those findings don't appear,
+        # exactly as they did before this feature existed.
+        _openfda_reference_context(timeline, user_id, "upload_documents")
         # Safety is another provider call, so it shares the same bounded pool
         # as extraction instead of bypassing load control or blocking polling.
         cross_check = await _cross_check_trusted_timeline(timeline, graph_backed_findings)

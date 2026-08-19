@@ -57,8 +57,11 @@ Env:
     OPENFDA_BASE_URL       default https://api.fda.gov
     OPENFDA_HTTP_TIMEOUT   per-request timeout seconds (default 5)
     OPENFDA_LABEL_CACHE_TTL seconds to keep a label cached (default 30 days)
+    OPENFDA_RECALL_CACHE_TTL seconds to keep recall records cached (7 days)
+    OPENFDA_NDC_CACHE_TTL  seconds to keep NDC entries cached (30 days)
     OPENFDA_MAX_LABELS_PER_RECORD  cap on ingredients fetched per record
     OPENFDA_PREFETCH_WORKERS       concurrent fetches during a warm (default 4)
+    OPENFDA_RECALL_LIMIT   recall records fetched per ingredient (default 10)
 """
 
 from __future__ import annotations
@@ -186,6 +189,16 @@ def _api_key() -> str:
     return (os.environ.get("OPENFDA_API_KEY") or "").strip()
 
 
+def _first(values: Any) -> str:
+    """First non-empty string element of a list-or-scalar openFDA field."""
+    if isinstance(values, list):
+        for value in values:
+            if str(value).strip():
+                return str(value).strip()
+        return ""
+    return str(values or "").strip()
+
+
 def is_configured() -> bool:
     """True when openFDA lookups are allowed. Without a key the module stays
     dormant rather than burn the shared anonymous quota, and findings keep
@@ -239,8 +252,9 @@ def _get_json(url: str) -> Any:
         ) from exc
 
 
-def _format_effective_time(raw: Any) -> Optional[str]:
-    """openFDA effective_time is YYYYMMDD; render it ISO for display."""
+def _format_openfda_date(raw: Any) -> Optional[str]:
+    """openFDA dates (effective_time, recall_initiation_date, ...) are
+    YYYYMMDD; render them ISO for display."""
     if raw is None:
         return None
     text = str(raw).strip()
@@ -279,7 +293,7 @@ def _shape_label(result: Dict[str, Any], ingredient: str) -> Dict[str, Any]:
         "display_name": str(generic[0]) if generic else str(ingredient),
         "generic_name": [str(g) for g in generic],
         "set_id": set_id,
-        "effective_time": _format_effective_time(result.get("effective_time")),
+        "effective_time": _format_openfda_date(result.get("effective_time")),
         "version": result.get("version"),
         "url": url,
         "sections": sections,
@@ -490,6 +504,244 @@ def openfda_claim_reference(
     return None
 
 
+# ---------------------------------------------------------------------------
+# Recall checking — /drug/enforcement.json
+# ---------------------------------------------------------------------------
+# Same fail-open, cache-first discipline as labels. Enforcement records are
+# US-market; a medicine missing from them is silently left unmatched, and a
+# recall match is framed as "reported in the US market — confirm your supply
+# with a pharmacist", never as a certainty that the patient's own product was
+# affected.
+
+RECALL_CACHE_TTL_SECONDS = float(os.environ.get("OPENFDA_RECALL_CACHE_TTL", str(7 * 24 * 3600)))
+RECALL_LIMIT = max(1, int(os.environ.get("OPENFDA_RECALL_LIMIT", "10")))
+
+_RECALL_CACHE = _TTLCache(RECALL_CACHE_TTL_SECONDS)
+_RECALL_MISSING = object()
+
+
+def _recall_search_url(ingredient: str) -> str:
+    params = {
+        "search": f'openfda.generic_name:"{ingredient}"',
+        "sort": "recall_initiation_date:desc",
+        "limit": str(RECALL_LIMIT),
+    }
+    key = _api_key()
+    if key:
+        params["api_key"] = key
+    return OPENFDA_BASE_URL + "/drug/enforcement.json?" + urllib.parse.urlencode(params)
+
+
+def _shape_recall(result: Dict[str, Any]) -> Dict[str, Any]:
+    openfda = result.get("openfda") if isinstance(result.get("openfda"), dict) else {}
+    reason = result.get("reason_for_recall")
+    if isinstance(reason, list):
+        reason_text = "\n".join(str(item) for item in reason if isinstance(item, str))
+    else:
+        reason_text = str(reason or "")
+    classification = str(result.get("classification") or "").strip()
+    status = str(result.get("status") or "").strip()
+    return {
+        "source": "FDA Enforcement Report (openFDA drug/enforcement)",
+        "publisher": "U.S. Food and Drug Administration (FDA) via openFDA",
+        "recall_number": str(result.get("recall_number") or "").strip(),
+        "classification": classification,
+        "classification_rank": {
+            "class i": 0,
+            "class ii": 1,
+            "class iii": 2,
+        }.get(classification.lower(), 3),
+        "status": status,
+        "ongoing": status.lower() == "ongoing",
+        "recall_initiation_date": _format_openfda_date(result.get("recall_initiation_date")),
+        "reason_for_recall": reason_text,
+        "product_description": str(result.get("product_description") or "").strip(),
+        "voluntary_mandated": str(result.get("voluntary_mandated") or "").strip(),
+        "state": str(result.get("state") or "").strip(),
+        "generic_name": [str(g) for g in (openfda.get("generic_name") or [])],
+    }
+
+
+def _fetch_recalls(ingredient: str) -> List[Dict[str, Any]]:
+    """Fetch recall records for one ingredient, newest first. Raises
+    OpenFdaUnavailableError only on transport failure, so a clean no-match
+    (empty results) is cacheable as a definitive miss."""
+    payload = _get_json(_recall_search_url(ingredient))
+    results = payload.get("results") if isinstance(payload, dict) else None
+    if not isinstance(results, list):
+        return []
+    shaped = [_shape_recall(r) for r in results if isinstance(r, dict)]
+    # Most actionable first. Sort is stable, so the two passes compose: newest
+    # first, THEN ongoing recalls (and within those, FDA class order) to the
+    # front without disturbing the date order inside each group.
+    shaped.sort(key=lambda r: r["recall_initiation_date"] or "", reverse=True)
+    shaped.sort(key=lambda r: (not r["ongoing"], r["classification_rank"]))
+    return shaped
+
+
+def lookup_recall_references(
+    ingredients: List[str], fetch_missing: bool = True
+) -> Dict[str, List[Dict[str, Any]]]:
+    """Bulk recall lookup keyed by lowercased base ingredient.
+
+    Reads the cache first; with ``fetch_missing`` (default) uncached
+    ingredients are fetched. A definitive miss is cached too. The grading /
+    safety-check path passes ``fetch_missing=False`` so it never performs
+    network I/O — the record path warms the cache first.
+    """
+    if not is_configured():
+        return {}
+    normalized = sorted({_base_ingredient(i) for i in ingredients if i and str(i).strip()})
+    normalized = [n for n in normalized if n][:MAX_LABELS_PER_RECORD]
+
+    found: Dict[str, List[Dict[str, Any]]] = {}
+    missing: List[str] = []
+    for name in normalized:
+        cached = _RECALL_CACHE.get(name)
+        if cached is _RECALL_MISSING:
+            continue
+        if isinstance(cached, list):
+            found[name] = cached
+        else:
+            missing.append(name)
+
+    if not missing or not fetch_missing:
+        return found
+
+    for name in missing:
+        try:
+            recalls = _fetch_recalls(name)
+        except OpenFdaUnavailableError:
+            # Transport failure is not a definitive miss — leave uncached.
+            continue
+        if recalls:
+            _RECALL_CACHE.set(name, recalls)
+            found[name] = recalls
+        else:
+            _RECALL_CACHE.set(name, _RECALL_MISSING)
+
+    if found:
+        logger.info(
+            "openFDA recall lookup: %d/%d ingredient(s) have enforcement records",
+            len(found),
+            len(normalized),
+        )
+    return found
+
+
+def prefetch_recalls(ingredients: List[str]) -> Dict[str, List[Dict[str, Any]]]:
+    """Warm the recall cache for a set of ingredients (record path / scheduler)."""
+    return lookup_recall_references(ingredients, fetch_missing=True)
+
+
+# ---------------------------------------------------------------------------
+# Brand -> INN resolution — /drug/ndc.json
+# ---------------------------------------------------------------------------
+# The NDC directory maps a brand name to its generic_name deterministically,
+# where the extractor otherwise relies on model recall (which the extraction
+# prompt correctly caps below 0.9). Used by brand_resolver.py to fill empty
+# ingredient lists so a Latin-script brand still takes part in cross-checking.
+
+NDC_CACHE_TTL_SECONDS = float(os.environ.get("OPENFDA_NDC_CACHE_TTL", str(30 * 24 * 3600)))
+
+_NDC_CACHE = _TTLCache(NDC_CACHE_TTL_SECONDS)
+_NDC_MISSING = object()
+
+
+def _ndc_search_url(brand: str) -> str:
+    params = {"search": f'brand_name:"{brand}"', "limit": "1"}
+    key = _api_key()
+    if key:
+        params["api_key"] = key
+    return OPENFDA_BASE_URL + "/drug/ndc.json?" + urllib.parse.urlencode(params)
+
+
+def _shape_ndc(result: Dict[str, Any]) -> Dict[str, Any]:
+    openfda = result.get("openfda") if isinstance(result.get("openfda"), dict) else {}
+    active = [
+        str(item.get("name") or "").strip()
+        for item in (result.get("active_ingredients") or [])
+        if isinstance(item, dict) and str(item.get("name") or "").strip()
+    ]
+    return {
+        "source": "FDA National Drug Code (NDC) directory via openFDA",
+        "publisher": "U.S. Food and Drug Administration (FDA) via openFDA",
+        "brand_name": _first(openfda.get("brand_name"))
+        or str(result.get("brand_name") or "").strip(),
+        "generic_name": _first(openfda.get("generic_name"))
+        or str(result.get("generic_name") or "").strip(),
+        "product_ndc": str(result.get("product_ndc") or "").strip(),
+        "labeler_name": _first(openfda.get("manufacturer_name"))
+        or str(result.get("labeler_name") or "").strip(),
+        "active_ingredients": active,
+        "marketing_status": str(
+            openfda.get("marketing_status") or result.get("marketing_status") or ""
+        ).strip(),
+    }
+
+
+def _fetch_ndc(brand: str) -> Optional[Dict[str, Any]]:
+    """Fetch the NDC entry for one brand name. Returns None for a clean
+    no-match and raises OpenFdaUnavailableError on transport failure."""
+    payload = _get_json(_ndc_search_url(brand))
+    results = payload.get("results") if isinstance(payload, dict) else None
+    if isinstance(results, list) and results and isinstance(results[0], dict):
+        return _shape_ndc(results[0])
+    return None
+
+
+def lookup_generic_names(
+    brands: List[str], fetch_missing: bool = True
+) -> Dict[str, Dict[str, Any]]:
+    """Bulk brand -> generic lookup, keyed by lowercased brand name.
+
+    Same cache discipline as labels/recalls. The resolver path calls this
+    during upload (network allowed); it must not run during grading.
+    """
+    if not is_configured():
+        return {}
+    normalized = sorted({str(b).strip().lower() for b in brands if str(b).strip()})
+    normalized = [n for n in normalized if n][:MAX_LABELS_PER_RECORD]
+
+    found: Dict[str, Dict[str, Any]] = {}
+    missing: List[str] = []
+    for name in normalized:
+        cached = _NDC_CACHE.get(name)
+        if cached is _NDC_MISSING:
+            continue
+        if isinstance(cached, dict):
+            found[name] = cached
+        else:
+            missing.append(name)
+
+    if not missing or not fetch_missing:
+        return found
+
+    for name in missing:
+        try:
+            entry = _fetch_ndc(name)
+        except OpenFdaUnavailableError:
+            continue
+        if entry is None:
+            _NDC_CACHE.set(name, _NDC_MISSING)
+        else:
+            _NDC_CACHE.set(name, entry)
+            found[name] = entry
+
+    if found:
+        logger.info(
+            "openFDA NDC lookup: %d/%d brand name(s) resolved to a generic",
+            len(found),
+            len(normalized),
+        )
+    return found
+
+
+def prefetch_ndc(brands: List[str]) -> Dict[str, Dict[str, Any]]:
+    """Warm the NDC cache for a set of brand names (upload path)."""
+    return lookup_generic_names(brands, fetch_missing=True)
+
+
 if __name__ == "__main__":
     import sys
 
@@ -542,4 +794,39 @@ if __name__ == "__main__":
         is None
     )
 
-    print("openFDA label reference self-checks passed.")
+    # --- Recall shaping: classification rank + ISO date + ongoing sort ------
+    recall = _shape_recall(
+        {
+            "recall_number": "D-1234-2024",
+            "classification": "Class II",
+            "status": "Ongoing",
+            "recall_initiation_date": "20240105",
+            "reason_for_recall": ["Microbial contamination", "See firm press release"],
+            "openfda": {"generic_name": ["LOSARTAN POTASSIUM"]},
+        }
+    )
+    assert recall["classification_rank"] == 1
+    assert recall["recall_initiation_date"] == "2024-01-05"
+    assert recall["ongoing"] is True
+    assert "Microbial contamination" in recall["reason_for_recall"]
+
+    # --- NDC shaping: brand -> generic + active ingredients -----------------
+    ndc = _shape_ndc(
+        {
+            "product_ndc": "12345-678-90",
+            "brand_name": "PANADOL",
+            "generic_name": "ACETAMINOPHEN",
+            "openfda": {
+                "brand_name": ["PANADOL"],
+                "generic_name": ["ACETAMINOPHEN"],
+                "manufacturer_name": ["Test Labeler"],
+                "marketing_status": "prescription",
+            },
+            "active_ingredients": [{"name": "ACETAMINOPHEN", "strength": "500 mg/1"}],
+        }
+    )
+    assert ndc["generic_name"] == "ACETAMINOPHEN"
+    assert ndc["product_ndc"] == "12345-678-90"
+    assert ndc["active_ingredients"] == ["ACETAMINOPHEN"]
+
+    print("openFDA label / recall / NDC reference self-checks passed.")

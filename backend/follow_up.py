@@ -106,6 +106,40 @@ def build_follow_up_plan(
             )
         )
 
+    # US FDA recall matches become a concrete pharmacy task: the patient can
+    # take the recall number to a pharmacist and have their batch/lot checked.
+    # Priority follows the FDA class; the guardrail keeps the US-market
+    # caveat in front of the user so a foreign-market record never reads as
+    # a certainty about their own supply.
+    for recall in cross_check.get("openfda_recalls") or []:
+        ref = recall.get("reference") or {}
+        meds = recall.get("medications_involved") or []
+        subject = " + ".join(str(m) for m in meds) or str(recall.get("ingredient") or "medicine")
+        severity = str(recall.get("severity") or "moderate").lower()
+        priority = "high" if severity == "high" else ("medium" if severity == "moderate" else "low")
+        recall_number = str(ref.get("recall_number") or "").strip()
+        tasks.append(
+            _task(
+                "recall_check",
+                "Medication safety",
+                priority,
+                f"Check whether your {subject} supply is affected by a US recall",
+                (
+                    f"Ask your pharmacist to compare your medicine's batch or lot "
+                    f"number against FDA recall {recall_number}."
+                    if recall_number
+                    else (
+                        "Ask your pharmacist whether your medicine's batch is "
+                        "affected by the recall."
+                    )
+                ),
+                recall.get("explanation") or "",
+                [],
+                "US-market recall data: your medicine may not be affected. Confirm with a "
+                "pharmacist before stopping or changing any medicine.",
+            )
+        )
+
     # The same underlying discrepancy can appear in integrity and appointment
     # prep. Keep the higher-priority first occurrence by normalized title.
     order = {"high": 0, "medium": 1, "low": 2}
