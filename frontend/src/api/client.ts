@@ -53,6 +53,7 @@ import type {
   ProviderMessage,
   ProviderThread,
   GuidelinesStatus,
+  AnalysisLogsResponse,
 } from "../types/api";
 import type { ScoredCareRecommendationsResponse } from "../types/recommendations";
 
@@ -95,6 +96,19 @@ export interface ReprocessDocumentResponse {
   document_types?: DocumentsResponse["document_types"];
   indexed: boolean;
   index_error?: string;
+}
+
+export interface DocumentSignedUrlResponse {
+  document_id: string;
+  url: string;
+  expires_in_seconds: number;
+  mode: "private_storage_signed_url" | "medimind_expiring_proxy" | string;
+}
+
+export interface ProcessTextResponse {
+  document_id: string;
+  raw_text_processing: Record<string, unknown>;
+  rows_updated: number;
 }
 
 export type JobFileStatus = "queued" | "processing" | "completed" | "failed";
@@ -532,6 +546,26 @@ export const api = {
     );
   },
 
+  getDocumentSignedUrl(
+    credentials: Credentials,
+    documentId: string,
+    expiresInSeconds = 900
+  ): Promise<DocumentSignedUrlResponse> {
+    return request<DocumentSignedUrlResponse>(
+      credentials,
+      `/api/v1/documents/${encodeURIComponent(documentId)}/signed-url?expires_in_seconds=${encodeURIComponent(String(expiresInSeconds))}`,
+      { method: "POST" }
+    );
+  },
+
+  processDocumentText(credentials: Credentials, documentId: string): Promise<ProcessTextResponse> {
+    return request<ProcessTextResponse>(
+      credentials,
+      `/api/v1/documents/${encodeURIComponent(documentId)}/process-text`,
+      { method: "POST" }
+    );
+  },
+
   // One request returns timeline + cross-check + lab trends together (the
   // dashboard's whole record). Individual getters below remain for pages
   // that need just one slice, and for backward compatibility.
@@ -642,6 +676,10 @@ export const api = {
 
   getLabTrends(credentials: Credentials): Promise<LabTrendsReport> {
     return request<LabTrendsReport>(credentials, "/api/v1/lab-trends");
+  },
+
+  listAnalyses(credentials: Credentials): Promise<AnalysisLogsResponse> {
+    return request<AnalysisLogsResponse>(credentials, "/api/v1/analyses");
   },
 
   getRiskTimeline(credentials: Credentials): Promise<RiskTimelineReport> {

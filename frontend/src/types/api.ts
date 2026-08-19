@@ -142,6 +142,17 @@ export interface DocumentSource {
   page?: number;
 }
 
+export interface RawTextProcessing {
+  processing_status: "COMPLETED" | "FAILED" | "PROCESSING" | "UPLOADED" | string;
+  extracted_text: string;
+  page_count: number;
+  extraction_method: string;
+  has_text: boolean;
+  confidence?: number | null;
+  processed_at?: string | null;
+  error_message?: string | null;
+}
+
 // A single extracted page/document (one entry in timeline.visits).
 export interface Visit {
   _document_id: string;
@@ -170,7 +181,11 @@ export interface Visit {
   overall_confidence: number;
   _source: DocumentSource;
   document_url?: string;
-  cloudinary_public_id?: string;
+  cloudinary_public_id?: string | null;
+  storage_backend?: "cloudinary" | "supabase" | string;
+  storage_path?: string | null;
+  storage_bucket?: string | null;
+  raw_text_processing?: RawTextProcessing;
   _trust?: TrustMetadata;
   _corrections?: CorrectionMarker;
 }
@@ -531,8 +546,29 @@ export interface InsufficientData {
   reason: string;
 }
 
+export interface SingleLabResult {
+  test_name: string;
+  date: string | null;
+  value: string | number | null;
+  numeric_value?: number | null;
+  unit?: string | null;
+  original_unit?: string | null;
+  unit_assumed?: boolean;
+  reference_range?: string | null;
+  range_source?: "printed" | "general" | null | string;
+  range_bounds?: { low?: number | null; high?: number | null; unit?: string | null; source?: string | null; basis?: Record<string, unknown> | null } | null;
+  status: "normal" | "high" | "low" | "unknown" | string;
+  source_file: string | null;
+  source_page?: number | null;
+  confidence?: number | null;
+  is_main_test?: boolean;
+  explanation: string;
+}
+
 export interface LabTrendsReport {
   trends: LabTrend[];
+  single_results?: SingleLabResult[];
+  patient_context?: { sex?: string | null; age?: number | null };
   insufficient_data: InsufficientData[];
   note: string;
 }
@@ -864,6 +900,24 @@ export interface PatientSnapshot {
   // table because the cached snapshot row was missing. The record is intact;
   // only the AI safety cross-check still needs to be re-run.
   rebuilt_from_documents?: boolean;
+}
+
+
+// ---- AI analysis logs -----------------------------------------------------
+
+export interface AnalysisLogRecord {
+  id: string;
+  analysis_type: "document_extraction" | "qa" | string;
+  result: Record<string, unknown>;
+  confidence?: number | null;
+  summary?: string | null;
+  created_at?: string | null;
+}
+
+export interface AnalysisLogsResponse {
+  analyses: AnalysisLogRecord[];
+  count: number;
+  total: number;
 }
 
 // ---- Upload response (api.py) --------------------------------------------

@@ -71,6 +71,8 @@ URGENCY_MEANING = {
 }
 
 LOW_CONFIDENCE_AT_OR_BELOW = 0.6
+TRIAGE_OUTPUT_VERSION = "2026-08-19.data-quality-versioned"
+DATA_QUALITY_TRIGGERS = {"low_extraction_confidence", "translation_uncertain"}
 
 EMERGENCY_ADVICE = (
     "These findings come from uploaded documents, which describe the past. "
@@ -280,6 +282,7 @@ def _item(
         "urgency_meaning": URGENCY_MEANING[urgency],
         "why_this_route": why_this_route,
         "confidence": confidence if isinstance(confidence, (int, float)) else None,
+        "category": "data_quality" if trigger in DATA_QUALITY_TRIGGERS else "clinical",
     }
     caveat = _confidence_caveat(entry["confidence"])
     if caveat:
@@ -609,7 +612,7 @@ def generate_consult_triage(
                 and (not isinstance(ocr, (int, float)) or translation < ocr)
             )
             if translation_is_dominant:
-                items.append(_item(
+                translation_item = _item(
                     trigger="translation_uncertain",
                     subject=source,
                     detail=language_risk.get("advice") or "Medication-name translation should be verified.",
@@ -620,9 +623,16 @@ def generate_consult_triage(
                         "generic medicine before uncertain normalization affects safety checks."
                     ),
                     confidence=language_risk.get("effective_confidence"),
-                ))
+                )
+                # A high translation-risk flag can mean the drug names in the
+                # record may be wrong while still looking complete; keep that as
+                # a clinical pharmacist referral. A lower review flag stays a
+                # document-quality notice.
+                if language_risk.get("flag") == "high":
+                    translation_item["category"] = "clinical"
+                items.append(translation_item)
             else:
-                items.append(_item(
+                quality_item = _item(
                     trigger="low_extraction_confidence",
                     subject=source,
                     detail=language_risk.get("advice") or "The source was difficult to read.",
@@ -633,12 +643,14 @@ def generate_consult_triage(
                         "details against the dispensing record."
                     ),
                     confidence=language_risk.get("effective_confidence"),
-                ))
+                )
+                quality_item["category"] = "data_quality"
+                items.append(quality_item)
 
         illegible = visit.get("illegible_or_low_confidence_fields") or []
         overall = visit.get("overall_confidence")
         if illegible and language_risk.get("flag") == "none":
-            items.append(_item(
+            quality_item = _item(
                 trigger="low_extraction_confidence",
                 subject=source,
                 detail=f"Fields needing verification: {', '.join(str(value) for value in illegible)}.",
@@ -646,26 +658,34 @@ def generate_consult_triage(
                 urgency="routine",
                 why_this_route="The extracted fields should be checked against the original or dispensing record.",
                 confidence=overall if isinstance(overall, (int, float)) else None,
-            ))
+            )
+            quality_item["category"] = "data_quality"
+            items.append(quality_item)
+
+    for item in items:
+        item.setdefault("category", "clinical")
+    clinical_items = [item for item in items if item.get("category") != "data_quality"]
+    quality_items = [item for item in items if item.get("category") == "data_quality"]
 
     # Deterministic specialty mapping has already run while items were built.
     # Optionally resolve only the remaining GP fallbacks with a structured
     # model call; any failure retains GP and cannot lose/de-escalate referral.
-    _assign_model_specialties(items)
+    _assign_model_specialties(clinical_items)
 
     # --- Assemble the report -------------------------------------------------
-    items.sort(key=lambda item: URGENCY_ORDER[item["urgency"]], reverse=True)
-    pharmacist_actions = [item for item in items if item["route"] == "pharmacist"]
-    doctor_actions = [item for item in items if item["route"] == "doctor"]
+    clinical_items.sort(key=lambda item: URGENCY_ORDER[item["urgency"]], reverse=True)
+    quality_items.sort(key=lambda item: URGENCY_ORDER[item["urgency"]], reverse=True)
+    pharmacist_actions = [item for item in clinical_items if item["route"] == "pharmacist"]
+    doctor_actions = [item for item in clinical_items if item["route"] == "doctor"]
 
-    consult_needed = bool(items)
+    consult_needed = bool(clinical_items)
     consult_type: Optional[str] = None
     if doctor_actions:
         consult_type = "doctor"
     elif pharmacist_actions:
         consult_type = "pharmacist"
 
-    overall_urgency: Optional[str] = items[0]["urgency"] if items else None
+    overall_urgency: Optional[str] = clinical_items[0]["urgency"] if clinical_items else None
 
     # Distinct specialties across doctor items, most urgent first, GP last.
     recommended_specialties: List[Dict[str, Any]] = []
@@ -697,7 +717,7 @@ def generate_consult_triage(
         summary = (
             f"A {consult_type} should be consulted — "
             f"{URGENCY_MEANING[overall_urgency]}. "
-            f"{len(items)} finding(s) were routed: {len(doctor_actions)} to a doctor, "
+            f"{len(clinical_items)} clinical finding(s) were routed: {len(doctor_actions)} to a doctor, "
             f"{len(pharmacist_actions)} to a pharmacist. This is a routing "
             "suggestion, not a diagnosis."
         )
@@ -710,15 +730,21 @@ def generate_consult_triage(
         )
 
     return {
+        "output_version": TRIAGE_OUTPUT_VERSION,
         "consult_needed": consult_needed,
         "consult_type": consult_type,
         "urgency": overall_urgency,
         "urgency_meaning": URGENCY_MEANING.get(overall_urgency) if overall_urgency else None,
-        "confidence": max((i["confidence"] or 0.0) for i in items) if items else None,
+        "confidence": max((i["confidence"] or 0.0) for i in clinical_items) if clinical_items else None,
         "recommended_specialties": recommended_specialties,
         "pharmacist_actions": pharmacist_actions,
         "doctor_actions": doctor_actions,
-        "referral_items": items,
+        "referral_items": clinical_items,
+        "document_quality_notices": quality_items,
+        "document_quality_note": (
+            f"{len(quality_items)} uploaded document(s) need source verification before relying on all extracted details."
+            if quality_items else None
+        ),
         "summary": summary,
         "emergency_advice": EMERGENCY_ADVICE,
         "note": STANDING_NOTE,
