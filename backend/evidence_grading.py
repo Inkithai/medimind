@@ -34,16 +34,21 @@ THREE GRADES
                     (e.g. detect_exact_duplicate_medications). Highest trust —
                     no model judgment involved.
   reference_graph   Backed by an ingested reference source passed in via
-                    `graph_backed_findings`. Trusted, and cites the source
-                    document. MediMind ships no reference graph today, so in
-                    practice findings grade deterministic or model_knowledge;
-                    the grade is kept so real reference data can be wired in
-                    later without another contract change.
+                    `graph_backed_findings`, or by a claim-level citation
+                    returned from a `claim_reference` hook (see
+                    reference_library.samhsa_claim_reference and
+                    openfda_reference.openfda_claim_reference). Trusted, and
+                    cites the source document. The WHO antidote graph and the
+                    optional openFDA Structured Product Labels fill this
+                    grade today; the grade stays so more reference data can
+                    be wired in without another contract change.
   model_knowledge   The model's own pharmacological knowledge, with nothing
                     behind it. Capped, flagged, and told to be confirmed.
 """
 
-from typing import Any, Callable, Dict, Optional, Set
+from typing import Any, Callable, Dict, Optional, Sequence, Set, Union
+
+ClaimReferenceFn = Callable[[Dict[str, Any]], Optional[Dict[str, Any]]]
 
 # Ungrounded findings are capped here. Matches retrieval.LOW_CONFIDENCE_THRESHOLD
 # so "low confidence" means one thing across the product — and so the QA
@@ -81,6 +86,23 @@ REFERENCE_GRAPH_NOTE = (
 )
 
 
+def _claim_reference_chain(
+    claim_reference: Optional[Any],
+) -> tuple:
+    """Normalize the `claim_reference` argument to a tuple of callables.
+
+    Accepts a single callable (the original contract) or a sequence of them,
+    so several evidence sources (curated SAMHSA guidance, openFDA labels) can
+    each get a chance to corroborate a finding without every source living in
+    one function.
+    """
+    if claim_reference is None:
+        return ()
+    if callable(claim_reference):
+        return (claim_reference,)
+    return tuple(claim_reference)
+
+
 def _finding_drug_names(finding: Dict[str, Any]) -> Set[str]:
     """Every drug name a finding refers to, lowercased."""
     names: Set[str] = set()
@@ -97,7 +119,7 @@ def _finding_drug_names(finding: Dict[str, Any]) -> Set[str]:
 def grade_finding(
     finding: Dict[str, Any],
     graph_backed_findings: Optional[Dict[str, Dict[str, Any]]] = None,
-    claim_reference: Optional[Callable[[Dict[str, Any]], Optional[Dict[str, Any]]]] = None,
+    claim_reference: Optional[Union[ClaimReferenceFn, Sequence[ClaimReferenceFn]]] = None,
 ) -> Dict[str, Any]:
     """
     Grades one finding in place and returns it.
@@ -128,17 +150,26 @@ def grade_finding(
 
     # A source that makes this exact claim is stronger evidence than a graph
     # merely showing that one named drug appears in a reference document.
-    if claim_reference is not None:
-        citation = claim_reference(finding)
-        if citation:
-            finding["evidence_source"] = REFERENCE_GRAPH
-            finding["grounded"] = True
-            finding["reference"] = citation
-            finding["evidence_note"] = (
-                "Backed by published clinical guidance, with source and page — "
-                "not the model's own recollection."
-            )
-            return finding
+    # `claim_reference` may be one callable or a sequence of them; the first
+    # that corroborates the finding wins. A citation may carry its own
+    # `note` (e.g. an FDA label quote, which has no page number), which
+    # overrides the default evidence_note for that finding only.
+    for ref_fn in _claim_reference_chain(claim_reference):
+        citation = ref_fn(finding)
+        if not citation:
+            continue
+        note = None
+        if isinstance(citation, dict) and "note" in citation:
+            note = citation.get("note")
+            citation = {key: value for key, value in citation.items() if key != "note"}
+        finding["evidence_source"] = REFERENCE_GRAPH
+        finding["grounded"] = True
+        finding["reference"] = citation
+        finding["evidence_note"] = note or (
+            "Backed by published clinical guidance, with source and page — "
+            "not the model's own recollection."
+        )
+        return finding
 
     graph_backed_findings = graph_backed_findings or {}
     matched = {
@@ -177,7 +208,7 @@ def grade_finding(
 def grade_cross_check(
     cross_check: Dict[str, Any],
     graph_backed_findings: Optional[Dict[str, Dict[str, Any]]] = None,
-    claim_reference: Optional[Callable[[Dict[str, Any]], Optional[Dict[str, Any]]]] = None,
+    claim_reference: Optional[Union[ClaimReferenceFn, Sequence[ClaimReferenceFn]]] = None,
 ) -> Dict[str, Any]:
     """
     Grades every finding in a cross_check report, in place, and adds an
@@ -188,6 +219,12 @@ def grade_cross_check(
     graded `reference_graph` and keeps its confidence uncapped. When no
     reference graph is configured (the default), every non-deterministic
     finding grades as model_knowledge — the honest answer.
+
+    `claim_reference` optionally corroborates findings at the claim level:
+    it may be a single callable or a sequence of callables, each returning a
+    citation dict for a finding it actually supports (else None). The first
+    citation wins, and a citation may carry its own `note` for the
+    evidence_note.
     """
     counts = {DETERMINISTIC: 0, REFERENCE_GRAPH: 0, MODEL_KNOWLEDGE: 0}
 

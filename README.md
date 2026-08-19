@@ -51,6 +51,9 @@ The system is designed to be evidence-based and conservative: it explains what u
 - Drug-lab, renal/hepatic, and condition-contraindication checks.
 - Published guidance enrichment for opioid/depressant safety.
 - WHO/EML-backed poisoning and age-restriction reference logic.
+- Optional openFDA-backed FDA Structured Product Label citations for interaction findings (evidence-backed, not model recall).
+- Optional US FDA recall checking (deterministic, framed as US-market data, routed to a pharmacist).
+- Optional deterministic brand→generic (INN) resolution from the FDA NDC directory.
 - Evidence grading: deterministic, reference-backed, or model-knowledge with confidence caps.
 - Treatment-window risk timeline: concurrent, possible, historical, and unknown risk timing.
 
@@ -298,6 +301,9 @@ Zero matches return an empty list plus a widening-search suggestion. Missing pho
 | `backend/record_trust.py` | Correction replay, deterministic conflict detection, authoritative-source state, fail-closed quarantine. |
 | `backend/evidence.py` | Page/quote/bounding-box provenance and exact text-region resolution. |
 | `backend/evidence_grading.py` | Finding evidence source classification and model-knowledge confidence caps. |
+| `backend/openfda_reference.py` | Optional openFDA adapter: FDA Structured Product Labels cited behind interaction findings, US recall records, and NDC brand→generic lookups (cache-first, fail-open, keyed by ingredient/brand). |
+| `backend/recall_check.py` | Deterministic US FDA recall check: one finding per recalled ingredient, routed to a pharmacist (US-market framing, absence never rendered as "not recalled"). |
+| `backend/brand_resolver.py` | Deterministic brand→INN resolution from the NDC directory, filling empty ingredient lists so Latin-script brands join cross-checking. |
 | `backend/risk_timeline.py` | Timing windows for safety findings and double-dosing exposure periods. |
 | `backend/vector_store.py` | Chroma/Supabase vector-store abstraction. |
 | `backend/storage.py` | Cloudinary default storage, optional Supabase private storage, signed URL helpers, storage deletion/download abstraction. |
@@ -359,8 +365,9 @@ JWT_SECRET=some-long-random-string  # openssl rand -hex 32
 
 # optional
 OPENAI_API_KEY=sk-...   # only for embeddings, else local ONNX
-VECTOR_STORE=supabase   # or chroma — supabase uses Supabase `chunks` table (no volume, recommended for Railway)
-CHROMA_DIR=./chroma_db   # only for VECTOR_STORE=chroma, override to /data/chroma_db on Railway volume
+OPENFDA_API_KEY=...     # openFDA label citations for interaction findings (US-market data) — https://open.fda.gov/apis/authentication/
+VECTOR_STORE=supabase   # or chroma — supabase uses Supabase `chunks` table (no disk; recommended for Render/Railway)
+CHROMA_DIR=./chroma_db   # only for VECTOR_STORE=chroma, override to /data/chroma_db on a Render Disk / Railway volume
 USE_BACKGROUND_JOBS=true # async 202 + polling for uploads
 UPLOAD_FILE_CONCURRENCY=1 # shared worker limit; raise only if provider quota supports it
 CORS_ORIGINS=*          # or https://your-frontend
@@ -568,14 +575,38 @@ Open App → Create Anonymous Session (UUID) → Store in localStorage → Patie
 - `AuthContext` now correctly resets `provisioningStarted` on `clearCredentials`/`createNewWorkspace` — erasing workspace no longer stalls auto-provision (fixed StrictMode double-invoke guard).
 - New workspace = clear localStorage. Old Supabase rows stay but become orphaned (acceptable for demo).
 
-### Deploying to Railway
+### Deploying (Render backend + Vercel frontend)
 
-`requirements.txt` + `Procfile` (`web: uvicorn api:app --host 0.0.0.0 --port $PORT`) enable Nixpacks auto-detect.
+The backend and frontend deploy to two separate hosts:
 
-1. Set env vars from `.env.example` in Railway Variables (`LLM_PROVIDER` + provider key, plus `SUPABASE_*`, `CLOUDINARY_*`, `JWT_SECRET`, `VECTOR_STORE=supabase` recommended).
-2. **No volume needed if `VECTOR_STORE=supabase`** (uses Supabase `chunks` table). For `VECTOR_STORE=chroma`, attach Railway Volume mounted at `/data/chroma_db`, set `CHROMA_DIR=/data/chroma_db`.
-3. Set `USE_BACKGROUND_JOBS=true` and keep `UPLOAD_FILE_CONCURRENCY=1` for constrained quotas. Uploads return 202 immediately, while a shared bounded worker pool load-balances files and the frontend polls per-file progress.
-4. Deploy — `$PORT` assigned automatically.
+| Part | Host | Config |
+| --- | --- | --- |
+| FastAPI backend | **Render** (Docker web service) | `render.yaml` Blueprint + `backend/Dockerfile` |
+| Vite frontend | **Vercel** (static/SPA) | `frontend/vercel.json` |
+
+#### 1. Backend → Render
+
+The repository ships a `render.yaml` Blueprint. In Render: **New → Blueprint → select this repository** — Render provisions the web service, builds `backend/Dockerfile` (which bakes the ~79 MB ONNX embedding model into the image so the first upload does not download it inside a request), and honors `$PORT`.
+
+1. Fill the secrets the Blueprint cannot hold (`sync: false`) in **Project → Settings → Environment**: `LLM_PROVIDER` + a provider key (`GEMINI_API_KEY` or `GROQ_API_KEY`), `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY`, `CLOUDINARY_*`, and (optionally) `OPENFDA_API_KEY`. `JWT_SECRET` is generated for you (`generateValue: true`).
+2. **No disk needed if `VECTOR_STORE=supabase`** (uses the Supabase `chunks` table — run `supabase_schema.sql` once). If you prefer `VECTOR_STORE=chroma`, attach a Render **Disk** and set `CHROMA_DIR=/data/chroma_db`.
+3. Set `USE_BACKGROUND_JOBS=true` and keep `UPLOAD_FILE_CONCURRENCY=1` for constrained/free quotas. Uploads return 202 immediately; a shared bounded worker pool load-balances files and the frontend polls per-file progress.
+4. Set `CORS_ORIGINS` to your Vercel URL, and `OPENFDA_API_KEY` if you want FDA label citations / recall checks / NDC brand resolution (all optional, fail-open).
+5. Health check: `/api/v1/health` returns `200 {"status": "ok", ...}` — the Blueprint uses it for liveness.
+
+> Manual deploy (no Blueprint): create a **Web Service → Existing Image / Dockerfile**, set **Root Directory = `backend`**, and the `backend/Dockerfile` auto-detects. `backend/Procfile` (`web: uvicorn api:app --host 0.0.0.0 --port $PORT`) also works on Heroku/Render Nixpacks-style hosts.
+
+#### 2. Frontend → Vercel
+
+Import the repo in Vercel with **Root Directory = `frontend`**. `frontend/vercel.json` sets the Vite build + SPA rewrite.
+
+1. In **Vercel → Settings → Environment Variables (Production)**, set `VITE_API_URL` to your live Render URL with **no trailing slash** (e.g. `https://medimind-backend.onrender.com`).
+2. Redeploy after changing it — Vite inlines `VITE_API_URL` at build time.
+3. Note: Render's free tier spins down when idle, so the first request after inactivity can take ~50s while it wakes up.
+
+#### 3. Railway (alternative)
+
+`backend/requirements.txt` + `backend/Procfile` also enable Railway's Nixpacks auto-detect if you prefer it: set the same env vars, and (for `VECTOR_STORE=chroma`) attach a Railway Volume at `/data/chroma_db` with `CHROMA_DIR=/data/chroma_db`.
 
 ### Live local care recommendations (Round 2)
 

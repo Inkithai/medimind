@@ -138,6 +138,7 @@ def _empty_cross_check(reason: str) -> Dict[str, Any]:
         "duplicate_prescriptions": [],
         "conflicting_dosage_instructions": [],
         "allergy_conflicts": [],
+        "openfda_recalls": [],
         "overall_recommendation": reason,
         "reference_date": None,
         "medication_activity": {
@@ -210,6 +211,61 @@ def _antidote_context(
             ", ".join(n["medication"] for n in notes),
         )
     return graph_backed_findings_from_antidotes(references), notes
+
+
+def _openfda_reference_context(timeline: Dict[str, Any], user_id: str, operation: str) -> None:
+    """Warm the openFDA caches (labels + recalls) for this record's
+    ingredients, BEFORE the safety cross-check runs.
+
+    Fail-open by design: without an OPENFDA_API_KEY, or on any fetch failure,
+    this returns without touching the record — findings simply do not carry
+    an FDA label citation (and grade as model_knowledge) and no recall
+    findings appear. The claim hook (openfda_claim_reference) and the recall
+    check (recall_check.check_recalls) read only these in-process caches, so
+    warming here keeps network I/O out of the grading loop.
+    """
+    import openfda_reference
+
+    if not openfda_reference.is_configured():
+        logger.debug(
+            "%s: user=%s openFDA not configured (OPENFDA_API_KEY unset) — skipping reference warm",
+            operation,
+            user_id,
+        )
+        return
+
+    ingredients = sorted(
+        {
+            str(ingredient).strip()
+            for medication in timeline.get("medications_timeline") or []
+            for ingredient in medication.get("ingredients") or []
+            if str(ingredient).strip()
+        }
+    )
+    if not ingredients:
+        return
+
+    try:
+        labels = openfda_reference.prefetch_labels(ingredients)
+        recalls = openfda_reference.prefetch_recalls(ingredients)
+    except Exception as e:  # defensive — the adapter is fail-open, but never block a record
+        logger.warning(
+            "%s: user=%s openFDA reference warm failed, continuing without FDA "
+            "citations or recall checks: %s",
+            operation,
+            user_id,
+            e,
+        )
+        return
+    logger.info(
+        "%s: user=%s warmed openFDA references: %d label(s), %d recall set(s) "
+        "across %d ingredient(s)",
+        operation,
+        user_id,
+        len(labels),
+        len(recalls),
+        len(ingredients),
+    )
 
 
 def _attach_eml_age_safety(
@@ -376,6 +432,7 @@ async def _derive_record_impl(
     graph_backed_findings, antidote_reference_notes = _antidote_context(
         timeline, user_id, "record_rebuild"
     )
+    _openfda_reference_context(timeline, user_id, "record_rebuild")
     cross_check = await _cross_check_trusted_timeline(timeline, graph_backed_findings)
     _attach_eml_age_safety(cross_check, timeline, user_id)
     cross_check["antidote_reference_notes"] = antidote_reference_notes
@@ -537,6 +594,12 @@ def _enhanced_cross_check_impl(
     report.setdefault("duplicate_prescriptions", [])
     report.setdefault("conflicting_dosage_instructions", [])
     report.setdefault("allergy_conflicts", [])
+    # Recall findings are NOT backfilled here: they come from a live openFDA
+    # lookup that only runs during upload/reanalysis (which warm the cache).
+    # A snapshot saved before this feature existed simply has no recall
+    # findings until the next safety re-analysis — absence is not "not
+    # recalled", it is "not checked".
+    report.setdefault("openfda_recalls", [])
     # Newer deterministic safety layers (drug-lab, renal/hepatic, condition).
     # Backfilled on read for snapshots saved before these engines existed, so
     # every stored record surfaces them without a re-upload.
@@ -597,6 +660,7 @@ def _enhanced_cross_check_impl(
                 "drug_lab_findings",
                 "renal_hepatic_findings",
                 "condition_contraindications",
+                "openfda_recalls",
             ):
                 for finding in enriched.get(key) or []:
                     fkey = finding_key(finding)
@@ -713,6 +777,7 @@ async def reanalyze_medication_safety(
         "drug_lab_findings",
         "renal_hepatic_findings",
         "condition_contraindications",
+        "openfda_recalls",
     )
 
     def count(report):
@@ -1039,6 +1104,7 @@ _EMPTY_CROSS_CHECK: Dict[str, Any] = {
     "duplicate_prescriptions": [],
     "conflicting_dosage_instructions": [],
     "allergy_conflicts": [],
+    "openfda_recalls": [],
     "overall_recommendation": (
         "Your records were restored from storage, so the medication safety "
         "check has not been re-run yet. Upload a document or ask a question "

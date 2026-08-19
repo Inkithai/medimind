@@ -43,6 +43,7 @@ import storage  # noqa: E402
 import vector_store  # noqa: E402
 from analysis_log import build_extraction_analyses  # noqa: E402
 from auth import get_current_user  # noqa: E402
+from brand_resolver import resolve_brand_ingredients  # noqa: E402
 from document_filter import NonMedicalDocumentError, assert_medical_document  # noqa: E402
 from document_processing import process_raw_text  # noqa: E402
 from document_types import normalize_document_type, summarize_document_types  # noqa: E402
@@ -89,6 +90,7 @@ from routes.records import (  # noqa: E402
     _attach_eml_age_safety,
     _cross_check_trusted_timeline,
     _derive_record,
+    _openfda_reference_context,
     _prepare_current_trust_state,
     _rebuild_after_document_deletion,
     _replace_index,
@@ -634,7 +636,7 @@ async def _execute_upload_pipeline(
                         raise ValueError("model returned an invalid extraction structure")
                     pages = result["pages"] if result.get("multi_page") else [result]
                     kept_pages: List[Dict[str, Any]] = []
-                    rejected = False
+                    skipped_page_reasons: List[str] = []
                     page_degradations: List[Dict[str, Any]] = []
                     for page_num, page in enumerate(pages, start=1):
                         label = (
@@ -660,14 +662,48 @@ async def _execute_upload_pipeline(
                         try:
                             assert_medical_document(page, label)
                         except NonMedicalDocumentError as exc:
+                            # Skip the non-medical page rather than failing the
+                            # whole file: a multi-page PDF with a cover letter,
+                            # blank divider, or stray receipt page must not cost
+                            # the real clinical pages around it. A single-page
+                            # file that fails here ends up with no kept pages
+                            # and is rejected as before.
+                            reason = f"'{label}' {exc.reason}"
+                            skipped_page_reasons.append(reason)
                             logger.warning(
-                                "upload: user=%s rejected '%s': %s",
+                                "upload: user=%s skipped page %s",
                                 user_id,
-                                original_name,
-                                exc.reason,
+                                reason,
                             )
-                            rejected = True
-                            break
+                            continue
+                        # Deterministic brand -> generic resolution from the
+                        # FDA NDC directory BEFORE language degradation: a
+                        # Latin-script brand the model could not map to an
+                        # ingredient gets its INN filled from the directory,
+                        # so it takes part in cross-checking instead of
+                        # silently dropping out. Fail-open: no key, no hit, or
+                        # a lookup failure leaves the page exactly as
+                        # extracted. Non-Latin names are never queried (NDC
+                        # brand names are Latin) and remain language_guard's
+                        # responsibility.
+                        try:
+                            ndc_summary = resolve_brand_ingredients(page)
+                        except Exception as exc:  # defensive — never block a record on a lookup
+                            logger.warning(
+                                "upload: user=%s NDC brand resolution failed for '%s': %s",
+                                user_id,
+                                label,
+                                exc,
+                            )
+                            ndc_summary = {}
+                        if ndc_summary.get("resolved"):
+                            logger.info(
+                                "upload: user=%s NDC resolved %d brand name(s) on '%s': %s",
+                                user_id,
+                                len(ndc_summary["resolved"]),
+                                label,
+                                ", ".join(ndc_summary["resolved"]),
+                            )
                         # A page whose drug names could not all be normalized
                         # is KEPT at a lowered confidence with the unmatchable
                         # medications marked, instead of failing the whole
@@ -695,12 +731,20 @@ async def _execute_upload_pipeline(
                             page["_source"]["file"] = original_name
                         kept_pages.append(page)
 
-                    if rejected or not kept_pages:
+                    if not kept_pages:
+                        # Every page was non-medical (or the extractor produced
+                        # no pages at all). Say what actually happened instead
+                        # of guessing a cause: the reasons are per-page, so a
+                        # blank/corrupt file is told apart from a folder of
+                        # placeholders.
+                        detail = "This doesn't appear to contain medical information we can add."
+                        if skipped_page_reasons:
+                            detail += " " + "; ".join(skipped_page_reasons[:3])
                         info = {
                             "file": original_name,
                             "file_id": f"file-{file_index}",
                             "file_index": file_index,
-                            "error": "This doesn't appear to contain medical information we can add.",  # noqa: E501
+                            "error": detail,
                             "kind": "not_medical",
                             "code": "not_medical",
                             "retryable": False,
@@ -1010,6 +1054,12 @@ async def _execute_upload_pipeline(
         graph_backed_findings, antidote_reference_notes = _antidote_context(
             timeline, user_id, "upload_documents"
         )
+        # Warm the openFDA caches (labels + recalls) BEFORE the cross-check so
+        # interaction findings can be corroborated by FDA Structured Product
+        # Labels and the recall check can match ingredients. Fail-open: a cold
+        # cache or a failed fetch just means those findings don't appear,
+        # exactly as they did before this feature existed.
+        _openfda_reference_context(timeline, user_id, "upload_documents")
         # Safety is another provider call, so it shares the same bounded pool
         # as extraction instead of bypassing load control or blocking polling.
         cross_check = await _cross_check_trusted_timeline(timeline, graph_backed_findings)

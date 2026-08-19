@@ -1,7 +1,13 @@
 import type { CrossCheckReport, DosageReport } from "../types/api";
 
 export type SafetyAlertKind =
-  "allergy" | "interaction" | "duplicate" | "dosage" | "concurrent_duplicate" | "age_restriction";
+  | "allergy"
+  | "interaction"
+  | "duplicate"
+  | "dosage"
+  | "concurrent_duplicate"
+  | "age_restriction"
+  | "recall";
 
 export interface SafetyAlertSummary {
   key: string;
@@ -139,6 +145,22 @@ export function collectSafetyAlerts(
         "A published age restriction needs professional review.",
       confidence: item.confidence,
       evidenceSource: item.evidence_source,
+    });
+  }
+
+  for (const item of report.openfda_recalls || []) {
+    const subject = item.medications_involved?.join(", ") || item.ingredient || "medicine";
+    const classification = item.reference?.classification || "";
+    const status = item.reference?.status || "";
+    const recallNumber = item.reference?.recall_number || "";
+    alerts.push({
+      key: `recall:${normalized(item.ingredient || subject)}:${normalized(recallNumber)}`,
+      kind: "recall",
+      severity: (item.severity as SafetyAlertSummary["severity"]) || "moderate",
+      title: `Possible US recall: ${subject}`,
+      description: `${item.explanation}${classification ? ` (${classification}${status ? `, ${status}` : ""})` : ""}`,
+      confidence: item.confidence,
+      evidenceSource: item.source,
     });
   }
 

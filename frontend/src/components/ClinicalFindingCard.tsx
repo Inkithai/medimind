@@ -99,6 +99,7 @@ const FINDING_KIND_LABEL: Record<string, string> = {
   renal_hepatic: "Organ-function dose",
   condition_contraindication: "Drug × Condition",
   ddi: "Drug interaction",
+  openfda_recall: "Recall (US FDA)",
 };
 
 function labPhrase(f: ClinicalFinding): string | null {
@@ -213,7 +214,8 @@ export function ClinicalFindingCard({
               {FINDING_KIND_LABEL[finding.finding_kind] ?? finding.finding_kind}
             </StatusBadge>
           )}
-          {finding.source === "curated_knowledge_base" && (
+          {(finding.source === "curated_knowledge_base" ||
+            finding.source === "openfda_enforcement") && (
             <StatusBadge tone="success">deterministic</StatusBadge>
           )}
           {overridden && <StatusBadge tone="neutral">overridden</StatusBadge>}

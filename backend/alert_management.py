@@ -34,6 +34,7 @@ FINDING_LISTS = (
     "renal_hepatic_findings",
     "condition_contraindications",
     "guideline_flagged_combinations",
+    "openfda_recalls",
 )
 
 

@@ -54,7 +54,7 @@ class NonMedicalDocumentError(ValueError):
         super().__init__(f"'{filename}' does not appear to be a medical document: {reason}")
 
 
-def _has_medical_content(doc: Dict[str, Any]) -> bool:
+def has_medical_content(doc: Dict[str, Any]) -> bool:
     """True if the extraction actually pulled out *structured* clinical
     substance — at least one medication, lab result, or noted allergy.
 
@@ -75,6 +75,11 @@ def _has_medical_content(doc: Dict[str, Any]) -> bool:
     if doc.get("diagnoses_or_conditions"):
         return True
     return any(doc.get(collection) for collection in CLINICAL_EVENT_COLLECTIONS)
+
+
+# Backward-compatible private name: callers that predate the public rename
+# (e.g. older forks) import this. New code should use has_medical_content().
+_has_medical_content = has_medical_content
 
 
 # Sentinel distinguishing "the extraction reported no score at all" from
@@ -146,7 +151,7 @@ def looks_like_medical_document(doc: Dict[str, Any]) -> bool:
     """
     doc_type = doc.get("document_type")
 
-    if _has_medical_content(doc):
+    if has_medical_content(doc):
         return True
 
     if doc_type in RECOGNIZED_MEDICAL_TYPES:
