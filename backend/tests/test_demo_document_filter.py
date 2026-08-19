@@ -24,7 +24,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 os.environ.setdefault("GROQ_API_KEY", "gsk_test_123")
 
-from medical_extractor import _is_demo_document  # noqa: E402
+from medical_extractor import _is_demo_document, group_documents_by_patient  # noqa: E402
 
 
 def _doc(patient_name=None, medications=None, source=None):
@@ -173,3 +173,42 @@ class TestRobustness:
 
     def test_non_string_patient_name(self):
         assert _is_demo_document(_doc(12345)) is False
+
+
+class TestGroupDocumentsByPatientContentWins:
+    """A demo/placeholder marker is a hint about a printed NAME, not a
+    substitute for the document's CONTENT. group_documents_by_patient must
+    keep a demo-marked document that actually extracted medical content, and
+    only drop one that has no structured clinical substance at all."""
+
+    def test_demo_marked_document_with_medical_content_is_kept(self):
+        # A lab report whose patient field caught "Sample Collected" still has
+        # real lab results — dropping it would silently lose patient data.
+        doc = _doc(
+            "SAMPLE",
+            medications=[{"name": "Metformin", "ingredients": ["Metformin"]}],
+            source={"file": "real_rx.pdf", "method": "vision"},
+        )
+        groups = group_documents_by_patient([doc], drop_demo_documents=True)
+        assert "sample" in groups, groups
+        assert len(groups["sample"]) == 1
+
+    def test_demo_marked_document_without_content_is_dropped(self):
+        doc = _doc(
+            "DEMO PATIENT",
+            medications=[],
+            source={"file": "demo.pdf", "method": "vision"},
+        )
+        groups = group_documents_by_patient([doc], drop_demo_documents=True)
+        assert groups == {}, groups
+
+    def test_synthetic_source_always_dropped(self):
+        # A `_source.method == "synthetic"` marker is structural, not a name
+        # hint: even with medical-looking content it is not a real document.
+        doc = _doc(
+            "Jane Doe",
+            medications=[{"name": "Metformin", "ingredients": ["Metformin"]}],
+            source={"file": "generated.pdf", "method": "synthetic"},
+        )
+        groups = group_documents_by_patient([doc], drop_demo_documents=True)
+        assert groups == {}, groups
