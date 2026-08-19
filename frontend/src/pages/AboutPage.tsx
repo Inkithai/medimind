@@ -977,6 +977,11 @@ const API_GROUPS: Array<{
       { method: "GET", path: "/api/v1/record-integrity", bodyKey: "about.e17" },
       { method: "GET", path: "/api/v1/appointment-prep", bodyKey: "about.e18" },
       { method: "GET", path: "/api/v1/follow-up", bodyKey: "about.e19" },
+      { method: "GET", path: "/api/v1/consult-triage", bodyKey: "about.e20" },
+      { method: "GET", path: "/api/v1/medications/reconciliation", bodyKey: "about.e21" },
+      { method: "GET", path: "/api/v1/deterioration", bodyKey: "about.e22" },
+      { method: "GET", path: "/api/v1/findings/lifecycle", bodyKey: "about.e23" },
+      { method: "POST", path: "/api/v1/findings/lifecycle", bodyKey: "about.e23" },
     ],
   },
   {
@@ -998,6 +1003,9 @@ const API_GROUPS: Array<{
     endpoints: [
       { method: "POST", path: "/api/v1/anonymous/session", bodyKey: "about.e14" },
       { method: "GET", path: "/api/v1/health", bodyKey: "about.e15" },
+      { method: "GET", path: "/api/v1/export", bodyKey: "about.e24" },
+      { method: "GET", path: "/api/v1/export/validation", bodyKey: "about.e25" },
+      { method: "GET", path: "/api/v1/corrections", bodyKey: "about.e26" },
     ],
   },
 ];

@@ -5,6 +5,7 @@ import { Card, CardBody, CardHeader } from "../components/Card";
 import { StatusBadge } from "../components/StatusBadge";
 import { MedicalDisclaimer } from "../components/MedicalDisclaimer";
 import { UploadIcon, FileIcon } from "../components/icons";
+import { toastMessage, useToast } from "../components/Toast";
 import { useAuth } from "../context/AuthContext";
 import { useI18n } from "../i18n/I18nContext";
 import type { FhirImportResult } from "../types/api";
@@ -25,6 +26,7 @@ const COUNT_LABELS: Record<string, string> = {
 export function FhirImportPage() {
   const { credentials } = useAuth();
   const { t } = useI18n();
+  const { toastSuccess, toastError, toastInfo } = useToast();
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -47,14 +49,28 @@ export function FhirImportPage() {
       setError(
         "That isn't valid JSON. Paste a FHIR R4 Bundle (a JSON object with a `resourceType` of `Bundle` and an `entry` array).",
       );
+      toastError("That file could not be read", "It is not valid JSON. Check the file and retry.");
       return;
     }
     setBusy(true);
     try {
       const res = await api.importFhir(credentials, bundle);
       setResult(res);
+      const total = Object.values(res.imported || {}).reduce((sum, count) => sum + (count || 0), 0);
+      if (total > 0) {
+        toastSuccess(
+          `${total} item${total === 1 ? "" : "s"} imported`,
+          "They now appear in your timeline and safety checks.",
+        );
+      } else {
+        toastInfo(
+          "Nothing was imported",
+          "The file was read, but it contained no records MediMind can use.",
+        );
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Import failed.");
+      toastError("Import failed", toastMessage(e));
     } finally {
       setBusy(false);
     }

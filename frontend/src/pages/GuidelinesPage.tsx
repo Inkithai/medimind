@@ -4,19 +4,55 @@ import { Card, CardBody, CardHeader } from "../components/Card";
 import { StatusBadge } from "../components/StatusBadge";
 import { ErrorState } from "../components/ErrorState";
 import { LoadingState } from "../components/Spinner";
+import { toastMessage, useToast } from "../components/Toast";
+import { Spinner } from "../components/Spinner";
 import { RefreshIcon } from "../components/icons";
 import { useAuth } from "../context/AuthContext";
 import { useStrictEffect } from "../hooks/useStrictEffect";
 import { useI18n } from "../i18n/I18nContext";
-import type { GuidelinesStatus } from "../types/api";
+import type { GuidelinesRefreshResult, GuidelinesStatus } from "../types/api";
 
 export function GuidelinesPage() {
   const { credentials } = useAuth();
   const { t } = useI18n();
+  const { toastSuccess, toastError, toastInfo } = useToast();
   const [status, setStatus] = useState<GuidelinesStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  const [checking, setChecking] = useState(false);
+  const [lastCheck, setLastCheck] = useState<GuidelinesRefreshResult | null>(null);
+
+  // POST /api/v1/guidelines/refresh: looks for newer published versions of
+  // the curated sources and applies any it finds. Fails open ("manual
+  // review") when no manifest is configured, which is a normal answer and
+  // is reported as information rather than as an error.
+  async function handleCheckForUpdates() {
+    setChecking(true);
+    try {
+      const result = await api.refreshGuidelines(credentials);
+      setLastCheck(result);
+      const applied = result.applied_count ?? result.applied?.length ?? 0;
+      if (applied > 0) {
+        toastSuccess(
+          `${applied} guideline source${applied === 1 ? "" : "s"} updated`,
+          "The list below now shows the newest reviewed versions.",
+        );
+      } else if (result.checked === false) {
+        toastInfo(
+          "No update service is configured",
+          "These sources are reviewed by hand. Nothing was changed.",
+        );
+      } else {
+        toastInfo("Everything is already up to date", "No newer versions were published.");
+      }
+      setReloadKey((key) => key + 1);
+    } catch (err) {
+      toastError("Could not check for updates", toastMessage(err));
+    } finally {
+      setChecking(false);
+    }
+  }
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -41,13 +77,30 @@ export function GuidelinesPage() {
           <h1 className="page-title">{t("guidelines.title")}</h1>
           <p className="secondary-text mt-2 max-w-2xl">{t("guidelines.subtitle")}</p>
         </div>
-        <button
-          onClick={() => setReloadKey((k) => k + 1)}
-          className="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
-        >
-          <RefreshIcon className="h-4 w-4" />
-          {t("common.refresh")}
-        </button>
+        <div className="flex flex-wrap gap-3">
+          <button
+            onClick={() => setReloadKey((k) => k + 1)}
+            disabled={loading || checking}
+            className="btn-secondary"
+            title="Reload this page's information from the server."
+          >
+            <RefreshIcon className="h-5 w-5" aria-hidden="true" />
+            {t("common.refresh")}
+          </button>
+          <button
+            onClick={() => void handleCheckForUpdates()}
+            disabled={checking || loading}
+            className="btn-primary"
+            title="Asks the guideline publishers whether a newer version exists."
+          >
+            {checking ? (
+              <Spinner className="h-5 w-5" />
+            ) : (
+              <RefreshIcon className="h-5 w-5" aria-hidden="true" />
+            )}
+            {checking ? "Checking for updates…" : "Check for newer guidelines"}
+          </button>
+        </div>
       </div>
 
       {loading && <LoadingState label={t("common.loading")} />}
@@ -91,7 +144,35 @@ export function GuidelinesPage() {
               ))}
             </CardBody>
           </Card>
-          <p className="text-xs text-slate-400">{status.note}</p>
+          {lastCheck && (
+            <Card>
+              <CardHeader
+                title="Last update check"
+                description={
+                  lastCheck.checked === false
+                    ? "No automatic update service is configured, so these sources are reviewed by hand."
+                    : `Checked ${lastCheck.checked_at || "just now"}.`
+                }
+              />
+              <CardBody className="space-y-2 text-sm text-slate-700">
+                {(lastCheck.applied_count ?? lastCheck.applied?.length ?? 0) > 0 ? (
+                  <ul className="space-y-1">
+                    {(lastCheck.applied || []).map((item) => (
+                      <li key={item.key} className="flex items-center gap-2">
+                        <StatusBadge tone="success">updated</StatusBadge>
+                        <span>
+                          {item.key} → version {item.version}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p>No source needed updating.</p>
+                )}
+              </CardBody>
+            </Card>
+          )}
+          <p className="text-sm text-slate-500">{status.note}</p>
         </>
       )}
     </div>

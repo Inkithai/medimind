@@ -4,9 +4,10 @@ import { ApiError, api } from "../api/client";
 import { Card, CardBody } from "../components/Card";
 import { DocumentViewer } from "../components/DocumentViewer";
 import { ErrorState } from "../components/ErrorState";
-import { LoadingState } from "../components/Spinner";
+import { LoadingState, Spinner } from "../components/Spinner";
 import { StatusBadge } from "../components/StatusBadge";
 import { FileIcon, LinkIcon, UploadIcon } from "../components/icons";
+import { toastMessage, useToast } from "../components/Toast";
 import { useAuth } from "../context/AuthContext";
 import { useStrictEffect } from "../hooks/useStrictEffect";
 import { useI18n } from "../i18n/I18nContext";
@@ -28,6 +29,7 @@ export function DocumentsPage() {
     kind: "reprocess" | "delete";
   } | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const { toastSuccess, toastError } = useToast();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -226,9 +228,10 @@ export function DocumentsPage() {
                           <button
                             type="button"
                             onClick={() => setSelected(visit)}
-                            className="rounded-md px-2.5 py-1.5 text-xs font-semibold text-brand-700 hover:bg-brand-50"
+                            title="Open this document to read what MediMind found and fix anything it got wrong."
+                            className="inline-flex min-h-[44px] items-center rounded-lg px-3 py-2 text-sm font-semibold text-brand-700 hover:bg-brand-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
                           >
-                            View & correct
+                            View &amp; correct
                           </button>
                           <button
                             type="button"
@@ -239,18 +242,32 @@ export function DocumentsPage() {
                               try {
                                 await api.reprocessDocument(credentials, visit._document_id);
                                 await load();
+                                toastSuccess(
+                                  "Document read again",
+                                  `“${visit._source.file}” was re-read and your record was updated.`,
+                                );
                               } catch (err) {
                                 setActionError(err instanceof Error ? err.message : String(err));
+                                toastError("Could not read the document again", toastMessage(err));
                               } finally {
                                 setDocumentAction(null);
                               }
                             }}
-                            className="rounded-md px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-white disabled:opacity-50"
+                            title="Read this document again from the original file. Useful if something was missed."
+                            aria-busy={
+                              documentAction?.id === visit._document_id &&
+                              documentAction.kind === "reprocess"
+                            }
+                            className="inline-flex min-h-[44px] items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 disabled:cursor-not-allowed disabled:opacity-50"
                           >
                             {documentAction?.id === visit._document_id &&
-                            documentAction.kind === "reprocess"
-                              ? "Reprocessing…"
-                              : "Reprocess"}
+                            documentAction.kind === "reprocess" ? (
+                              <>
+                                <Spinner className="h-4 w-4" /> Reading again…
+                              </>
+                            ) : (
+                              "Read again"
+                            )}
                           </button>
                           <button
                             type="button"
@@ -269,18 +286,32 @@ export function DocumentsPage() {
                                 if (selected?._document_id === visit._document_id)
                                   setSelected(null);
                                 await load();
+                                toastSuccess(
+                                  "Document deleted",
+                                  `“${visit._source.file}” and the facts taken from it were removed. Safety checks were rebuilt.`,
+                                );
                               } catch (err) {
                                 setActionError(err instanceof Error ? err.message : String(err));
+                                toastError("Could not delete the document", toastMessage(err));
                               } finally {
                                 setDocumentAction(null);
                               }
                             }}
-                            className="ml-auto rounded-md px-2.5 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50"
+                            title="Permanently remove this document and everything read from it."
+                            aria-busy={
+                              documentAction?.id === visit._document_id &&
+                              documentAction.kind === "delete"
+                            }
+                            className="ml-auto inline-flex min-h-[44px] items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 disabled:cursor-not-allowed disabled:opacity-50"
                           >
                             {documentAction?.id === visit._document_id &&
-                            documentAction.kind === "delete"
-                              ? "Deleting…"
-                              : "Delete"}
+                            documentAction.kind === "delete" ? (
+                              <>
+                                <Spinner className="h-4 w-4" /> Deleting…
+                              </>
+                            ) : (
+                              "Delete"
+                            )}
                           </button>
                         </div>
                       </div>
@@ -296,13 +327,25 @@ export function DocumentsPage() {
                     onClose={() => setSelected(null)}
                     onUpdated={() => void load()}
                     onReprocess={async () => {
-                      await api.reprocessDocument(credentials, selected._document_id);
-                      await load();
+                      try {
+                        await api.reprocessDocument(credentials, selected._document_id);
+                        await load();
+                        toastSuccess("Document read again", "Your record was updated.");
+                      } catch (err) {
+                        toastError("Could not read the document again", toastMessage(err));
+                        throw err;
+                      }
                     }}
                     onDelete={async () => {
-                      await api.deleteDocument(credentials, selected._document_id);
-                      setSelected(null);
-                      await load();
+                      try {
+                        await api.deleteDocument(credentials, selected._document_id);
+                        setSelected(null);
+                        await load();
+                        toastSuccess("Document deleted", "Safety checks were rebuilt without it.");
+                      } catch (err) {
+                        toastError("Could not delete the document", toastMessage(err));
+                        throw err;
+                      }
                     }}
                     onOpenOriginal={async () => {
                       if (selected.document_url) return selected.document_url;
@@ -313,8 +356,17 @@ export function DocumentsPage() {
                       return signed.url;
                     }}
                     onProcessText={async () => {
-                      await api.processDocumentText(credentials, selected._document_id);
-                      await load();
+                      try {
+                        await api.processDocumentText(credentials, selected._document_id);
+                        await load();
+                        toastSuccess(
+                          "Text re-read",
+                          "The typed text of this document was processed again.",
+                        );
+                      } catch (err) {
+                        toastError("Could not process the text", toastMessage(err));
+                        throw err;
+                      }
                     }}
                     initialEvidenceId={requestedEvidenceId}
                   />

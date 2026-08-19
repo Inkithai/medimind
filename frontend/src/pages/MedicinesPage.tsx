@@ -1,7 +1,9 @@
 import { useCallback, useState } from "react";
 import { Link } from "react-router-dom";
 import { ApiError, api } from "../api/client";
+import { Alert } from "../components/Alert";
 import { Card, CardBody } from "../components/Card";
+import { MedicationReconciliationView } from "../components/MedicationReconciliationView";
 import { ErrorState } from "../components/ErrorState";
 import { LoadingState } from "../components/Spinner";
 import { StatusBadge } from "../components/StatusBadge";
@@ -9,13 +11,15 @@ import { PillIcon, UploadIcon } from "../components/icons";
 import { useAuth } from "../context/AuthContext";
 import { useStrictEffect } from "../hooks/useStrictEffect";
 import { useI18n } from "../i18n/I18nContext";
-import type { Timeline } from "../types/api";
+import type { MedicationReconciliationReport, Timeline } from "../types/api";
 import { compareDates, formatDate } from "../utils/format";
 
 export function MedicinesPage() {
   const { credentials } = useAuth();
   const { t } = useI18n();
   const [timeline, setTimeline] = useState<Timeline | null>(null);
+  const [reconciliation, setReconciliation] = useState<MedicationReconciliationReport | null>(null);
+  const [reconciliationError, setReconciliationError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
   const [filter, setFilter] = useState<string>("");
@@ -23,6 +27,23 @@ export function MedicinesPage() {
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
+    setReconciliationError(null);
+    // The reconciled list is an extra view of the same record: if it is
+    // unavailable the raw medicine history must still render.
+    void api
+      .getMedicationReconciliation(credentials)
+      .then((report) => {
+        setReconciliation(report);
+        setReconciliationError(null);
+      })
+      .catch((err) => {
+        setReconciliation(null);
+        setReconciliationError(
+          err instanceof ApiError && err.status === 404
+            ? null
+            : "The checked medicine list could not be loaded just now. The full history below is still accurate.",
+        );
+      });
     try {
       const data = await api.getTimeline(credentials);
       setTimeline(data);
@@ -151,6 +172,17 @@ export function MedicinesPage() {
         </Card>
       ) : (
         <div className="space-y-6">
+          {reconciliation && (
+            <Section title="Checked medicine list">
+              <MedicationReconciliationView report={reconciliation} />
+            </Section>
+          )}
+          {reconciliationError && (
+            <Alert variant="info" title="Checked list unavailable">
+              {reconciliationError}
+            </Alert>
+          )}
+
           <Section title={t("medicines.current")}>
             <div className="grid gap-3 sm:grid-cols-2">
               {sortedIngredients.map(([ingredient, entries]) => {

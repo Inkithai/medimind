@@ -21,6 +21,7 @@ import {
   SettingsIcon,
   ShieldIcon,
   SparkleIcon,
+  StethoscopeIcon,
   TimelineIcon,
   UploadIcon,
 } from "./icons";
@@ -162,6 +163,14 @@ const NAV: NavItem[] = [
     descriptionKey: "nav.descriptions.recordCheck",
     icon: IntegrityIcon,
     chip: "bg-orange-50 text-orange-800",
+  },
+  {
+    group: "actions",
+    to: "/who-to-see",
+    labelKey: "nav.whoToSee",
+    descriptionKey: "nav.descriptions.whoToSee",
+    icon: StethoscopeIcon,
+    chip: "bg-amber-50 text-amber-800",
   },
   {
     group: "actions",

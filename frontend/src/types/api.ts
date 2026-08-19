@@ -1363,6 +1363,161 @@ export interface GuidelinesSource {
   age_days: number | null;
   stale: boolean;
 }
+// ---- Consult triage (GET /api/v1/consult-triage) --------------------------
+
+export interface TriageAction {
+  /** Rule that fired, e.g. "drug_interaction". */
+  trigger: string;
+  /** What the finding is about, e.g. "Warfarin + Ibuprofen". */
+  subject: string;
+  /** Plain-language explanation of the finding. */
+  detail: string;
+  /** "pharmacist" or "doctor". */
+  route: string;
+  urgency: string;
+  urgency_meaning?: string | null;
+  /** Why this was routed to a pharmacist rather than a doctor, or vice versa. */
+  why_this_route?: string | null;
+  confidence?: number | null;
+  confidence_caveat?: string | null;
+  category?: string | null;
+  specialty?: { key: string; label: string } | null;
+  timing?: { status?: string | null; explanation?: string | null } | null;
+  is_historical?: boolean;
+}
+
+export interface TriageSpecialty {
+  key: string;
+  label: string;
+  urgency: string;
+  confidence?: number | null;
+  triggered_by?: string[];
+}
+
+export interface ConsultTriageReport {
+  output_version?: string;
+  consult_needed: boolean;
+  consult_type?: string | null;
+  urgency?: string | null;
+  urgency_meaning?: string | null;
+  confidence?: number | null;
+  recommended_specialties: TriageSpecialty[];
+  pharmacist_actions: TriageAction[];
+  doctor_actions: TriageAction[];
+  referral_items?: TriageAction[];
+  document_quality_notices?: Array<Record<string, unknown>>;
+  document_quality_note?: string | null;
+  summary: string;
+  emergency_advice: string;
+  note: string;
+}
+
+// ---- Medication reconciliation (GET /api/v1/medications/reconciliation) ---
+
+export type ReconciledState =
+  "active" | "duplicate" | "dose_conflict" | "discontinued" | "single_supply" | string;
+
+export interface ReconciledMedication {
+  ingredient: string;
+  display_name: string;
+  state: ReconciledState;
+  is_active: boolean;
+  sources: Array<{
+    name?: string;
+    date?: string | null;
+    source_file?: string | null;
+    dose?: string | null;
+  }>;
+  supply_count: number;
+  active_supply_count: number;
+  doses: string[];
+  dose_conflict: boolean;
+  duplicate: boolean;
+  notes: string[];
+}
+
+export interface MedicationReconciliationReport {
+  reference_date: string;
+  reconciled_medications: ReconciledMedication[];
+  summary: {
+    total_ingredients: number;
+    active: number;
+    discontinued: number;
+    duplicates: number;
+    dose_conflicts: number;
+  };
+  note: string;
+}
+
+// ---- Deterioration trajectory (GET /api/v1/deterioration) -----------------
+
+export interface DeteriorationPoint {
+  date?: string | null;
+  score: number;
+  risk_band: string;
+  components?: Record<string, number | null>;
+  source_file?: string | null;
+}
+
+export interface DeteriorationReport {
+  trajectory: DeteriorationPoint[];
+  point_count: number;
+  latest_score: number;
+  latest_band: string;
+  previous_score?: number | null;
+  peak_score: number;
+  trend: string;
+  sustained_high: boolean;
+  worsening_signals: string[];
+  deteriorating: boolean;
+  note: string;
+}
+
+// ---- Record export (GET /api/v1/export, /api/v1/export/validation) --------
+
+export interface FhirValidationReport {
+  valid: boolean;
+  format?: string;
+  bundle_type?: string;
+  errors?: string[];
+  warnings?: string[];
+  resource_counts?: Record<string, number>;
+  [key: string]: unknown;
+}
+
+// ---- Finding history (GET /api/v1/findings/history/change-log) ------------
+
+export interface FindingChangeLogEntry {
+  finding_key: string;
+  kind?: string | null;
+  severity?: string | null;
+  rule?: string | null;
+  subject?: string | null;
+  first_seen: string;
+  last_seen: string;
+  seen_in_runs: number;
+  absent_then_recurred: boolean;
+}
+
+export interface FindingChangeLog {
+  snapshots: number;
+  findings: FindingChangeLogEntry[];
+}
+
+// ---- Guidelines refresh (POST /api/v1/guidelines/refresh) -----------------
+
+export interface GuidelinesRefreshResult {
+  applied: Array<{ key: string; version: string }>;
+  applied_count?: number;
+  checked?: boolean;
+  checked_at?: string | null;
+  manifest_url?: string | null;
+  new_sources_in_manifest?: string[] | null;
+  reason?: string | null;
+  note?: string | null;
+  [key: string]: unknown;
+}
+
 export interface GuidelinesStatus {
   sources: GuidelinesSource[];
   total: number;

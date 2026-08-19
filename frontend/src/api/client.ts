@@ -53,7 +53,14 @@ import type {
   ProviderMessage,
   ProviderThread,
   GuidelinesStatus,
+  GuidelinesRefreshResult,
   AnalysisLogsResponse,
+  ConsultTriageReport,
+  MedicationReconciliationReport,
+  DeteriorationReport,
+  FhirValidationReport,
+  CorrectionEvent,
+  FindingChangeLog,
 } from "../types/api";
 import type { ScoredCareRecommendationsResponse } from "../types/recommendations";
 
@@ -971,5 +978,66 @@ export const api = {
   },
   getGuidelinesStatus(credentials: Credentials): Promise<GuidelinesStatus> {
     return request<GuidelinesStatus>(credentials, "/api/v1/guidelines/status");
+  },
+
+  /** Check the curated guideline sources for newer published versions. */
+  refreshGuidelines(credentials: Credentials): Promise<GuidelinesRefreshResult> {
+    return request<GuidelinesRefreshResult>(credentials, "/api/v1/guidelines/refresh", {
+      method: "POST",
+    });
+  },
+
+  /** Who to talk to (pharmacist / doctor), how soon, and why. */
+  getConsultTriage(credentials: Credentials): Promise<ConsultTriageReport> {
+    return request<ConsultTriageReport>(credentials, "/api/v1/consult-triage");
+  },
+
+  /** Reconciled current medicine list: active / duplicate / conflict / stopped. */
+  getMedicationReconciliation(credentials: Credentials): Promise<MedicationReconciliationReport> {
+    return request<MedicationReconciliationReport>(
+      credentials,
+      "/api/v1/medications/reconciliation",
+    );
+  },
+
+  /** Early-warning trajectory across every dated reading. */
+  getDeterioration(credentials: Credentials): Promise<DeteriorationReport> {
+    return request<DeteriorationReport>(credentials, "/api/v1/deterioration");
+  },
+
+  /**
+   * Full record export. `json` is the complete MediMind copy; `fhir` is the
+   * standard FHIR R4 bundle other health systems can import.
+   */
+  exportRecord(
+    credentials: Credentials,
+    format: "json" | "fhir" = "json",
+  ): Promise<Record<string, unknown>> {
+    return request<Record<string, unknown>>(
+      credentials,
+      `/api/v1/export?format=${encodeURIComponent(format)}`,
+    );
+  },
+
+  /** Structural check of the FHIR export before it is handed to a clinic. */
+  validateRecordExport(credentials: Credentials): Promise<FhirValidationReport> {
+    return request<FhirValidationReport>(credentials, "/api/v1/export/validation?format=fhir");
+  },
+
+  /** Every field correction saved in this workspace (append-only audit). */
+  listCorrections(credentials: Credentials): Promise<{ corrections: CorrectionEvent[] }> {
+    return request<{ corrections: CorrectionEvent[] }>(credentials, "/api/v1/corrections");
+  },
+
+  /** Per-finding change log: first seen, last seen, whether it came back. */
+  getFindingChangeLog(credentials: Credentials): Promise<FindingChangeLog> {
+    return request<FindingChangeLog>(credentials, "/api/v1/findings/history/change-log");
+  },
+
+  /** Record the current safety findings as a point-in-time snapshot. */
+  captureFindingSnapshot(credentials: Credentials): Promise<Record<string, unknown>> {
+    return request<Record<string, unknown>>(credentials, "/api/v1/findings/history/snapshot", {
+      method: "POST",
+    });
   },
 };

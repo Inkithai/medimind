@@ -702,8 +702,32 @@ python backend/clean_duplicate_analyses.py --user-id "anon_ab12cd34ef56" --execu
 
 It only deletes rows with the same upload identity, the same page number, and an identical clinical payload. Different pages, a reprocess that read the page differently, documents with correction events attached, and rows with no upload identity are all preserved, and no derived table (snapshots, corrections, conflicts, conversations) is ever touched.
 
+### Backend features now reachable from the UI
+
+Several capabilities the API already served had no screen. They are now surfaced (no backend logic was duplicated in the frontend — every screen calls the existing endpoint):
+
+| Screen | Endpoint(s) | What the user can now do |
+| --- | --- | --- |
+| **Who should I talk to?** (`/who-to-see`, sidebar → Take action) | `GET /api/v1/consult-triage` | See in one sentence whether a pharmacist or doctor should look at their record, how soon, which specialty, and what to ask — with the emergency advice and "no trigger found is not a clean bill of health" caveat shown verbatim. |
+| **Medications** → checked medicine list | `GET /api/v1/medications/reconciliation` | See each ingredient as *Taking now / Possible duplicate / Different doses / Stopped / One supply only*, with the source documents behind each row. |
+| **Vitals** → "Is this getting better or worse?" | `GET /api/v1/deterioration` | Compare the early-warning trajectory across every dated reading (trend, sustained-high, which signals worsened). |
+| **Clinical safety** → review workflow | `GET`/`POST /api/v1/findings/lifecycle`, `GET /api/v1/findings/feedback` | Mark a warning as read / sorted out / not relevant / reopened (only transitions the backend allows are offered), see review progress counters, and read back past answers. |
+| **Record check** → corrections history | `GET /api/v1/corrections` | See every field correction made in the workspace, with the reason and a link back to the document. |
+| **Record changes** → warning history | `GET /api/v1/findings/history/change-log`, `POST /api/v1/findings/history/snapshot` | See when each safety warning first appeared, when it was last seen, whether it went away and came back — and record a new snapshot. |
+| **Settings** → take a copy of your records | `GET /api/v1/export`, `GET /api/v1/export/validation` | Download the native JSON copy or the FHIR R4 bundle for a clinic, and structurally validate the bundle before sharing it. |
+| **Guidelines** → check for newer guidelines | `POST /api/v1/guidelines/refresh` | Check the curated sources for newer published versions and apply them, with the result reported (including the fail-open "reviewed by hand" case). |
+
+### Interface feedback and accessibility
+
+- **Toasts** (`components/Toast.tsx`, no new dependency) confirm every action — saving, deleting, re-reading a document, downloading, importing FHIR, reviewing a warning. Success/info messages clear themselves; **errors stay until dismissed**, because an unread failure reads as a success. Each toast pairs its colour with an icon *and* a word (`Done` / `Could not finish` / `Please note`) and is announced with `role="status"` or `role="alert"`.
+- **Status is never colour-only**: medicine states, urgency levels, trends and lifecycle states all carry a word (and a symbol such as `!!`, `▲`, `✓`) next to the badge.
+- **Tables** (reconciled medicines, home readings, corrections, warning history, deterioration) use real `<caption>`, `scope="col"`/`scope="row"` headers, base-size text and row hover.
+- **Forms** (home measurement entry) have visible labels, required markers, per-field guidance, inline `role="alert"` errors, and a disabled submit that explains what is missing.
+- **Touch targets** on row actions are at least 44px, with visible focus rings, `title` explanations for unfamiliar actions, and `aria-busy` while an action runs.
+
 ### What changed
 
+- **Backend capabilities exposed in the UI** — consult triage, medication reconciliation, deterioration trajectory, finding lifecycle + past feedback, correction history, finding change log/snapshot, record export (+ FHIR validation) and guideline refresh all have screens now; a toast system gives every action a plain-language success/failure message.
 - **One analysis log entry per document** — the analysis log grouped page rows into the upload they came from, so a multi-page scan no longer appears as several separate "Document extraction" analyses with its medications counted once per page. Document type is normalized (never null/free-form), confidence falls back to the result payload in the UI and is normalized when reported as a percentage, and `clean_duplicate_analyses.py` cleans historical duplicate page rows (dry-run by default).
 - **Sticky sidebar** — the desktop sidebar is now `lg:sticky lg:top-0 lg:h-screen lg:self-start` instead of a flex child stretched by its sibling, so it stays fixed in the viewport on long pages rather than scrolling away and growing to the content height.
 - **Accurate current location** — "Use my current location" now refines the GPS fix instead of accepting the first coarse estimate, never lets reverse geocoding move the confirmed coordinates, and surfaces the accuracy radius so the user can correct a poor fix.
