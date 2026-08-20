@@ -186,19 +186,57 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="MediMind API", version="1.0.0", lifespan=lifespan)
 
+def parse_cors_settings(
+    cors_origins: str | None = None,
+    frontend_url: str | None = None,
+) -> tuple[list[str], bool]:
+    """Build CORS allow_origins + allow_credentials from deployment env.
+
+    ``CORS_ORIGINS`` is the explicit allowlist (comma-separated). ``FRONTEND_URL``
+    is accepted as an alias so a Vercel/production URL can be set without a
+    second variable. Trailing slashes are stripped: browsers send Origin without
+    one, but operators often paste ``https://app.example.com/``.
+
+    ``allow_credentials=True`` is invalid with ``allow_origins=["*"]`` (browsers
+    reject it). When the allowlist is ``*`` we allow all origins without
+    credentials. An explicit FRONTEND_URL promotes the allowlist off ``*`` so
+    credentialed browser calls from that origin succeed.
+    """
+    raw = (cors_origins if cors_origins is not None else os.environ.get("CORS_ORIGINS", "*")).strip()
+    extra = (
+        frontend_url if frontend_url is not None else os.environ.get("FRONTEND_URL", "")
+    ).strip()
+
+    def _clean(value: str) -> str:
+        return value.strip().rstrip("/")
+
+    origins: list[str] = []
+
+    def _add(value: str) -> None:
+        cleaned = _clean(value)
+        if cleaned and cleaned != "*" and cleaned not in origins:
+            origins.append(cleaned)
+
+    if extra:
+        for item in extra.split(","):
+            _add(item)
+
+    if raw == "*" or not raw:
+        if origins:
+            return origins, True
+        return ["*"], False
+
+    for item in raw.split(","):
+        _add(item)
+    if not origins:
+        return ["*"], False
+    return origins, True
+
+
 # The authenticated routes require custom Authorization / X-User-Id headers,
 # which trigger a CORS preflight when the frontend is served from a different
-# origin than the API. Allow cross-origin requests from the browser app;
-# restrict via CORS_ORIGINS (comma-separated list of origins) when deployed.
-# NOTE: allow_credentials=True is invalid with allow_origins=["*"] (browsers
-# reject it). When CORS_ORIGINS is "*" we allow all origins without credentials.
-_cors_origins_raw = os.environ.get("CORS_ORIGINS", "*").strip()
-if _cors_origins_raw == "*":
-    _cors_allow_origins = ["*"]
-    _cors_allow_credentials = False
-else:
-    _cors_allow_origins = [o.strip() for o in _cors_origins_raw.split(",") if o.strip()]
-    _cors_allow_credentials = True
+# origin than the API. Restrict via CORS_ORIGINS / FRONTEND_URL when deployed.
+_cors_allow_origins, _cors_allow_credentials = parse_cors_settings()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_allow_origins,

@@ -13,6 +13,9 @@ openai
 pdfplumber
 pymupdf
 pillow
+# Optional OCR binding — the tesseract binary is installed in the Docker image.
+# Absence degrades to the vision path (see ocr_service.py).
+pytesseract
 chromadb
 python-dotenv
 python-dateutil

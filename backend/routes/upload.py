@@ -7,6 +7,7 @@ import asyncio
 import hashlib
 import logging
 import os
+import threading
 
 from dotenv import load_dotenv
 
@@ -88,6 +89,54 @@ from routes.records import (  # noqa: E402, F401
 SUPPORTED_EXTENSIONS = (".pdf", ".png", ".jpg", ".jpeg", ".webp")
 
 router = APIRouter()
+
+# Concurrent reprocess of the same document used to run two full pipelines
+# at once (duplicate LLM spend, racing snapshot writes). Process-local, the
+# same constraint FastAPI BackgroundTasks already has.
+_active_document_jobs: set = set()
+_active_document_jobs_lock = threading.Lock()
+
+
+def register_document_job(user_id: str, document_id: str) -> bool:
+    """Register an in-flight per-document job. False if already running."""
+    key = (user_id, document_id)
+    with _active_document_jobs_lock:
+        if key in _active_document_jobs:
+            return False
+        _active_document_jobs.add(key)
+        return True
+
+
+def unregister_document_job(user_id: str, document_id: str) -> None:
+    with _active_document_jobs_lock:
+        _active_document_jobs.discard((user_id, document_id))
+
+
+def is_document_job_active(user_id: str, document_id: str) -> bool:
+    with _active_document_jobs_lock:
+        return (user_id, document_id) in _active_document_jobs
+
+
+def _belongs_to_same_upload(selected: Dict[str, Any]):
+    """Match every extracted page of one physical file."""
+    content_sha256 = selected.get("content_sha256")
+    public_id = selected.get("cloudinary_public_id")
+    storage_path = selected.get("storage_path")
+    source_file = ((selected.get("_source") or {}).get("file")) or None
+    document_id = trust_document_id(selected)
+
+    def belongs(doc: Dict[str, Any]) -> bool:
+        if content_sha256:
+            return doc.get("content_sha256") == content_sha256
+        if public_id:
+            return doc.get("cloudinary_public_id") == public_id
+        if storage_path:
+            return doc.get("storage_path") == storage_path
+        if source_file:
+            return ((doc.get("_source") or {}).get("file")) == source_file
+        return trust_document_id(doc) == document_id
+
+    return belongs
 
 
 from routes.records import (  # noqa: E402
@@ -1615,11 +1664,30 @@ async def reprocess_document(
     are replaced together, and corrections/conflicts are replayed on the
     rebuild exactly as they are for an upload.
     """
+    if _workspace_has_active_upload(user_id):
+        raise HTTPException(
+            409,
+            "A document upload is still processing. Wait for it to finish before reprocessing.",
+        )
     docs = db.load_documents(user_id)
     doc = next((d for d in docs if trust_document_id(d) == document_id), None)
     if doc is None:
         raise HTTPException(404, "Document not found in this workspace.")
+    if not register_document_job(user_id, document_id):
+        raise HTTPException(
+            409,
+            "This document is already being reprocessed. Wait for it to finish.",
+        )
 
+    try:
+        return await _reprocess_document_locked(user_id, document_id, doc)
+    finally:
+        unregister_document_job(user_id, document_id)
+
+
+async def _reprocess_document_locked(
+    user_id: str, document_id: str, doc: Dict[str, Any]
+) -> Dict[str, Any]:
     source_file = ((doc.get("_source") or {}).get("file")) or "document"
     try:
         content = storage.download_original_bytes(doc)
@@ -1899,16 +1967,9 @@ async def delete_document(
 
     content_sha256 = selected.get("content_sha256")
     public_id = selected.get("cloudinary_public_id")
+    storage_path = selected.get("storage_path")
     source_file = ((selected.get("_source") or {}).get("file")) or None
-
-    def belongs_to_upload(doc: Dict[str, Any]) -> bool:
-        if content_sha256:
-            return doc.get("content_sha256") == content_sha256
-        if public_id:
-            return doc.get("cloudinary_public_id") == public_id
-        if source_file:
-            return ((doc.get("_source") or {}).get("file")) == source_file
-        return trust_document_id(doc) == document_id
+    belongs_to_upload = _belongs_to_same_upload(selected)
 
     deleted_group = [doc for doc in documents if belongs_to_upload(doc)]
     remaining = [doc for doc in documents if not belongs_to_upload(doc)]
@@ -1925,6 +1986,7 @@ async def delete_document(
         user_id,
         content_sha256=str(content_sha256) if content_sha256 else None,
         cloudinary_public_id=str(public_id) if public_id else None,
+        storage_path=str(storage_path) if storage_path else None,
         source_file=str(source_file) if source_file else None,
         document_id=document_id,
     )
@@ -1967,9 +2029,8 @@ async def delete_workspace(user_id: str = Depends(get_current_user)) -> Dict[str
             "A document upload is still processing. Wait for it to finish before deleting the workspace.",  # noqa: E501
         )
     documents = db.load_documents(user_id, include_corrections=False)
-    public_ids = [doc.get("cloudinary_public_id") for doc in documents]
     try:
-        await asyncio.to_thread(storage.delete_workspace_documents, public_ids)
+        await asyncio.to_thread(storage.delete_workspace_originals, documents)
     except storage.StorageDeletionError as exc:
         raise HTTPException(502, str(exc)) from exc
 
@@ -1992,21 +2053,7 @@ def _select_document_group(
     selected = next((doc for doc in documents if trust_document_id(doc) == document_id), None)
     if selected is None:
         raise HTTPException(404, "Document not found in this workspace.")
-    content_sha256 = selected.get("content_sha256")
-    public_id = selected.get("cloudinary_public_id")
-    source_file = ((selected.get("_source") or {}).get("file")) or None
-
-    def belongs(doc: Dict[str, Any]) -> bool:
-        if content_sha256:
-            return doc.get("content_sha256") == content_sha256
-        if public_id:
-            return doc.get("cloudinary_public_id") == public_id
-        if selected.get("storage_path"):
-            return doc.get("storage_path") == selected.get("storage_path")
-        if source_file:
-            return ((doc.get("_source") or {}).get("file")) == source_file
-        return trust_document_id(doc) == document_id
-
+    belongs = _belongs_to_same_upload(selected)
     group = [doc for doc in documents if belongs(doc)]
     remaining = [doc for doc in documents if not belongs(doc)]
     return selected, group, remaining

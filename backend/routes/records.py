@@ -538,6 +538,10 @@ async def _rebuild_after_document_deletion_impl(
     db.clear_conflict_history(user_id)
     if not remaining_documents:
         db.delete_patient_snapshot(user_id)
+        # Snapshot deletion does not touch the normalized projection tables.
+        # Without this wipe, medications/labs/events from the deleted source
+        # remain queryable after the workspace is empty.
+        db.clear_clinical_projection(user_id)
         await asyncio.to_thread(vector_store.delete_collection, user_id)
         return {
             "documents_remaining": 0,

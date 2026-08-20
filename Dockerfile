@@ -12,9 +12,18 @@ FROM python:3.10-slim
 
 WORKDIR /app
 
-# Install system dependencies needed by pymupdf and pdfplumber
+# System deps: compilers for wheels, Tesseract for the optional OCR pre-pass.
+# libglib/libgl package names changed on Debian Trixie (python:3.13-slim);
+# fall back to Bookworm names so this Dockerfile survives a base-image bump.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
+    tesseract-ocr \
+    tesseract-ocr-eng \
+    && (apt-get install -y --no-install-recommends libglib2.0-0t64 \
+        || apt-get install -y --no-install-recommends libglib2.0-0) \
+    && (apt-get install -y --no-install-recommends libgl1 \
+        || apt-get install -y --no-install-recommends libgl1-mesa-glx \
+        || true) \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy and install Python dependencies

@@ -427,12 +427,14 @@ def delete_document_group(
     cloudinary_public_id: Optional[str],
     source_file: Optional[str],
     document_id: str,
+    storage_path: Optional[str] = None,
 ) -> int:
     """Delete one physical upload, including every extracted page row.
 
     New uploads share a content hash and Cloudinary id across all pages.
-    Older rows fall back to their source filename, then finally to the exact
-    application document id. Every query remains scoped to ``user_id``.
+    Private Supabase originals share ``storage_path``. Older rows fall back
+    to their source filename, then finally to the exact application document
+    id. Every query remains scoped to ``user_id``.
     """
     response = _documents().select("id, data").eq("user_id", user_id).execute()
     matched_ids: List[Any] = []
@@ -444,6 +446,8 @@ def delete_document_group(
             same_upload = data.get("content_sha256") == content_sha256
         elif cloudinary_public_id:
             same_upload = data.get("cloudinary_public_id") == cloudinary_public_id
+        elif storage_path:
+            same_upload = data.get("storage_path") == storage_path
         elif source_file:
             same_upload = (data.get("_source") or {}).get("file") == source_file
         else:
@@ -525,6 +529,28 @@ def clear_document_derived_history(user_id: str) -> None:
     """
     client = _get_client()
     for table_name in ("conversation_sessions", "jobs", "referral_searches", "audit_log"):
+        try:
+            client.table(table_name).delete().eq("user_id", user_id).execute()
+        except Exception as exc:
+            if getattr(exc, "code", None) == _MISSING_TABLE_CODE or _MISSING_TABLE_CODE in str(exc):
+                continue
+            raise
+
+
+@_translate_missing_schema
+def clear_clinical_projection(user_id: str) -> None:
+    """Remove normalized clinical entity rows for this user.
+
+    The JSON document rows and patient snapshot are the recovery source of
+    truth. Projection tables (medications, prescriptions, labs, allergies,
+    events, safety findings) are derived and must not outlive their source —
+    especially when the last document in a workspace is deleted, because
+    there is then no rebuild that would sync them back to empty.
+    """
+    from clinical_projection import ENTITY_TABLES
+
+    client = _get_client()
+    for table_name in ENTITY_TABLES:
         try:
             client.table(table_name).delete().eq("user_id", user_id).execute()
         except Exception as exc:

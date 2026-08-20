@@ -201,11 +201,34 @@ def delete_patient_document(public_id: str) -> None:
 
 
 def delete_workspace_documents(public_ids: Any) -> None:
-    """Remove every distinct original owned by a workspace."""
+    """Remove every distinct Cloudinary original owned by a workspace."""
     for public_id in sorted(
         {str(value).strip() for value in public_ids if value and str(value).strip()}
     ):
         delete_patient_document(public_id)
+
+
+def delete_workspace_originals(documents: Any) -> None:
+    """Remove every distinct original, Cloudinary or private Supabase storage.
+
+    Workspace deletion used to pass only ``cloudinary_public_id`` values, so
+    documents stored in a private Supabase bucket were left behind.
+    """
+    seen = set()
+    for doc in documents or []:
+        if not isinstance(doc, dict):
+            continue
+        if doc.get("storage_backend") == "supabase" and doc.get("storage_path"):
+            key = ("supabase", str(doc.get("storage_path")))
+        else:
+            public_id = str(doc.get("cloudinary_public_id") or "").strip()
+            if not public_id:
+                continue
+            key = ("cloudinary", public_id)
+        if key in seen:
+            continue
+        seen.add(key)
+        delete_uploaded_document(doc)
 
 
 class StorageDownloadError(RuntimeError):
