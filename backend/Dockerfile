@@ -11,9 +11,18 @@
 # ============================================================
 FROM python:3.10-slim
 WORKDIR /app
-# Install system dependencies needed by pymupdf and pdfplumber
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
+# System deps: compilers for wheels, Tesseract for the optional OCR pre-pass.
+# libglib/libgl package names changed on Debian Trixie (python:3.13-slim);
+# pick whichever name exists so a failed apt-get does not leave dpkg unhappy.
+RUN apt-get update && \
+    GLIB_PKG=$(apt-cache show libglib2.0-0t64 >/dev/null 2>&1 && echo libglib2.0-0t64 || echo libglib2.0-0) && \
+    GL_PKG=$(apt-cache show libgl1 >/dev/null 2>&1 && echo libgl1 || echo libgl1-mesa-glx) && \
+    apt-get install -y --no-install-recommends \
+        build-essential \
+        tesseract-ocr \
+        tesseract-ocr-eng \
+        "$GLIB_PKG" \
+        "$GL_PKG" \
     && rm -rf /var/lib/apt/lists/*
 # Copy and install Python dependencies
 COPY requirements.txt ./

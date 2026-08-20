@@ -343,6 +343,39 @@ def test_ocr_failure_never_blocks_extraction(tmp_path, monkeypatch):
     assert page["_source"]["method"] == "vision_ocr"
 
 
+def test_single_pass_tesseract_invocation_and_word_confidence(monkeypatch):
+    """image_to_data is invoked exactly once; image_to_string is never called.
+    Confidence averages only over words that produced text."""
+
+    class FakePytesseract:
+        Output = type("Output", (), {"DICT": "dict"})
+        image_to_string_called = False
+
+        def image_to_data(self, *args, **kwargs):
+            return {
+                "text": ["Patient", "Test", "Hemoglobin", "13.5", "g/dL", ""],
+                "conf": [95.0, 92.0, 90.0, 88.0, 96.0, 99.0],
+                "block_num": [1, 1, 1, 1, 1, 1],
+                "par_num": [1, 1, 1, 1, 1, 1],
+                "line_num": [1, 1, 1, 1, 1, 1],
+            }
+
+        def image_to_string(self, *args, **kwargs):
+            FakePytesseract.image_to_string_called = True
+            raise AssertionError("image_to_string must not be used")
+
+    monkeypatch.setattr(ocr_service.shutil, "which", lambda name: "/usr/bin/tesseract")
+    monkeypatch.setattr(ocr_service, "_require_tesseract", lambda: FakePytesseract())
+    from PIL import Image
+
+    img = Image.new("RGB", (40, 40), "white")
+    result = ocr_service.ocr_image(img)
+    assert FakePytesseract.image_to_string_called is False
+    assert "Patient Test Hemoglobin 13.5 g/dL" in result.text
+    # Empty-text row with conf 99 must not inflate the average: (95+92+90+88+96)/5
+    assert result.confidence == 92.2
+
+
 def test_malformed_tesseract_rows_do_not_crash_ocr_image(monkeypatch):
     """Tesseract output arrays can carry blank/absent row fields; the row
     assembler must treat them as unreadable rather than raising."""

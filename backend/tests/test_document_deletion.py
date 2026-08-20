@@ -67,6 +67,27 @@ def test_delete_document_removes_every_page_and_rebuilds_without_the_upload():
     assert [item["_document_id"] for item in passed_remaining] == ["doc-3"]
 
 
+def test_delete_document_waits_for_an_active_reprocess():
+    import routes.upload as upload_routes
+
+    upload_routes._active_document_jobs.clear()
+    try:
+        assert upload_routes.register_document_job("user", "doc-1") is True
+        with (
+            mock.patch.object(api.jobs, "list_jobs", return_value=[]),
+            mock.patch.object(api.db, "delete_document_group") as delete_rows,
+        ):
+            try:
+                asyncio.run(api.delete_document("doc-1", "user"))
+            except api.HTTPException as exc:
+                assert exc.status_code == 409
+            else:
+                raise AssertionError("an in-flight reprocess must block document deletion")
+        delete_rows.assert_not_called()
+    finally:
+        upload_routes.unregister_document_job("user", "doc-1")
+
+
 def test_delete_document_waits_for_an_active_upload():
     with (
         mock.patch.object(api.jobs, "list_jobs", return_value=[{"status": "pending"}]),
@@ -100,7 +121,7 @@ def test_delete_workspace_removes_originals_durable_data_and_memory_caches():
     with (
         mock.patch.object(api.jobs, "list_jobs", return_value=[]),
         mock.patch.object(api.db, "load_documents", return_value=docs),
-        mock.patch.object(api.storage, "delete_workspace_documents") as delete_originals,
+        mock.patch.object(api.storage, "delete_workspace_originals") as delete_originals,
         mock.patch.object(
             api.db, "delete_workspace_data", return_value={"documents": 2}
         ) as delete_data,
@@ -111,15 +132,30 @@ def test_delete_workspace_removes_originals_durable_data_and_memory_caches():
         response = asyncio.run(api.delete_workspace("user"))
 
     assert response == {"deleted": True}
-    delete_originals.assert_called_once_with(
-        [
-            "mediscan/user/report",
-            "mediscan/user/report",
-        ]
-    )
+    delete_originals.assert_called_once_with(docs)
     delete_data.assert_called_once_with("user")
     delete_jobs.assert_called_once_with("user")
     delete_sessions.assert_called_once_with("user")
+    delete_index.assert_called_once_with("user")
+
+
+def test_rebuild_after_last_document_clears_clinical_projection():
+    """Deleting the last source must wipe derived medications/labs/events,
+    not just the snapshot cache — otherwise GET /clinical-entities still
+    returns facts from a document that no longer exists."""
+    with (
+        mock.patch.object(api.db, "clear_conflict_history") as clear_conflicts,
+        mock.patch.object(api.db, "delete_patient_snapshot") as delete_snap,
+        mock.patch.object(api.db, "clear_clinical_projection") as clear_proj,
+        mock.patch.object(api.vector_store, "delete_collection") as delete_index,
+    ):
+        result = asyncio.run(api._rebuild_after_document_deletion("user", []))
+
+    assert result["documents_remaining"] == 0
+    assert result["timeline"] is None
+    clear_conflicts.assert_called_once_with("user")
+    delete_snap.assert_called_once_with("user")
+    clear_proj.assert_called_once_with("user")
     delete_index.assert_called_once_with("user")
 
 

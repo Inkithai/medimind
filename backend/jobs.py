@@ -235,7 +235,10 @@ def update_job(
             _JOBS[job_id] = job
 
     with _JOBS_LOCK:
-        job = _JOBS[job_id]
+        job = _JOBS.get(job_id)
+        if job is None:
+            logger.warning("update_job missing %s after load", job_id)
+            return
         if status:
             job["status"] = status
         if progress is not None:

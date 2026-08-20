@@ -7,6 +7,7 @@ import asyncio
 import hashlib
 import logging
 import os
+import threading
 
 from dotenv import load_dotenv
 
@@ -88,6 +89,59 @@ from routes.records import (  # noqa: E402, F401
 SUPPORTED_EXTENSIONS = (".pdf", ".png", ".jpg", ".jpeg", ".webp")
 
 router = APIRouter()
+
+# Concurrent reprocess of the same document used to run two full pipelines
+# at once (duplicate LLM spend, racing snapshot writes). Process-local, the
+# same constraint FastAPI BackgroundTasks already has.
+_active_document_jobs: set = set()
+_active_document_jobs_lock = threading.Lock()
+
+
+def register_document_job(user_id: str, document_id: str) -> bool:
+    """Register an in-flight per-document job. False if already running."""
+    key = (user_id, document_id)
+    with _active_document_jobs_lock:
+        if key in _active_document_jobs:
+            return False
+        _active_document_jobs.add(key)
+        return True
+
+
+def unregister_document_job(user_id: str, document_id: str) -> None:
+    with _active_document_jobs_lock:
+        _active_document_jobs.discard((user_id, document_id))
+
+
+def is_document_job_active(user_id: str, document_id: str) -> bool:
+    with _active_document_jobs_lock:
+        return (user_id, document_id) in _active_document_jobs
+
+
+def workspace_has_active_document_job(user_id: str) -> bool:
+    with _active_document_jobs_lock:
+        return any(owner == user_id for owner, _document_id in _active_document_jobs)
+
+
+def _belongs_to_same_upload(selected: Dict[str, Any]):
+    """Match every extracted page of one physical file."""
+    content_sha256 = selected.get("content_sha256")
+    public_id = selected.get("cloudinary_public_id")
+    storage_path = selected.get("storage_path")
+    source_file = ((selected.get("_source") or {}).get("file")) or None
+    document_id = trust_document_id(selected)
+
+    def belongs(doc: Dict[str, Any]) -> bool:
+        if content_sha256:
+            return doc.get("content_sha256") == content_sha256
+        if public_id:
+            return doc.get("cloudinary_public_id") == public_id
+        if storage_path:
+            return doc.get("storage_path") == storage_path
+        if source_file:
+            return ((doc.get("_source") or {}).get("file")) == source_file
+        return trust_document_id(doc) == document_id
+
+    return belongs
 
 
 from routes.records import (  # noqa: E402
@@ -383,6 +437,9 @@ async def _execute_upload_pipeline(
     file_errors: List[Dict[str, Any]] = []
     duplicate_files_skipped: List[Dict[str, Any]] = []
     successfully_saved_files = 0
+    # Pages carrying a demo/placeholder marker. They are ADDED like any
+    # other; this only records which ones they were.
+    demo_documents: List[str] = []
 
     # Loaded up front (rather than after extraction) so an already-uploaded
     # file can be recognised BEFORE it costs a vision/extraction call.
@@ -657,13 +714,12 @@ async def _execute_upload_pipeline(
                             if len(pages) == 1
                             else f"{original_name} (page {page_num})"
                         )
-                        if _is_demo_document(page):
-                            # A placeholder-like name is only a hint. Structured
-                            # clinical content wins so a real prescription for
-                            # somebody named Demonte, or a lab report whose
-                            # patient field captured "Sample Collected", is not
-                            # silently lost. Dropping an otherwise valid empty
-                            # template is an explicit deployment opt-in.
+                        # CLASSIFY, never skip solely for demo marker alone when clinical content present.
+                        # Tag demo documents so caller can label/filter them; skipping empty templates
+                        # remains an explicit opt-in via SKIP_DEMO_DOCUMENTS.
+                        page["is_demo_document"] = _is_demo_document(page)
+                        if page["is_demo_document"]:
+                            demo_documents.append(label)
                             medical_content_found = has_medical_content(page)
                             if SKIP_DEMO_DOCUMENTS and not medical_content_found:
                                 reason = (
@@ -678,15 +734,12 @@ async def _execute_upload_pipeline(
                                 )
                                 continue
                             logger.info(
-                                "upload: user=%s demo/placeholder marker detected in '%s', "
-                                "but %s — keeping it",
+                                "upload: user=%s '%s' matches a demo/placeholder "
+                                "marker — keeping it and tagging it is_demo_document=true "
+                                "(medical content present: %s)",
                                 user_id,
                                 label,
-                                (
-                                    "structured clinical content was found"
-                                    if medical_content_found
-                                    else "SKIP_DEMO_DOCUMENTS is off"
-                                ),
+                                has_medical_content(page),
                             )
                         try:
                             assert_medical_document(page, label)
@@ -922,6 +975,13 @@ async def _execute_upload_pipeline(
                     },
                 )
 
+        # uploaded_at is stamped here (one timestamp for the whole batch)
+        # rather than left for db.insert_documents() to set later, because
+        # build_patient_timeline() below runs BEFORE that insert — without
+        # this, the snapshot saved from THIS request would carry visits
+        # with no uploaded_at at all, only gaining one retroactively once
+        # a later upload rebuilds the timeline from the now-saved records.
+        batch_uploaded_at = db.now_iso()
         # Cloud storage is per-file too: one storage failure should not discard
         # documents that were extracted and saved successfully.
         for file_index in sorted(extracted):
@@ -969,6 +1029,7 @@ async def _execute_upload_pipeline(
                 # correctable without exposing storage-provider identifiers.
                 page.setdefault("_document_id", f"doc_{uuid.uuid4().hex}")
                 page["document_url"] = upload_info["document_url"]
+                page["uploaded_at"] = batch_uploaded_at
                 page["cloudinary_public_id"] = upload_info.get("cloudinary_public_id")
                 page["storage_backend"] = upload_info.get("storage_backend") or "cloudinary"
                 if upload_info.get("storage_path"):
@@ -1262,6 +1323,9 @@ async def _execute_upload_pipeline(
         "trust_summary": trust_summary,
         "conflicts": active_conflicts,
         "failed_files": sorted(file_errors, key=lambda item: item.get("file_index", 0)),
+        # Documents that matched a demo/placeholder marker. They were added
+        # normally — this names them so a caller can label or filter them.
+        "demo_documents": demo_documents,
         # Present (and non-empty) when a re-uploaded file was recognised and
         # not added a second time.
         "duplicate_files_skipped": duplicate_files_skipped,
@@ -1605,11 +1669,30 @@ async def reprocess_document(
     are replaced together, and corrections/conflicts are replayed on the
     rebuild exactly as they are for an upload.
     """
+    if _workspace_has_active_upload(user_id):
+        raise HTTPException(
+            409,
+            "A document upload is still processing. Wait for it to finish before reprocessing.",
+        )
     docs = db.load_documents(user_id)
     doc = next((d for d in docs if trust_document_id(d) == document_id), None)
     if doc is None:
         raise HTTPException(404, "Document not found in this workspace.")
+    if not register_document_job(user_id, document_id):
+        raise HTTPException(
+            409,
+            "This document is already being reprocessed. Wait for it to finish.",
+        )
 
+    try:
+        return await _reprocess_document_locked(user_id, document_id, doc)
+    finally:
+        unregister_document_job(user_id, document_id)
+
+
+async def _reprocess_document_locked(
+    user_id: str, document_id: str, doc: Dict[str, Any]
+) -> Dict[str, Any]:
     source_file = ((doc.get("_source") or {}).get("file")) or "document"
     try:
         content = storage.download_original_bytes(doc)
@@ -1877,10 +1960,10 @@ async def delete_document(
     user_id: str = Depends(get_current_user),
 ) -> Dict[str, Any]:
     """Permanently delete one uploaded file and rebuild all dependent views."""
-    if _workspace_has_active_upload(user_id):
+    if _workspace_has_active_upload(user_id) or workspace_has_active_document_job(user_id):
         raise HTTPException(
             409,
-            "A document upload is still processing. Wait for it to finish before deleting a document.",  # noqa: E501
+            "A document is still being processed. Wait for it to finish before deleting a document.",  # noqa: E501
         )
     documents = db.load_documents(user_id)
     selected = next((doc for doc in documents if trust_document_id(doc) == document_id), None)
@@ -1889,16 +1972,9 @@ async def delete_document(
 
     content_sha256 = selected.get("content_sha256")
     public_id = selected.get("cloudinary_public_id")
+    storage_path = selected.get("storage_path")
     source_file = ((selected.get("_source") or {}).get("file")) or None
-
-    def belongs_to_upload(doc: Dict[str, Any]) -> bool:
-        if content_sha256:
-            return doc.get("content_sha256") == content_sha256
-        if public_id:
-            return doc.get("cloudinary_public_id") == public_id
-        if source_file:
-            return ((doc.get("_source") or {}).get("file")) == source_file
-        return trust_document_id(doc) == document_id
+    belongs_to_upload = _belongs_to_same_upload(selected)
 
     deleted_group = [doc for doc in documents if belongs_to_upload(doc)]
     remaining = [doc for doc in documents if not belongs_to_upload(doc)]
@@ -1915,6 +1991,7 @@ async def delete_document(
         user_id,
         content_sha256=str(content_sha256) if content_sha256 else None,
         cloudinary_public_id=str(public_id) if public_id else None,
+        storage_path=str(storage_path) if storage_path else None,
         source_file=str(source_file) if source_file else None,
         document_id=document_id,
     )
@@ -1957,9 +2034,8 @@ async def delete_workspace(user_id: str = Depends(get_current_user)) -> Dict[str
             "A document upload is still processing. Wait for it to finish before deleting the workspace.",  # noqa: E501
         )
     documents = db.load_documents(user_id, include_corrections=False)
-    public_ids = [doc.get("cloudinary_public_id") for doc in documents]
     try:
-        await asyncio.to_thread(storage.delete_workspace_documents, public_ids)
+        await asyncio.to_thread(storage.delete_workspace_originals, documents)
     except storage.StorageDeletionError as exc:
         raise HTTPException(502, str(exc)) from exc
 
@@ -1982,21 +2058,7 @@ def _select_document_group(
     selected = next((doc for doc in documents if trust_document_id(doc) == document_id), None)
     if selected is None:
         raise HTTPException(404, "Document not found in this workspace.")
-    content_sha256 = selected.get("content_sha256")
-    public_id = selected.get("cloudinary_public_id")
-    source_file = ((selected.get("_source") or {}).get("file")) or None
-
-    def belongs(doc: Dict[str, Any]) -> bool:
-        if content_sha256:
-            return doc.get("content_sha256") == content_sha256
-        if public_id:
-            return doc.get("cloudinary_public_id") == public_id
-        if selected.get("storage_path"):
-            return doc.get("storage_path") == selected.get("storage_path")
-        if source_file:
-            return ((doc.get("_source") or {}).get("file")) == source_file
-        return trust_document_id(doc) == document_id
-
+    belongs = _belongs_to_same_upload(selected)
     group = [doc for doc in documents if belongs(doc)]
     remaining = [doc for doc in documents if not belongs(doc)]
     return selected, group, remaining
@@ -2111,45 +2173,53 @@ async def process_document_text_layer(
     upload so the text layer can be inspected/reused independently.
     """
     selected, group, _remaining = _select_document_group(user_id, document_id)
-    source_file = ((selected.get("_source") or {}).get("file")) or "document"
-    suffix = Path(source_file).suffix or ".bin"
+    if not register_document_job(user_id, document_id):
+        raise HTTPException(
+            409,
+            "This document is already being processed. Wait for it to finish.",
+        )
     try:
-        content = await asyncio.to_thread(storage.download_original_bytes, selected)
-    except storage.StorageDownloadError as exc:
-        raise HTTPException(502, str(exc)) from exc
-    from document_processing import process_raw_text
+        source_file = ((selected.get("_source") or {}).get("file")) or "document"
+        suffix = Path(source_file).suffix or ".bin"
+        try:
+            content = await asyncio.to_thread(storage.download_original_bytes, selected)
+        except storage.StorageDownloadError as exc:
+            raise HTTPException(502, str(exc)) from exc
+        from document_processing import process_raw_text
 
-    with TemporaryDirectory() as tmp_dir:
-        tmp_path = Path(tmp_dir) / ("original" + suffix)
-        tmp_path.write_bytes(content)
-        raw_processing = await asyncio.to_thread(process_raw_text, str(tmp_path))
-    updated_pages = []
-    for page in group:
-        clone = dict(page)
-        clone["raw_text_processing"] = raw_processing
-        updated_pages.append(clone)
-    replaced = db.replace_document_group(
-        user_id,
-        content_sha256=str(selected.get("content_sha256"))
-        if selected.get("content_sha256")
-        else None,
-        source_file=str(source_file) if source_file else None,
-        pages=updated_pages,
-    )
-    audit.record(
-        user_id,
-        "documents.process_text",
-        {
+        with TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir) / ("original" + suffix)
+            tmp_path.write_bytes(content)
+            raw_processing = await asyncio.to_thread(process_raw_text, str(tmp_path))
+        updated_pages = []
+        for page in group:
+            clone = dict(page)
+            clone["raw_text_processing"] = raw_processing
+            updated_pages.append(clone)
+        replaced = db.replace_document_group(
+            user_id,
+            content_sha256=str(selected.get("content_sha256"))
+            if selected.get("content_sha256")
+            else None,
+            source_file=str(source_file) if source_file else None,
+            pages=updated_pages,
+        )
+        audit.record(
+            user_id,
+            "documents.process_text",
+            {
+                "document_id": document_id,
+                "status": raw_processing.get("processing_status"),
+                "rows_replaced": replaced,
+            },
+        )
+        return {
             "document_id": document_id,
-            "status": raw_processing.get("processing_status"),
-            "rows_replaced": replaced,
-        },
-    )
-    return {
-        "document_id": document_id,
-        "raw_text_processing": raw_processing,
-        "rows_updated": len(updated_pages),
-    }
+            "raw_text_processing": raw_processing,
+            "rows_updated": len(updated_pages),
+        }
+    finally:
+        unregister_document_job(user_id, document_id)
 
 
 @router.get("/api/v1/analyses")

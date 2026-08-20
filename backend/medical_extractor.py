@@ -2007,6 +2007,29 @@ states, preserving separate event dates when printed:
 - Use null for an event-specific date when the document does not print one;
   the timeline will fall back to the enclosing document date.
 
+A TEST THAT WAS ORDERED IS NOT A TEST THAT WAS RESULTED — this distinction
+decides which of two fields a test name goes in, and getting it wrong
+produces a record that says a measurement exists when none was taken.
+
+- lab_results: ONLY tests this document reports an actual measured RESULT
+  for. There must be a value that was produced by running the test —
+  a number ("14.8", "5,400"), or a categorical finding a lab actually
+  reports ("Negative", "Reactive", "Trace", "Nil", "Absent", "Clear").
+  If you cannot point to a result on the page, it does not belong here.
+
+- recommended_investigations: tests the document ORDERS, ADVISES, REQUESTS
+  or PLANS, with no result attached. These appear under headings like
+  "Advise", "Investigations", "Suggested", "To be done", "Plan", "Follow-up
+  tests", or as a bare list of test names on a prescription. Record just the
+  test name as printed.
+
+Never put an ordered test in lab_results with an invented, blank or
+placeholder value — not "", not "-", not "N/A", not "pending", not the test
+name repeated, and never a number you did not read off the page. A test with
+no result is not a low-confidence result; it is a different kind of fact, and
+it has its own field. The same test name may legitimately appear in both
+fields on a document that reports today's result and orders a repeat.
+
 PAGE-LEVEL EVIDENCE — every extracted fact must point back to the document:
 - Include a short VERBATIM quote for every date, identity, provider, allergy,
   clinical note, medication, lab result, diagnosis, symptom, procedure, vital
@@ -2268,6 +2291,15 @@ EXTRACTION_JSON_SCHEMA = {
                 "additionalProperties": False,
             },
         },
+        # Tests the document ORDERS or ADVISES but does not report a result
+        # for. Kept out of lab_results entirely: an ordered test has no value,
+        # no unit and no reference range, so everything downstream that reads
+        # lab_results — trend tracking, single-reading assessment, the
+        # abnormal-result triggers in consult_triage — has nothing to work
+        # with and can only report it as "insufficient data". Recording it
+        # here keeps the clinical intent (a doctor wanted this checked)
+        # without it masquerading as a measurement that was taken.
+        "recommended_investigations": {"type": "array", "items": {"type": "string"}},
         "diagnoses": {"type": "array", "items": DIAGNOSIS_JSON_SCHEMA},
         "symptoms": {"type": "array", "items": SYMPTOM_JSON_SCHEMA},
         "procedures": {"type": "array", "items": PROCEDURE_JSON_SCHEMA},
@@ -2310,6 +2342,7 @@ EXTRACTION_JSON_SCHEMA = {
         "translation_confidence",
         "medications",
         "lab_results",
+        "recommended_investigations",
         "diagnoses",
         "symptoms",
         "procedures",
@@ -2546,6 +2579,102 @@ def _normalize_extraction_result(result: Dict[str, Any]) -> Dict[str, Any]:
     return result
 
 
+# Values that mean "no result was reported", not "the result was this".
+#
+# Chosen conservatively, because the opposite mistake is worse: plenty of
+# genuine lab results are non-numeric — "Negative", "Reactive", "Trace",
+# "Absent", "Clear", and "Nil" is a real reported value for urine albumin.
+# Treating those as empty would delete measurements that were actually taken,
+# so nothing is dropped for merely failing to look like a number. Only these
+# explicit placeholders count as absent.
+NO_RESULT_PLACEHOLDERS = frozenset({
+    "", "-", "--", "---", "?", "??", ".", "_",
+    "n/a", "n.a.", "na", "nil result", "no result", "not available",
+    "not done", "nd", "not reported", "no value",
+    "pending", "result pending", "awaited", "result awaited", "awaiting",
+    "to be done", "to do", "tbd", "tba",
+    "advised", "advise", "advice", "suggested", "recommended", "ordered",
+    "requested", "planned", "follow up", "follow-up",
+})
+
+
+def _has_reported_result(lab: Dict[str, Any]) -> bool:
+    """True if this lab entry carries a value that was actually measured."""
+    value = lab.get("value")
+    if value is None:
+        return False
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return True
+    text = str(value).strip()
+    if not text:
+        return False
+    if text.lower() in NO_RESULT_PLACEHOLDERS:
+        return False
+    # "Haemoglobin: Haemoglobin" — the model echoing the test name back into
+    # the value field is a non-answer, not a categorical result.
+    if text.lower() == str(lab.get("test_name") or "").strip().lower():
+        return False
+    return True
+
+
+def separate_recommended_investigations(result: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Moves any lab_results entry with no reported result into
+    recommended_investigations. Mutates and returns `result`.
+
+    The schema requires a non-null `value` on every lab_results item, so a
+    model asked to record an ordered-but-not-yet-done test has no valid way
+    to say "there is no result" — it must put SOMETHING there, and what it
+    puts is a placeholder or an echo of the test name. The prompt now tells
+    it where such tests belong, but a prompt is guidance and this is a
+    correctness property, so it is enforced here as well.
+
+    The consequence of not enforcing it is quiet: an ordered test entering
+    lab_results becomes a data point with no parseable value, which
+    lab_trends can only file under `insufficient_data`, and which reads back
+    to the user as a test that was performed and somehow produced nothing.
+    """
+    labs = result.get("lab_results")
+    if not isinstance(labs, list):
+        # Still guarantee the key exists, so callers never have to tell
+        # "no tests were ordered" apart from "this ran on a malformed dict".
+        result.setdefault("recommended_investigations", [])
+        return result
+
+    resulted, ordered = [], []
+    for lab in labs:
+        if not isinstance(lab, dict):
+            continue
+        if _has_reported_result(lab):
+            resulted.append(lab)
+        else:
+            name = str(lab.get("test_name") or "").strip()
+            if name:
+                ordered.append(name)
+
+    result["lab_results"] = resulted
+    if ordered:
+        existing = [
+            str(t).strip() for t in (result.get("recommended_investigations") or [])
+            if str(t).strip()
+        ]
+        # Preserve order, drop duplicates case-insensitively.
+        merged, seen = [], set()
+        for name in existing + ordered:
+            if name.lower() not in seen:
+                seen.add(name.lower())
+                merged.append(name)
+        result["recommended_investigations"] = merged
+        result.setdefault("extraction_notes", []).append(
+            f"{len(ordered)} test(s) were listed without a result and recorded as "
+            f"recommended investigations rather than lab results: "
+            f"{', '.join(ordered)}"
+        )
+    else:
+        result.setdefault("recommended_investigations", [])
+    return result
+
+
 def extract_from_image(img: Image.Image, model: str = VISION_MODEL) -> Dict[str, Any]:
     """Send a single page image to the vision model and parse structured JSON.
 
@@ -2573,7 +2702,7 @@ def extract_from_image(img: Image.Image, model: str = VISION_MODEL) -> Dict[str,
         ],
         strict_format=EXTRACTION_RESPONSE_FORMAT,
     )
-    return _normalize_extraction_result(_parse_json_object(raw))
+    return separate_recommended_investigations(_normalize_extraction_result(_parse_json_object(raw)))
 
 
 def extract_from_text(text: str, model: str = MODEL) -> Dict[str, Any]:
@@ -2587,7 +2716,7 @@ def extract_from_text(text: str, model: str = MODEL) -> Dict[str, Any]:
         user_content=f"Extract structured data from this document text:\n\n{text}",
         strict_format=EXTRACTION_RESPONSE_FORMAT,
     )
-    return _normalize_extraction_result(_parse_json_object(raw))
+    return separate_recommended_investigations(_normalize_extraction_result(_parse_json_object(raw)))
 
 
 VISION_OCR_CONFIDENCE_CEILING = 0.85  # a vision/handwriting read is never "fully certain"
@@ -3156,6 +3285,10 @@ def _is_demo_document(d: Dict[str, Any]) -> bool:
     return False
 
 
+# Alias for ygc compatibility (ygc names this _matches_demo_marker)
+_matches_demo_marker = _has_demo_marker
+
+
 def _normalize_patient_key(name: Any) -> str:
     """Group documents by patient name. Missing/null names go into their
     own 'unknown_patient' bucket rather than being silently merged with
@@ -3293,6 +3426,7 @@ def build_patient_timeline(raw_results: List[Dict[str, Any]]) -> Dict[str, Any]:
 
     all_medications = []
     all_lab_results = []
+    all_recommended = []
     clinical_rollups: Dict[str, List[Dict[str, Any]]] = {
         timeline_key: [] for timeline_key in CLINICAL_TIMELINE_KEYS.values()
     }
@@ -3364,6 +3498,14 @@ def build_patient_timeline(raw_results: List[Dict[str, Any]]) -> Dict[str, Any]:
                     "document_type": d.get("document_type"),
                 }
             )
+
+        # Tests a clinician asked for but that carry no result. Tracked
+        # separately from lab_results so nothing downstream mistakes an
+        # intention to measure for a measurement.
+        for test in d.get("recommended_investigations", []) or []:
+            all_recommended.append({
+                "test_name": test, "date": visit_date, "source_file": source_file,
+            })
 
         # Legacy generic diagnoses remain available as low-detail events.
         for index, diagnosis in enumerate(
@@ -3447,6 +3589,7 @@ def build_patient_timeline(raw_results: List[Dict[str, Any]]) -> Dict[str, Any]:
         "documents": docs_sorted,
         "medications_timeline": all_medications,
         "lab_results_timeline": all_lab_results,
+        "recommended_investigations_timeline": all_recommended,
         **clinical_rollups,
         "known_allergies": sorted(all_allergies),
         "allergy_evidence": allergy_evidence,
@@ -3557,12 +3700,58 @@ def save_patient_report(
         json.dump(output, f, indent=2)
 
 
+def _self_test_lab_separation() -> None:
+    """Ordered tests must never reach lab_results; real results must never
+    leave it. Run with: python medical_extractor.py --self-test"""
+    def lab(name, value):
+        return {"test_name": name, "value": value, "unit": None,
+                "reference_range": None, "flag": "unknown", "confidence": 0.8}
+
+    # Categorical findings a lab genuinely reports. Every one of these is a
+    # RESULT and must survive — this is the half that a naive "is it a
+    # number?" filter would silently delete.
+    for value in ("Negative", "Nil", "Trace", "Absent", "Non-reactive",
+                  "Pale yellow", "3 - 5", "5,400", 250000, 14.8):
+        out = separate_recommended_investigations({"lab_results": [lab("T", value)]})
+        assert len(out["lab_results"]) == 1, f"dropped a real result: {value!r}"
+        assert not out["recommended_investigations"], value
+
+    # Placeholders standing in for "no result yet".
+    for value in ("", "   ", "-", "--", "N/A", "n/a", "pending", "advised",
+                  "to be done", "?", None, "Not Done"):
+        out = separate_recommended_investigations({"lab_results": [lab("LFT", value)]})
+        assert out["lab_results"] == [], f"kept a non-result: {value!r}"
+        assert out["recommended_investigations"] == ["LFT"], value
+
+    # The model echoing the test name back is a non-answer, not a category.
+    out = separate_recommended_investigations({"lab_results": [lab("CBC", "CBC")]})
+    assert out["recommended_investigations"] == ["CBC"] and out["lab_results"] == []
+
+    # A document may both report a result and order a repeat of the same test.
+    out = separate_recommended_investigations(
+        {"lab_results": [lab("TSH", "4.2"), lab("TSH", "-")]})
+    assert len(out["lab_results"]) == 1 and out["recommended_investigations"] == ["TSH"]
+
+    # Merges with anything the model already put there, deduped case-insensitively.
+    out = separate_recommended_investigations(
+        {"lab_results": [lab("LFT", "-")], "recommended_investigations": ["USG", "lft"]})
+    assert out["recommended_investigations"] == ["USG", "lft"]
+
+    # The key is always present, even on malformed input.
+    assert separate_recommended_investigations({})["recommended_investigations"] == []
+
+    print("All checks passed.")
+
+
 # ---------------------------------------------------------------------------
 # 8. Example usage — full pipeline: extract -> merge -> cross-check
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
     import sys
+    if "--self-test" in sys.argv:
+        _self_test_lab_separation()
+        raise SystemExit(0)
 
     if len(sys.argv) < 2:
         print("Usage:")

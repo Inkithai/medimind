@@ -153,6 +153,26 @@ def test_reprocess_invalid_content_422(monkeypatch):
     assert "actually" in resp.json()["detail"] or "supported" in resp.json()["detail"]
 
 
+def test_reprocess_rejects_duplicate_in_flight_job(monkeypatch):
+    """A second reprocess of the same document while the first is running
+    must 409 rather than launching a second extraction pipeline."""
+    import routes.upload as upload_routes
+
+    _auth_override()
+    upload_routes._active_document_jobs.clear()
+    try:
+        assert upload_routes.register_document_job("anon_reprocess_user", "doc_test1") is True
+        assert upload_routes.register_document_job("anon_reprocess_user", "doc_test1") is False
+        monkeypatch.setattr(api.db, "load_documents", lambda uid: [dict(STORED_DOC)])
+        with TestClient(api.app) as client:
+            resp = _reprocess(client)
+        assert resp.status_code == 409
+        assert "already being reprocessed" in resp.json()["detail"]
+    finally:
+        upload_routes.unregister_document_job("anon_reprocess_user", "doc_test1")
+        api.app.dependency_overrides.pop(api.get_current_user, None)
+
+
 def test_reprocess_extraction_failure_502(monkeypatch):
     _auth_override()
     patchers = _pipeline_patchers()

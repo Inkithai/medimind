@@ -168,8 +168,17 @@ def _require_tesseract() -> Any:
 def ocr_image(image: Image.Image, page: int = 1, dpi: int = 200) -> OCRPageResult:
     """OCR one in-memory PIL image. Raises TesseractNotFoundError when the
     engine is missing; returns a result with empty text when nothing is
-    readable (blank scan, junk image)."""
+    readable (blank scan, junk image).
+
+    Single-pass: ``image_to_data`` yields both the transcript and per-word
+    confidence, so ``image_to_string`` is never called.
+    """
     pytesseract = _require_tesseract()
+    if image.mode not in ("RGB", "L"):
+        try:
+            image = image.convert("RGB")
+        except Exception:
+            pass
     try:
         data = pytesseract.image_to_data(
             image, output_type=pytesseract.Output.DICT, config=f"--dpi {dpi}"
@@ -192,12 +201,24 @@ def ocr_image(image: Image.Image, page: int = 1, dpi: int = 200) -> OCRPageResul
         except (IndexError, TypeError, ValueError):
             return -1
 
+    def _safe_conf(index: int) -> float:
+        try:
+            return float(confidences[index])
+        except (IndexError, TypeError, ValueError):
+            return -1.0
+
     line_parts: List[str] = []
     last_block = last_par = last_line = -1
+    numeric_conf: List[float] = []
     for i, word in enumerate(words):
-        word = str(word).strip()
+        word = str(word).strip() if word is not None else ""
         if not word:
             continue
+        # Only words with real text contribute to confidence — empty Tesseract
+        # rows often carry a dummy high score that inflated the page average.
+        conf = _safe_conf(i)
+        if conf >= 0:
+            numeric_conf.append(conf)
         block, par, line = _safe_int(blocks, i), _safe_int(pars, i), _safe_int(lines, i)
         if (block, par, line) != (last_block, last_par, last_line):
             line_parts.append(word)
@@ -205,12 +226,6 @@ def ocr_image(image: Image.Image, page: int = 1, dpi: int = 200) -> OCRPageResul
             line_parts[-1] += " " + word
         last_block, last_par, last_line = block, par, line
 
-    numeric_conf = [
-        float(c)
-        for c in confidences
-        if isinstance(c, (int, float)) or (isinstance(c, str) and c.strip().lstrip("-").isdigit())
-    ]
-    numeric_conf = [c for c in numeric_conf if c >= 0]
     mean_conf = round(sum(numeric_conf) / len(numeric_conf), 1) if numeric_conf else None
     return OCRPageResult(page=page, text="\n".join(line_parts), confidence=mean_conf)
 
@@ -221,6 +236,7 @@ def ocr_image_bytes(image_bytes: bytes, page: int = 1, dpi: Optional[int] = None
     _require_tesseract()  # fail fast with a clear error before PIL parsing
     try:
         img = Image.open(__import__("io").BytesIO(image_bytes))
+        img.load()
         transposed = ImageOps.exif_transpose(img)
         return ocr_image(
             transposed if transposed is not None else img, page=page, dpi=dpi or _dpi()

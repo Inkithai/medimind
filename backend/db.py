@@ -119,8 +119,12 @@ def ensure_indexes() -> None:
     patient_snapshots, which is the access-control boundary for both."""
 
 
-def _now_iso() -> str:
+def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+# Backward alias: older code references _now_iso
+_now_iso = now_iso
 
 
 def _translate_missing_schema(fn):
@@ -191,12 +195,21 @@ def load_documents(user_id: str, include_corrections: bool = True) -> List[Dict[
 def insert_documents(user_id: str, docs: List[Dict[str, Any]]) -> None:
     """Appends newly-extracted documents for this user (append-only — never
     rewrites or touches this user's existing documents). No-op on an empty
-    list."""
+    list.
+
+    Preserves a caller-supplied `uploaded_at` (set at upload time, before
+    the timeline is built from these same docs) rather than overwriting it
+    here — otherwise the timestamp baked into the patient snapshot and the
+    one actually stored on the document record would disagree."""
     if not docs:
         return
-    now = _now_iso()
-    rows = [{"user_id": user_id, "uploaded_at": now, "data": doc} for doc in docs]
-    _documents().insert(rows).execute()
+    now = now_iso()
+    normalized = []
+    for doc in docs:
+        uploaded = doc.get("uploaded_at", now) if isinstance(doc, dict) else now
+        data = {k: v for k, v in doc.items() if k != "uploaded_at"} if isinstance(doc, dict) and "uploaded_at" in doc else doc
+        normalized.append({"user_id": user_id, "uploaded_at": uploaded, "data": data})
+    _documents().insert(normalized).execute()
 
 
 @_translate_missing_schema
@@ -414,12 +427,14 @@ def delete_document_group(
     cloudinary_public_id: Optional[str],
     source_file: Optional[str],
     document_id: str,
+    storage_path: Optional[str] = None,
 ) -> int:
     """Delete one physical upload, including every extracted page row.
 
     New uploads share a content hash and Cloudinary id across all pages.
-    Older rows fall back to their source filename, then finally to the exact
-    application document id. Every query remains scoped to ``user_id``.
+    Private Supabase originals share ``storage_path``. Older rows fall back
+    to their source filename, then finally to the exact application document
+    id. Every query remains scoped to ``user_id``.
     """
     response = _documents().select("id, data").eq("user_id", user_id).execute()
     matched_ids: List[Any] = []
@@ -431,6 +446,8 @@ def delete_document_group(
             same_upload = data.get("content_sha256") == content_sha256
         elif cloudinary_public_id:
             same_upload = data.get("cloudinary_public_id") == cloudinary_public_id
+        elif storage_path:
+            same_upload = data.get("storage_path") == storage_path
         elif source_file:
             same_upload = (data.get("_source") or {}).get("file") == source_file
         else:
@@ -512,6 +529,28 @@ def clear_document_derived_history(user_id: str) -> None:
     """
     client = _get_client()
     for table_name in ("conversation_sessions", "jobs", "referral_searches", "audit_log"):
+        try:
+            client.table(table_name).delete().eq("user_id", user_id).execute()
+        except Exception as exc:
+            if getattr(exc, "code", None) == _MISSING_TABLE_CODE or _MISSING_TABLE_CODE in str(exc):
+                continue
+            raise
+
+
+@_translate_missing_schema
+def clear_clinical_projection(user_id: str) -> None:
+    """Remove normalized clinical entity rows for this user.
+
+    The JSON document rows and patient snapshot are the recovery source of
+    truth. Projection tables (medications, prescriptions, labs, allergies,
+    events, safety findings) are derived and must not outlive their source —
+    especially when the last document in a workspace is deleted, because
+    there is then no rebuild that would sync them back to empty.
+    """
+    from clinical_projection import ENTITY_TABLES
+
+    client = _get_client()
+    for table_name in ENTITY_TABLES:
         try:
             client.table(table_name).delete().eq("user_id", user_id).execute()
         except Exception as exc:
