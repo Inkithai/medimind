@@ -31,6 +31,21 @@ const KIND_LABELS: Record<string, string> = {
 
 function EvidenceBadge({ source }: { source?: string | null }) {
   if (!source) return null;
+  if (source === "derived_reference") {
+    return (
+      <span
+        className={classNames(
+          "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium",
+          "bg-amber-50 text-amber-700",
+        )}
+        title={
+          "The mechanism is quoted from a published reference, but the source does not state these two drugs interact — that pairing was derived from a shared pathway and needs clinical review"
+        }
+      >
+        Derived from reference · review
+      </span>
+    );
+  }
   const verified = source === "deterministic" || source === "reference_graph";
   return (
     <span

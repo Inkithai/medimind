@@ -48,11 +48,23 @@ export function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  // A workspace that genuinely has no records yet. Rendered as the same
+  // first-run welcome state as a snapshot 404, but discovered via the cheap
+  // document count (which never 404s) so the fresh-workspace visit doesn't
+  // log a red console error.
+  const [noRecords, setNoRecords] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
+    setNoRecords(false);
     try {
+      const { count } = await api.countDocuments(credentials);
+      if (count === 0) {
+        setRecord(null);
+        setNoRecords(true);
+        return;
+      }
       // Single snapshot request instead of three parallel calls to
       // /timeline + /cross-check + /lab-trends (they all live in one
       // patient_snapshots row anyway — one round-trip, one failure mode,
@@ -101,7 +113,7 @@ export function DashboardPage() {
       error && typeof error === "object" && "status" in error
         ? (error as { status?: number }).status
         : undefined;
-    if (status === 404) {
+    if (status === 404 || noRecords) {
       return (
         <div className="space-y-6">
           <PageHeader onReload={() => setReloadKey((k) => k + 1)} />

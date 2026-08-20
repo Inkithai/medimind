@@ -29,8 +29,11 @@ router = APIRouter()
 
 
 from routes.records import (  # noqa: E402
+    _derive_record,
     _enhanced_cross_check,
     _load_snapshot_or_rebuild,
+    _prepare_current_trust_state,
+    _replace_index,
 )
 
 
@@ -272,6 +275,18 @@ async def import_fhir(
     except Exception as e:
         raise HTTPException(400, f"FHIR bundle could not be parsed: {e}")
 
+    # Importing appends documents to the same workspace an in-flight upload
+    # is rebuilding; serialize them under the same 409 contract as the other
+    # record-mutating endpoints.
+    from routes.records import has_active_upload_pipeline
+    from routes.upload import workspace_has_active_document_job
+
+    if has_active_upload_pipeline(user_id) or workspace_has_active_document_job(user_id):
+        raise HTTPException(
+            409,
+            "A document is still being processed. Wait for it to finish before importing.",  # noqa: E501
+        )
+
     docs = result.get("documents") or []
     result["persisted"] = False
     result["persistence_error"] = None
@@ -284,6 +299,38 @@ async def import_fhir(
             # Surface the parse result anyway — the data is valid; only the
             # storage layer (e.g. Supabase not configured) is unavailable.
             result["persistence_error"] = str(e)
+            return result
+
+        # Re-derive the whole record like an upload so the imported data
+        # enters the timeline, the safety analysis and the search index
+        # immediately instead of waiting for the next manual re-analysis.
+        # Fail-open: a derivation failure (e.g. the provider is rate-limited)
+        # leaves the documents persisted — reads rebuild the timeline from
+        # them and the user can re-run the safety analysis.
+        try:
+            all_docs = db.load_documents(user_id)
+            trusted, conflicts, trust_summary, detected = _prepare_current_trust_state(
+                user_id, all_docs
+            )
+            persisted_conflicts = db.sync_conflicts(user_id, detected) if detected else conflicts
+            timeline, cross_check, lab_trends = await _derive_record(
+                trusted, persisted_conflicts, trust_summary, user_id
+            )
+            timeline["conflicts"] = persisted_conflicts
+            db.save_patient_snapshot(user_id, timeline, cross_check, lab_trends=lab_trends)
+            indexed, index_error, _chunks = await _replace_index(user_id, timeline)
+            result["derived"] = True
+            result["indexed"] = indexed
+            result["index_error"] = index_error
+        except Exception as e:
+            logger.warning(
+                "fhir import: user=%s re-derivation failed after persisting %d document(s): %s",
+                user_id,
+                len(docs),
+                e,
+            )
+            result["derived"] = False
+            result["derivation_error"] = str(e)
     return result
 
 

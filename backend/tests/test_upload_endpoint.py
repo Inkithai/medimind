@@ -464,6 +464,29 @@ def test_placeholder_marker_never_beats_structured_medical_content():
         app.dependency_overrides.clear()
 
 
+def test_documents_count_is_a_cheap_never_404_probe():
+    """GET /api/v1/documents/count is the frontend's pre-flight probe: it
+    must answer 200 with the row count for an empty AND a populated
+    workspace (a fresh workspace must not 404 the way /timeline does)."""
+    app, patchers = _make_client(index_chunks=2)
+    try:
+        with mock.patch.object(api.db, "count_documents", return_value=0):
+            with TestClient(app) as client:
+                resp = client.get("/api/v1/documents/count")
+        assert resp.status_code == 200, resp.text
+        assert resp.json() == {"user_id": "anon_test_user", "count": 0}
+
+        with mock.patch.object(api.db, "count_documents", return_value=3):
+            with TestClient(app) as client:
+                resp = client.get("/api/v1/documents/count")
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["count"] == 3
+    finally:
+        for p in patchers:
+            p.stop()
+        app.dependency_overrides.clear()
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:

@@ -192,6 +192,20 @@ def load_documents(user_id: str, include_corrections: bool = True) -> List[Dict[
 
 
 @_translate_missing_schema
+def count_documents(user_id: str) -> int:
+    """Authoritative count of this user's persisted document rows.
+
+    Selects row ids only (not the document JSON) so it stays cheap enough
+    to be a pre-flight probe: the frontend calls it before firing requests
+    that would 404 on a fresh workspace (timeline / patient-snapshot), so a
+    brand-new record doesn't log scary console errors while it is still
+    legitimately empty.
+    """
+    response = _documents().select("id").eq("user_id", user_id).execute()
+    return len(response.data or [])
+
+
+@_translate_missing_schema
 def insert_documents(user_id: str, docs: List[Dict[str, Any]]) -> None:
     """Appends newly-extracted documents for this user (append-only — never
     rewrites or touches this user's existing documents). No-op on an empty

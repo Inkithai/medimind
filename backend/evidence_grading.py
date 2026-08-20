@@ -28,8 +28,8 @@ cross-check prompt itself states it is "a reasoning layer over extracted
 text, NOT a validated clinical drug-interaction database". This grading makes
 the scores honour that sentence instead of contradicting it.
 
-THREE GRADES
-------------
+FOUR GRADES
+-----------
   deterministic     Computed in code from the patient's own extracted data
                     (e.g. detect_exact_duplicate_medications). Highest trust —
                     no model judgment involved.
@@ -38,15 +38,28 @@ THREE GRADES
                     returned from a `claim_reference` hook (see
                     reference_library.samhsa_claim_reference and
                     openfda_reference.openfda_claim_reference). Trusted, and
-                    cites the source document. The WHO antidote graph and the
-                    optional openFDA Structured Product Labels fill this
-                    grade today; the grade stays so more reference data can
-                    be wired in without another contract change.
+                    cites the source document. The WHO antidote graph, the
+                    optional openFDA Structured Product Labels and the FDA
+                    enzyme-role table's quoted statements fill this grade
+                    today; the grade stays so more reference data can be
+                    wired in without another contract change.
+  derived_reference A pair DERIVED by joining two separately-quoted reference
+                    statements — "drug A is a CYP3A substrate" and "drug B is
+                    a strong CYP3A inhibitor" (interactions_kg.potential_
+                    interactions). Sits between the other grades because that
+                    is honestly where it belongs: the mechanism is quoted,
+                    the pairing is inferred. Higher ceiling than
+                    model_knowledge because two verbatim FDA rows stand behind
+                    the mechanism, lower than reference_graph because no
+                    document states that these two drugs interact. Shared
+                    enzymes are common and most theoretical pairs are
+                    clinically unremarkable, so the finding also carries
+                    requires_clinical_review.
   model_knowledge   The model's own pharmacological knowledge, with nothing
                     behind it. Capped, flagged, and told to be confirmed.
 """
 
-from typing import Any, Callable, Dict, Optional, Sequence, Set, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Union
 
 ClaimReferenceFn = Callable[[Dict[str, Any]], Optional[Dict[str, Any]]]
 
@@ -58,6 +71,12 @@ MODEL_KNOWLEDGE_CONFIDENCE_CEILING = 0.6
 
 DETERMINISTIC = "deterministic"
 REFERENCE_GRAPH = "reference_graph"
+# A pair DERIVED by joining two separately-quoted reference statements
+# (interactions_kg.potential_interactions) rather than a source stating the
+# two drugs interact. Higher ceiling than model_knowledge, lower than
+# reference_graph, and always flagged for clinical review.
+DERIVED_REFERENCE = "derived_reference"
+DERIVED_REFERENCE_CONFIDENCE_CEILING = 0.75
 MODEL_KNOWLEDGE = "model_knowledge"
 
 # Finding lists in a cross_check report, and whether each is about drugs whose
@@ -116,19 +135,28 @@ def _finding_drug_names(finding: Dict[str, Any]) -> Set[str]:
     return names
 
 
+def _pair_key(names: Sequence[str]) -> Optional[str]:
+    """Order-independent key for a two-drug finding."""
+    unique = sorted({(n or "").strip().lower() for n in names if n and n.strip()})
+    return "|".join(unique) if len(unique) == 2 else None
+
+
 def grade_finding(
     finding: Dict[str, Any],
     graph_backed_findings: Optional[Dict[str, Dict[str, Any]]] = None,
     claim_reference: Optional[Union[ClaimReferenceFn, Sequence[ClaimReferenceFn]]] = None,
+    derived_references: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """
     Grades one finding in place and returns it.
 
     Adds:
-      evidence_source : "deterministic" | "reference_graph" | "model_knowledge"
+      evidence_source : "deterministic" | "reference_graph" | "derived_reference"
+                        | "model_knowledge"
       grounded        : bool  (False only for model_knowledge)
       evidence_note   : str   plain-language explanation of the grade
-      reference       : dict  present only for reference_graph findings
+      reference       : dict  present for reference_graph and derived_reference
+                        findings
 
     A finding that already declares `evidence_source` (as the deterministic
     duplicate detector does) keeps it — this never downgrades a finding that
@@ -185,6 +213,33 @@ def grade_finding(
         finding["evidence_note"] = REFERENCE_GRAPH_NOTE
         return finding
 
+    # Checked only after the per-drug graph hit and the claim citations, so
+    # nothing that already grades reference_graph is downgraded by adding
+    # this tier: a source that states the pairing beats one that merely
+    # implies it.
+    pair = _pair_key(_finding_drug_names(finding))
+    derived = (derived_references or {}).get(pair) if pair else None
+    if derived:
+        finding["evidence_source"] = DERIVED_REFERENCE
+        finding["grounded"] = True
+        finding["reference"] = derived
+        finding["requires_clinical_review"] = True
+        finding["evidence_note"] = (
+            "The mechanism is quoted from a published reference — each drug's "
+            "enzyme role is recorded there — but the source does not state that "
+            "these two drugs interact; that pairing is derived from the shared "
+            "pathway and needs clinical confirmation."
+        )
+        raw = finding.get("confidence")
+        ceiling = DERIVED_REFERENCE_CONFIDENCE_CEILING
+        if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+            if float(raw) > ceiling:
+                finding["model_reported_confidence"] = round(float(raw), 2)
+            finding["confidence"] = round(min(float(raw), ceiling), 2)
+        else:
+            finding["confidence"] = ceiling
+        return finding
+
     finding["evidence_source"] = MODEL_KNOWLEDGE
     finding["grounded"] = False
     finding["evidence_note"] = MODEL_KNOWLEDGE_NOTE
@@ -209,6 +264,7 @@ def grade_cross_check(
     cross_check: Dict[str, Any],
     graph_backed_findings: Optional[Dict[str, Dict[str, Any]]] = None,
     claim_reference: Optional[Union[ClaimReferenceFn, Sequence[ClaimReferenceFn]]] = None,
+    derived_references: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """
     Grades every finding in a cross_check report, in place, and adds an
@@ -225,14 +281,27 @@ def grade_cross_check(
     citation dict for a finding it actually supports (else None). The first
     citation wins, and a citation may carry its own `note` for the
     evidence_note.
+
+    `derived_references` optionally maps an order-independent drug-pair key
+    ("a|b") to the derived pharmacokinetic pairing behind it (see
+    interactions_kg.potential_interactions and
+    derived_references_from_interactions). A finding naming exactly that pair
+    grades `derived_reference` — above the model-knowledge cap, below a
+    stated citation — and is flagged for clinical review.
     """
-    counts = {DETERMINISTIC: 0, REFERENCE_GRAPH: 0, MODEL_KNOWLEDGE: 0}
+    counts = {
+        DETERMINISTIC: 0,
+        REFERENCE_GRAPH: 0,
+        DERIVED_REFERENCE: 0,
+        MODEL_KNOWLEDGE: 0,
+    }
 
     for list_name in FINDING_LISTS:
         for finding in cross_check.get(list_name) or []:
             if not isinstance(finding, dict):
                 continue
-            grade_finding(finding, graph_backed_findings, claim_reference)
+            grade_finding(finding, graph_backed_findings, claim_reference,
+                          derived_references)
             counts[finding["evidence_source"]] += 1
 
     total = sum(counts.values())
@@ -240,15 +309,17 @@ def grade_cross_check(
         "total_findings": total,
         "deterministic": counts[DETERMINISTIC],
         "reference_graph": counts[REFERENCE_GRAPH],
+        "derived_reference": counts[DERIVED_REFERENCE],
         "model_knowledge": counts[MODEL_KNOWLEDGE],
         "model_knowledge_confidence_ceiling": MODEL_KNOWLEDGE_CONFIDENCE_CEILING,
         "note": (
-            f"{counts[DETERMINISTIC] + counts[REFERENCE_GRAPH]} of {total} finding(s) "
-            "are backed by the patient's own records or by an ingested reference "
-            f"document. The other {counts[MODEL_KNOWLEDGE]} come from the language "
-            "model's own knowledge with nothing in this system confirming them, so "
-            f"their confidence is capped at {MODEL_KNOWLEDGE_CONFIDENCE_CEILING} and "
-            "each is flagged. A pharmacist can confirm any of them."
+            f"{counts[DETERMINISTIC] + counts[REFERENCE_GRAPH] + counts[DERIVED_REFERENCE]} "
+            f"of {total} finding(s) are backed by the patient's own records or by an "
+            "ingested reference document. "
+            f"The other {counts[MODEL_KNOWLEDGE]} come from the language model's own "
+            f"knowledge with nothing in this system confirming them, so their confidence "
+            f"is capped at {MODEL_KNOWLEDGE_CONFIDENCE_CEILING} and each is flagged. "
+            "A pharmacist can confirm any of them."
         )
         if total
         else ("No safety findings were reported, so there is nothing to grade."),
@@ -276,6 +347,37 @@ def graph_backed_findings_from_antidotes(
             "source": "WHO Model List of Essential Medicines (antidotes section)",
             "display_name": ref.get("display_name"),
             "listings": ref.get("listings", []),
+        }
+    return backed
+
+
+def derived_references_from_interactions(
+    pairs: List[Dict[str, Any]],
+) -> Dict[str, Dict[str, Any]]:
+    """
+    Adapts interactions_kg.potential_interactions() output into the
+    `derived_references` shape keyed by drug pair.
+
+    Deliberately NOT routed through `graph_backed_findings`, which grades
+    reference_graph and leaves confidence uncapped. Nothing in the FDA table
+    says these two drugs interact — it records each drug's enzyme role
+    separately, and the pairing is a join. Grading that as a citation would
+    make an inference indistinguishable from a quote.
+    """
+    backed: Dict[str, Dict[str, Any]] = {}
+    for pair in pairs or []:
+        key = _pair_key([pair.get("affecting_drug"), pair.get("affected_drug")])
+        if not key:
+            continue
+        backed[key] = {
+            "source": pair.get("source"),
+            "source_url": pair.get("source_url"),
+            "shared_pathways": pair.get("shared_pathways"),
+            "mechanism": pair.get("mechanism"),
+            "strength": pair.get("strength"),
+            "derivation": pair.get("derivation"),
+            "pathways": pair.get("pathways", []),
+            "requires_clinical_review": True,
         }
     return backed
 
@@ -379,6 +481,7 @@ if __name__ == "__main__":
     assert summary["deterministic"] == 1
     assert summary["model_knowledge"] == 5
     assert summary["reference_graph"] == 0
+    assert summary["derived_reference"] == 0
 
     # --- Reference-graph grounding raises a finding above the cap ----------
     backed = {
@@ -407,6 +510,56 @@ if __name__ == "__main__":
     assert grounded["grounded"] is True
     assert grounded["confidence"] == 0.9, "a graph-backed finding is not capped"
     assert "naloxone" in grounded["reference"]
+
+    # --- A derived shared-enzyme pair sits between the other grades --------
+    # The FDA table quotes each drug's role separately; the pairing is a
+    # join. It must never be dressed up as a stated citation (uncapped
+    # reference_graph), but it does stand on quoted mechanism rows, so it
+    # clears the model-knowledge cap and is flagged for clinical review.
+    derived_pairs = derived_references_from_interactions([
+        {
+            "affecting_drug": "clarithromycin",
+            "affected_drug": "simvastatin",
+            "source": "fda-cyp-transporter-examples",
+            "source_url": "https://www.fda.gov/...",
+            "shared_pathways": "3A, OATP1B1, OATP1B3",
+            "mechanism": "INHIBITS",
+            "strength": "strong",
+            "derivation": "Clarithromycin is recorded as ... and simvastatin as ...",
+            "pathways": [],
+        },
+    ])
+    assert set(derived_pairs) == {"clarithromycin|simvastatin"}, derived_pairs
+    derived_report = {
+        "potential_drug_interactions": [
+            {
+                "medications_involved": ["Simvastatin", "Clarithromycin"],
+                "explanation": "Clarithromycin inhibits CYP3A4, raising simvastatin levels.",
+                "severity": "high",
+                "confidence": 0.95,
+            },
+            {
+                "medications_involved": ["Simvastatin", "Clarithromycin"],
+                "explanation": "Same pair, model confidence already below the ceiling.",
+                "severity": "high",
+                "confidence": 0.5,
+            },
+        ],
+        "duplicate_prescriptions": [],
+        "conflicting_dosage_instructions": [],
+        "allergy_conflicts": [],
+    }
+    grade_cross_check(derived_report, derived_references=derived_pairs)
+    capped = derived_report["potential_drug_interactions"][0]
+    assert capped["evidence_source"] == DERIVED_REFERENCE
+    assert capped["grounded"] is True
+    assert capped["requires_clinical_review"] is True
+    assert capped["confidence"] == 0.75, capped["confidence"]
+    assert capped["model_reported_confidence"] == 0.95
+    below = derived_report["potential_drug_interactions"][1]
+    assert below["confidence"] == 0.5, "a below-ceiling derived finding keeps its score"
+    assert "model_reported_confidence" not in below
+    assert derived_report["evidence_summary"]["derived_reference"] == 2
 
     # --- An empty report grades cleanly ------------------------------------
     empty = grade_cross_check(

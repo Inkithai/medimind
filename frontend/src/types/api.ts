@@ -365,7 +365,11 @@ export interface MedicationTransition {
 
 // Evidence grading + timing (evidence_grading.py, risk_timeline.py) -------
 
-export type EvidenceSource = "deterministic" | "reference_graph" | "model_knowledge";
+export type EvidenceSource =
+  | "deterministic"
+  | "reference_graph"
+  | "derived_reference"
+  | "model_knowledge";
 
 export interface FindingTiming {
   status: "concurrent" | "possible" | "not_concurrent" | "unknown";
