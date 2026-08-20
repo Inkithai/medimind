@@ -35,7 +35,7 @@ Env:
     (optional: OPENAI_API_KEY — used only for embeddings; without it,
      embeddings run locally via Chroma's ONNX MiniLM model)
     (optional: METRICS_TOKEN — bearer token guarding GET /metrics; when
-     unset the endpoint is only reachable from localhost / private ranges)
+     unset the endpoint is only reachable from loopback)
 """
 
 import asyncio
@@ -185,6 +185,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="MediMind API", version="1.0.0", lifespan=lifespan)
+
 
 def parse_cors_settings(
     cors_origins: str | None = None,
@@ -336,18 +337,20 @@ def _metrics_authorized(request: Request) -> bool:
     """Internal-only guard for /metrics.
 
     When METRICS_TOKEN is set, the caller must present it as a bearer token.
-    Otherwise the endpoint is restricted to loopback and private ranges, so
-    it can never be scraped from the public internet by accident.
+    Otherwise the endpoint is restricted to loopback. Private RFC1918 ranges
+    are NOT treated as internal: on Render/Railway/Fly the TCP peer is the
+    platform proxy on 10/8 or 172.16/12, which would make /metrics
+    world-readable without a token.
     """
     expected = os.environ.get("METRICS_TOKEN", "").strip()
     if expected:
         auth_header = request.headers.get("authorization", "")
         provided = auth_header[7:].strip() if auth_header.lower().startswith("bearer ") else ""
+        if not provided or len(provided) != len(expected):
+            return False
         return hmac.compare_digest(provided, expected)
     host = request.client.host if request.client else ""
-    return host in ("127.0.0.1", "::1", "localhost") or host.startswith(
-        ("10.", "192.168.", "172.16.", "172.17.", "172.18.", "172.19.", "172.30.", "172.31.")
-    )
+    return host in ("127.0.0.1", "::1", "localhost")
 
 
 @app.middleware("http")

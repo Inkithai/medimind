@@ -117,6 +117,11 @@ def is_document_job_active(user_id: str, document_id: str) -> bool:
         return (user_id, document_id) in _active_document_jobs
 
 
+def workspace_has_active_document_job(user_id: str) -> bool:
+    with _active_document_jobs_lock:
+        return any(owner == user_id for owner, _document_id in _active_document_jobs)
+
+
 def _belongs_to_same_upload(selected: Dict[str, Any]):
     """Match every extracted page of one physical file."""
     content_sha256 = selected.get("content_sha256")
@@ -1955,10 +1960,10 @@ async def delete_document(
     user_id: str = Depends(get_current_user),
 ) -> Dict[str, Any]:
     """Permanently delete one uploaded file and rebuild all dependent views."""
-    if _workspace_has_active_upload(user_id):
+    if _workspace_has_active_upload(user_id) or workspace_has_active_document_job(user_id):
         raise HTTPException(
             409,
-            "A document upload is still processing. Wait for it to finish before deleting a document.",  # noqa: E501
+            "A document is still being processed. Wait for it to finish before deleting a document.",  # noqa: E501
         )
     documents = db.load_documents(user_id)
     selected = next((doc for doc in documents if trust_document_id(doc) == document_id), None)
@@ -2168,45 +2173,53 @@ async def process_document_text_layer(
     upload so the text layer can be inspected/reused independently.
     """
     selected, group, _remaining = _select_document_group(user_id, document_id)
-    source_file = ((selected.get("_source") or {}).get("file")) or "document"
-    suffix = Path(source_file).suffix or ".bin"
+    if not register_document_job(user_id, document_id):
+        raise HTTPException(
+            409,
+            "This document is already being processed. Wait for it to finish.",
+        )
     try:
-        content = await asyncio.to_thread(storage.download_original_bytes, selected)
-    except storage.StorageDownloadError as exc:
-        raise HTTPException(502, str(exc)) from exc
-    from document_processing import process_raw_text
+        source_file = ((selected.get("_source") or {}).get("file")) or "document"
+        suffix = Path(source_file).suffix or ".bin"
+        try:
+            content = await asyncio.to_thread(storage.download_original_bytes, selected)
+        except storage.StorageDownloadError as exc:
+            raise HTTPException(502, str(exc)) from exc
+        from document_processing import process_raw_text
 
-    with TemporaryDirectory() as tmp_dir:
-        tmp_path = Path(tmp_dir) / ("original" + suffix)
-        tmp_path.write_bytes(content)
-        raw_processing = await asyncio.to_thread(process_raw_text, str(tmp_path))
-    updated_pages = []
-    for page in group:
-        clone = dict(page)
-        clone["raw_text_processing"] = raw_processing
-        updated_pages.append(clone)
-    replaced = db.replace_document_group(
-        user_id,
-        content_sha256=str(selected.get("content_sha256"))
-        if selected.get("content_sha256")
-        else None,
-        source_file=str(source_file) if source_file else None,
-        pages=updated_pages,
-    )
-    audit.record(
-        user_id,
-        "documents.process_text",
-        {
+        with TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir) / ("original" + suffix)
+            tmp_path.write_bytes(content)
+            raw_processing = await asyncio.to_thread(process_raw_text, str(tmp_path))
+        updated_pages = []
+        for page in group:
+            clone = dict(page)
+            clone["raw_text_processing"] = raw_processing
+            updated_pages.append(clone)
+        replaced = db.replace_document_group(
+            user_id,
+            content_sha256=str(selected.get("content_sha256"))
+            if selected.get("content_sha256")
+            else None,
+            source_file=str(source_file) if source_file else None,
+            pages=updated_pages,
+        )
+        audit.record(
+            user_id,
+            "documents.process_text",
+            {
+                "document_id": document_id,
+                "status": raw_processing.get("processing_status"),
+                "rows_replaced": replaced,
+            },
+        )
+        return {
             "document_id": document_id,
-            "status": raw_processing.get("processing_status"),
-            "rows_replaced": replaced,
-        },
-    )
-    return {
-        "document_id": document_id,
-        "raw_text_processing": raw_processing,
-        "rows_updated": len(updated_pages),
-    }
+            "raw_text_processing": raw_processing,
+            "rows_updated": len(updated_pages),
+        }
+    finally:
+        unregister_document_job(user_id, document_id)
 
 
 @router.get("/api/v1/analyses")

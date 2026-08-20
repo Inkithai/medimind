@@ -52,9 +52,21 @@ def test_health_requires_no_auth():
 
 def test_metrics_rejects_public_access_without_token():
     with _client() as client:
-        # Simulate a non-loopback caller so the private-range guard blocks it.
+        # Simulate a non-loopback caller so the loopback-only guard blocks it.
         response = client.get("/metrics", headers={"X-Forwarded-For": "203.0.113.9"})
     assert response.status_code in (403, 404)
+
+
+def test_metrics_rejects_private_proxy_peer_without_token():
+    """Render/Railway peers are RFC1918. That must not open /metrics."""
+    class _Client:
+        host = "10.8.0.12"
+
+    class _Request:
+        client = _Client()
+        headers = {}
+
+    assert api._metrics_authorized(_Request()) is False
 
 
 def test_metrics_accepts_bearer_token_when_configured(monkeypatch):

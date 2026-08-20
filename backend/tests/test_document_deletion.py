@@ -67,6 +67,27 @@ def test_delete_document_removes_every_page_and_rebuilds_without_the_upload():
     assert [item["_document_id"] for item in passed_remaining] == ["doc-3"]
 
 
+def test_delete_document_waits_for_an_active_reprocess():
+    import routes.upload as upload_routes
+
+    upload_routes._active_document_jobs.clear()
+    try:
+        assert upload_routes.register_document_job("user", "doc-1") is True
+        with (
+            mock.patch.object(api.jobs, "list_jobs", return_value=[]),
+            mock.patch.object(api.db, "delete_document_group") as delete_rows,
+        ):
+            try:
+                asyncio.run(api.delete_document("doc-1", "user"))
+            except api.HTTPException as exc:
+                assert exc.status_code == 409
+            else:
+                raise AssertionError("an in-flight reprocess must block document deletion")
+        delete_rows.assert_not_called()
+    finally:
+        upload_routes.unregister_document_job("user", "doc-1")
+
+
 def test_delete_document_waits_for_an_active_upload():
     with (
         mock.patch.object(api.jobs, "list_jobs", return_value=[{"status": "pending"}]),

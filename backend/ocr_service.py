@@ -236,6 +236,7 @@ def ocr_image_bytes(image_bytes: bytes, page: int = 1, dpi: Optional[int] = None
     _require_tesseract()  # fail fast with a clear error before PIL parsing
     try:
         img = Image.open(__import__("io").BytesIO(image_bytes))
+        img.load()
         transposed = ImageOps.exif_transpose(img)
         return ocr_image(
             transposed if transposed is not None else img, page=page, dpi=dpi or _dpi()
