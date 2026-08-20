@@ -54,7 +54,8 @@ The system is designed to be evidence-based and conservative: it explains what u
 - Optional openFDA-backed FDA Structured Product Label citations for interaction findings (evidence-backed, not model recall).
 - Optional US FDA recall checking (deterministic, framed as US-market data, routed to a pharmacist).
 - Optional deterministic brand→generic (INN) resolution from the FDA NDC directory.
-- Evidence grading: deterministic, reference-backed, or model-knowledge with confidence caps.
+- Optional FDA CYP/transporter table: shared-enzyme medication pairs are derived on demand and graded as `derived_reference` — the mechanism is quoted, the pairing is inferred, so it clears the model-knowledge cap but is flagged for clinical review rather than dressed up as a stated citation.
+- Evidence grading: deterministic, reference-backed, derived (shared-pathway) or model-knowledge with confidence caps.
 - Treatment-window risk timeline: concurrent, possible, historical, and unknown risk timing.
 
 ### Laboratory intelligence

@@ -103,6 +103,59 @@ def _base_ingredient(name: str) -> str:
     return " ".join(words)
 
 
+# Strength/dose tokens the extractor folds into a printed name:
+# "NALOXONE 400mcg", "Amoxicillin 500 mg", "Insulin 100IU/mL".
+_DOSE_TOKEN_RE = re.compile(
+    r"^\d+(?:\.\d+)?(?:mg|mcg|ug|g|ml|l|iu|u|meq|mmol|%)?$|^\d+$", re.IGNORECASE
+)
+_UNIT_ONLY = frozenset({"mg", "mcg", "ug", "g", "ml", "l", "iu", "u", "meq",
+                        "mmol", "tablet", "tablets", "capsule", "capsules"})
+
+
+def name_variants(name: Any) -> List[str]:
+    """
+    Every spelling under which a printed drug name might be stored in the
+    reference graph, most specific first.
+
+    The reference graph keys :Medicine on a bare lowercased ingredient
+    ("naloxone"), but prescriptions are printed as "Naloxone Hydrochloride
+    400mcg". An exact lookup on the printed name misses, and — because a miss
+    is indistinguishable from a drug genuinely not being in the reference
+    data — the miss is silent: the finding quietly drops to unverified model
+    recall with no error anywhere. So callers query every variant and take
+    the first hit.
+
+    Deliberately conservative. Salts, doses and units are removed because
+    they qualify a drug rather than identify it; the name is never truncated
+    to its first word, since "insulin glargine" and "insulin" are different
+    products and matching one to the other would be worse than missing.
+    """
+    raw = (name or "") if isinstance(name, str) else ""
+    if not raw.strip():
+        return []
+
+    variants: List[str] = []
+
+    def add(candidate: str) -> None:
+        candidate = candidate.strip()
+        if candidate and candidate not in variants:
+            variants.append(candidate)
+
+    add(raw.strip().lower())
+    normalized = _normalize_text(raw)
+    add(normalized)
+
+    # Drop dose figures and bare units, then re-strip salts: "naloxone
+    # hydrochloride 400 mcg" -> "naloxone".
+    words = [w for w in normalized.split()
+             if not _DOSE_TOKEN_RE.match(w) and w not in _UNIT_ONLY]
+    while len(words) > 1 and words[-1] in SALT_SUFFIXES:
+        words.pop()
+    add(" ".join(words))
+    add(_base_ingredient(raw))
+    return [v for v in variants if v]
+
+
 def plausible_dates(raw: Any) -> frozenset:
     """
     Every date this string could reasonably mean, as `date` objects.

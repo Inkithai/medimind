@@ -576,6 +576,15 @@ export const api = {
     return request<DocumentsResponse>(credentials, "/api/v1/documents");
   },
 
+  // Lightweight "does this workspace have records yet?" probe (PostgREST
+  // exact count, no row payload). Never 404s — unlike /timeline and
+  // /patient-snapshot, which 404 by design for a fresh workspace. Pages use
+  // it as a pre-flight check so a brand-new record doesn't fire requests
+  // that exist only to log a red error in the browser console.
+  countDocuments(credentials: Credentials): Promise<{ user_id: string; count: number }> {
+    return request<{ user_id: string; count: number }>(credentials, "/api/v1/documents/count");
+  },
+
   deleteDocument(credentials: Credentials, documentId: string): Promise<DeleteDocumentResponse> {
     return request<DeleteDocumentResponse>(
       credentials,

@@ -216,26 +216,45 @@ export function Layout() {
       return;
     }
     let cancelled = false;
-    api
-      .getPatientSnapshot(credentials)
-      .then((snapshot) => {
-        if (cancelled) return;
-        setNavSignals({
-          safety: collectSafetyAlerts(snapshot.cross_check_report, snapshot.dosage_report).length,
-          safetyAvailable: true,
-          safetyPending: snapshot.rebuilt_from_documents === true,
-          hasChanges:
-            (snapshot.patient_timeline.documents || snapshot.patient_timeline.visits).length >= 2,
+    const emptySignals = {
+      safety: 0,
+      safetyAvailable: false,
+      safetyPending: false,
+      hasChanges: false,
+    } as const;
+    const loadSnapshotSignals = () =>
+      api
+        .getPatientSnapshot(credentials)
+        .then((snapshot) => {
+          if (cancelled) return;
+          setNavSignals({
+            safety: collectSafetyAlerts(snapshot.cross_check_report, snapshot.dosage_report).length,
+            safetyAvailable: true,
+            safetyPending: snapshot.rebuilt_from_documents === true,
+            hasChanges:
+              (snapshot.patient_timeline.documents || snapshot.patient_timeline.visits).length >= 2,
+          });
+        })
+        .catch(() => {
+          if (!cancelled) setNavSignals(emptySignals);
         });
+    // The snapshot 404s by design for a fresh workspace (every page visit
+    // would log a red console error for what is a normal empty record).
+    // Probe with the cheap count first — it never 404s — and skip the
+    // snapshot entirely when there are no records yet. If the probe itself
+    // fails, fall back to the previous behavior.
+    api
+      .countDocuments(credentials)
+      .then(({ count }) => {
+        if (cancelled) return;
+        if (count === 0) {
+          setNavSignals(emptySignals);
+          return;
+        }
+        return loadSnapshotSignals();
       })
       .catch(() => {
-        if (!cancelled)
-          setNavSignals({
-            safety: 0,
-            safetyAvailable: false,
-            safetyPending: false,
-            hasChanges: false,
-          });
+        if (!cancelled) loadSnapshotSignals();
       });
     return () => {
       cancelled = true;

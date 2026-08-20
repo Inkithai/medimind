@@ -6,6 +6,7 @@ helpers used by the other route modules.
 import asyncio
 import logging
 import os
+import threading
 from concurrent.futures import ThreadPoolExecutor
 
 from dotenv import load_dotenv
@@ -220,6 +221,72 @@ def _antidote_context(
     return graph_backed_findings_from_antidotes(references), notes
 
 
+def _interaction_reference_context(
+    timeline: Dict[str, Any], user_id: str, operation: str
+) -> Dict[str, Dict[str, Any]]:
+    """Best-effort FDA CYP/transporter table lookup for a medication timeline.
+
+    Returns the `derived_references` dict consumed by
+    `cross_check_prescriptions()`/`grade_cross_check()`: an order-independent
+    drug-pair key -> the shared-pathway derivation behind it.
+
+    This is a DISTINCT channel from the antidote `graph_backed_findings`. The
+    FDA table never states that two drugs interact — it records each drug's
+    enzyme role separately, and the pairing is a join computed on demand.
+    Routing it through `graph_backed_findings` would grade the inferred pair
+    as a stated citation (reference_graph, uncapped confidence); instead it
+    grades as `derived_reference` (capped at 0.75, flagged for clinical
+    review), which is what it honestly is.
+
+    Fail-open by design, exactly like the antidote context: an unconfigured,
+    unreachable, or failing graph never fails the upload — it just means the
+    shared-enzyme pairs stay at model_knowledge (the honest default).
+    """
+    if not graph_db.is_configured():
+        logger.debug(
+            "%s: user=%s interaction reference graph not configured — skipping "
+            "shared-enzyme derivation",
+            operation,
+            user_id,
+        )
+        return {}
+
+    from evidence_grading import derived_references_from_interactions
+    from interactions_kg import potential_interactions
+
+    med_names = sorted(
+        {m.get("name") for m in timeline.get("medications_timeline", []) if m.get("name")}
+    )
+    if len(med_names) < 2:
+        return {}
+    try:
+        pairs = potential_interactions(med_names)
+    except Exception as e:
+        logger.warning(
+            "%s: user=%s interaction reference lookup skipped, continuing without "
+            "it (shared-enzyme pairs will grade as unverified model knowledge): %s",
+            operation,
+            user_id,
+            e,
+        )
+        return {}
+    derived = derived_references_from_interactions(pairs)
+    if pairs:
+        logger.info(
+            "%s: user=%s FDA enzyme table derived %d potential pharmacokinetic "
+            "pair(s) among %d medication name(s): %s",
+            operation,
+            user_id,
+            len(pairs),
+            len(med_names),
+            "; ".join(
+                f"{p['affecting_drug']}->{p['affected_drug']} via {p['shared_pathways']}"
+                for p in pairs[:5]
+            ),
+        )
+    return derived
+
+
 def _openfda_reference_context(timeline: Dict[str, Any], user_id: str, operation: str) -> None:
     """Warm the openFDA caches (labels + recalls) for this record's
     ingredients, BEFORE the safety cross-check runs.
@@ -321,6 +388,7 @@ def _attach_eml_age_safety(
 async def _cross_check_trusted_timeline(
     timeline: Dict[str, Any],
     graph_backed_findings: Optional[Dict[str, Dict[str, Any]]] = None,
+    derived_references: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     if not timeline.get("medications_timeline"):
         return _empty_cross_check(
@@ -338,7 +406,11 @@ async def _cross_check_trusted_timeline(
         # slow and non-deterministic online, and a hard failure offline.
         import api as _api
 
-        return _api.cross_check_prescriptions(timeline, graph_backed_findings=graph_backed_findings)
+        return _api.cross_check_prescriptions(
+            timeline,
+            graph_backed_findings=graph_backed_findings,
+            derived_references=derived_references,
+        )
 
     return await asyncio.get_running_loop().run_in_executor(_DOCUMENT_EXECUTOR, _run)
 
@@ -503,8 +575,11 @@ async def _derive_record_impl(
     graph_backed_findings, antidote_reference_notes = _antidote_context(
         timeline, user_id, "record_rebuild"
     )
+    derived_references = _interaction_reference_context(timeline, user_id, "record_rebuild")
     _openfda_reference_context(timeline, user_id, "record_rebuild")
-    cross_check = await _cross_check_trusted_timeline(timeline, graph_backed_findings)
+    cross_check = await _cross_check_trusted_timeline(
+        timeline, graph_backed_findings, derived_references=derived_references
+    )
     _attach_eml_age_safety(cross_check, timeline, user_id)
     cross_check["antidote_reference_notes"] = antidote_reference_notes
     lab_trends = track_lab_trends(timeline)
@@ -585,6 +660,45 @@ def _workspace_has_active_upload_impl(user_id: str) -> bool:
     return any(
         job.get("status") in {"pending", "processing"} for job in jobs.list_jobs(user_id, limit=100)
     )
+
+
+# ---------------------------------------------------------------------------
+# Per-user upload mutex (in-process)
+# ---------------------------------------------------------------------------
+# Async uploads (202 jobs) are visible through the job store, but SYNC uploads
+# run inside the request with no job row at all. Without this mutex two
+# concurrent uploads for one user each load the document history, each rebuild
+# the snapshot from "existing + own new docs", and each replace the whole
+# search index — last writer wins, so the OTHER batch's documents silently
+# vanish from the snapshot (safety analysis withheld until a manual
+# re-analysis) and from the index until the next self-healing reindex. Both
+# paths hold this lock for the whole pipeline, so a second upload gets a 409
+# (the same "wait for the active upload" contract the delete/reprocess/
+# re-analysis endpoints already enforce) instead of racing.
+_active_upload_users: set = set()
+_active_upload_users_guard = threading.Lock()
+
+
+def register_active_upload(user_id: str) -> bool:
+    """Claim the per-user upload slot. False if one is already in flight."""
+    with _active_upload_users_guard:
+        if user_id in _active_upload_users:
+            return False
+        _active_upload_users.add(user_id)
+        return True
+
+
+def unregister_active_upload(user_id: str) -> None:
+    with _active_upload_users_guard:
+        _active_upload_users.discard(user_id)
+
+
+def has_active_upload_pipeline(user_id: str) -> bool:
+    """True while any upload pipeline (sync or async) is running for this
+    user — the check the record-mutating endpoints use alongside the
+    job-store check."""
+    with _active_upload_users_guard:
+        return user_id in _active_upload_users
 
 
 def _rebuild_snapshot_from_documents(user_id: str) -> Optional[Dict[str, Any]]:
@@ -813,7 +927,7 @@ async def reanalyze_medication_safety(
     potentially stale snapshot. The response includes before/after counts so
     clients can explain whether findings were added or resolved.
     """
-    if _workspace_has_active_upload(user_id):
+    if _workspace_has_active_upload(user_id) or has_active_upload_pipeline(user_id):
         raise HTTPException(
             409, "Wait for the active upload to finish before re-running safety analysis."
         )

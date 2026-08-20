@@ -181,10 +181,31 @@ export function UploadPage({ embedded }: EmbeddedPageProps = {}) {
   const [timeline, setTimeline] = useState<Timeline | null>(null);
 
   useStrictEffect(() => {
-    api
-      .getTimeline(credentials)
-      .then(setTimeline)
-      .catch(() => setTimeline(null)); // 404 = no record yet — page still works
+    let cancelled = false;
+    (async () => {
+      try {
+        // /timeline 404s by design for a fresh workspace; the cheap count
+        // probe never does. Skip the timeline request entirely when there
+        // are no records yet so a first upload doesn't log red 404s in the
+        // browser console. After an upload a record exists, so the timeline
+        // is fetched directly (it then 200s).
+        if (!result) {
+          const { count } = await api.countDocuments(credentials);
+          if (cancelled) return;
+          if (count === 0) {
+            setTimeline(null);
+            return;
+          }
+        }
+        const timeline = await api.getTimeline(credentials);
+        if (!cancelled) setTimeline(timeline);
+      } catch {
+        if (!cancelled) setTimeline(null); // no record yet — page still works
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [credentials, result]);
 
   // Object URLs for image previews — revoked when the pending list changes.

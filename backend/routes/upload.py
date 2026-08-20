@@ -149,11 +149,15 @@ from routes.records import (  # noqa: E402
     _attach_eml_age_safety,
     _cross_check_trusted_timeline,
     _derive_record,
+    _interaction_reference_context,
     _openfda_reference_context,
     _prepare_current_trust_state,
     _rebuild_after_document_deletion,
     _replace_index,
     _workspace_has_active_upload,
+    has_active_upload_pipeline,
+    register_active_upload,
+    unregister_active_upload,
 )
 
 
@@ -1145,6 +1149,19 @@ async def _execute_upload_pipeline(
         graph_backed_findings, antidote_reference_notes = _antidote_context(
             timeline, user_id, "upload_documents"
         )
+        # Shared-enzyme pairs from the FDA CYP/transporter table. Kept in their
+        # own channel rather than folded into graph_backed_findings: that
+        # channel grades reference_graph and leaves confidence uncapped, and
+        # nothing in the FDA table states that two drugs interact — it records
+        # each drug's enzyme role separately. The join is ours, so the finding
+        # is graded derived_reference and flagged for clinical review instead
+        # of being dressed up as a citation.
+        #
+        # Fails open like every other graph call: no graph simply means these
+        # findings stay at model_knowledge, which is the honest default.
+        derived_references = _interaction_reference_context(
+            timeline, user_id, "upload_documents"
+        )
         # Warm the openFDA caches (labels + recalls) BEFORE the cross-check so
         # interaction findings can be corroborated by FDA Structured Product
         # Labels and the recall check can match ingredients. Fail-open: a cold
@@ -1153,7 +1170,9 @@ async def _execute_upload_pipeline(
         _openfda_reference_context(timeline, user_id, "upload_documents")
         # Safety is another provider call, so it shares the same bounded pool
         # as extraction instead of bypassing load control or blocking polling.
-        cross_check = await _cross_check_trusted_timeline(timeline, graph_backed_findings)
+        cross_check = await _cross_check_trusted_timeline(
+            timeline, graph_backed_findings, derived_references=derived_references
+        )
         _attach_eml_age_safety(cross_check, timeline, user_id)
     except NonMedicalDocumentError as exc:
         raise UploadPipelineError(422, str(exc), code="not_medical", retryable=False) from exc
@@ -1419,6 +1438,17 @@ async def upload_documents(
         },
     )
 
+    # One pipeline per user at a time (in-process). A second concurrent
+    # upload would rebuild the snapshot and the search index from its own
+    # stale document view and last-write-wins could drop the other batch
+    # from the derived views — 409 (same contract as the delete/reprocess
+    # guards) is the honest answer.
+    if not register_active_upload(user_id):
+        raise HTTPException(
+            409,
+            "A document upload is still processing. Wait for it to finish before uploading more documents.",  # noqa: E501
+        )
+
     # Read files upfront (needed for background after request ends)
     files_data: List[Tuple[str, bytes]] = []
     for upload in files:
@@ -1442,7 +1472,12 @@ async def upload_documents(
     if use_background:
         # Validate all files are medical-like before queuing? We do full validation in background
         # Create job and return 202
-        job = jobs.create_job(user_id, [name for name, _ in files_data])
+        try:
+            job = jobs.create_job(user_id, [name for name, _ in files_data])
+        except Exception:
+            # The pipeline never ran, so release the claim we took above.
+            unregister_active_upload(user_id)
+            raise
         job_id = job["job_id"]
 
         async def _run_job():
@@ -1519,6 +1554,11 @@ async def upload_documents(
                         "http_status": 500,
                     },
                 )
+            finally:
+                # The pipeline is over (success, HTTP failure, or crash), so
+                # release the per-user claim. The endpoint itself must NOT
+                # release it: the background task outlives the request.
+                unregister_active_upload(user_id)
 
         background_tasks.add_task(_run_job)
         # Return 202 immediately
@@ -1535,12 +1575,16 @@ async def upload_documents(
             },
         )
 
-    # Sync path (default, used by tests)
-    return await _execute_upload_pipeline(
-        user_id,
-        files_data,
-        confirm_identity_mismatch=confirm_identity_mismatch,
-    )
+    # Sync path (default, used by tests). The pipeline runs inside this
+    # request, so the request task releases the per-user claim.
+    try:
+        return await _execute_upload_pipeline(
+            user_id,
+            files_data,
+            confirm_identity_mismatch=confirm_identity_mismatch,
+        )
+    finally:
+        unregister_active_upload(user_id)
 
 
 # --- Background Jobs polling ---
@@ -1594,6 +1638,19 @@ async def correct_document_extraction(
     user_id: str = Depends(get_current_user),
 ) -> Dict[str, Any]:
     """Append correction events, then rebuild every derived representation."""
+    # The rebuild rewrites the snapshot and the search index from the
+    # currently persisted documents; an in-flight upload (or reprocess) would
+    # do the same from a different view, and last-writer-wins could drop one
+    # of the two. Same 409 contract as the other record-mutating endpoints.
+    if (
+        _workspace_has_active_upload(user_id)
+        or workspace_has_active_document_job(user_id)
+        or has_active_upload_pipeline(user_id)
+    ):
+        raise HTTPException(
+            409,
+            "A document is still being processed. Wait for it to finish before editing corrections.",  # noqa: E501
+        )
     originals = db.load_documents(user_id, include_corrections=False)
     effective_docs = db.load_documents(user_id)
     original = next((doc for doc in originals if trust_document_id(doc) == document_id), None)
@@ -1670,7 +1727,10 @@ async def reprocess_document(
     are replaced together, and corrections/conflicts are replayed on the
     rebuild exactly as they are for an upload.
     """
-    if _workspace_has_active_upload(user_id):
+    if (
+        _workspace_has_active_upload(user_id)
+        or has_active_upload_pipeline(user_id)
+    ):
         raise HTTPException(
             409,
             "A document upload is still processing. Wait for it to finish before reprocessing.",
@@ -1861,6 +1921,18 @@ async def _change_conflict_status(
     authoritative_document_id: Optional[str],
     note: Optional[str],
 ) -> Dict[str, Any]:
+    # Resolving/reopening a conflict rebuilds the snapshot and index from the
+    # current documents; an in-flight upload would do the same from a
+    # different view. Same 409 contract as the other record-mutating calls.
+    if (
+        _workspace_has_active_upload(user_id)
+        or workspace_has_active_document_job(user_id)
+        or has_active_upload_pipeline(user_id)
+    ):
+        raise HTTPException(
+            409,
+            "A document is still being processed. Wait for it to finish before changing a conflict.",  # noqa: E501
+        )
     documents = db.load_documents(user_id)
     if not documents:
         raise HTTPException(404, "No records found in this workspace.")
@@ -1961,7 +2033,11 @@ async def delete_document(
     user_id: str = Depends(get_current_user),
 ) -> Dict[str, Any]:
     """Permanently delete one uploaded file and rebuild all dependent views."""
-    if _workspace_has_active_upload(user_id) or workspace_has_active_document_job(user_id):
+    if (
+        _workspace_has_active_upload(user_id)
+        or workspace_has_active_document_job(user_id)
+        or has_active_upload_pipeline(user_id)
+    ):
         raise HTTPException(
             409,
             "A document is still being processed. Wait for it to finish before deleting a document.",  # noqa: E501
@@ -2029,7 +2105,7 @@ async def delete_document(
 @router.delete("/api/v1/workspace")
 async def delete_workspace(user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
     """Permanently erase originals, extracted records, derived data and history."""
-    if _workspace_has_active_upload(user_id):
+    if _workspace_has_active_upload(user_id) or has_active_upload_pipeline(user_id):
         raise HTTPException(
             409,
             "A document upload is still processing. Wait for it to finish before deleting the workspace.",  # noqa: E501
@@ -2316,6 +2392,19 @@ async def list_documents(user_id: str = Depends(get_current_user)) -> Dict[str, 
         "documents": documents,
         "document_types": summarize_document_types(documents),
     }
+
+
+@router.get("/api/v1/documents/count")
+async def documents_count(user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
+    """Lightweight "does this workspace have records yet?" probe.
+
+    The timeline / patient-snapshot endpoints 404 by design for a fresh
+    workspace (the frontend renders that as the first-run empty state).
+    Pages use this count — which is cheap and never 404s — as a pre-flight
+    check so a brand-new record doesn't fire requests that only exist to
+    log a scary red error in the browser console.
+    """
+    return {"user_id": user_id, "count": db.count_documents(user_id)}
 
 
 @router.post("/api/v1/knowledge-graph/antidotes", status_code=201)

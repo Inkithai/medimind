@@ -302,6 +302,7 @@ def cross_check_prescriptions(
     model: Optional[str] = None,
     graph_backed_findings: Optional[Dict[str, Dict[str, Any]]] = None,
     reference_date: Optional[str] = None,
+    derived_references: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """
     Runs interaction / duplicate / dosage-conflict / allergy cross-checking
@@ -322,7 +323,12 @@ def cross_check_prescriptions(
     After the findings are merged they are post-processed deterministically:
       * evidence grading (evidence_grading.py) — each finding is tagged by
         what actually backs it (computed-from-records vs model knowledge),
-        and ungrounded model claims get their confidence capped;
+        and ungrounded model claims get their confidence capped. The optional
+        `derived_references` (shared-enzyme pairs from interactions_kg) lets
+        a two-drug finding that no source states but a reference table implies
+        grade as `derived_reference` — above the model-knowledge cap, flagged
+        for clinical review, rather than either a stated citation or a bare
+        model recollection;
       * timing (risk_timeline.py) — each finding is placed in time using the
         prescription dates/durations;
       * concurrent_exposure — periods where two live prescriptions supplied
@@ -485,6 +491,7 @@ def cross_check_prescriptions(
         result,
         graph_backed_findings,
         claim_reference=(samhsa_claim_reference, openfda_claim_reference),
+        derived_references=derived_references,
     )
 
     # Place every finding in time. Within the active set all courses overlap
@@ -513,6 +520,7 @@ def analyze_medication_safety(
     model: Optional[str] = None,
     graph_backed_findings: Optional[Dict[str, Dict[str, Any]]] = None,
     reference_date: Optional[str] = None,
+    derived_references: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Public name for the dedicated medication-safety analysis."""
     return cross_check_prescriptions(
@@ -520,6 +528,7 @@ def analyze_medication_safety(
         model=model,
         graph_backed_findings=graph_backed_findings,
         reference_date=reference_date,
+        derived_references=derived_references,
     )
 
 
