@@ -2702,7 +2702,9 @@ def extract_from_image(img: Image.Image, model: str = VISION_MODEL) -> Dict[str,
         ],
         strict_format=EXTRACTION_RESPONSE_FORMAT,
     )
-    return separate_recommended_investigations(_normalize_extraction_result(_parse_json_object(raw)))
+    return separate_recommended_investigations(
+        _normalize_extraction_result(_parse_json_object(raw))
+    )
 
 
 def extract_from_text(text: str, model: str = MODEL) -> Dict[str, Any]:
@@ -2716,7 +2718,9 @@ def extract_from_text(text: str, model: str = MODEL) -> Dict[str, Any]:
         user_content=f"Extract structured data from this document text:\n\n{text}",
         strict_format=EXTRACTION_RESPONSE_FORMAT,
     )
-    return separate_recommended_investigations(_normalize_extraction_result(_parse_json_object(raw)))
+    return separate_recommended_investigations(
+        _normalize_extraction_result(_parse_json_object(raw))
+    )
 
 
 VISION_OCR_CONFIDENCE_CEILING = 0.85  # a vision/handwriting read is never "fully certain"

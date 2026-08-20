@@ -714,9 +714,10 @@ async def _execute_upload_pipeline(
                             if len(pages) == 1
                             else f"{original_name} (page {page_num})"
                         )
-                        # CLASSIFY, never skip solely for demo marker alone when clinical content present.
-                        # Tag demo documents so caller can label/filter them; skipping empty templates
-                        # remains an explicit opt-in via SKIP_DEMO_DOCUMENTS.
+                        # CLASSIFY, never skip for a demo marker alone when clinical
+                        # content is present. Tag demo documents so callers can
+                        # label/filter them; skipping empty templates remains an
+                        # explicit opt-in via SKIP_DEMO_DOCUMENTS.
                         page["is_demo_document"] = _is_demo_document(page)
                         if page["is_demo_document"]:
                             demo_documents.append(label)

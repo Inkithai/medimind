@@ -42,6 +42,7 @@ import asyncio
 import hmac
 import logging
 import os
+import re
 from contextlib import asynccontextmanager
 from typing import Dict
 
@@ -190,20 +191,30 @@ app = FastAPI(title="MediMind API", version="1.0.0", lifespan=lifespan)
 def parse_cors_settings(
     cors_origins: str | None = None,
     frontend_url: str | None = None,
-) -> tuple[list[str], bool]:
-    """Build CORS allow_origins + allow_credentials from deployment env.
+) -> tuple[list[str], bool, str | None]:
+    """Build CORS allow_origins + allow_credentials + allow_origin_regex.
 
     ``CORS_ORIGINS`` is the explicit allowlist (comma-separated). ``FRONTEND_URL``
     is accepted as an alias so a Vercel/production URL can be set without a
     second variable. Trailing slashes are stripped: browsers send Origin without
     one, but operators often paste ``https://app.example.com/``.
 
+    Entries containing a ``*`` (other than a bare ``*``) are treated as wildcard
+    patterns, e.g. ``https://*.vercel.app`` matches every per-deployment Vercel
+    preview URL (``https://medimind-abc123.vercel.app``) — Vercel mints a new
+    random subdomain on each deploy, so allowlisting exact preview URLs is not
+    practical. Patterns are compiled into a single ``allow_origin_regex`` for
+    Starlette's CORSMiddleware, which matches the specific Origin header and
+    reflects it back (so credentialed requests still work).
+
     ``allow_credentials=True`` is invalid with ``allow_origins=["*"]`` (browsers
     reject it). When the allowlist is ``*`` we allow all origins without
     credentials. An explicit FRONTEND_URL promotes the allowlist off ``*`` so
     credentialed browser calls from that origin succeed.
     """
-    raw = (cors_origins if cors_origins is not None else os.environ.get("CORS_ORIGINS", "*")).strip()
+    raw = (
+        cors_origins if cors_origins is not None else os.environ.get("CORS_ORIGINS", "*")
+    ).strip()
     extra = (
         frontend_url if frontend_url is not None else os.environ.get("FRONTEND_URL", "")
     ).strip()
@@ -212,10 +223,16 @@ def parse_cors_settings(
         return value.strip().rstrip("/")
 
     origins: list[str] = []
+    patterns: list[str] = []
 
     def _add(value: str) -> None:
         cleaned = _clean(value)
-        if cleaned and cleaned != "*" and cleaned not in origins:
+        if not cleaned or cleaned == "*":
+            return
+        if "*" in cleaned:
+            if cleaned not in patterns:
+                patterns.append(cleaned)
+        elif cleaned not in origins:
             origins.append(cleaned)
 
     if extra:
@@ -223,25 +240,43 @@ def parse_cors_settings(
             _add(item)
 
     if raw == "*" or not raw:
-        if origins:
-            return origins, True
-        return ["*"], False
+        if origins or patterns:
+            return origins, True, _compile_origin_patterns(patterns)
+        return ["*"], False, None
 
     for item in raw.split(","):
         _add(item)
-    if not origins:
-        return ["*"], False
-    return origins, True
+    if not origins and not patterns:
+        return ["*"], False, None
+    return origins, True, _compile_origin_patterns(patterns)
+
+
+def _compile_origin_patterns(patterns: list[str]) -> str | None:
+    """Translate wildcard origin patterns into one regex for CORSMiddleware.
+
+    Each ``*`` in a pattern becomes ``.*``; everything else is escaped
+    literally. The middleware applies ``re.fullmatch``, so
+    ``https://*.vercel.app`` becomes ``https://.*\\.vercel\\.app`` and cannot
+    match e.g. ``https://evil.vercel.app.attacker.com``.
+    """
+    if not patterns:
+        return None
+    return "|".join(
+        ".*".join(re.escape(part) for part in pattern.split("*")) for pattern in patterns
+    )
 
 
 # The authenticated routes require custom Authorization / X-User-Id headers,
 # which trigger a CORS preflight when the frontend is served from a different
-# origin than the API. Restrict via CORS_ORIGINS / FRONTEND_URL when deployed.
-_cors_allow_origins, _cors_allow_credentials = parse_cors_settings()
+# origin than the API. Restrict via CORS_ORIGINS / FRONTEND_URL when deployed;
+# wildcard patterns like https://*.vercel.app are supported (see
+# parse_cors_settings).
+_cors_allow_origins, _cors_allow_credentials, _cors_origin_regex = parse_cors_settings()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_allow_origins,
     allow_credentials=_cors_allow_credentials,
+    allow_origin_regex=_cors_origin_regex,
     allow_methods=["*"],
     allow_headers=["*"],
 )

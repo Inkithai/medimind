@@ -250,7 +250,13 @@ SnapDeploy dashboard env vars  →  injected into container  →  os.environ.get
 ### Frontend shows "Could not reach the API"
 - Check `VITE_API_URL` is set correctly (no trailing slash)
 - Verify backend `/api/v1/health` responds
-- Check CORS_ORIGINS matches your Vercel URL exactly
+- Check CORS_ORIGINS matches your Vercel URL exactly — note that per-deployment
+  preview URLs (`https://medimind-<random>.vercel.app`) change on every deploy,
+  so allowlist the wildcard pattern instead: `CORS_ORIGINS=https://*.vercel.app`
+  (exact origins and wildcards can be combined, comma-separated)
+- Free-tier Render/SnapDeploy cold starts (~30-60s) can also surface as a CORS
+  error ("No 'Access-Control-Allow-Origin' header") because the proxy error
+  page carries no CORS headers — retry after the service wakes up
 
 ### Upload hangs or times out
 - Verify `USE_BACKGROUND_JOBS=true`

@@ -375,7 +375,7 @@ VECTOR_STORE=supabase   # or chroma — supabase uses Supabase `chunks` table (n
 CHROMA_DIR=./chroma_db   # only for VECTOR_STORE=chroma, override to /data/chroma_db on a Render Disk / Railway volume
 USE_BACKGROUND_JOBS=true # async 202 + polling for uploads
 UPLOAD_FILE_CONCURRENCY=1 # shared worker limit; raise only if provider quota supports it
-CORS_ORIGINS=*          # or https://your-frontend
+CORS_ORIGINS=*          # or https://your-frontend — wildcard patterns like https://*.vercel.app are supported
 
 # optional private document storage instead of Cloudinary for NEW uploads
 # MEDIMIND_DOCUMENT_STORAGE_BACKEND=supabase
@@ -619,7 +619,7 @@ The repository ships a `render.yaml` Blueprint. In Render: **New → Blueprint �
 1. Fill the secrets the Blueprint cannot hold (`sync: false`) in **Project → Settings → Environment**: `LLM_PROVIDER` + a provider key (`GEMINI_API_KEY` or `GROQ_API_KEY`), `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY`, `CLOUDINARY_*`, and (optionally) `OPENFDA_API_KEY`. `JWT_SECRET` is generated for you (`generateValue: true`).
 2. **No disk needed if `VECTOR_STORE=supabase`** (uses the Supabase `chunks` table — run `supabase_schema.sql` once). If you prefer `VECTOR_STORE=chroma`, attach a Render **Disk** and set `CHROMA_DIR=/data/chroma_db`.
 3. Set `USE_BACKGROUND_JOBS=true` and keep `UPLOAD_FILE_CONCURRENCY=1` for constrained/free quotas. Uploads return 202 immediately; a shared bounded worker pool load-balances files and the frontend polls per-file progress.
-4. Set `CORS_ORIGINS` to your Vercel URL, and `OPENFDA_API_KEY` if you want FDA label citations / recall checks / NDC brand resolution (all optional, fail-open).
+4. Set `CORS_ORIGINS` to your Vercel origin(s). Wildcard patterns are supported: `https://*.vercel.app` (the Blueprint default) matches every per-deployment preview URL such as `https://medimind-murex-nu.vercel.app`, which Vercel regenerates on each deploy — exact URLs would break on the next preview. `OPENFDA_API_KEY` is optional (FDA label citations / recall checks / NDC brand resolution — fail-open).
 5. Health check: `/api/v1/health` returns `200 {"status": "ok", ...}` — the Blueprint uses it for liveness.
 
 > Manual deploy (no Blueprint): create a **Web Service → Existing Image / Dockerfile**, set **Root Directory = `backend`**, and the `backend/Dockerfile` auto-detects. `backend/Procfile` (`web: uvicorn api:app --host 0.0.0.0 --port $PORT`) also works on Heroku/Render Nixpacks-style hosts.
