@@ -383,6 +383,9 @@ async def _execute_upload_pipeline(
     file_errors: List[Dict[str, Any]] = []
     duplicate_files_skipped: List[Dict[str, Any]] = []
     successfully_saved_files = 0
+    # Pages carrying a demo/placeholder marker. They are ADDED like any
+    # other; this only records which ones they were.
+    demo_documents: List[str] = []
 
     # Loaded up front (rather than after extraction) so an already-uploaded
     # file can be recognised BEFORE it costs a vision/extraction call.
@@ -657,13 +660,12 @@ async def _execute_upload_pipeline(
                             if len(pages) == 1
                             else f"{original_name} (page {page_num})"
                         )
-                        if _is_demo_document(page):
-                            # A placeholder-like name is only a hint. Structured
-                            # clinical content wins so a real prescription for
-                            # somebody named Demonte, or a lab report whose
-                            # patient field captured "Sample Collected", is not
-                            # silently lost. Dropping an otherwise valid empty
-                            # template is an explicit deployment opt-in.
+                        # CLASSIFY, never skip solely for demo marker alone when clinical content present.
+                        # Tag demo documents so caller can label/filter them; skipping empty templates
+                        # remains an explicit opt-in via SKIP_DEMO_DOCUMENTS.
+                        page["is_demo_document"] = _is_demo_document(page)
+                        if page["is_demo_document"]:
+                            demo_documents.append(label)
                             medical_content_found = has_medical_content(page)
                             if SKIP_DEMO_DOCUMENTS and not medical_content_found:
                                 reason = (
@@ -678,15 +680,12 @@ async def _execute_upload_pipeline(
                                 )
                                 continue
                             logger.info(
-                                "upload: user=%s demo/placeholder marker detected in '%s', "
-                                "but %s — keeping it",
+                                "upload: user=%s '%s' matches a demo/placeholder "
+                                "marker — keeping it and tagging it is_demo_document=true "
+                                "(medical content present: %s)",
                                 user_id,
                                 label,
-                                (
-                                    "structured clinical content was found"
-                                    if medical_content_found
-                                    else "SKIP_DEMO_DOCUMENTS is off"
-                                ),
+                                has_medical_content(page),
                             )
                         try:
                             assert_medical_document(page, label)
@@ -922,6 +921,13 @@ async def _execute_upload_pipeline(
                     },
                 )
 
+        # uploaded_at is stamped here (one timestamp for the whole batch)
+        # rather than left for db.insert_documents() to set later, because
+        # build_patient_timeline() below runs BEFORE that insert — without
+        # this, the snapshot saved from THIS request would carry visits
+        # with no uploaded_at at all, only gaining one retroactively once
+        # a later upload rebuilds the timeline from the now-saved records.
+        batch_uploaded_at = db.now_iso()
         # Cloud storage is per-file too: one storage failure should not discard
         # documents that were extracted and saved successfully.
         for file_index in sorted(extracted):
@@ -969,6 +975,7 @@ async def _execute_upload_pipeline(
                 # correctable without exposing storage-provider identifiers.
                 page.setdefault("_document_id", f"doc_{uuid.uuid4().hex}")
                 page["document_url"] = upload_info["document_url"]
+                page["uploaded_at"] = batch_uploaded_at
                 page["cloudinary_public_id"] = upload_info.get("cloudinary_public_id")
                 page["storage_backend"] = upload_info.get("storage_backend") or "cloudinary"
                 if upload_info.get("storage_path"):
@@ -1262,6 +1269,9 @@ async def _execute_upload_pipeline(
         "trust_summary": trust_summary,
         "conflicts": active_conflicts,
         "failed_files": sorted(file_errors, key=lambda item: item.get("file_index", 0)),
+        # Documents that matched a demo/placeholder marker. They were added
+        # normally — this names them so a caller can label or filter them.
+        "demo_documents": demo_documents,
         # Present (and non-empty) when a re-uploaded file was recognised and
         # not added a second time.
         "duplicate_files_skipped": duplicate_files_skipped,

@@ -64,8 +64,26 @@ HOLD_THRESHOLD = 2
 
 def _normalize_name(name: Optional[str]) -> str:
     """Lowercase, strip accents/punctuation/honorifics, collapse spaces."""
-    if not name:
+    if not name or not str(name).strip():
         return ""
+    # A demo/placeholder name is not a different patient's name — it is the
+    # absence of a name, and it is treated the same as a blank one.
+    #
+    # Comparing "DEMO PATIENT" against the real patient on file produced a
+    # confident mismatch and held the document back, which meant a sample
+    # document could never be added to an account that already had real
+    # records. That reading is wrong on its own terms: a placeholder carries
+    # no identity information, so it is no evidence that the document belongs
+    # to someone else. Returning "" here lets the age/gender corroboration
+    # decide on its own merits, exactly as it does for a document whose name
+    # could not be read at all.
+    try:
+        from medical_extractor import _has_demo_marker
+
+        if _has_demo_marker(name):
+            return ""
+    except Exception:
+        pass
     text = unicodedata.normalize("NFKD", str(name))
     text = "".join(c for c in text if not unicodedata.combining(c))
     text = text.lower()
