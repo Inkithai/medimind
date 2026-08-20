@@ -61,9 +61,15 @@ services:
       - key: PRELOAD_EMBEDDING_MODEL
         value: "true"
 
-      # ── Browser frontend origin (set to your Vercel URL) ──────────────────
+      # ── Browser frontend origin (comma-separated allowlist) ───────────────
+      # `https://*.vercel.app` matches every per-deployment Vercel preview
+      # URL (each deploy gets a new random subdomain, e.g.
+      # https://medimind-murex-nu.vercel.app), so preview deployments don't
+      # break CORS. For a locked-down production deployment, replace with your
+      # exact stable frontend origin(s), e.g.
+      #   https://medimind.vercel.app,https://mydomain.com
       - key: CORS_ORIGINS
-        value: https://YOUR-APP.vercel.app
+        value: https://*.vercel.app
 
       # ── Optional: openFDA references (labels / recalls / NDC) ─────────────
       - key: OPENFDA_API_KEY
