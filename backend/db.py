@@ -207,7 +207,10 @@ def insert_documents(user_id: str, docs: List[Dict[str, Any]]) -> None:
     normalized = []
     for doc in docs:
         uploaded = doc.get("uploaded_at", now) if isinstance(doc, dict) else now
-        data = {k: v for k, v in doc.items() if k != "uploaded_at"} if isinstance(doc, dict) and "uploaded_at" in doc else doc
+        if isinstance(doc, dict) and "uploaded_at" in doc:
+            data = {k: v for k, v in doc.items() if k != "uploaded_at"}
+        else:
+            data = doc
         normalized.append({"user_id": user_id, "uploaded_at": uploaded, "data": data})
     _documents().insert(normalized).execute()
 

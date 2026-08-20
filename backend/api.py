@@ -212,7 +212,9 @@ def parse_cors_settings(
     credentials. An explicit FRONTEND_URL promotes the allowlist off ``*`` so
     credentialed browser calls from that origin succeed.
     """
-    raw = (cors_origins if cors_origins is not None else os.environ.get("CORS_ORIGINS", "*")).strip()
+    raw = (
+        cors_origins if cors_origins is not None else os.environ.get("CORS_ORIGINS", "*")
+    ).strip()
     extra = (
         frontend_url if frontend_url is not None else os.environ.get("FRONTEND_URL", "")
     ).strip()

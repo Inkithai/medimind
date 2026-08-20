@@ -68,6 +68,10 @@ def _supabase_persist(job: Dict[str, Any]) -> None:
                 "progress": job.get("progress"),
                 "result": job.get("result"),
                 "error": job.get("error"),
+                # Persist the true creation time so JOB_TTL_HOURS keeps
+                # measuring from job creation across restarts (the column
+                # default now() would measure from the first persist instead).
+                "created_at": job.get("created_at"),
                 "updated_at": _now_iso(),
             },
             on_conflict="job_id",
@@ -161,6 +165,11 @@ def get_job(job_id: str, user_id: str) -> Optional[Dict[str, Any]]:
     stored = _supabase_load(job_id)
     if stored and stored.get("user_id") == user_id:
         normalized = _normalise_stored_job(stored)
+        # The in-memory path honours JOB_TTL_HOURS; the persisted path must
+        # too, or a restarted server would keep serving (and re-caching in
+        # _JOBS) jobs that expired long before the restart.
+        if _is_expired(normalized):
+            return None
         with _JOBS_LOCK:
             _JOBS[job_id] = normalized
         return _copy_job(normalized)
